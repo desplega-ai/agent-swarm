@@ -22,6 +22,7 @@ import { getScript, upsertScriptByName } from "../scripts/db";
 import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
 import type { Seeder, SeederRunOptions, SeedItem } from "../seed/types";
+import appSyncRunSrc from "./catalog/app-sync-run.ts" with { type: "text" };
 import bootTriageSrc from "./catalog/boot-triage.inline.ts" with { type: "text" };
 // @ts-expect-error Bun text imports synthesize a default string for this helper.
 import catalogReportSrc from "./catalog/catalog-report.inline.ts" with { type: "text" };
@@ -32,6 +33,7 @@ import delegateSrc from "./catalog/delegate.ts" with { type: "text" };
 import fetchReadableSrc from "./catalog/fetch-readable.ts" with { type: "text" };
 import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "text" };
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
+import githubIssuesPullSrc from "./catalog/github-issues-pull.ts" with { type: "text" };
 import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
@@ -76,6 +78,22 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "Triage a GitHub PR's status in a single call instead of running several gh pr view / gh pr checks / gh api invocations.",
     source: asText(ghPrSnapshotSrc),
+  },
+  {
+    name: "github-issues-pull",
+    description:
+      "Pull a GitHub repository's issues (pull requests filtered out) as app-sync records: number, title, state, body, author, labels, comments and timestamps, with a completeness flag for the pull window.",
+    intent:
+      "Back a Swarm App model with GitHub issues — the worked example of a sync source script returning {records, complete} with placeholder-based auth.",
+    source: asText(githubIssuesPullSrc),
+  },
+  {
+    name: "app-sync-run",
+    description:
+      "Run a Swarm App's sync passes — refreshes every source-backed model, or just one model/source, and returns the per-pass created/updated/refreshed tallies.",
+    intent:
+      "Keep an app's synced rows fresh on a schedule or on demand; the script a targetType:'script' schedule points at to sync an app.",
+    source: asText(appSyncRunSrc),
   },
   {
     name: "fetch-readable",

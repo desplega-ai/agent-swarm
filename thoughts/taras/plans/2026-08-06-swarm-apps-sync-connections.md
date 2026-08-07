@@ -439,9 +439,9 @@ Batteries included, in user space: the GitHub source that AMENDMENT v2 moved out
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync-engine.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] Seeder health on a **fresh** isolated DB: `rm -f /tmp/apps-sync-seed.sqlite && BUN_OPTIONS=--no-env-file DATABASE_PATH=/tmp/apps-sync-seed.sqlite PORT=3114 MCP_BASE_URL=http://localhost:3114 bun src/http.ts` boots with both scripts seeded (typecheck runs inside `scriptsSeeder.apply`) — then `curl -s -H "Authorization: Bearer 123123" "http://localhost:3114/api/scripts?scope=global" | jq '[.scripts[].name] | index("github-issues-pull")'` is non-null. Kill the process afterwards.
+- [x] `bun run test:root -- src/tests/apps-sync-engine.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] Seeder health on a **fresh** isolated DB: `rm -f /tmp/apps-sync-seed.sqlite && BUN_OPTIONS=--no-env-file DATABASE_PATH=/tmp/apps-sync-seed.sqlite PORT=3114 MCP_BASE_URL=http://localhost:3114 bun src/http.ts` boots with both scripts seeded (typecheck runs inside `scriptsSeeder.apply`) — then `curl -s -H "Authorization: Bearer 123123" "http://localhost:3114/api/scripts?scope=global" | jq '[.scripts[].name] | index("github-issues-pull")'` is non-null. Kill the process afterwards.
 
 #### Automated QA:
 - [ ] Against :3113 — a `{connector:"script", scriptId:<github-issues-pull>}` source against a small public repo creates rows; narrow `state` to `closed` and re-sync → previously-seen rows go `stale:true`; widen back → `stale` clears.

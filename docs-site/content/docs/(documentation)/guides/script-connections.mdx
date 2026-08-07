@@ -282,6 +282,26 @@ tool and `POST /api/scripts/run`), scheduled script runs,
 [external script endpoints](./scripts-external-apis) (which resolve under the
 endpoint's run-as agent).
 
+## Apps sync sources use connections
+
+A Swarm App model's `sources.<name>` can name a `connection` slug alongside its
+`scriptId`. The slug is validated when the definition is written and re-checked
+at the start of every sync pass — a connection that was disabled after the write
+fails the pass before the source script runs, with zero row churn.
+
+Credentials resolve for the **sync run-as identity**: the source script's owner,
+falling back to the lead agent for owner-less scripts (every seeded catalog
+script is owner-less). That identity's connections and credential bindings are
+what the run gets — the sync engine itself never reads, resolves, or forwards
+secret material.
+
+Source scripts follow the same placeholder rule as every other script: send
+`[REDACTED:KEY]` in the header and let the egress layer substitute the real
+value toward allowlisted hosts only. The seeded `github-issues-pull` script is
+the worked example — it sends `Authorization: Bearer [REDACTED:GITHUB_TOKEN]`
+and never unwraps a secret. Sources naming a connection are otherwise free to
+use the typed `ctx.api.<slug>` client instead of raw `fetch`.
+
 ## Current limitations (v1)
 
 - OpenAPI specs may be JSON or YAML (YAML is converted to JSON at ingest and

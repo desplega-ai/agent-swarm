@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   createServer as createHttpServer,
@@ -19,12 +19,18 @@ import { createApp, getApp, updateApp } from "../apps/store";
 import { getAppSyncStatus, runAppSync, type SyncPassResult } from "../apps/sync";
 import { closeDb, createAgent, createTaskExtended, getDb, getKv, initDb } from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
+import { buildScriptCredentialBindingsWithFailures } from "../be/script-credential-broker";
 import { upsertScriptByName } from "../be/scripts/db";
+import { typecheckScript } from "../be/scripts/typecheck";
+import { SEED_SCRIPTS } from "../be/seed-scripts";
+import githubIssuesPull from "../be/seed-scripts/catalog/github-issues-pull";
 import { handleApps } from "../http/apps";
 import { resolveHttpRequestAuth } from "../http/auth";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { LEGACY_POLICY, type LegacyRule } from "../rbac";
+import { validateScriptImports } from "../scripts-runtime/import-allowlist";
+import { runtimeFetchJson } from "../scripts-runtime/stdlib/fetch";
 import { registerAppSyncTool } from "../tools/app-sync";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { setRequestAuth } from "../utils/request-auth-context";
@@ -1685,5 +1691,407 @@ describe("script delete guard", () => {
 
     expect(deleted.status).toBe(200);
     expect(deleted.body.deleted).toBe(true);
+  });
+});
+
+// ── Catalog seed scripts (Phase 6) ──────────────────────────────────────────
+
+function catalogSource(name: string): string {
+  const entry = SEED_SCRIPTS.find((script) => script.name === name);
+  if (!entry) throw new Error(`catalog script "${name}" is not registered in SEED_SCRIPTS`);
+  return entry.source;
+}
+
+/** A GitHub issues-endpoint entry, in the API's own snake_case wire shape. */
+function ghApiIssue(number: number, overrides: Record<string, unknown> = {}) {
+  return {
+    number,
+    id: 1000 + number,
+    title: `Issue ${number}`,
+    state: "open",
+    body: `body ${number}`,
+    user: { login: "ada" },
+    labels: [{ name: "bug" }, { name: "p1" }],
+    comments: 3,
+    html_url: `https://github.com/owner/name/issues/${number}`,
+    created_at: "2026-01-02T03:04:05Z",
+    updated_at: "2026-01-03T03:04:05Z",
+    ...overrides,
+  };
+}
+
+/** The same endpoint interleaves pull requests; only PR entries carry `pull_request`. */
+function ghApiPull(number: number) {
+  return { ...ghApiIssue(number), pull_request: { url: `https://api.github.com/pulls/${number}` } };
+}
+
+describe("github-issues-pull", () => {
+  // The script reaches GitHub through ctx.stdlib.fetchJson, which bottoms out in
+  // globalThis.fetch. Stub that (never mock.module — it leaks process-wide) and
+  // hand the script the real stdlib so the fetch layer under test is the real one.
+  const stdlibCtx = { stdlib: { fetchJson: runtimeFetchJson } };
+  let originalFetch: typeof globalThis.fetch;
+  let lastRequest: { url: string; headers: Headers } | undefined;
+  let fetchCalls = 0;
+
+  function stubGithub(body: unknown, status = 200) {
+    globalThis.fetch = (async (input: unknown, init?: { headers?: Record<string, string> }) => {
+      fetchCalls += 1;
+      lastRequest = { url: String(input), headers: new Headers(init?.headers ?? {}) };
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    lastRequest = undefined;
+    fetchCalls = 0;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("filters out pull requests and projects flat camelCase fields", async () => {
+    stubGithub([ghApiIssue(1), ghApiPull(2), ghApiIssue(3)]);
+
+    const result = (await githubIssuesPull({ repo: "owner/name" }, stdlibCtx)) as {
+      records: Array<{ key: string; fields: Record<string, unknown> }>;
+      complete: boolean;
+    };
+
+    expect(result.records.map((record) => record.key)).toEqual(["1", "3"]);
+    expect(result.records[0]).toEqual({
+      key: "1",
+      fields: {
+        number: 1,
+        id: 1001,
+        title: "Issue 1",
+        state: "open",
+        body: "body 1",
+        userLogin: "ada",
+        labelsCsv: "bug,p1",
+        comments: 3,
+        htmlUrl: "https://github.com/owner/name/issues/1",
+        createdAt: "2026-01-02T03:04:05Z",
+        updatedAt: "2026-01-03T03:04:05Z",
+      },
+    });
+    expect(result.complete).toBe(true);
+    expect(lastRequest?.url).toBe(
+      "https://api.github.com/repos/owner/name/issues?state=open&per_page=100",
+    );
+    expect(lastRequest?.headers.get("accept")).toBe("application/vnd.github+json");
+    expect(lastRequest?.headers.get("user-agent")).toBe("agent-swarm-apps-sync");
+    // The script hands the egress layer a placeholder, never secret material.
+    expect(lastRequest?.headers.get("authorization")).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+  });
+
+  test("forwards state and limit to the issues query", async () => {
+    stubGithub([]);
+
+    await githubIssuesPull({ repo: "owner/name", state: "all", limit: 25 }, stdlibCtx);
+
+    expect(lastRequest?.url).toBe(
+      "https://api.github.com/repos/owner/name/issues?state=all&per_page=25",
+    );
+  });
+
+  test("echoes the connection slug back without otherwise using it", async () => {
+    stubGithub([ghApiIssue(1)]);
+
+    const result = (await githubIssuesPull(
+      { repo: "owner/name", connection: "ghApp" },
+      stdlibCtx,
+    )) as { connection: string };
+
+    expect(result.connection).toBe("ghApp");
+    // Credentials resolve at the egress layer for the run-as identity — naming a
+    // connection changes nothing about the request the script builds.
+    expect(lastRequest?.url).toBe(
+      "https://api.github.com/repos/owner/name/issues?state=open&per_page=100",
+    );
+    expect(lastRequest?.headers.get("authorization")).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+  });
+
+  test("a full raw page reports an incomplete window even after PRs are filtered out", async () => {
+    stubGithub([ghApiIssue(1), ghApiPull(2)]);
+
+    const result = (await githubIssuesPull({ repo: "owner/name", limit: 2 }, stdlibCtx)) as {
+      records: unknown[];
+      complete: boolean;
+    };
+
+    // Two raw entries filled the page even though only one survived filtering.
+    expect(result.records).toHaveLength(1);
+    expect(result.complete).toBe(false);
+  });
+
+  test("a short raw page reports a complete window", async () => {
+    stubGithub([ghApiIssue(1)]);
+
+    const result = (await githubIssuesPull({ repo: "owner/name", limit: 2 }, stdlibCtx)) as {
+      complete: boolean;
+    };
+
+    expect(result.complete).toBe(true);
+  });
+
+  test("truncates a long body to 1000 characters", async () => {
+    stubGithub([ghApiIssue(1, { body: "x".repeat(5000) })]);
+
+    const result = (await githubIssuesPull({ repo: "owner/name" }, stdlibCtx)) as {
+      records: Array<{ fields: { body: string } }>;
+    };
+
+    expect(result.records[0]?.fields.body).toHaveLength(1000);
+  });
+
+  for (const repo of ["owner", "owner/name/extra", "../name", "owner/..", "/name", "owner/"]) {
+    test(`rejects the malformed repo "${repo}" without a request`, async () => {
+      stubGithub([ghApiIssue(1)]);
+
+      const result = (await githubIssuesPull({ repo }, stdlibCtx)) as { error: string };
+
+      expect(result.error).toContain("owner/name");
+      expect(fetchCalls).toBe(0);
+    });
+  }
+
+  test("rejects a missing repo as invalid args", async () => {
+    stubGithub([ghApiIssue(1)]);
+
+    const result = (await githubIssuesPull({}, stdlibCtx)) as { error: string };
+
+    expect(result.error).toContain("invalid args");
+    expect(fetchCalls).toBe(0);
+  });
+
+  test("a non-2xx response becomes an error return", async () => {
+    stubGithub({ message: "API rate limit exceeded" }, 403);
+
+    const result = (await githubIssuesPull({ repo: "owner/name" }, stdlibCtx)) as {
+      error: string;
+      records?: unknown;
+    };
+
+    expect(result.error).toContain("API rate limit exceeded");
+    // A non-conforming return is what the engine turns into a pass error.
+    expect(result.records).toBeUndefined();
+  });
+});
+
+describe("apps-sync catalog registration", () => {
+  for (const name of ["github-issues-pull", "app-sync-run"]) {
+    test(`${name} is registered and typechecks against the live SDK`, () => {
+      const entry = SEED_SCRIPTS.find((script) => script.name === name);
+      expect(entry).toBeDefined();
+      expect(entry?.description.length).toBeGreaterThan(0);
+      expect(entry?.intent.length).toBeGreaterThan(0);
+
+      expect(validateScriptImports(entry?.source ?? "").ok).toBe(true);
+      const typecheck = typecheckScript(entry?.source ?? "");
+      expect(typecheck.ok ? [] : typecheck.diagnostics).toEqual([]);
+    });
+  }
+
+  test("the source script uses placeholder auth and never reads secrets", () => {
+    const source = catalogSource("github-issues-pull");
+
+    expect(source).toContain("Bearer [REDACTED:GITHUB_TOKEN]");
+    expect(source).not.toContain("includeSecrets");
+    expect(source).not.toContain("Redacted.value");
+    // Seeded scripts are typechecked against the LIVE connection registry, which
+    // is empty on a fresh DB — a ctx.api.<slug> reference would fail boot seeding.
+    expect(source).not.toContain("ctx.api.");
+  });
+
+  test("app-sync-run just forwards to the app_sync tool", () => {
+    const source = catalogSource("app-sync-run");
+
+    expect(source).toContain("ctx.swarm.app_sync");
+  });
+});
+
+describe("a sync source against a dummy GitHub through the real sandbox", () => {
+  // The real path end to end: runSavedScriptAsAgent -> sandbox subprocess ->
+  // patched fetch -> a Bun.serve fixture on 127.0.0.1. Nothing reaches GitHub.
+  //
+  // Egress note: the sandbox's network is open, so no allowlist entry is needed
+  // to REACH the fixture. The allowlist governs secret SUBSTITUTION only, and
+  // that is the point of these tests: GITHUB_TOKEN's binding is allowlisted to
+  // api.github.com, so an active binding exists while the fixture host does not
+  // match it — the placeholder must therefore leave the sandbox unsubstituted.
+  const FIXTURE_TOKEN = "ghp_fixture_secret_value_9876543210";
+
+  let fixture: ReturnType<typeof Bun.serve>;
+  let origin = "";
+  let seen: { path: string; authorization: string | null } | undefined;
+  let nextPage: (echo: { authorization: string | null }) => unknown[] = () => [];
+  let releaseStall: (() => void) | undefined;
+
+  /** The shipped catalog script, repointed at the fixture. Same logic, no GitHub. */
+  function fixtureSource(): string {
+    return catalogSource("github-issues-pull").replace("https://api.github.com", origin);
+  }
+
+  function fixtureDefinition(scriptId: string, args: Record<string, unknown>): Definition {
+    return appWith({
+      issue: {
+        columns: {
+          issueKey: { kind: "string" },
+          title: { kind: "string", source: { of: "gh", field: "title" } },
+          userLogin: { kind: "string", source: { of: "gh", field: "userLogin" } },
+          comments: { kind: "number", source: { of: "gh", field: "comments" } },
+        },
+        sources: { gh: { connector: "script", scriptId, joinKey: "issueKey", args } },
+      },
+    });
+  }
+
+  beforeAll(() => {
+    // Mints the default GITHUB_TOKEN credential binding (allowlisted to
+    // api.github.com) for every run-as identity.
+    process.env.GITHUB_TOKEN = FIXTURE_TOKEN;
+    refreshSecretScrubberCache();
+    fixture = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (req: Request) => {
+        const url = new URL(req.url);
+        const authorization = req.headers.get("authorization");
+        seen = { path: url.pathname + url.search, authorization };
+        if (url.pathname === "/stall") {
+          await new Promise<void>((resolve) => {
+            releaseStall = resolve;
+          });
+        }
+        return new Response(JSON.stringify(nextPage({ authorization })), {
+          headers: {
+            "content-type": "application/json",
+            // Echo what the fixture actually received back to the caller.
+            "x-echo-authorization": authorization ?? "<none>",
+          },
+        });
+      },
+    });
+    origin = `http://127.0.0.1:${fixture.port}`;
+  });
+
+  afterAll(() => {
+    releaseStall?.();
+    fixture.stop(true);
+    delete process.env.GITHUB_TOKEN;
+    refreshSecretScrubberCache();
+  });
+
+  beforeEach(() => {
+    seen = undefined;
+    nextPage = () => [];
+  });
+
+  test("a successful pull creates rows from the fixture's page", async () => {
+    nextPage = () => [ghApiIssue(1), ghApiPull(2), ghApiIssue(3)];
+    const scriptId = await saveScript({ name: scriptName("fixture-ok"), source: fixtureSource() });
+    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+
+    const pass = (await runAppSync({ appId })).passes[0]!;
+
+    expect(pass.error).toBeUndefined();
+    expect(pass).toMatchObject({ pulled: 2, created: 2 });
+    expect(pass.staleSweepSkipped).toBeUndefined();
+    expect(seen?.path).toBe("/repos/owner/name/issues?state=open&per_page=100");
+    const rows = rowsOf(appId);
+    expect(rows.map((row) => row.issueKey)).toEqual(["1", "3"]);
+    expect(rows[0]).toMatchObject({
+      issueKey: "1",
+      title: "Issue 1",
+      userLogin: "ada",
+      comments: 3,
+      source: "gh",
+      stale: false,
+    });
+  });
+
+  test("a full page at the limit skips the stale sweep", async () => {
+    const scriptId = await saveScript({
+      name: scriptName("fixture-page"),
+      source: fixtureSource(),
+    });
+    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 2 }));
+
+    nextPage = () => [ghApiIssue(10)];
+    const first = (await runAppSync({ appId })).passes[0]!;
+    expect(first).toMatchObject({ created: 1 });
+    expect(first.staleSweepSkipped).toBeUndefined();
+
+    // A raw page of exactly `limit` entries, one of which is a PR: the window is
+    // incomplete even though only one record survives filtering.
+    nextPage = () => [ghApiIssue(11), ghApiPull(12)];
+    const second = (await runAppSync({ appId })).passes[0]!;
+
+    expect(second).toMatchObject({
+      pulled: 1,
+      created: 1,
+      markedStale: 0,
+      staleSweepSkipped: true,
+    });
+    expect(second.warnings.some((warning) => warning.includes("stale sweep skipped"))).toBe(true);
+    // The row the incomplete window never saw must survive.
+    expect(rowsOf(appId).find((row) => row.issueKey === "10")?.stale).toBe(false);
+  });
+
+  test("a fetch that outlives its timeout fails the pass with zero row churn", async () => {
+    const name = scriptName("fixture-timeout");
+    const scriptId = await saveScript({ name, source: fixtureSource() });
+    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+    nextPage = () => [ghApiIssue(30)];
+    await runAppSync({ appId });
+    const before = rowSnapshot(appId);
+
+    // Bare fetch, not ctx.stdlib.fetch: the stdlib wrapper retries three times,
+    // so an external abort there costs three stalled attempts instead of one.
+    await saveScript({
+      name,
+      source: `export default async () => {
+        await fetch("${origin}/stall", { signal: AbortSignal.timeout(300) });
+        return [];
+      };`,
+    });
+    const result = await runAppSync({ appId });
+
+    expect(result.ok).toBe(false);
+    expect(result.passes[0]?.error).toContain("TimeoutError");
+    expect(result.passes[0]).toMatchObject({ pulled: 0, created: 0, updated: 0, markedStale: 0 });
+    expect(rowSnapshot(appId)).toBe(before);
+    releaseStall?.();
+  });
+
+  test("the fixture only ever sees the placeholder, never the token", async () => {
+    // An ACTIVE binding for this identity — otherwise the assertion is vacuous.
+    const bindings = await buildScriptCredentialBindingsWithFailures({ agentId: LEAD_AGENT_ID });
+    const github = bindings.egressSecrets.find((secret) => secret.configKey === "GITHUB_TOKEN");
+    expect(github?.value).toBe(FIXTURE_TOKEN);
+    expect(github?.allowedHosts).toEqual(["api.github.com"]);
+
+    // The fixture echoes the Authorization header it received into the record it
+    // serves, so the projected row carries whatever actually left the sandbox.
+    nextPage = (echo) => [ghApiIssue(40, { title: echo.authorization })];
+    const scriptId = await saveScript({
+      name: scriptName("fixture-auth"),
+      source: fixtureSource(),
+    });
+    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+
+    const result = await runAppSync({ appId });
+
+    expect(seen?.authorization).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+    expect(rowsOf(appId)[0]?.title).toBe("Bearer [REDACTED:GITHUB_TOKEN]");
+    expect(JSON.stringify(rowsOf(appId))).not.toContain(FIXTURE_TOKEN);
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_TOKEN);
+    expect(JSON.stringify(getAppSyncStatus(appId, "issue", "gh"))).not.toContain(FIXTURE_TOKEN);
   });
 });
