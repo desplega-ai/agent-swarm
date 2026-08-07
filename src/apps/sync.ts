@@ -356,7 +356,14 @@ function pullFromSwarmTasks(
       if (!parsed.success) throw new SyncPassError(`config.status: unknown task status "${token}"`);
       return parsed.data;
     });
-    if (statuses.length > 0) filters.status = statuses;
+    // Fail CLOSED like agentId/assetKey: an empty filter silently dropping
+    // would widen a previously scoped pull to the whole pool.
+    if (statuses.length === 0) {
+      throw new SyncPassError(
+        `config.status must name at least one task status, got ${JSON.stringify(config.status)}`,
+      );
+    }
+    filters.status = statuses;
   }
   // Scoping config fails CLOSED: silently dropping a malformed filter would
   // widen the pull to the whole task pool.
@@ -370,7 +377,12 @@ function pullFromSwarmTasks(
   }
   if (config.tags !== undefined) {
     const tags = commaList(config.tags);
-    if (tags.length > 0) filters.tags = tags;
+    if (tags.length === 0) {
+      throw new SyncPassError(
+        `config.tags must name at least one tag, got ${JSON.stringify(config.tags)}`,
+      );
+    }
+    filters.tags = tags;
   }
   if (config.assetKey !== undefined) {
     if (typeof config.assetKey !== "string" || config.assetKey.trim().length === 0) {

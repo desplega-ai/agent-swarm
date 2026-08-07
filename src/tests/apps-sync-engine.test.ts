@@ -831,6 +831,16 @@ describe("swarm-tasks source", () => {
     expect(keyResult.ok).toBe(false);
     expect(keyResult.passes[0]?.error).toContain("config.assetKey must be a non-empty string");
     expect(rowsOf(badKey, "task", "taskKey")).toHaveLength(0);
+
+    const badStatus = createSyncApp(taskDefinition({ status: " , " }), "Bad status");
+    const statusResult = await runAppSync({ appId: badStatus });
+    expect(statusResult.ok).toBe(false);
+    expect(statusResult.passes[0]?.error).toContain("config.status must name at least one");
+
+    const badTags = createSyncApp(taskDefinition({ tags: "" }), "Bad tags");
+    const tagsResult = await runAppSync({ appId: badTags });
+    expect(tagsResult.ok).toBe(false);
+    expect(tagsResult.passes[0]?.error).toContain("config.tags must name at least one");
   });
 
   test("an unsupported config key is reported as a warning", async () => {

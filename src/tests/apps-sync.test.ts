@@ -620,6 +620,60 @@ describe("apps sync definition surface", () => {
     expect(stillEditable.status).toBe(200);
   });
 
+  test("check 7c — grandfathering pins args and connection, not just the script id", async () => {
+    const foreignSource = (args: Record<string, unknown>, connection?: string) =>
+      syncDefinition({
+        columns: { status: { kind: "string" } },
+        sources: {
+          gh: {
+            connector: "script",
+            scriptId: foreignScriptId,
+            joinKey: "issueKey",
+            args,
+            ...(connection ? { connection } : {}),
+          },
+        },
+      });
+    const operatorApp = await fetch(`${base}/api/apps`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Foreign source with args",
+        definition: foreignSource({ repo: "owner/name" }),
+      }),
+    });
+    expect(operatorApp.status).toBe(201);
+    const appId = ((await operatorApp.json()) as { app: { id: string } }).app.id;
+
+    // Same script id, attacker-chosen args: the sync would run the owner's
+    // credentials over a different request — not grandfathered.
+    const argsSwap = await request<IssuesBody>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ definition: foreignSource({ repo: "owner/evil" }) }),
+    });
+    expect(argsSwap.status).toBe(400);
+    expect(
+      issueAt(argsSwap.body.issues ?? [], "models.issue.sources.gh.scriptId")?.message,
+    ).toContain("agent-scoped to another agent");
+
+    // Same id, same args, new connection choice: also not grandfathered.
+    const connectionSwap = await request<IssuesBody>(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ definition: foreignSource({ repo: "owner/name" }, "vendorApi") }),
+    });
+    expect(connectionSwap.status).toBe(400);
+    expect(
+      issueAt(connectionSwap.body.issues ?? [], "models.issue.sources.gh.scriptId")?.message,
+    ).toContain("agent-scoped to another agent");
+
+    // The unchanged reference stays editable around.
+    const unchanged = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ definition: foreignSource({ repo: "owner/name" }) }),
+    });
+    expect(unchanged.status).toBe(200);
+  });
+
   test("check 8 — connection must resolve to an enabled connection for the run-as identity", async () => {
     const issues = await rejectedIssues(scriptSourceDefinition(globalScriptId, "ghost"));
     expect(issueAt(issues, "models.issue.sources.gh.connection")?.message).toBe(

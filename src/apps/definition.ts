@@ -608,14 +608,43 @@ function foreignScriptForWriter(
 }
 
 /**
- * Path-exact grandfathering index: `definition path -> scriptId`. A reference
- * is grandfathered only when the stored definition already names the SAME
- * script at the SAME path.
+ * Canonical form of everything security-relevant about a script reference:
+ * which script runs, with what arguments, over which connection. Grandfathering
+ * compares THIS, not the bare id — an id-only match would let a non-owner keep
+ * a stored foreign reference while swapping in attacker-chosen args or a
+ * different connection, all executed under the owner's credentials.
+ */
+function scriptRefKey(scriptId: unknown, args: unknown, connection: unknown): string | null {
+  if (typeof scriptId !== "string" || scriptId.length === 0) return null;
+  return JSON.stringify({ scriptId, args: args ?? null, connection: connection ?? null });
+}
+
+/**
+ * Path-exact grandfathering index: `definition path -> scriptRefKey`. A
+ * reference is grandfathered only when the stored definition already carries
+ * the SAME script, args, and connection at the SAME path.
  */
 function collectScriptReferencePathMap(definition: unknown): Map<string, string> {
   const byPath = new Map<string, string>();
-  for (const [scriptId, paths] of collectScriptReferences(definition)) {
-    for (const path of paths) byPath.set(path, scriptId);
+  if (!isMergePatchObject(definition)) return byPath;
+  const actions = definition.actions;
+  if (isMergePatchObject(actions)) {
+    for (const [actionName, action] of Object.entries(actions)) {
+      if (!isMergePatchObject(action)) continue;
+      const key = scriptRefKey(action.scriptId, action.args, undefined);
+      if (key) byPath.set(`actions.${actionName}`, key);
+    }
+  }
+  const models = definition.models;
+  if (isMergePatchObject(models)) {
+    for (const [modelName, model] of Object.entries(models)) {
+      if (!isMergePatchObject(model) || !isMergePatchObject(model.sources)) continue;
+      for (const [sourceName, source] of Object.entries(model.sources)) {
+        if (!isMergePatchObject(source)) continue;
+        const key = scriptRefKey(source.scriptId, source.args, source.connection);
+        if (key) byPath.set(`models.${modelName}.sources.${sourceName}`, key);
+      }
+    }
   }
   return byPath;
 }
@@ -677,7 +706,8 @@ function modelSourceIssues(
     // wire scripts it owns (or global ones) — the script-action rule.
     if (
       foreignScriptForWriter(context, script) &&
-      grandfatheredScriptRefs.get(path) !== source.scriptId
+      grandfatheredScriptRefs.get(path) !==
+        scriptRefKey(source.scriptId, source.args, source.connection)
     ) {
       issues.push({
         path: `${path}.scriptId`,
@@ -840,7 +870,8 @@ export function parseAppDefinition(
     // foreign reference cannot seed a new one elsewhere.
     if (
       foreignScriptForWriter(elementContext, script) &&
-      grandfatheredScriptRefs.get(`actions.${name}`) !== action.scriptId
+      grandfatheredScriptRefs.get(`actions.${name}`) !==
+        scriptRefKey(action.scriptId, action.args, undefined)
     ) {
       issues.push({
         path: `actions.${name}.scriptId`,
