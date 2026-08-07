@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 - **Bundled skills now seed from canonical database-backed templates** (#1083, #1106), with vendored ai-toolbox content and single-source generated `SKILL.md` artifacts.
-- **Worker dependencies refresh agent-fs to 0.12.2 and context-mode to 1.0.169** (#1108, #1109), including the Helm agent-fs image default.
+- **Worker dependencies refresh agent-fs to 0.12.2 and context-mode to 1.0.169** (#1108, #1109), while the Helm deployment tracks the current agent-fs backend image (#1127).
 
 ### Fixed
 - **Script and webhook execution is hardened against injection, SSRF, and fail-open authentication** (#1107, #1112, #1138), including sandboxed subprocesses and inert Bun argument handling.
@@ -27,7 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Requester attribution, session-summary sourcing, and profile edits survive sync and restart paths correctly** (#1116, #1131, #1132, #1137).
 - **GitHub review replies require the configured bot identity** (#1133), and Codex credential/bootstrap reload paths preserve valid standalone and pooled credentials (#1114).
 - **Agent-fs attachments preserve scoped IDs and safe, correctly encoded filenames** (#1118, #1126).
-- **Slack accepted-message, persona, steering reactions, and terminal task rendering are consistent** (#1103, #1111, #1121, #1128), while incomplete approval responses are rejected (#1119).
+- **Slack accepted-message, persona, and steering reactions render consistently** (#1103, #1111, #1121), while incomplete approval responses are rejected (#1119).
+- **Dashboard task and integration state stays accurate** — superseded tasks are terminal (#1128), and blessed connections save without clobbering OpenAPI base URLs (#1110).
+- **Internal structured summaries reject malformed model output without blocking pre-push validation** (#1125).
 
 ## [1.128.0] - 2026-08-05
 
