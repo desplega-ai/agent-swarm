@@ -10,12 +10,26 @@ type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
 interface RouteResponseDef {
   description: string;
   schema?: z.ZodType;
+  /**
+   * Reason this response intentionally carries no JSON schema — SSE stream,
+   * binary download, HTML, redirect, proxied upstream body, intentionally
+   * dynamic shape, etc. Mutually exclusive with `schema`. Every 2xx response
+   * (except bodiless 204/205/304) must declare one of the two — enforced by
+   * `bun run check:openapi-response-coverage` (CI).
+   */
+  unstructured?: string;
 }
+
+type ResponsesDef = Record<number, RouteResponseDef>;
+
+/** Extracts the payload type respond() accepts for one response def. */
+type ResponseData<R> = R extends { schema: infer S extends z.ZodType } ? z.input<S> : never;
 
 export interface RouteDef<
   TParams extends z.ZodType = z.ZodType,
   TQuery extends z.ZodType = z.ZodType,
   TBody extends z.ZodType = z.ZodType,
+  TResponses extends ResponsesDef = ResponsesDef,
 > {
   method: HttpMethod;
   path: string; // OpenAPI-style: "/api/tasks/{id}"
@@ -28,7 +42,7 @@ export interface RouteDef<
   params?: TParams;
   query?: TQuery;
   body?: TBody;
-  responses: Record<number, RouteResponseDef>;
+  responses: TResponses;
   auth?: {
     apiKey?: boolean; // default true
     agentId?: boolean; // requires X-Agent-ID
@@ -49,7 +63,7 @@ interface ParsedRequest<TParams, TQuery, TBody> {
   body: TBody;
 }
 
-interface RouteHandle<TParams, TQuery, TBody> {
+interface RouteHandle<TParams, TQuery, TBody, TResponses extends ResponsesDef = ResponsesDef> {
   /** Check if this route matches the request */
   match(method: string | undefined, pathSegments: string[]): boolean;
 
@@ -60,6 +74,24 @@ interface RouteHandle<TParams, TQuery, TBody> {
     pathSegments: string[],
     queryParams: URLSearchParams,
   ): Promise<ParsedRequest<TParams, TQuery, TBody> | null>;
+
+  /**
+   * Typed JSON egress: send `data` as the response body for `code`, with `data`
+   * compile-time checked against the `schema` declared for that code — the
+   * declared OpenAPI shape and the wire shape cannot drift silently. Only
+   * callable for codes that declare a `schema`; keep `jsonError` for error
+   * paths and raw `res` for bodiless/unstructured responses.
+   *
+   * Outside production the payload is additionally runtime-validated against
+   * the schema (throws → 500 + test failure), catching mismatches the type
+   * system can't see through `any`-typed DB rows. Always sends the raw `data`
+   * object, never the parsed output — validation must not change the wire.
+   */
+  respond<C extends keyof TResponses & number>(
+    res: ServerResponse,
+    code: C,
+    data: ResponseData<TResponses[C]>,
+  ): void;
 
   /** The raw definition (for OpenAPI generation) */
   def: RouteDef;
@@ -154,17 +186,48 @@ export function describeRequestRoute(
 
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
+/**
+ * Runtime response validation gate for `respond()`. NODE_ENV is deliberately
+ * unset on prod deploys, so this is opt-in outside `bun test` (which sets
+ * NODE_ENV=test): response schemas must never introduce a production failure
+ * mode — they fail loudly in tests and (opt-in) local dev instead.
+ */
+const VALIDATE_RESPONSES =
+  process.env.NODE_ENV === "test" ||
+  process.env.NODE_ENV === "development" ||
+  process.env.VALIDATE_HTTP_RESPONSES === "true";
+
 export function route<
   TParams extends z.ZodType = z.ZodUndefined,
   TQuery extends z.ZodType = z.ZodUndefined,
   TBody extends z.ZodType = z.ZodUndefined,
+  TResponses extends ResponsesDef = ResponsesDef,
 >(
-  def: RouteDef<TParams, TQuery, TBody>,
-): RouteHandle<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>> {
+  def: RouteDef<TParams, TQuery, TBody, TResponses>,
+): RouteHandle<z.infer<TParams>, z.infer<TQuery>, z.infer<TBody>, TResponses> {
   routeRegistry.push(def as RouteDef);
 
   return {
     def: def as RouteDef,
+
+    respond(res, code, data) {
+      if (VALIDATE_RESPONSES) {
+        const schema = (def.responses as ResponsesDef)[code]?.schema;
+        if (schema) {
+          const result = schema.safeParse(data);
+          if (!result.success) {
+            throw new Error(
+              `Response schema violation: ${def.method.toUpperCase()} ${def.path} ${code} — ` +
+                result.error.issues
+                  .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+                  .join("; "),
+            );
+          }
+        }
+      }
+      res.writeHead(code, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(data));
+    },
 
     match(method, pathSegments) {
       return matchRoute(

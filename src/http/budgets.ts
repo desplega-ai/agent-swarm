@@ -20,7 +20,7 @@ import {
 import { BudgetRefusalNotificationSchema, BudgetSchema, BudgetScopeSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
-import { json, jsonError } from "./utils";
+import { jsonError } from "./utils";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ export async function handleBudgets(
   if (listBudgets.match(req.method, pathSegments)) {
     const parsed = await listBudgets.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    json(res, { budgets: getBudgets() });
+    listBudgets.respond(res, 200, { budgets: getBudgets() });
     return true;
   }
 
@@ -139,7 +139,9 @@ export async function handleBudgets(
     const parsed = await listBudgetRefusals.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 50;
-    json(res, { refusals: getRecentBudgetRefusalNotifications(limit) });
+    listBudgetRefusals.respond(res, 200, {
+      refusals: getRecentBudgetRefusalNotifications(limit),
+    });
     return true;
   }
 
@@ -161,7 +163,7 @@ export async function handleBudgets(
       jsonError(res, "Budget not configured", 404);
       return true;
     }
-    json(res, row);
+    getBudgetByScope.respond(res, 200, row);
     return true;
   }
 
@@ -184,7 +186,7 @@ export async function handleBudgets(
       },
     });
 
-    json(res, updated);
+    upsertBudgetRoute.respond(res, 200, updated);
     return true;
   }
 

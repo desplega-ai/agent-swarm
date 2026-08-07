@@ -161,6 +161,8 @@ Always use the `route()` factory from `src/http/route-def.ts` — auto-registers
 
 Every **non-GET** route must declare its RBAC posture on the def: `rbac: { permission: "<verb>" }` (handler gates via `can()`) or `rbac: { ungated: "<reason>" }`. Enforced by `bun run check:rbac-coverage` (CI); new verbs register in `src/rbac/permissions.ts` + `src/rbac/legacy-policy.ts`.
 
+Every **2xx** response (except bodiless 204/205) must declare `schema: <zod>` — sent via the handle's typed `<route>.respond(res, 200, data)`, never `json()` — or `unstructured: "<reason>"` for non-JSON bodies (SSE, binary, redirects, proxied payloads). Enforced by `bun run check:openapi-response-coverage` (CI). Reuse the named entity schemas from `src/types.ts` (they emit `$ref`s); untyped 4xx/5xx default to the shared `ErrorResponse` envelope automatically.
+
 After adding a handler FILE: also add the import to `src/http/all-routes.ts`, then run `bun run docs:openapi` and commit `openapi.json`.
 
 </important>

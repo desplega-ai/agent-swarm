@@ -92,6 +92,7 @@
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
     "check:rbac-coverage": "bun scripts/check-rbac-coverage.ts",
+    "check:openapi-response-coverage": "bun scripts/check-openapi-response-coverage.ts",
     "check:script-types": "bash scripts/check-script-types-freshness.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "lint:structure": "konsistent check",

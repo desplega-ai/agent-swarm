@@ -1,13 +1,17 @@
-import {
-  extendZodWithOpenApi,
-  OpenAPIRegistry,
-  OpenApiGeneratorV31,
-} from "@asteasolutions/zod-to-openapi";
-import { z } from "zod";
+import { OpenAPIRegistry, OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { z } from "../utils/zod-openapi";
 import { routeRegistry } from "./route-def";
 
-extendZodWithOpenApi(z);
+/**
+ * Default component for 4xx/5xx responses that declare no schema of their own:
+ * the `jsonError()` envelope every error path emits. Loose because a few
+ * handlers attach extra diagnostic fields (e.g. TriggerSchemaError's
+ * `message`/`details`) — those may declare an explicit schema instead.
+ */
+const ErrorResponseSchema = z
+  .looseObject({ error: z.string() })
+  .openapi("ErrorResponse", { description: "Standard error envelope" });
 
 let cachedSpec: string | null = null;
 
@@ -43,11 +47,16 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
       { description: string; content?: Record<string, { schema: z.ZodType }> }
     > = {};
     for (const [code, resDef] of Object.entries(routeDef.responses)) {
+      const schema =
+        resDef.schema ??
+        // Untyped error responses default to the shared jsonError envelope;
+        // `unstructured` (non-JSON body) opts out.
+        (Number(code) >= 400 && !resDef.unstructured ? ErrorResponseSchema : undefined);
       responses[code] = {
         description: resDef.description,
-        ...(resDef.schema && {
+        ...(schema && {
           content: {
-            "application/json": { schema: resDef.schema },
+            "application/json": { schema },
           },
         }),
       };
