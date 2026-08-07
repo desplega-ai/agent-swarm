@@ -86,6 +86,42 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
 
   const serverUrl = opts.serverUrl || getPublicMcpBaseUrl();
 
+  /**
+   * zod-to-openapi emits `.nullable()` on an `.extend()`ed (or `$ref`ed)
+   * schema as `allOf: [{$ref}, {type: ["object","null"], ...delta}]` — an
+   * allOf member allowing null is semantically wrong (the intersection with
+   * the non-null base can never be null), and TS-definition generators
+   * (fumadocs-openapi) collapse it to `never`. Rewrite to the intended
+   * `anyOf: [<intersection>, {type: "null"}]`.
+   */
+  function fixNullableAllOf(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) fixNullableAllOf(item);
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    const allOf = obj.allOf;
+    if (Array.isArray(allOf)) {
+      let hadNull = false;
+      for (const member of allOf) {
+        if (member && Array.isArray(member.type) && member.type.includes("null")) {
+          hadNull = true;
+          const rest = member.type.filter((t: string) => t !== "null");
+          member.type = rest.length === 1 ? rest[0] : rest;
+        }
+      }
+      if (hadNull) {
+        // Drop members reduced to a bare `{type: "object"}` (no constraints left).
+        const members = allOf.filter((m) => !(Object.keys(m).length === 1 && m.type === "object"));
+        const intersection = members.length === 1 ? members[0] : { allOf: members };
+        delete obj.allOf;
+        obj.anyOf = [intersection, { type: "null" }];
+      }
+    }
+    for (const value of Object.values(obj)) fixNullableAllOf(value);
+  }
+
   const generator = new OpenApiGeneratorV31(registry.definitions);
   const doc = generator.generateDocument({
     openapi: "3.1.0",
@@ -104,6 +140,9 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
       },
     ],
   });
+
+  fixNullableAllOf(doc.paths);
+  fixNullableAllOf(doc.components);
 
   cachedSpec = JSON.stringify(doc, null, 2);
   return cachedSpec;

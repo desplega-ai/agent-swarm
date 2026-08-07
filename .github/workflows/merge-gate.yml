@@ -572,9 +572,9 @@ jobs:
           echo "OpenAPI spec is up to date."
       - name: Check generated API docs for drift
         run: |
-          if [ -n "$(git diff --name-only docs-site/content/docs/api-reference/)" ]; then
+          if [ -n "$(git diff --name-only docs-site/content/docs/api-reference/ docs-site/public/openapi.d.ts)" ]; then
             echo "::error::API reference docs are out of date! Run 'bun run docs:openapi' and commit the changes."
-            git diff --stat docs-site/content/docs/api-reference/
+            git diff --stat docs-site/content/docs/api-reference/ docs-site/public/openapi.d.ts
             exit 1
           fi
           echo "API reference docs are up to date."

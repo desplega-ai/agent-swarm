@@ -9076,15 +9076,12 @@
                     }
                   },
                   "cred_status": {
-                    "allOf": [
+                    "anyOf": [
                       {
                         "$ref": "#/components/schemas/AgentCredStatus"
                       },
                       {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
+                        "type": "null"
                       }
                     ]
                   },
@@ -9230,15 +9227,12 @@
                       ]
                     },
                     "credStatus": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/AgentCredStatus"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     },
@@ -9365,15 +9359,12 @@
                             ]
                           },
                           "credStatus": {
-                            "allOf": [
+                            "anyOf": [
                               {
                                 "$ref": "#/components/schemas/AgentCredStatus"
                               },
                               {
-                                "type": [
-                                  "object",
-                                  "null"
-                                ]
+                                "type": "null"
                               }
                             ]
                           },
@@ -14101,15 +14092,12 @@
                       "type": "string"
                     },
                     "row": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/UserFavorite"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -22550,15 +22538,12 @@
                     "type": "boolean"
                   },
                   "hooks": {
-                    "allOf": [
+                    "anyOf": [
                       {
                         "$ref": "#/components/schemas/RepoHooks"
                       },
                       {
-                        "type": [
-                          "object",
-                          "null"
-                        ]
+                        "type": "null"
                       }
                     ]
                   },
@@ -32406,15 +32391,12 @@
                       "type": "number"
                     },
                     "skill": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/Skill"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -32578,15 +32560,12 @@
                       "$ref": "#/components/schemas/SkillFile"
                     },
                     "skill": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/Skill"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -32664,15 +32643,12 @@
                       ]
                     },
                     "skill": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/Skill"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -38221,15 +38197,12 @@
                       ]
                     },
                     "task": {
-                      "allOf": [
+                      "anyOf": [
                         {
                           "$ref": "#/components/schemas/AgentTask"
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ]
+                          "type": "null"
                         }
                       ]
                     },
@@ -39591,119 +39564,123 @@
                     "users": {
                       "type": "array",
                       "items": {
-                        "allOf": [
+                        "anyOf": [
                           {
-                            "$ref": "#/components/schemas/User"
+                            "allOf": [
+                              {
+                                "$ref": "#/components/schemas/User"
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "identities": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string"
+                                        },
+                                        "externalId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "externalId"
+                                      ]
+                                    }
+                                  },
+                                  "tokens": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "userId": {
+                                          "type": "string"
+                                        },
+                                        "label": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "tokenPreview": {
+                                          "type": "string"
+                                        },
+                                        "createdAt": {
+                                          "type": "string"
+                                        },
+                                        "lastUsedAt": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        },
+                                        "revokedAt": {
+                                          "type": [
+                                            "string",
+                                            "null"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "userId",
+                                        "label",
+                                        "tokenPreview",
+                                        "createdAt",
+                                        "lastUsedAt",
+                                        "revokedAt"
+                                      ]
+                                    }
+                                  },
+                                  "recentEvents": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "userId": {
+                                          "type": "string"
+                                        },
+                                        "eventType": {
+                                          "type": "string"
+                                        },
+                                        "actor": {
+                                          "type": "string"
+                                        },
+                                        "before": {},
+                                        "after": {},
+                                        "createdAt": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "userId",
+                                        "eventType",
+                                        "actor",
+                                        "createdAt"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "identities",
+                                  "tokens",
+                                  "recentEvents"
+                                ]
+                              }
+                            ]
                           },
                           {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "properties": {
-                              "identities": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "kind": {
-                                      "type": "string"
-                                    },
-                                    "externalId": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "kind",
-                                    "externalId"
-                                  ]
-                                }
-                              },
-                              "tokens": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "userId": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "tokenPreview": {
-                                      "type": "string"
-                                    },
-                                    "createdAt": {
-                                      "type": "string"
-                                    },
-                                    "lastUsedAt": {
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    },
-                                    "revokedAt": {
-                                      "type": [
-                                        "string",
-                                        "null"
-                                      ]
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "userId",
-                                    "label",
-                                    "tokenPreview",
-                                    "createdAt",
-                                    "lastUsedAt",
-                                    "revokedAt"
-                                  ]
-                                }
-                              },
-                              "recentEvents": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "userId": {
-                                      "type": "string"
-                                    },
-                                    "eventType": {
-                                      "type": "string"
-                                    },
-                                    "actor": {
-                                      "type": "string"
-                                    },
-                                    "before": {},
-                                    "after": {},
-                                    "createdAt": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "userId",
-                                    "eventType",
-                                    "actor",
-                                    "createdAt"
-                                  ]
-                                }
-                              }
-                            },
-                            "required": [
-                              "identities",
-                              "tokens",
-                              "recentEvents"
-                            ]
+                            "type": "null"
                           }
                         ]
                       }
@@ -39824,119 +39801,123 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -40147,119 +40128,123 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -40596,119 +40581,123 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -40848,119 +40837,123 @@
                       ]
                     },
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -41034,119 +41027,123 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
@@ -41229,119 +41226,123 @@
                   "type": "object",
                   "properties": {
                     "user": {
-                      "allOf": [
+                      "anyOf": [
                         {
-                          "$ref": "#/components/schemas/User"
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/User"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "identities": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string"
+                                      },
+                                      "externalId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "externalId"
+                                    ]
+                                  }
+                                },
+                                "tokens": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "label": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "tokenPreview": {
+                                        "type": "string"
+                                      },
+                                      "createdAt": {
+                                        "type": "string"
+                                      },
+                                      "lastUsedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "revokedAt": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "label",
+                                      "tokenPreview",
+                                      "createdAt",
+                                      "lastUsedAt",
+                                      "revokedAt"
+                                    ]
+                                  }
+                                },
+                                "recentEvents": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "userId": {
+                                        "type": "string"
+                                      },
+                                      "eventType": {
+                                        "type": "string"
+                                      },
+                                      "actor": {
+                                        "type": "string"
+                                      },
+                                      "before": {},
+                                      "after": {},
+                                      "createdAt": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "userId",
+                                      "eventType",
+                                      "actor",
+                                      "createdAt"
+                                    ]
+                                  }
+                                }
+                              },
+                              "required": [
+                                "identities",
+                                "tokens",
+                                "recentEvents"
+                              ]
+                            }
+                          ]
                         },
                         {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
-                          "properties": {
-                            "identities": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string"
-                                  },
-                                  "externalId": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "externalId"
-                                ]
-                              }
-                            },
-                            "tokens": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "tokenPreview": {
-                                    "type": "string"
-                                  },
-                                  "createdAt": {
-                                    "type": "string"
-                                  },
-                                  "lastUsedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  },
-                                  "revokedAt": {
-                                    "type": [
-                                      "string",
-                                      "null"
-                                    ]
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "label",
-                                  "tokenPreview",
-                                  "createdAt",
-                                  "lastUsedAt",
-                                  "revokedAt"
-                                ]
-                              }
-                            },
-                            "recentEvents": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "userId": {
-                                    "type": "string"
-                                  },
-                                  "eventType": {
-                                    "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "string"
-                                  },
-                                  "before": {},
-                                  "after": {},
-                                  "createdAt": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "userId",
-                                  "eventType",
-                                  "actor",
-                                  "createdAt"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "identities",
-                            "tokens",
-                            "recentEvents"
-                          ]
+                          "type": "null"
                         }
                       ]
                     }
