@@ -179,7 +179,7 @@ Each column is `{ "kind": ..., "required"?: boolean, "default"?: ..., "index"?: 
 | `date` | ISO-8601 string; never indexed. |
 | `enum` | String from the non-empty unique `enum` list; always indexed, without `index: true`. |
 
-`default` must match the column kind (and be one of the enum values). `required: true` rejects missing/null values unless a default supplies the value. `id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy` — and the sync envelope `source`, `syncedAt`, `stale` — are system columns and reserved names. Rows always expose `id`/`createdAt`/`updatedAt`; `createdBy`/`updatedBy` record the acting principal (`user:<id>`, `agent:<id>`, `operator`, or `sync:<source>` for engine writes) and are system-managed on every row write.
+`default` must match the column kind (and be one of the enum values). `required: true` rejects missing/null values unless a default supplies the value. `id`, `createdAt`, `updatedAt`, `createdBy`, `updatedBy` — and the sync envelope `source`, `syncedAt`, `stale` — are system columns and reserved names. An app created before the sync envelope that declared ordinary columns with these names surfaces `definitionError` after upgrade until they are renamed: patch in a fresh column with a `{from}` migration directive, then purge the old one. Rows always expose `id`/`createdAt`/`updatedAt`; `createdBy`/`updatedBy` record the acting principal (`user:<id>`, `agent:<id>`, `operator`, or `sync:<source>` for engine writes) and are system-managed on every row write.
 
 ### Sources and sync
 
