@@ -22024,7 +22024,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        status: "running" | "paused" | "completed" | "failed" | "cancelled" | "aborted_limit";
+                        url: string;
+                    };
                 };
             };
             /** @description Script run concurrency cap reached */
@@ -23117,7 +23123,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": {
+                        error: {
+                            type: string;
+                            message: string;
+                            details?: string[];
+                        };
+                    };
                 };
             };
             /** @description Endpoint not found or disabled */
@@ -23126,7 +23138,13 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": {
+                        error: {
+                            type: string;
+                            message: string;
+                            details?: string[];
+                        };
+                    };
                 };
             };
             /** @description workspace-rw scripts are not supported */

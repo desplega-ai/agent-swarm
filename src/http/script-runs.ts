@@ -127,7 +127,9 @@ const createScriptRunRoute = route({
   responses: {
     201: { description: "Script run created", schema: scriptRunCreatedSchema },
     400: { description: "Validation or label-lint failure" },
-    409: { description: "Existing idempotent run returned" },
+    // Idempotency conflict returns the EXISTING run's pointer, not the
+    // standard error envelope — declare it so the fallback doesn't lie.
+    409: { description: "Existing idempotent run returned", schema: scriptRunCreatedSchema },
     429: { description: "Script run concurrency cap reached" },
   },
   // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
@@ -410,7 +412,11 @@ export async function handleScriptRuns(
     }
 
     if (existing) {
-      json(res, { id: run.id, status: run.status, url: scriptRunUrl(run.id) }, 409);
+      createScriptRunRoute.respond(res, 409, {
+        id: run.id,
+        status: run.status,
+        url: scriptRunUrl(run.id),
+      });
       return true;
     }
     createScriptRunRoute.respond(res, 201, {

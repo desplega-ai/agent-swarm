@@ -86,8 +86,17 @@ const scriptApiRoute = route({
       description: "Script executed — see `ok` in the envelope",
       schema: XScriptResponseSchema,
     },
-    401: { description: "Missing or invalid bearer token" },
-    404: { description: "Endpoint not found or disabled" },
+    // This surface uses a NESTED error envelope `{error: {type, message}}`
+    // (public API, richer machine-readable type) — declare it explicitly so
+    // the standard flat ErrorResponse fallback doesn't misdocument it.
+    401: {
+      description: "Missing or invalid bearer token",
+      schema: z.object({ error: XScriptErrorSchema }),
+    },
+    404: {
+      description: "Endpoint not found or disabled",
+      schema: z.object({ error: XScriptErrorSchema }),
+    },
     501: { description: "workspace-rw scripts are not supported" },
   },
 });

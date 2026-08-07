@@ -54,6 +54,10 @@ ALLOWED_PATTERNS=(
   'src/http/poll.ts|if \(agent\??\.isLead\) \{'
   'src/http/kv.ts|let isLead = false;'
   'src/http/kv.ts|isLead = agent\?\.isLead === true;'
+  # Response-schema FIELD declarations (`isLeadTask` on the steering-fields
+  # wire payload) — OpenAPI shape descriptions, not authorization reads.
+  'src/http/sessions.ts|isLeadTask: z\.boolean\(\)'
+  'src/http/tasks.ts|isLeadTask: z\.boolean\(\)'
 )
 
 HITS=$(grep -rn --include='*.ts' --include='*.tsx' 'isLead' "${CHECK_PATHS[@]}" 2>/dev/null || true)
