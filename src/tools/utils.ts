@@ -261,6 +261,17 @@ export const NUDGES: Record<string, (result: SwarmToolResult) => string | undefi
       ? "Rate memories that help or mislead you with memory_rate."
       : undefined;
   },
+  "app-get": (r) => {
+    if (!r.ok) return undefined;
+    const definition = (
+      r.data as { app?: { definition?: { queries?: object; actions?: object } } | null } | undefined
+    )?.app?.definition;
+    const hasQueries = Object.keys(definition?.queries ?? {}).length > 0;
+    const hasActions = Object.keys(definition?.actions ?? {}).length > 0;
+    return hasQueries || hasActions
+      ? "This app's callable surface is `definition.queries` (run with `app-query`, passing any `$param` values) and `definition.actions` (invoke with `POST /api/apps/<id>/actions/<name>`; `sync` actions refresh sources)."
+      : undefined;
+  },
   // kv-get is spill-exempt (retrieval path), so oversized values reach the
   // harness whole and get natively truncated there. Steer big-value work
   // toward scripts, where the full value stays out of the model's context.

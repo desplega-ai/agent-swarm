@@ -267,6 +267,38 @@ describe("finalizeSwarmToolResult", () => {
     expect((nonEmpty.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
+  test("NUDGES map: app-get steers to the callable surface only when one exists", () => {
+    const withSurface = finalizeSwarmToolResult("app-get", {
+      ok: true,
+      message: 'App "PM Inbox" (a1).',
+      data: {
+        app: {
+          definition: {
+            models: {},
+            queries: { open: { model: "issue" } },
+            actions: { refresh: { kind: "sync" } },
+          },
+        },
+      },
+    });
+    expect((withSurface.structuredContent as { nudge?: string }).nudge).toContain(
+      "callable surface",
+    );
+
+    const bare = finalizeSwarmToolResult("app-get", {
+      ok: true,
+      message: 'App "Bare" (a2).',
+      data: { app: { definition: { models: {} } } },
+    });
+    expect((bare.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+
+    const failed = finalizeSwarmToolResult("app-get", {
+      ok: false,
+      message: "App a3 not found.",
+    });
+    expect((failed.structuredContent as { nudge?: string }).nudge).toBeUndefined();
+  });
+
   test("NUDGES map: memory-search rating steer fires only when a result carries a rateHint", () => {
     const withHint = finalizeSwarmToolResult("memory-search", {
       ok: true,

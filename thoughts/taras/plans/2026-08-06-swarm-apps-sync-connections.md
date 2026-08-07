@@ -482,10 +482,10 @@ Two small surfaces that decide whether any of the above is actually used: a nudg
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
-- [ ] `bun run test:root -- src/tests/apps-sync-engine.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] Full suite once: `bun run test:root`
+- [x] `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
+- [x] `bun run test:root -- src/tests/apps-sync-engine.test.ts` (nudge test lives in swarm-tool-result-gate.test.ts — the NUDGES unit surface)
+- [x] `bun run lint && bun run tsc:check`
+- [x] Full suite once: `bun run test:root` (7332 pass / 5 known pre-existing failures, zero delta)
 
 #### Automated QA:
 - [ ] Restart :3113 → the seeded `apps` skill content updates (version-aware seeding preserves user edits). The list route omits `content` by default, so assert with `curl -s -H "Authorization: Bearer 123123" "http://localhost:3113/api/skills?fields=full" | jq -r '.skills[] | select(.name=="apps") | .content' | grep -c "Sources and sync"` → 1.
