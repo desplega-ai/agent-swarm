@@ -42,9 +42,12 @@ function ConfigProvider({ children }: { children: ReactNode }) {
  *     return 404 from `/api/users` and would render an empty modal).
  */
 function IdentityGate() {
-  const { state } = useCurrentUser();
+  const { state, locked } = useCurrentUser();
   const { supported } = useFeatureGate("1.76.0");
   if (!supported) return null;
+  // Token-bound identity (DES-771) never needs picking — belt-and-braces on
+  // top of the provider never entering `needs-pick` while locked.
+  if (locked) return null;
   if (state !== "needs-pick") return null;
   return <IdentityModal />;
 }

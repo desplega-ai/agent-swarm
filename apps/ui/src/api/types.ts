@@ -317,6 +317,16 @@ export interface UserResponse {
   user: User;
 }
 
+/**
+ * GET /api/whoami (DES-771) — the principal behind the configured bearer.
+ * `kind: "user"` means the key is a user-bound `aswt_` token and every write
+ * is server-attributed to `user` regardless of what the client claims.
+ */
+export interface WhoamiResponse {
+  kind: "operator" | "user";
+  user: User | null;
+}
+
 export interface MintTokenResponse {
   plaintext: string;
   token: UserToken;

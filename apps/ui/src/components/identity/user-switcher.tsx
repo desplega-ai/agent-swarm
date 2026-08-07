@@ -44,8 +44,8 @@ function userInitials(name: string): string {
 
 export function UserSwitcher() {
   const gate = useFeatureGate("1.76.0");
-  const { user, userId, setUserId, clearUser } = useCurrentUser();
-  const { data: users } = useUsers();
+  const { user, userId, setUserId, clearUser, locked } = useCurrentUser();
+  const { data: users } = useUsers({ enabled: !locked });
   const createUser = useCreateUser();
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -53,6 +53,11 @@ export function UserSwitcher() {
 
   // Older API servers (no /api/users) — hide entirely.
   if (!gate.supported) return null;
+
+  // Token-bound identity (DES-771): attribution is fixed server-side, so a
+  // switcher would only misrepresent it. The embedding shell owns the
+  // identity chrome.
+  if (locked) return null;
 
   const handleCreate = async () => {
     const trimmed = newName.trim();

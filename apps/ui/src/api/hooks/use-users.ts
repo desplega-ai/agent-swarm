@@ -19,11 +19,14 @@ import type {
   UserIdentity,
 } from "../types";
 
-export function useUsers(opts?: { recentEvents?: number }) {
+export function useUsers(opts?: { recentEvents?: number; enabled?: boolean }) {
   return useQuery({
     queryKey: ["users", { recentEvents: opts?.recentEvents ?? null }],
-    queryFn: () => api.listUsers(opts),
+    queryFn: () => api.listUsers({ recentEvents: opts?.recentEvents }),
     refetchInterval: 5000,
+    // DES-771: token-bound tabs resolve identity from /api/whoami and never
+    // need the full user directory — callers disable the poll entirely.
+    enabled: opts?.enabled ?? true,
   });
 }
 

@@ -9,6 +9,7 @@
  *
  * Endpoint set:
  *
+ *   GET    /api/whoami
  *   GET    /api/users
  *   POST   /api/users
  *   GET    /api/users/unmapped                       (must precede /:id)
@@ -48,6 +49,7 @@ import {
   unlinkIdentity,
 } from "../be/users";
 import { UserSchema } from "../types";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -127,6 +129,32 @@ const UnmappedIdentitySchema = z.object({
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
+
+/**
+ * DES-771: identity resolution for embedded dashboards. A client holding a
+ * user-bound `aswt_` token learns which user the server attributes its
+ * requests to (the token forces requester/audit attribution server-side, so
+ * this is the only identity the client can act as). The operator key resolves
+ * to `kind: "operator"` with no bound user.
+ */
+const whoamiRoute = route({
+  method: "get",
+  path: "/api/whoami",
+  pattern: ["api", "whoami"],
+  summary: "Resolve the authenticated principal behind the presented bearer",
+  tags: ["Users"],
+  responses: {
+    200: {
+      description: "Authenticated principal",
+      schema: z.object({
+        kind: z.enum(["operator", "user"]),
+        user: UserSchema.nullable(),
+      }),
+    },
+    401: { description: "Unauthorized" },
+  },
+  auth: { apiKey: true },
+});
 
 const listUsers = route({
   method: "get",
@@ -491,6 +519,19 @@ export async function handleUsers(
   pathSegments: string[],
   queryParams: URLSearchParams,
 ): Promise<boolean> {
+  // ─── GET /api/whoami ───────────────────────────────────────────────────────
+  if (whoamiRoute.match(req.method, pathSegments)) {
+    const parsed = await whoamiRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const auth = getRequestAuth(req);
+    if (auth?.kind === "user") {
+      whoamiRoute.respond(res, 200, { kind: "user", user: auth.user });
+    } else {
+      whoamiRoute.respond(res, 200, { kind: "operator", user: null });
+    }
+    return true;
+  }
+
   // ─── GET /api/users ────────────────────────────────────────────────────────
   if (listUsers.match(req.method, pathSegments)) {
     const parsed = await listUsers.parse(req, res, pathSegments, queryParams);

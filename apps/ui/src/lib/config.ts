@@ -186,3 +186,13 @@ export function resetConfig(): void {
 export function getDefaultConfig(): Config {
   return { ...DEFAULT_CONFIG };
 }
+
+/**
+ * User-bound `aswt_` bearer (minted on the People page) vs the deployment's
+ * operator key. When the tab authenticates with a user token the server
+ * forces requester/audit attribution to that user, so the UI must derive its
+ * identity from the token and never offer identity picking (DES-771).
+ */
+export function isUserTokenApiKey(apiKey: string): boolean {
+  return apiKey.startsWith("aswt_");
+}

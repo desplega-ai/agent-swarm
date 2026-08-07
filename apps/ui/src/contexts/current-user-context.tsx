@@ -18,6 +18,13 @@
  * re-enter `needs-pick`.
  *
  * Storage failures (privacy mode, etc.) degrade to in-memory state.
+ *
+ * DES-771 (embedded dashboards): when the configured API key is a user-bound
+ * `aswt_` token, the server already forces requester/audit attribution to
+ * that user — a localStorage picker would only misrepresent it. The provider
+ * resolves identity from `GET /api/whoami` instead, never enters
+ * `needs-pick`, and exposes `locked: true` so the switcher/modal stay hidden.
+ * Older servers (no /api/whoami) fall back to the legacy picker flow.
  */
 
 import {
@@ -31,9 +38,11 @@ import {
 } from "react";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useUsers } from "@/api/hooks/use-users";
+import { useWhoami } from "@/api/hooks/use-whoami";
 import type { User } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
+import { isUserTokenApiKey } from "@/lib/config";
 
 const CARD_KEY = "current-user";
 
@@ -45,6 +54,12 @@ export interface CurrentUserContextValue {
   user: User | null;
   setUserId: (id: string) => void;
   clearUser: () => void;
+  /**
+   * Identity was derived from a user-bound `aswt_` token (DES-771). Switching
+   * is blocked — `setUserId`/`clearUser` are no-ops and the switcher/identity
+   * modal must not render.
+   */
+  locked: boolean;
 }
 
 const CurrentUserContext = createContext<CurrentUserContextValue | null>(null);
@@ -63,7 +78,29 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const { supported: identitySupported } = useFeatureGate("1.76.0");
   const storageKey = useMemo(() => deriveStorageKey(config.apiUrl, CARD_KEY), [config.apiUrl]);
 
-  const usersQuery = useUsers();
+  // DES-771: a user-bound `aswt_` bearer fixes the tab's identity server-side
+  // — resolve it from /api/whoami instead of localStorage. "fallback" covers
+  // older servers (whoami resolves null) and the pathological case of a
+  // non-user principal behind an aswt_-looking key: both re-enter the legacy
+  // picker flow below.
+  const tokenBound = isUserTokenApiKey(config.apiKey);
+  const whoamiQuery = useWhoami(tokenBound);
+  const tokenUser =
+    tokenBound && whoamiQuery.data?.kind === "user" ? (whoamiQuery.data.user ?? null) : null;
+  const tokenResolution: "off" | "pending" | "resolved" | "fallback" = !tokenBound
+    ? "off"
+    : whoamiQuery.isPending
+      ? "pending"
+      : tokenUser
+        ? "resolved"
+        : "fallback";
+  const locked = tokenResolution === "resolved";
+
+  // Token-bound tabs never need the full user directory — skip the poll
+  // unless the legacy picker flow is (or may become) active.
+  const usersQuery = useUsers({
+    enabled: tokenResolution === "off" || tokenResolution === "fallback",
+  });
   const [storedUserId, setStoredUserId] = useState<string | null>(() =>
     readStoredUserId(storageKey),
   );
@@ -88,6 +125,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 
   const setUserId = useCallback(
     (id: string) => {
+      if (locked) return; // Token-bound identity — switching is blocked.
       try {
         localStorage.setItem(storageKey, id);
       } catch {
@@ -96,17 +134,18 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
       }
       setStoredUserId(id);
     },
-    [storageKey],
+    [storageKey, locked],
   );
 
   const clearUser = useCallback(() => {
+    if (locked) return; // See setUserId.
     try {
       localStorage.removeItem(storageKey);
     } catch {
       // See setUserId comment.
     }
     setStoredUserId(null);
-  }, [storageKey]);
+  }, [storageKey, locked]);
 
   // Auto-bind identity from ?email= / ?name= URL params (parsed in useConfig).
   // Match strategy: email-only, case-insensitive, against User.email and
@@ -118,6 +157,10 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   // really is unsupported, IdentityGate never renders the modal, so the
   // leftover in-memory state is harmless.
   useEffect(() => {
+    // Token-derived identity ignores ?email=/?name= hints entirely; while the
+    // token is still resolving, hold off so a hint can't race the whoami
+    // answer into localStorage.
+    if (tokenResolution === "pending" || tokenResolution === "resolved") return;
     if (!pendingIdentity) return;
     if (!identitySupported) return;
     if (usersQuery.isLoading) return;
@@ -134,6 +177,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [
+    tokenResolution,
     pendingIdentity,
     identitySupported,
     usersQuery.isLoading,
@@ -142,22 +186,26 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     clearPendingIdentity,
   ]);
 
-  // Derive state + matched user from (storedUserId, users list).
+  // Derive state + matched user. Token-derived identity short-circuits the
+  // localStorage/users-list flow — it can never enter `needs-pick`.
   const { state, user } = useMemo<{ state: CurrentUserState; user: User | null }>(() => {
+    if (tokenResolution === "pending") return { state: "pending", user: null };
+    if (tokenResolution === "resolved") return { state: "ready", user: tokenUser };
     if (usersQuery.isLoading) return { state: "pending", user: null };
     const users = usersQuery.data ?? [];
     if (!storedUserId) return { state: "needs-pick", user: null };
     const match = users.find((u) => u.id === storedUserId) ?? null;
     if (!match) return { state: "needs-pick", user: null };
     return { state: "ready", user: match };
-  }, [usersQuery.isLoading, usersQuery.data, storedUserId]);
+  }, [tokenResolution, tokenUser, usersQuery.isLoading, usersQuery.data, storedUserId]);
 
   const value: CurrentUserContextValue = {
     state,
-    userId: state === "ready" ? storedUserId : null,
+    userId: state === "ready" ? (user?.id ?? null) : null,
     user,
     setUserId,
     clearUser,
+    locked,
   };
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;
