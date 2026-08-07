@@ -375,7 +375,7 @@ describe("user writers and the script ownership gate", () => {
     };
   }
 
-  test("a web user cannot wire an agent-scoped script, may wire a global one, and stored paths stay editable", async () => {
+  test("a web user cannot wire agent-scoped or catalog scripts; stored paths stay editable", async () => {
     const ownerId = crypto.randomUUID();
     createAgent({ id: ownerId, name: "apps-rbac-script-owner", isLead: false, status: "idle" });
     const foreignId = await saveScript("agent", ownerId);
@@ -415,12 +415,20 @@ describe("user writers and the script ownership gate", () => {
       ),
     ).toBe(true);
 
-    // Global scripts remain wireable by users.
-    const globalApp = await request<{ app: { id: string } }>("/api/apps", "user", {
+    // Owner-less global (catalog) scripts sync with the LEAD's credentials —
+    // a user may not wire those as sources either.
+    const globalApp = await request<Issues>("/api/apps", "user", {
       method: "POST",
       body: JSON.stringify({ name: "User global source", definition: withSource(globalId) }),
     });
-    expect(globalApp.status).toBe(201);
+    expect(globalApp.status).toBe(400);
+    expect(
+      globalApp.body.issues?.some(
+        (issue) =>
+          issue.path === "models.note.sources.gh.scriptId" &&
+          issue.message.includes("only that agent or the operator"),
+      ),
+    ).toBe(true);
 
     // An operator-authored app carrying the foreign script at a stored path
     // stays editable for users — grandfathering is path-exact, not skipped.

@@ -183,7 +183,9 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: false, status: "idle" });
+  // The writer agent IS the lead: owner-less global sources resolve run-as to
+  // the lead, and only that identity (or the operator) may wire them.
+  createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: true, status: "idle" });
   createAgent({ id: OTHER_AGENT_ID, name: "apps-sync-other", isLead: false, status: "idle" });
 
   const fixture = {
@@ -695,12 +697,46 @@ describe("apps sync definition surface", () => {
     const ownedId = await createApp(scriptSourceDefinition(ownedScriptId, "mine"));
     expect(ownedId).toBeString();
 
-    // Owner-less global script: run-as falls back past the (absent) lead to
-    // "app-sync", which an agent-scoped connection never applies to.
-    const issues = await rejectedIssues(scriptSourceDefinition(globalScriptId, "mine"));
+    // Owner-less global script: run-as falls back to the lead — the writer
+    // here — so the lead-scoped `mine` connection is reachable.
+    const globalId = await createApp(scriptSourceDefinition(globalScriptId, "mine"), "Lead mine");
+    expect(globalId).toBeString();
+
+    // Foreign-owned script: run-as = ITS owner, which `mine` never applies to
+    // (the ownership gate fires too; both issues surface).
+    const issues = await rejectedIssues(scriptSourceDefinition(foreignScriptId, "mine"));
     expect(issueAt(issues, "models.issue.sources.gh.connection")?.message).toBe(
       'connection "mine" not found or disabled for the sync run-as identity',
     );
+  });
+
+  test("check 10 — only the lead or operator may wire an owner-less global source", async () => {
+    const issues = await rejectedIssues(scriptSourceDefinition(globalScriptId), {
+      "X-Agent-ID": OTHER_AGENT_ID,
+    });
+    expect(issueAt(issues, "models.issue.sources.gh.scriptId")?.message).toContain(
+      "only that agent or the operator may wire or alter this source",
+    );
+
+    // The operator may wire it...
+    const operatorApp = await fetch(`${base}/api/apps`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Operator catalog",
+        definition: scriptSourceDefinition(globalScriptId),
+      }),
+    });
+    expect(operatorApp.status).toBe(201);
+    const appId = ((await operatorApp.json()) as { app: { id: string } }).app.id;
+
+    // ...and the stored, pinned reference stays editable around for others.
+    const edited = await request(`/api/apps/${appId}`, {
+      method: "PATCH",
+      headers: { "X-Agent-ID": OTHER_AGENT_ID },
+      body: JSON.stringify({ definition: { models: { issue: { columns: { extra: null } } } } }),
+    });
+    expect(edited.status).toBe(200);
   });
 
   test("check 9 — a sync action must resolve to at least one (model x source) pair", async () => {

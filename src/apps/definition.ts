@@ -702,20 +702,34 @@ function modelSourceIssues(
       issues.push({ path: `${path}.scriptId`, message: `script "${source.scriptId}" not found` });
       continue;
     }
+    const runAs = resolveSyncRunAs(script);
+    const grandfatheredRef =
+      grandfatheredScriptRefs.get(path) ===
+      scriptRefKey(source.scriptId, source.args, source.connection);
     // A pull runs the script with its OWNER's bindings, so a writer may only
     // wire scripts it owns (or global ones) — the script-action rule.
-    if (
-      foreignScriptForWriter(context, script) &&
-      grandfatheredScriptRefs.get(path) !==
-        scriptRefKey(source.scriptId, source.args, source.connection)
-    ) {
+    if (foreignScriptForWriter(context, script) && !grandfatheredRef) {
       issues.push({
         path: `${path}.scriptId`,
         message: `script "${source.scriptId}" is agent-scoped to another agent — reference a script you own or a global script`,
       });
+    } else if (
+      // Owner-less (and foreign-owned) GLOBAL scripts sync with runAs's
+      // credential bindings — for the catalog that is the LEAD. Introducing or
+      // altering such a source is that identity's (or the operator's)
+      // privilege; every other writer keeps only pinned stored references.
+      script.scope !== "agent" &&
+      (context.writerIsUser === true || typeof context.writerAgentId === "string") &&
+      context.writerAgentId !== runAs &&
+      !grandfatheredRef
+    ) {
+      issues.push({
+        path: `${path}.scriptId`,
+        message: `script "${source.scriptId}" syncs with agent "${runAs}"'s credentials — only that agent or the operator may wire or alter this source`,
+      });
     }
     if (source.connection !== undefined) {
-      const reachable = listScriptConnections({ agentId: resolveSyncRunAs(script) });
+      const reachable = listScriptConnections({ agentId: runAs });
       if (!reachable.some((connection) => connection.slug === source.connection)) {
         issues.push({
           path: `${path}.connection`,
