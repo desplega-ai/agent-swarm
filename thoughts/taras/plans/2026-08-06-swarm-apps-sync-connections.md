@@ -267,10 +267,10 @@ Adding, changing, and removing sources / bindings runs through the existing sche
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync.test.ts`
-- [ ] `bun run test:root -- src/tests/apps-spike5.test.ts` (the schema-change engine's own suite — unchanged behaviour for source-less apps)
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bun run docs:openapi` — the `detachedRows` report field is OpenAPI-visible; commit `openapi.json` + `docs-site/content/docs/api-reference/**`
+- [x] `bun run test:root -- src/tests/apps-sync.test.ts`
+- [x] `bun run test:root -- src/tests/apps-spike5.test.ts` (the schema-change engine's own suite — unchanged behaviour for source-less apps)
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bun run docs:openapi` — the `detachedRows` report field is OpenAPI-visible; commit `openapi.json` + `docs-site/content/docs/api-reference/**` (docs-site unchanged — the report schema isn't inlined there)
 
 #### Automated QA:
 - [ ] Against :3113 — `app-patch` a live scratch app to add a source → `GET /api/apps/<id>/versions` shows a new version; patch `joinKey` → 400 immutable; remove the source → 200 with `migration.detachedRows > 0` and `GET /rows` shows values intact and no `source` field.
