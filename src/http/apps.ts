@@ -877,6 +877,8 @@ export async function handleApps(
         migration: parsed.body.migration,
         forceElementBreak: parsed.body.forceElementBreak,
         changedByAgentId: myAgentId,
+        writerAgentId: myAgentId ?? null,
+        writerIsUser: getRequestAuth(req)?.kind === "user",
       });
       json(res, { app: rolledBack.app, migration: rolledBack.migration });
     } catch (error) {

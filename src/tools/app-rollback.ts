@@ -65,6 +65,7 @@ export const registerAppRollbackTool = (server: McpServer) => {
           migration,
           forceElementBreak,
           changedByAgentId: requestInfo.agentId,
+          writerAgentId: requestInfo.agentId,
         });
         const url = `/apps/${rolledBack.app.id}`;
         return toolOk(`App "${rolledBack.app.name}" rolled back to v${version}.`, {

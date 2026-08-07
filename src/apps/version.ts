@@ -102,7 +102,11 @@ export function decodeAppVersion(appVersion: AppVersion): AppVersion {
   };
 }
 
-function rollbackSnapshot(version: AppVersion): {
+function rollbackSnapshot(
+  version: AppVersion,
+  writer: { writerAgentId?: string | null; writerIsUser?: boolean },
+  existingDefinition: unknown,
+): {
   name: string;
   description: string | null;
   definition: AppDefinition;
@@ -132,9 +136,16 @@ function rollbackSnapshot(version: AppVersion): {
     ]);
   }
 
+  // A rollback is an ordinary definition write by whoever invoked it, not a
+  // trusted restore: the historical snapshot may reintroduce foreign-owned or
+  // lead-run script references the writer could never add directly, so the
+  // same ownership/grandfathering checks apply against the CURRENT definition.
   const parsed = parseAppDefinition(upgradeAppDefinition(snapshot.definition), {
     currentAppId: version.appId,
     resolveApp: getApp,
+    writerAgentId: writer.writerAgentId ?? null,
+    ...(writer.writerIsUser === undefined ? {} : { writerIsUser: writer.writerIsUser }),
+    existingDefinition,
   });
   if (!parsed.success) throw new AppRollbackDefinitionError(version.version, parsed.issues);
   return {
@@ -155,6 +166,9 @@ export async function rollbackApp(input: {
   migration?: AppMigration;
   forceElementBreak?: string[];
   changedByAgentId?: string;
+  /** Writer principal for the restored definition's ownership checks. */
+  writerAgentId?: string | null;
+  writerIsUser?: boolean;
 }): Promise<{ app: AppRecord; migration: AppMigrationReport }> {
   return withAppDefinitionLock(input.appId, async () => {
     const existing = getApp(input.appId);
@@ -164,7 +178,7 @@ export async function rollbackApp(input: {
       (candidate) => candidate.version === input.version,
     );
     if (!version) throw new AppRollbackVersionNotFoundError(input.version);
-    const snapshot = rollbackSnapshot(version);
+    const snapshot = rollbackSnapshot(version, input, existing.definition);
 
     const migrated = await migrateAppSchema({
       appId: input.appId,

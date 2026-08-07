@@ -739,6 +739,56 @@ describe("apps sync definition surface", () => {
     expect(edited.status).toBe(200);
   });
 
+  test("check 11 — rollback restores get the same ownership checks as ordinary writes", async () => {
+    // Operator authors an app carrying the foreign source, then replaces it
+    // with a sourceless definition — version 1 snapshots the foreign source.
+    const withForeign = await fetch(`${base}/api/apps`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Rollback gate",
+        definition: scriptSourceDefinition(foreignScriptId),
+      }),
+    });
+    expect(withForeign.status).toBe(201);
+    const appId = ((await withForeign.json()) as { app: { id: string } }).app.id;
+
+    const sourceless = syncDefinition({
+      columns: {
+        title: { kind: "string" },
+        handle: { kind: "string" },
+        amountCents: { kind: "number" },
+        openedAt: { kind: "date" },
+        status: { kind: "string" },
+      },
+      sources: {},
+    });
+    const replaced = await fetch(`${base}/api/apps/${appId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ definition: sourceless }),
+    });
+    expect(replaced.status).toBe(200);
+
+    // A non-owner agent cannot reintroduce the foreign source via rollback.
+    const denied = await request<IssuesBody>(`/api/apps/${appId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(denied.status).toBe(400);
+    expect(
+      issueAt(denied.body.issues ?? [], "models.issue.sources.gh.scriptId")?.message,
+    ).toContain("agent-scoped to another agent");
+
+    // The operator may restore it.
+    const restored = await fetch(`${base}/api/apps/${appId}/rollback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: 1 }),
+    });
+    expect(restored.status).toBe(200);
+  });
+
   test("check 9 — a sync action must resolve to at least one (model x source) pair", async () => {
     const unknownModel = await rejectedIssues(
       syncDefinition({ actions: { refresh: { kind: "sync", model: "nope" } } }),
