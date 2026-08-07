@@ -42,6 +42,7 @@ import {
   listApps,
   updateApp,
 } from "../apps/store";
+import { runAppSync } from "../apps/sync";
 import {
   getAppUserConfigValues,
   isReservedUserConfigKey,
@@ -431,6 +432,26 @@ const runActionRoute = route({
   rbac: { permission: "app.use" },
 });
 
+const syncAppRoute = route({
+  method: "post",
+  path: "/api/apps/{id}/sync",
+  pattern: ["api", "apps", null, "sync"],
+  summary: "Sync an app's declared sources",
+  description:
+    "Runs every (model x source) pair the body selects. Each pass pulls outside the row mutation lock and reconciles inside it.",
+  tags: ["Apps"],
+  params: appParamsSchema,
+  body: z.object({ model: AppNameSchema.optional(), source: AppNameSchema.optional() }),
+  responses: {
+    200: { description: "Sync passes" },
+    400: { description: "Unknown model or source, or no model declares a source" },
+    403: { description: "Permission denied" },
+    409: { description: "App definition needs repair" },
+    404: { description: "App not found" },
+  },
+  rbac: { permission: "app.use" },
+});
+
 /**
  * RBAC-gate an app operation and resolve the acting principal's stable actor id
  * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
@@ -500,6 +521,17 @@ function definitionNeedsRepair(res: ServerResponse, app: ReturnType<typeof getAp
   if (!app || !appDefinitionNeedsRepair(app)) return false;
   json(res, { error: "definition needs repair", issues: app.definitionError }, 409);
   return true;
+}
+
+/**
+ * One `error` string for a sync result, or undefined when every pass succeeded.
+ * Each failed pair is named so a multi-pair sync says which one broke; the pass
+ * list in `result.passes` carries the rest.
+ */
+function syncPassError(sync: Awaited<ReturnType<typeof runAppSync>>): string | undefined {
+  const failed = sync.passes.filter((pass) => pass.error !== undefined);
+  if (failed.length === 0) return undefined;
+  return failed.map((pass) => `${pass.model}.${pass.source}: ${pass.error}`).join("; ");
 }
 
 function snapshotFailure(res: ServerResponse): void {
@@ -1139,13 +1171,30 @@ export async function handleApps(
     }
 
     if (action.kind === "sync") {
-      // The engine that fulfils a sync action lands with the /sync door; until
-      // then a declared sync action is a valid definition but not invocable —
-      // never a task with an undefined prompt.
-      jsonError(
+      const startedAt = Date.now();
+      const sync = await runAppSync({
+        appId: app.id,
+        ...(action.model === undefined ? {} : { model: action.model }),
+        ...(action.source === undefined ? {} : { source: action.source }),
+        invokedBy: actor,
+      });
+      const durationMs = Date.now() - startedAt;
+      if (sync.issues && sync.issues.length > 0) {
+        json(res, { error: "invalid sync action", issues: sync.issues }, 400);
+        return true;
+      }
+      // Deliberately the SCRIPT-action response shape, minus `taskId`:
+      // app-surface.tsx branches on `taskId` first, so omitting it gives the
+      // dashboard running -> ok/error + refetchAll() with zero UI changes.
+      const error = syncPassError(sync);
+      json(
         res,
-        `action "${parsed.params.name}" is a sync action; the sync engine is not wired up yet`,
-        400,
+        scrubObject({
+          ok: sync.ok,
+          result: { passes: sync.passes },
+          ...(error === undefined ? {} : { error }),
+          durationMs,
+        }),
       );
       return true;
     }
@@ -1163,6 +1212,34 @@ export async function handleApps(
       ...(actor.startsWith("user:") ? { requestedByUserId: actor.slice("user:".length) } : {}),
     });
     json(res, { ok: true, taskId: task.id, status: task.status });
+    return true;
+  }
+
+  if (syncAppRoute.match(req.method, pathSegments)) {
+    if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
+    const parsed = await syncAppRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    if (!actor) return true;
+
+    const app = getApp(parsed.params.id);
+    if (!app) {
+      jsonError(res, "app not found", 404);
+      return true;
+    }
+    if (definitionNeedsRepair(res, app)) return true;
+
+    const sync = await runAppSync({
+      appId: app.id,
+      ...(parsed.body.model === undefined ? {} : { model: parsed.body.model }),
+      ...(parsed.body.source === undefined ? {} : { source: parsed.body.source }),
+      invokedBy: actor,
+    });
+    if (sync.issues && sync.issues.length > 0) {
+      json(res, { error: "nothing to sync", issues: sync.issues }, 400);
+      return true;
+    }
+    json(res, scrubObject({ ok: sync.ok, passes: sync.passes }));
     return true;
   }
 

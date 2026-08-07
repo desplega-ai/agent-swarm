@@ -545,33 +545,46 @@ export type AppDefinitionParseContext = ElementReferenceContext & {
 };
 
 /**
- * Defensively collect every script id a possibly-broken definition already
- * references — script actions and model sources alike — so an agent editing an
- * app that legitimately carries another owner's script is not locked out.
+ * Defensively collect every script reference a possibly-broken definition
+ * carries — script actions and model sources alike — keyed by script id with
+ * the definition paths that name it. Tolerant by design: it walks raw JSON, so
+ * an app whose definition no longer parses still reports its references.
+ *
+ * Two callers: grandfathering on write (an agent editing an app that
+ * legitimately carries another owner's script must not be locked out) and the
+ * script-delete guard in the scripts API.
  */
-function collectScriptActionIds(definition: unknown): Set<string> {
-  const ids = new Set<string>();
-  if (!isMergePatchObject(definition)) return ids;
+export function collectScriptReferences(definition: unknown): Map<string, string[]> {
+  const references = new Map<string, string[]>();
+  const add = (scriptId: unknown, path: string): void => {
+    if (typeof scriptId !== "string" || scriptId.length === 0) return;
+    const paths = references.get(scriptId);
+    if (paths) paths.push(path);
+    else references.set(scriptId, [path]);
+  };
+  if (!isMergePatchObject(definition)) return references;
   const actions = definition.actions;
   if (isMergePatchObject(actions)) {
-    for (const action of Object.values(actions)) {
-      if (isMergePatchObject(action) && typeof action.scriptId === "string") {
-        ids.add(action.scriptId);
-      }
+    for (const [actionName, action] of Object.entries(actions)) {
+      if (isMergePatchObject(action)) add(action.scriptId, `actions.${actionName}`);
     }
   }
   const models = definition.models;
   if (isMergePatchObject(models)) {
-    for (const model of Object.values(models)) {
+    for (const [modelName, model] of Object.entries(models)) {
       if (!isMergePatchObject(model) || !isMergePatchObject(model.sources)) continue;
-      for (const source of Object.values(model.sources)) {
-        if (isMergePatchObject(source) && typeof source.scriptId === "string") {
-          ids.add(source.scriptId);
+      for (const [sourceName, source] of Object.entries(model.sources)) {
+        if (isMergePatchObject(source)) {
+          add(source.scriptId, `models.${modelName}.sources.${sourceName}`);
         }
       }
     }
   }
-  return ids;
+  return references;
+}
+
+function collectScriptActionIds(definition: unknown): Set<string> {
+  return new Set(collectScriptReferences(definition).keys());
 }
 
 /** Semantic checks for a model's sources and its columns' source bindings. */

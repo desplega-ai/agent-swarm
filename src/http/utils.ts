@@ -79,13 +79,23 @@ export function agentWithCapacity<T extends { id: string; maxTasks?: number }>(
   };
 }
 
-/** Parse JSON body from incoming request */
+/**
+ * Parse the JSON body of an incoming request.
+ *
+ * An empty (or whitespace-only) body parses as `{}` rather than throwing:
+ * `JSON.parse("")` raises a SyntaxError, and the `route()` factory only
+ * converts ZodErrors — so a bodyless POST used to escape as a 500. Yielding
+ * `{}` lets an all-optional body schema accept a bodyless request and turns a
+ * required-body schema's failure into the honest 400 its validation produces.
+ */
 export async function parseBody<T = unknown>(req: IncomingMessage): Promise<T> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
     chunks.push(chunk as Buffer);
   }
-  return JSON.parse(Buffer.concat(chunks).toString()) as T;
+  const raw = Buffer.concat(chunks).toString();
+  if (raw.trim() === "") return {} as T;
+  return JSON.parse(raw) as T;
 }
 
 /**

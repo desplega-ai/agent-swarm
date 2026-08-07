@@ -340,10 +340,10 @@ export async function runAppSync(input: {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync-engine.test.ts`
-- [ ] `bun run test:root -- src/tests/apps-sync.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bun run check:dep-graph`
+- [x] `bun run test:root -- src/tests/apps-sync-engine.test.ts`
+- [x] `bun run test:root -- src/tests/apps-sync.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bun run check:dep-graph`
 
 #### Automated QA:
 - [ ] Against :3113 — upsert a saved script that returns two fixed records, wire it as a source, call the engine through Phase 5's route once it exists (or a temporary `bun` REPL harness against the isolated DB), and confirm rows + envelope in `GET /rows`.
@@ -388,12 +388,12 @@ Expose the one engine through the three entry points, with the sync action delib
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bun run test:root -- src/tests/apps-sync-engine.test.ts src/tests/apps-sync.test.ts`
-- [ ] `bun run lint && bun run tsc:check`
-- [ ] `bun run check:rbac-coverage`
-- [ ] `bun run scripts/check-sdk-tool-registration.ts`
-- [ ] `bun run build:script-types` → `git diff --stat src/scripts-runtime/types` shows the `app_sync` entry; commit
-- [ ] `bun run docs:openapi` → `git diff --stat openapi.json` shows `/api/apps/{id}/sync`; commit `openapi.json` + `docs-site/content/docs/api-reference/**`
+- [x] `bun run test:root -- src/tests/apps-sync-engine.test.ts src/tests/apps-sync.test.ts`
+- [x] `bun run lint && bun run tsc:check`
+- [x] `bun run check:rbac-coverage`
+- [x] `bun run scripts/check-sdk-tool-registration.ts`
+- [x] `bun run build:script-types` → `git diff --stat src/scripts-runtime/types` shows the `app_sync` entry; commit
+- [x] `bun run docs:openapi` → `git diff --stat openapi.json` shows `/api/apps/{id}/sync`; commit `openapi.json` + `docs-site/content/docs/api-reference/**`
 
 #### Automated QA:
 - [ ] Against :3113 — `POST /api/apps/<id>/sync` returns `{ok:true, passes:[...]}`; invoking a `sync` action through `POST /api/apps/<id>/actions/<name>` returns the same shape without `taskId`; `app-sync` via the MCP handshake (`LOCAL_TESTING.md:100-133`) returns a rendered table.

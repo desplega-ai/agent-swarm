@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { type AppValidationIssue, collectScriptReferences } from "../apps/definition";
 import { getScriptAppTypes } from "../apps/script-types";
+import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
 import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
@@ -153,6 +155,7 @@ const deleteRoute = route({
     200: { description: "Delete result" },
     400: { description: "Validation error" },
     403: { description: "Global delete requires lead agent" },
+    409: { description: "Script is referenced by an app definition" },
   },
   rbac: { permission: "script.global.delete" },
 });
@@ -354,6 +357,39 @@ const deleteScriptApiRoute = route({
   },
   rbac: { permission: "script.api.delete" },
 });
+
+/**
+ * Every app definition that references `scriptId`, as path-bearing issues.
+ *
+ * Two-pass by design: the tolerant collector walks the stored JSON (so an app
+ * whose definition no longer parses still reports its references with exact
+ * paths), and any app that failed to decode at all — invalid stored JSON, where
+ * the "definition" is a raw string — falls back to a substring probe. A broken
+ * app is not consent to break it further.
+ *
+ * Cost: O(apps x definition size) per delete, all in memory. Deletes are rare
+ * and single-app installs hold tens of apps, so no index is warranted.
+ */
+function appScriptReferenceIssues(scriptId: string): AppValidationIssue[] {
+  const issues: AppValidationIssue[] = [];
+  for (const app of listAppRecords()) {
+    const paths = collectScriptReferences(app.definition).get(scriptId) ?? [];
+    if (
+      paths.length === 0 &&
+      app.definitionError !== undefined &&
+      JSON.stringify(app.definition ?? null).includes(scriptId)
+    ) {
+      paths.push("its (unparseable) definition");
+    }
+    for (const path of paths) {
+      issues.push({
+        path: `apps.${app.id}`,
+        message: `app "${app.name}" (${app.id}) uses this script at ${path}`,
+      });
+    }
+  }
+  return issues;
+}
 
 function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
@@ -772,11 +808,32 @@ export async function handleScripts(
       }
     }
 
-    const deleted = deleteScript({
+    const identity = {
       name: parsed.params.name,
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
-    });
+    };
+    const existing = getScript(identity);
+    if (existing) {
+      // An app that wires this script as a source or a script action would be
+      // left with a dangling reference: its definition stops parsing and every
+      // write 409s "needs repair". Refuse the delete instead. UPDATES stay
+      // allowed — a contract break there is a pass error with zero row churn.
+      const references = appScriptReferenceIssues(existing.id);
+      if (references.length > 0) {
+        json(
+          res,
+          {
+            error: "script is referenced by an app definition",
+            issues: references,
+          },
+          409,
+        );
+        return true;
+      }
+    }
+
+    const deleted = deleteScript(identity);
     json(res, { deleted });
     return true;
   }

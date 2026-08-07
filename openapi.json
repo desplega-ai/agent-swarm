@@ -1905,6 +1905,67 @@
         }
       }
     },
+    "/api/apps/{id}/sync": {
+      "post": {
+        "summary": "Sync an app's declared sources",
+        "description": "Runs every (model x source) pair the body selects. Each pass pulls outside the row mutation lock and reconciles inside it.",
+        "tags": [
+          "Apps"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                  },
+                  "source": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-zA-Z0-9_]{0,39}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sync passes"
+          },
+          "400": {
+            "description": "Unknown model or source, or no model declares a source"
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "404": {
+            "description": "App not found"
+          },
+          "409": {
+            "description": "App definition needs repair"
+          }
+        }
+      }
+    },
     "/api/db-query": {
       "post": {
         "summary": "Execute a read-only SQL query",
@@ -15887,6 +15948,9 @@
           },
           "403": {
             "description": "Global delete requires lead agent"
+          },
+          "409": {
+            "description": "Script is referenced by an app definition"
           }
         }
       }

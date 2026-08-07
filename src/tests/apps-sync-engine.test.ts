@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type ModelDef, parseAppDefinition } from "../apps/definition";
 import {
   type AppRow,
@@ -9,16 +16,33 @@ import {
   withMutationLock,
 } from "../apps/row-store";
 import { createApp, getApp, updateApp } from "../apps/store";
-import { getAppSyncStatus, runAppSync } from "../apps/sync";
+import { getAppSyncStatus, runAppSync, type SyncPassResult } from "../apps/sync";
 import { closeDb, createAgent, createTaskExtended, getDb, getKv, initDb } from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
 import { upsertScriptByName } from "../be/scripts/db";
+import { handleApps } from "../http/apps";
+import { resolveHttpRequestAuth } from "../http/auth";
+import { handleScripts } from "../http/scripts";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { LEGACY_POLICY, type LegacyRule } from "../rbac";
+import { registerAppSyncTool } from "../tools/app-sync";
+import { registerScriptDeleteTool } from "../tools/script-delete";
+import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = `/private/tmp/test-apps-sync-engine-${process.pid}.sqlite`;
+const API_KEY = "apps-sync-engine-test-key-0123456789";
 const OWNER_AGENT_ID = crypto.randomUUID();
 const LEAD_AGENT_ID = crypto.randomUUID();
 const savedEnv = { ...process.env };
+
+type RegisteredTool = { handler: (args: unknown, extra: unknown) => Promise<unknown> };
+type StructuredResult<T> = { isError?: boolean; structuredContent: T; content: unknown };
+
+let server: Server;
+let base = "";
+let syncTool: RegisteredTool;
+let scriptDeleteTool: RegisteredTool;
 
 const PAGE = { main: { root: "root", elements: { root: { type: "Container", props: {} } } } };
 
@@ -149,21 +173,79 @@ function ghRecord(key: string | number, overrides: Record<string, unknown> = {})
   };
 }
 
+// ── HTTP + MCP door harness (Phase 5) ───────────────────────────────────────
+
+/** node:http around the two handlers the doors live in — no ports but 0. */
+function createTestServer(): Server {
+  return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
+    setRequestAuth(req, resolveHttpRequestAuth(req, API_KEY));
+    res.setHeader("Content-Type", "application/json");
+    const pathSegments = getPathSegments(req.url || "");
+    const queryParams = parseQueryParams(req.url || "");
+    const agentId = req.headers["x-agent-id"] as string | undefined;
+    if (await handleApps(req, res, pathSegments, queryParams, agentId)) return;
+    if (await handleScripts(req, res, pathSegments, queryParams, agentId)) return;
+    res.writeHead(404);
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+}
+
+async function request<T>(
+  path: string,
+  init: RequestInit & { agentId?: string } = {},
+): Promise<{ status: number; body: T }> {
+  const { agentId, ...rest } = init;
+  const response = await fetch(`${base}${path}`, {
+    ...rest,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+      ...(agentId ? { "X-Agent-ID": agentId } : {}),
+      ...rest.headers,
+    },
+  });
+  return { status: response.status, body: (await response.json()) as T };
+}
+
+function registeredTool(register: (server: McpServer) => void, name: string): RegisteredTool {
+  const toolServer = new McpServer({ name: "apps-sync-engine-test", version: "1.0.0" });
+  register(toolServer);
+  return (toolServer as unknown as { _registeredTools: Record<string, RegisteredTool> })
+    ._registeredTools[name]!;
+}
+
+/** MCP agent identity is a real UUID — several app tool schemas pin UUIDs. */
+function toolMeta(agentId = OWNER_AGENT_ID) {
+  return { sessionId: "apps-sync-engine", requestInfo: { headers: { "x-agent-id": agentId } } };
+}
+
 beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);
     } catch {}
   }
-  process.env.AGENT_SWARM_API_KEY = "apps-sync-engine-test-key-0123456789";
+  process.env.AGENT_SWARM_API_KEY = API_KEY;
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   initDb(TEST_DB_PATH);
   createAgent({ id: OWNER_AGENT_ID, name: "apps-sync-owner", isLead: false, status: "idle" });
   createAgent({ id: LEAD_AGENT_ID, name: "apps-sync-lead", isLead: true, status: "idle" });
+  syncTool = registeredTool(registerAppSyncTool, "app-sync");
+  scriptDeleteTool = registeredTool(registerScriptDeleteTool, "script-delete");
+  server = createTestServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test server did not bind a port");
+  base = `http://127.0.0.1:${address.port}`;
+  // script-delete proxies over HTTP — point the tool transport at this server.
+  process.env.MCP_BASE_URL = base;
 });
 
 afterAll(async () => {
+  // Keep-alive sockets from the proxying tools would otherwise hold close().
+  server.closeAllConnections();
+  await new Promise<void>((resolve) => server.close(() => resolve()));
   closeDb();
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
@@ -1156,5 +1238,452 @@ describe("secret hygiene and sync status", () => {
       "refreshed",
       "updated",
     ]);
+  });
+});
+
+// ─── Phase 5: the three doors ────────────────────────────────────────────────
+
+type SyncBody = {
+  ok?: boolean;
+  passes?: SyncPassResult[];
+  error?: string;
+  issues?: Array<{ path: string; message: string }>;
+};
+
+const mutableLegacyPolicy = LEGACY_POLICY as unknown as Record<"app.use", LegacyRule>;
+
+describe("HTTP POST /api/apps/{id}/sync", () => {
+  test("runs every declared pair and answers {ok, passes}", async () => {
+    const script = await fixtureScript("http-sync", [ghRecord(1), ghRecord(2)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const response = await request<SyncBody>(`/api/apps/${appId}/sync`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(true);
+    expect(response.body.passes).toHaveLength(1);
+    expect(response.body.passes?.[0]).toMatchObject({
+      model: "issue",
+      source: "gh",
+      connector: "script",
+      pulled: 2,
+      created: 2,
+      invokedBy: "operator",
+    });
+    const rows = rowsOf(appId);
+    expect(rows.map((row) => row.issueKey)).toEqual(["1", "2"]);
+    expect(rows[0]).toMatchObject({ source: "gh", stale: false, title: "Issue 1" });
+    expect(typeof rows[0]?.syncedAt).toBe("string");
+  });
+
+  test("narrows to one pair when the body names model and source", async () => {
+    const script = await fixtureScript("http-sync-narrow", [ghRecord(9)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const response = await request<SyncBody>(`/api/apps/${appId}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ model: "issue", source: "gh" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.passes).toHaveLength(1);
+    expect(rowsOf(appId)).toHaveLength(1);
+  });
+
+  test("404s for an unknown app", async () => {
+    const response = await request<{ error: string }>(`/api/apps/${crypto.randomUUID()}/sync`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe("app not found");
+  });
+
+  test("400s with path-bearing issues when nothing matches", async () => {
+    const script = await fixtureScript("http-sync-nopair", []);
+    const withSource = createSyncApp(issueDefinition(script.id));
+    const sourceless = createSyncApp(
+      appWith({ issue: { columns: ownedIssueColumns() } }),
+      "Sourceless app",
+    );
+
+    const unknownSource = await request<SyncBody>(`/api/apps/${withSource}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ source: "nope" }),
+    });
+    expect(unknownSource.status).toBe(400);
+    expect(unknownSource.body.issues).toEqual([
+      { path: "source", message: 'unknown source "nope" — no model declares it' },
+    ]);
+
+    const unknownModel = await request<SyncBody>(`/api/apps/${withSource}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ model: "ghost" }),
+    });
+    expect(unknownModel.status).toBe(400);
+    expect(unknownModel.body.issues).toEqual([{ path: "model", message: 'unknown model "ghost"' }]);
+
+    const noSources = await request<SyncBody>(`/api/apps/${sourceless}/sync`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(noSources.status).toBe(400);
+    expect(noSources.body.issues).toEqual([
+      { path: "appId", message: "no model declares a source to sync" },
+    ]);
+  });
+
+  test("403s and never pulls when app.use is denied", async () => {
+    const script = await fixtureScript("http-sync-denied", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+    const original = mutableLegacyPolicy["app.use"];
+    mutableLegacyPolicy["app.use"] = { ...original, evaluate: () => false };
+    try {
+      const response = await request<{ error: string }>(`/api/apps/${appId}/sync`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      expect(response.status).toBe(403);
+    } finally {
+      mutableLegacyPolicy["app.use"] = original;
+    }
+    expect(rowsOf(appId)).toHaveLength(0);
+  });
+
+  test("accepts a request with no body at all", async () => {
+    const script = await fixtureScript("http-sync-bodyless", [ghRecord(1)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    // No Content-Type, no payload — parseBody must yield {} rather than throw.
+    const response = await fetch(`${base}/api/apps/${appId}/sync`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${API_KEY}` },
+    });
+    const body = (await response.json()) as SyncBody;
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.passes).toHaveLength(1);
+    expect(rowsOf(appId)).toHaveLength(1);
+  });
+
+  test("answers 200 with ok:false when a pass fails", async () => {
+    const script = await fixtureScript("http-sync-passfail", []);
+    await script.setSource('export default async () => { throw new Error("door pull failed"); };');
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const response = await request<SyncBody & { taskId?: string }>(`/api/apps/${appId}/sync`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+
+    // A failed pull is a reported outcome, not a transport error.
+    expect(response.status).toBe(200);
+    expect(response.body.ok).toBe(false);
+    expect(response.body.issues).toBeUndefined();
+    expect(response.body.passes).toHaveLength(1);
+    expect(response.body.passes?.[0]?.error).toContain("door pull failed");
+    expect(Object.hasOwn(response.body, "taskId")).toBe(false);
+    expect(rowsOf(appId)).toHaveLength(0);
+  });
+});
+
+describe("sync action kind", () => {
+  test("answers the script-action shape with no taskId key", async () => {
+    const script = await fixtureScript("action-sync", [ghRecord(1)]);
+    const definition = issueDefinition(script.id);
+    (definition as { actions?: unknown }).actions = { refresh: { kind: "sync" } };
+    const appId = createSyncApp(definition);
+
+    const response = await request<{
+      ok: boolean;
+      result: { passes: SyncPassResult[] };
+      durationMs: number;
+      taskId?: string;
+      error?: string;
+    }>(`/api/apps/${appId}/actions/refresh`, {
+      method: "POST",
+      body: JSON.stringify({ input: {} }),
+    });
+
+    expect(response.status).toBe(200);
+    // The zero-UI-change contract: app-surface.tsx branches on taskId FIRST.
+    expect(Object.hasOwn(response.body, "taskId")).toBe(false);
+    expect(response.body.ok).toBe(true);
+    expect(response.body.error).toBeUndefined();
+    expect(response.body.result.passes).toHaveLength(1);
+    expect(response.body.result.passes[0]).toMatchObject({
+      model: "issue",
+      source: "gh",
+      created: 1,
+    });
+    expect(typeof response.body.durationMs).toBe("number");
+    expect(rowsOf(appId)).toHaveLength(1);
+  });
+
+  test("reports a failed pass as ok:false plus a named error, still without taskId", async () => {
+    const script = await fixtureScript("action-sync-fail", []);
+    await script.setSource('export default async () => { throw new Error("pull exploded"); };');
+    const definition = issueDefinition(script.id);
+    (definition as { actions?: unknown }).actions = {
+      refresh: { kind: "sync", model: "issue", source: "gh" },
+    };
+    const appId = createSyncApp(definition);
+
+    const response = await request<{
+      ok: boolean;
+      result: { passes: SyncPassResult[] };
+      error?: string;
+      taskId?: string;
+    }>(`/api/apps/${appId}/actions/refresh`, {
+      method: "POST",
+      body: JSON.stringify({ input: {} }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(Object.hasOwn(response.body, "taskId")).toBe(false);
+    expect(response.body.ok).toBe(false);
+    expect(response.body.error).toContain("issue.gh: ");
+    expect(response.body.error).toContain("pull exploded");
+    expect(response.body.result.passes).toHaveLength(1);
+  });
+
+  test("400s with issues when the action selects a pair the app no longer has", async () => {
+    const script = await fixtureScript("action-sync-detached", [ghRecord(1)]);
+    const definition = issueDefinition(script.id);
+    (definition as { actions?: unknown }).actions = { refresh: { kind: "sync" } };
+    const appId = createSyncApp(definition);
+    // Drop the source behind the action's back — the stored action stays valid.
+    const app = getApp(appId)!;
+    const models = structuredClone(app.definition.models) as Record<string, ModelDef>;
+    delete models.issue?.sources;
+    for (const column of Object.values(models.issue?.columns ?? {})) {
+      delete (column as { source?: unknown }).source;
+    }
+    updateApp(appId, { definition: { ...app.definition, models } });
+
+    const response = await request<SyncBody>(`/api/apps/${appId}/actions/refresh`, {
+      method: "POST",
+      body: JSON.stringify({ input: {} }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.issues).toEqual([
+      { path: "appId", message: "no model declares a source to sync" },
+    ]);
+  });
+});
+
+describe("app-sync MCP tool", () => {
+  test("returns a rendered pass table and the result object", async () => {
+    const script = await fixtureScript("mcp-sync", [ghRecord(1), ghRecord(2)]);
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const result = (await syncTool.handler({ appId }, toolMeta())) as StructuredResult<{
+      success: boolean;
+      message: string;
+      details: string;
+      ok: boolean;
+      passes: SyncPassResult[];
+    }>;
+
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.ok).toBe(true);
+    expect(result.structuredContent.passes).toHaveLength(1);
+    expect(result.structuredContent.passes[0]).toMatchObject({
+      model: "issue",
+      source: "gh",
+      created: 2,
+      invokedBy: `agent:${OWNER_AGENT_ID}`,
+    });
+    expect(result.structuredContent.message).toContain("2 created");
+    expect(result.structuredContent.details).toContain("| model | source |");
+    expect(result.structuredContent.details).toContain("| issue | gh |");
+    expect(rowsOf(appId)).toHaveLength(2);
+  });
+
+  test("is an error result when a pass fails or nothing matches", async () => {
+    const script = await fixtureScript("mcp-sync-fail", []);
+    await script.setSource('export default async () => { throw new Error("mcp pull failed"); };');
+    const appId = createSyncApp(issueDefinition(script.id));
+
+    const failed = (await syncTool.handler({ appId }, toolMeta())) as StructuredResult<{
+      success: boolean;
+      details: string;
+      ok: boolean;
+    }>;
+    expect(failed.isError).toBe(true);
+    expect(failed.structuredContent.success).toBe(false);
+    expect(failed.structuredContent.ok).toBe(false);
+    expect(failed.structuredContent.details).toContain("mcp pull failed");
+
+    const nothing = (await syncTool.handler(
+      { appId, source: "nope" },
+      toolMeta(),
+    )) as StructuredResult<{ success: boolean; message: string; details: string }>;
+    expect(nothing.isError).toBe(true);
+    expect(nothing.structuredContent.message).toContain("Nothing to sync");
+    expect(nothing.structuredContent.details).toContain('unknown source "nope"');
+
+    const missing = (await syncTool.handler(
+      { appId: crypto.randomUUID() },
+      toolMeta(),
+    )) as StructuredResult<{ success: boolean; message: string }>;
+    expect(missing.isError).toBe(true);
+    expect(missing.structuredContent.message).toContain("not found");
+  });
+});
+
+describe("script delete guard", () => {
+  /** A model whose only source binding is the join key — patchable to sourceless. */
+  function guardDefinition(scriptId: string): Definition {
+    return appWith({
+      issue: {
+        columns: { issueKey: { kind: "string" }, note: { kind: "string" } },
+        sources: { gh: { connector: "script", scriptId, joinKey: "issueKey" } },
+      },
+    });
+  }
+
+  async function deleteScriptByName(name: string) {
+    return request<{
+      deleted?: boolean;
+      error?: string;
+      issues?: Array<{ path: string; message: string }>;
+    }>(`/api/scripts/${name}?scope=global`, { method: "DELETE", agentId: LEAD_AGENT_ID });
+  }
+
+  test("409s naming the app and the source path", async () => {
+    const name = scriptName("guard-source");
+    const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
+    const appId = createSyncApp(guardDefinition(scriptId), "Guarded app");
+
+    const blocked = await deleteScriptByName(name);
+
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error).toBe("script is referenced by an app definition");
+    expect(blocked.body.issues).toEqual([
+      {
+        path: `apps.${appId}`,
+        message: `app "Guarded app" (${appId}) uses this script at models.issue.sources.gh`,
+      },
+    ]);
+    expect(getApp(appId)).not.toBeNull();
+  });
+
+  test("409s when only a script action references it", async () => {
+    const name = scriptName("guard-action");
+    const scriptId = await saveScript({ name, source: "export default async () => ({});" });
+    const definition = appWith({ issue: { columns: { note: { kind: "string" } } } });
+    (definition as { actions?: unknown }).actions = { run: { kind: "script", scriptId } };
+    const appId = createSyncApp(definition, "Action app");
+
+    const blocked = await deleteScriptByName(name);
+
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.issues).toEqual([
+      {
+        path: `apps.${appId}`,
+        message: `app "Action app" (${appId}) uses this script at actions.run`,
+      },
+    ]);
+  });
+
+  test("blocks on a broken definition that still names the script", async () => {
+    const name = scriptName("guard-broken");
+    const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
+    const appId = createSyncApp(guardDefinition(scriptId), "Broken app");
+    // Corrupt the stored definition the way a bad hand-edit would.
+    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      JSON.stringify({ models: { issue: { sources: { gh: { scriptId } } } }, oops: true }),
+      appId,
+    ]);
+    expect(getApp(appId)?.definitionError).toBeDefined();
+
+    const blocked = await deleteScriptByName(name);
+
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.issues?.[0]?.message).toContain(
+      "uses this script at models.issue.sources.gh",
+    );
+  });
+
+  test("blocks on an unparseable definition that still contains the id", async () => {
+    const name = scriptName("guard-nonjson");
+    const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
+    const appId = createSyncApp(guardDefinition(scriptId), "Unparseable app");
+    // Not JSON at all: decodeApp cannot even parse it, so the tolerant
+    // collector yields nothing and only the raw probe can see the reference.
+    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", [`{not json ${scriptId}`, appId]);
+    expect(getApp(appId)?.definitionError?.[0]?.message).toContain("invalid stored JSON");
+
+    const blocked = await deleteScriptByName(name);
+
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.issues).toEqual([
+      {
+        path: `apps.${appId}`,
+        message: `app "Unparseable app" (${appId}) uses this script at its (unparseable) definition`,
+      },
+    ]);
+  });
+
+  test("the script-delete MCP tool carries the blocking apps in its text channel", async () => {
+    const name = scriptName("guard-mcp");
+    const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
+    const appId = createSyncApp(guardDefinition(scriptId), "MCP guarded app");
+
+    const result = (await scriptDeleteTool.handler(
+      { name, scope: "global" },
+      toolMeta(LEAD_AGENT_ID),
+    )) as StructuredResult<{ success: boolean; message: string; details: string }>;
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("referenced by an app definition");
+    expect(result.structuredContent.details).toContain(
+      `apps.${appId}: app "MCP guarded app" (${appId}) uses this script at models.issue.sources.gh`,
+    );
+    // Both channels stay consistent — the text channel must carry it too.
+    expect(JSON.stringify(result.content)).toContain("models.issue.sources.gh");
+    expect(getApp(appId)).not.toBeNull();
+  });
+
+  test("succeeds once the source is removed via PATCH", async () => {
+    const name = scriptName("guard-removable");
+    const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
+    const appId = createSyncApp(guardDefinition(scriptId), "Removable app");
+
+    expect((await deleteScriptByName(name)).status).toBe(409);
+
+    const patched = await request<{ app: { definition: { models: Record<string, ModelDef> } } }>(
+      `/api/apps/${appId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ definition: { models: { issue: { sources: { gh: null } } } } }),
+      },
+    );
+    expect(patched.status).toBe(200);
+    // Deleting the last entry leaves an empty map, not an absent key.
+    expect(patched.body.app.definition.models.issue?.sources ?? {}).toEqual({});
+
+    const deleted = await deleteScriptByName(name);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.deleted).toBe(true);
+  });
+
+  test("still deletes an unreferenced script", async () => {
+    const name = scriptName("guard-free");
+    await saveScript({ name, source: "export default async () => ([]);" });
+
+    const deleted = await deleteScriptByName(name);
+
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.deleted).toBe(true);
   });
 });

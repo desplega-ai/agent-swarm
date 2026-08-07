@@ -42,6 +42,15 @@ function apiBaseUrl(): string {
   return getMcpBaseUrl();
 }
 
+/** `{path, message}` renders as one `path: message` line; anything else verbatim. */
+function renderIssue(issue: unknown): string {
+  if (typeof issue === "string") return issue;
+  if (isRecord(issue) && typeof issue.message === "string") {
+    return typeof issue.path === "string" ? `${issue.path}: ${issue.message}` : issue.message;
+  }
+  return JSON.stringify(issue);
+}
+
 type ScriptFailure = { message: string; details?: string };
 
 /**
@@ -83,6 +92,17 @@ function describeScriptFailure(
         details: capDetails(
           violations.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join("\n"),
         ),
+      };
+    }
+
+    // Path-bearing rejections (e.g. a delete blocked by an app that still
+    // wires this script): without this branch the paths never reach the text
+    // channel and the model cannot see what to unwire.
+    const issues = body && Array.isArray(body.issues) ? (body.issues as unknown[]) : undefined;
+    if (issues && issues.length > 0) {
+      return {
+        message: `${error ?? `Scripts API request failed with ${status}`} — ${issues.length} issue(s)`,
+        details: capDetails(issues.map(renderIssue).join("\n")),
       };
     }
 

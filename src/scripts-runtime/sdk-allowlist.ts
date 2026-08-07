@@ -148,6 +148,7 @@ export const SDK_TOOL_NAME_MAP = {
   app_patch: "app-patch",
   app_query: "app-query",
   app_rollback: "app-rollback",
+  app_sync: "app-sync",
   app_upsert: "app-upsert",
   page_create: "create_page",
   page_delete: "delete-page", // destructive
