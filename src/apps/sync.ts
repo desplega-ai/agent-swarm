@@ -355,14 +355,26 @@ function pullFromSwarmTasks(
     });
     if (statuses.length > 0) filters.status = statuses;
   }
-  if (typeof config.agentId === "string" && config.agentId.trim().length > 0) {
+  // Scoping config fails CLOSED: silently dropping a malformed filter would
+  // widen the pull to the whole task pool.
+  if (config.agentId !== undefined) {
+    if (typeof config.agentId !== "string" || config.agentId.trim().length === 0) {
+      throw new SyncPassError(
+        `config.agentId must be a non-empty string, got ${JSON.stringify(config.agentId)}`,
+      );
+    }
     filters.agentId = config.agentId.trim();
   }
   if (config.tags !== undefined) {
     const tags = commaList(config.tags);
     if (tags.length > 0) filters.tags = tags;
   }
-  if (typeof config.assetKey === "string" && config.assetKey.trim().length > 0) {
+  if (config.assetKey !== undefined) {
+    if (typeof config.assetKey !== "string" || config.assetKey.trim().length === 0) {
+      throw new SyncPassError(
+        `config.assetKey must be a non-empty string, got ${JSON.stringify(config.assetKey)}`,
+      );
+    }
     filters.keyPrefix = config.assetKey.trim();
   }
 

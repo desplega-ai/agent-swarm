@@ -817,6 +817,22 @@ describe("swarm-tasks source", () => {
     expect(full.staleSweepSkipped).toBeUndefined();
   });
 
+  test("malformed scoping config fails the pass instead of widening it", async () => {
+    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+
+    const badAgent = createSyncApp(taskDefinition({ agentId: 123 }), "Bad agentId");
+    const agentResult = await runAppSync({ appId: badAgent });
+    expect(agentResult.ok).toBe(false);
+    expect(agentResult.passes[0]?.error).toContain("config.agentId must be a non-empty string");
+    expect(agentResult.passes[0]?.pulled).toBe(0);
+
+    const badKey = createSyncApp(taskDefinition({ assetKey: true }), "Bad assetKey");
+    const keyResult = await runAppSync({ appId: badKey });
+    expect(keyResult.ok).toBe(false);
+    expect(keyResult.passes[0]?.error).toContain("config.assetKey must be a non-empty string");
+    expect(rowsOf(badKey, "task", "taskKey")).toHaveLength(0);
+  });
+
   test("an unsupported config key is reported as a warning", async () => {
     createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
     const appId = createSyncApp(taskDefinition({ nonsense: "value" }));
@@ -1312,6 +1328,52 @@ describe("concurrency", () => {
       rowsOf(appId)
         .filter((row) => row.source === "pool")
         .every((row) => row.stale === false),
+    ).toBe(true);
+  });
+});
+
+describe("populated-column rebind guard", () => {
+  test("rebinding a populated column to another source is rejected like a fresh binding", async () => {
+    const script = await fixtureScript("rebind", [ghRecord(1)]);
+    const appId = createSyncApp(
+      appWith({
+        issue: {
+          columns: { ...ISSUE_COLUMNS, taskKey: { kind: "string" } },
+          sources: {
+            gh: ghSource(script.id),
+            pool: { connector: "swarm-tasks", joinKey: "taskKey", config: { limit: 50 } },
+          },
+        },
+      }),
+    );
+    await runAppSync({ appId, source: "gh" });
+    expect(rowsOf(appId)[0]?.title).toBe("Issue 1");
+
+    // Move title from gh to pool while a gh-written value exists: the value
+    // would be stranded read-only on a row pool never reconciles.
+    const rejected = await request<{ issues?: Array<{ path: string; message: string }> }>(
+      `/api/apps/${appId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          definition: {
+            models: {
+              issue: {
+                columns: { title: { kind: "string", source: { of: "pool", field: "prompt" } } },
+              },
+            },
+          },
+        }),
+      },
+    );
+
+    expect(rejected.status).toBe(400);
+    expect(
+      rejected.body.issues?.some(
+        (issue) =>
+          issue.path === "models.issue.columns.title.source" &&
+          issue.message.includes("binding an existing column"),
+      ),
     ).toBe(true);
   });
 });

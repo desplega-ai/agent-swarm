@@ -764,9 +764,15 @@ function planModel(
     }
 
     // Binding a column that already holds data hands it to the source: the next
-    // pass projects over every value it did not write. Adding the binding on a
-    // fresh (or emptied) column is the supported path.
-    if (nextColumn.source !== undefined && oldColumn?.source === undefined) {
+    // pass projects over every value it did not write. A REBIND (source.of
+    // moving to a different source) is the same hazard — the old source stops
+    // projecting the column, the new one only reconciles its own rows, and the
+    // stranded values stay read-only forever. Adding the binding on a fresh
+    // (or emptied) column is the supported path.
+    if (
+      nextColumn.source !== undefined &&
+      (oldColumn?.source === undefined || oldColumn.source.of !== nextColumn.source.of)
+    ) {
       const populated = rows.filter(
         (row) => Object.hasOwn(row, columnName) && row[columnName] !== null,
       ).length;
