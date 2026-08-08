@@ -16617,7 +16617,7 @@ export interface paths {
                         "application/json": {
                             /** @enum {string} */
                             kind: "operator" | "user";
-                            user: components["schemas"]["User"];
+                            user: components["schemas"]["User"] | null;
                         };
                     };
                 };
@@ -20086,7 +20086,7 @@ export interface components {
             createdAt: string;
             /** Format: date-time */
             lastUpdatedAt: string;
-        } | null;
+        };
         WorkflowDefinition: {
             nodes: components["schemas"]["WorkflowNode"][];
             /**

@@ -90,9 +90,62 @@ function resolveActiveId(multi: MultiConfig): MultiConfig {
 // Multi-connection CRUD
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Embed connection (DES-771)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tab-local connection for embedded dashboards (user-bound `aswt_` tokens
+ * arriving via URL params). Lives in **sessionStorage** — not the shared
+ * localStorage connection list — so two embeds on the same UI origin holding
+ * different user tokens can never clobber each other's credentials, and the
+ * token does not outlive the tab. When present it takes precedence over the
+ * localStorage `activeId` everywhere (`getActiveConnection`, and therefore
+ * `getConfig()`/ApiClient).
+ */
+export const EMBED_CONNECTION_ID = "embed";
+const EMBED_KEY = "agent-swarm-embed-connection";
+
+export function getEmbedConnection(): Connection | null {
+  try {
+    const raw = sessionStorage.getItem(EMBED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Connection>;
+    if (!parsed.apiUrl || !parsed.apiKey) return null;
+    return {
+      id: EMBED_CONNECTION_ID,
+      name: parsed.name || "embed",
+      apiUrl: parsed.apiUrl,
+      apiKey: parsed.apiKey,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function setEmbedConnection(conn: Omit<Connection, "id">): Connection {
+  const connection: Connection = { id: EMBED_CONNECTION_ID, ...conn };
+  try {
+    sessionStorage.setItem(EMBED_KEY, JSON.stringify(connection));
+  } catch {
+    // Storage unavailable — callers' in-memory state still drives this
+    // session; API calls fall back to the localStorage connection.
+  }
+  return connection;
+}
+
+export function clearEmbedConnection(): void {
+  try {
+    sessionStorage.removeItem(EMBED_KEY);
+  } catch {
+    // Nothing to clear if storage is unavailable.
+  }
+}
+
 export function getConnections(): Connection[] {
   const multi = resolveActiveId(loadMultiConfig());
-  return multi.connections;
+  const embed = getEmbedConnection();
+  return embed ? [embed, ...multi.connections] : multi.connections;
 }
 
 export function addConnection(conn: Omit<Connection, "id"> & { id?: string }): Connection {
@@ -116,6 +169,11 @@ export function updateConnection(
   id: string,
   updates: Partial<Omit<Connection, "id">>,
 ): Connection | null {
+  if (id === EMBED_CONNECTION_ID) {
+    const embed = getEmbedConnection();
+    if (!embed) return null;
+    return setEmbedConnection({ ...embed, ...updates });
+  }
   const multi = resolveActiveId(loadMultiConfig());
   const idx = multi.connections.findIndex((c) => c.id === id);
   if (idx === -1) return null;
@@ -125,6 +183,11 @@ export function updateConnection(
 }
 
 export function removeConnection(id: string): boolean {
+  if (id === EMBED_CONNECTION_ID) {
+    const existed = getEmbedConnection() !== null;
+    clearEmbedConnection();
+    return existed;
+  }
   const multi = resolveActiveId(loadMultiConfig());
   const idx = multi.connections.findIndex((c) => c.id === id);
   if (idx === -1) return false;
@@ -138,15 +201,23 @@ export function removeConnection(id: string): boolean {
 }
 
 export function getActiveConnection(): Connection | null {
+  const embed = getEmbedConnection();
+  if (embed) return embed;
   const multi = resolveActiveId(loadMultiConfig());
   if (!multi.activeId) return null;
   return multi.connections.find((c) => c.id === multi.activeId) ?? null;
 }
 
 export function setActiveConnection(id: string): boolean {
+  if (id === EMBED_CONNECTION_ID) {
+    return getEmbedConnection() !== null;
+  }
   const multi = loadMultiConfig();
   const exists = multi.connections.some((c) => c.id === id);
   if (!exists) return false;
+  // Activating a saved connection is an explicit choice to leave the
+  // tab-local embed session.
+  clearEmbedConnection();
   multi.activeId = id;
   saveMultiConfig(multi);
   return true;
@@ -181,6 +252,7 @@ export function saveConfig(config: Config): void {
 export function resetConfig(): void {
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(CONNECTIONS_KEY);
+  clearEmbedConnection();
 }
 
 export function getDefaultConfig(): Config {

@@ -148,7 +148,11 @@ const whoamiRoute = route({
       description: "Authenticated principal",
       schema: z.object({
         kind: z.enum(["operator", "user"]),
-        user: UserSchema.nullable(),
+        // `z.union([UserSchema, z.null()])`, NOT `UserSchema.nullable()`:
+        // .nullable() on a registered schema rewrites the shared
+        // `components.schemas.User` to `object | null` for every consumer;
+        // the union keeps nullability local to this response field.
+        user: z.union([UserSchema, z.null()]),
       }),
     },
     401: { description: "Unauthorized" },

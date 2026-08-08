@@ -2219,18 +2219,17 @@ class ApiClient {
   // ─── Users (Phase 2 ≥1.76.0; Phase 064 step-8 ≥1.80.0) ──────────────────
 
   /**
-   * Resolve the principal behind the configured bearer (DES-771). Returns
-   * null on any failure — older servers 404 this route and the caller
-   * (CurrentUserProvider) falls back to the localStorage picker flow.
+   * Resolve the principal behind the configured bearer (DES-771). `null`
+   * strictly means "older server — the route doesn't exist" (404). Every
+   * other failure (network, 5xx, 401 on a revoked token) throws so
+   * react-query retries and refetches on focus/reconnect instead of the
+   * caller mistaking a transient blip for an unsupported server.
    */
   async whoami(): Promise<WhoamiResponse | null> {
-    try {
-      const res = await fetch(`${this.getBaseUrl()}/api/whoami`, { headers: this.getHeaders() });
-      if (!res.ok) return null;
-      return (await res.json()) as WhoamiResponse;
-    } catch {
-      return null;
-    }
+    const res = await fetch(`${this.getBaseUrl()}/api/whoami`, { headers: this.getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to resolve whoami: ${res.status}`);
+    return (await res.json()) as WhoamiResponse;
   }
 
   async listUsers(opts?: { recentEvents?: number }): Promise<User[]> {

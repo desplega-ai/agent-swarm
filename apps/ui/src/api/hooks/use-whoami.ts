@@ -1,11 +1,11 @@
 /**
  * DES-771: resolve the principal behind the configured bearer.
  *
- * Enabled only when the configured API key is a user-bound `aswt_` token
- * (embedded dashboards) — operator-key tabs keep the localStorage identity
- * picker. `api.whoami()` resolves `null` (never throws) on 404/network
- * failure, so `data === null` means "older server / unreachable" and the
- * caller falls back to the picker flow.
+ * Enabled only when the configured API key looks like a user-bound `aswt_`
+ * token (embedded dashboards) — operator-key tabs keep the localStorage
+ * identity picker. `api.whoami()` resolves `null` strictly on 404 (older
+ * server, no such route); transient/network/auth failures throw so
+ * react-query retries them, and the caller stays locked throughout.
  *
  * The query key carries the apiUrl plus the token's last-4 suffix (the same
  * non-sensitive preview the server stores as `tokenPreview`) so a persisted

@@ -3677,10 +3677,7 @@
         ]
       },
       "User": {
-        "type": [
-          "object",
-          "null"
-        ],
+        "type": "object",
         "properties": {
           "id": {
             "type": "string"
@@ -39936,7 +39933,14 @@
                       ]
                     },
                     "user": {
-                      "$ref": "#/components/schemas/User"
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/User"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     }
                   },
                   "required": [

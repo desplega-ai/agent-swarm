@@ -26,8 +26,12 @@ export default function ConnectionsPage() {
         <Alert>
           <UserRound className="h-4 w-4" />
           <AlertDescription>
-            You are logged in with the credentials of <strong>{user.name}</strong> — this connection
-            is bound to their user token and the identity cannot be switched.
+            {/* Single <p>: AlertDescription is a grid, so bare inline children
+                each land on their own row. */}
+            <p>
+              You are logged in with the credentials of <strong>{user.name}</strong> — this
+              connection is bound to their user token and the identity cannot be switched.
+            </p>
           </AlertDescription>
         </Alert>
       ) : null}

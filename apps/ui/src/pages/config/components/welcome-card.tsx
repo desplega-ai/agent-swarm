@@ -65,7 +65,14 @@ export function WelcomeCard() {
       switchConnection(created.id);
       setStatus("success");
 
-      const target = resolvePostConnectRedirect((location.state as { from?: string } | null)?.from);
+      // Deep-link preservation: when the full-page connect takeover renders
+      // (RootLayout, no ConfigGuard redirect), the requested route is still
+      // the current location — fall back to it when the guard didn't stash
+      // one in location.state.from.
+      const from =
+        (location.state as { from?: string } | null)?.from ??
+        `${location.pathname}${location.search}${location.hash}`;
+      const target = resolvePostConnectRedirect(from);
       setTimeout(() => navigate(target, { replace: true }), 500);
     } catch (err) {
       setStatus("error");

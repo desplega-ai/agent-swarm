@@ -12,6 +12,7 @@ import {
   resetConfig as resetStoredConfig,
   saveConfig,
   setActiveConnection,
+  setEmbedConnection,
   updateConnection as updateStoredConnection,
 } from "@/lib/config";
 
@@ -108,28 +109,20 @@ function extractUrlParams(
   }
 
   // DES-771: a user-bound `aswt_` token arriving via URL params is the embed
-  // handshake. Save + activate it silently — the ApiClient authenticates from
-  // *saved* connections only, and an embedded iframe must not be interrupted
-  // by the "Name This Connection" modal. Same-URL token connections are
-  // updated in place (token rotation / different user) instead of piling up;
-  // operator-key connections to the same URL are never clobbered.
+  // handshake. Store it as the tab-local embed connection (sessionStorage) —
+  // the ApiClient authenticates from stored connections and an embedded
+  // iframe must not be interrupted by the "Name This Connection" modal.
+  // Tab-local storage means two embeds on this origin holding different
+  // tokens can never clobber each other, and the shared localStorage
+  // connection list is never touched.
   if (isUserTokenApiKey(apiKey)) {
-    const sameUrlToken = connections.find(
-      (c) => c.apiUrl.replace(/\/+$/, "") === normalizedUrl && isUserTokenApiKey(c.apiKey),
-    );
-    if (sameUrlToken) {
-      updateStoredConnection(sameUrlToken.id, { apiKey });
-      activateFn(sameUrlToken.id);
-    } else {
-      let host = normalizedUrl;
-      try {
-        host = new URL(normalizedUrl).host;
-      } catch {
-        // Keep the raw URL as the label if it doesn't parse.
-      }
-      const created = addStoredConnection({ name: `embed:${host}`, apiUrl: normalizedUrl, apiKey });
-      activateFn(created.id);
+    let host = normalizedUrl;
+    try {
+      host = new URL(normalizedUrl).host;
+    } catch {
+      // Keep the raw URL as the label if it doesn't parse.
     }
+    setEmbedConnection({ name: `embed:${host}`, apiUrl: normalizedUrl, apiKey });
     return { pendingConnection: null, pendingIdentity };
   }
 
