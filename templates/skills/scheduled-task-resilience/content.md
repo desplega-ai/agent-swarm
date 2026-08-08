@@ -18,13 +18,22 @@ Aggregate **every** check run before you decide the poll is over. Reading a sing
 ```bash
 # ONE cycle per agent turn. Resolve PR_NUMBER from the current task or repository context.
 sleep 240
-gh pr checks "$PR_NUMBER" --json name,state,bucket \
-  --jq 'if   any(.[]; .bucket == "pending") then "PENDING"
-        elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "FAILING"
-        else "PASSED" end'
+if out=$(gh pr checks "$PR_NUMBER" --json name,state,bucket \
+      --jq 'if   any(.[]; .bucket == "pending") then "PENDING"
+            elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "FAILING"
+            else "PASSED" end' 2>&1); then
+  echo "$out"
+else
+  case "$out" in
+    *"no checks reported"*) echo "PENDING" ;;  # no check contexts yet — not a failure
+    *) echo "$out" >&2; exit 1 ;;              # real gh error: auth, network, bad PR
+  esac
+fi
 ```
 
 ⚠️ Do not substitute the exit code for the aggregate here. Plain `gh pr checks <pr>` exits `8` while any check is pending and `1` on failure, but **`--json` suppresses that — it exits `0` even mid-run** (verified on gh 2.97.0). A cycle that adds `--json` and then reads `$?` reports success on a still-pending PR, which is the exact bug the aggregate exists to prevent.
+
+⚠️ Treat `no checks reported` as `PENDING`, not as a failure. Right after a PR is opened or a new commit is pushed, GitHub can briefly report zero check contexts. In that window `gh pr checks` exits `1` and prints `no checks reported on the '<branch>' branch` **before** the `--json` exporter runs, so the aggregate never executes at all (verified on gh 2.97.0). A cycle that treats any non-zero exit as failure will stop polling — or report CI as broken — before the workflows have even appeared. That is why the sample branches on the error text instead of on the exit status alone.
 
 If the aggregate is anything other than `PASSED`, call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
 
