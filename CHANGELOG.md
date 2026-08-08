@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.130.0] - 2026-08-08
+
+### Added
+- **Swarm Apps can synchronize source-backed models through scripts and connections** (#1140) — app definitions declare source mappings, on-demand or scheduled syncs reconcile projected rows, and credential resolution follows the source script's owner without exposing secrets to the sync engine.
+- **The OpenAPI surface now carries typed response schemas for every route** (#1141) — generated TypeScript definitions provide end-to-end request and response types, backed by a hard coverage gate that prevents untyped endpoints from landing.
+
+### Fixed
+- **MCP OAuth reuses each connector's dynamically registered client** (#1124) — persisted DCR credentials survive subsequent authorization flows instead of registering a new client on every attempt.
+- **Script runtime fetches honor signals that were already aborted** (#1146) — pre-aborted requests now reject immediately instead of starting network work.
+
 ## [1.129.0] - 2026-08-07
 
 ### Added

@@ -127,6 +127,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [app-patch](#app-patch)
   - [app-query](#app-query)
   - [app-rollback](#app-rollback)
+  - [app-sync](#app-sync)
   - [app-upsert](#app-upsert)
   - [create_page](#create_page)
   - [delete-page](#delete-page)
@@ -1535,6 +1536,18 @@ Restore a historical app snapshot through the schema migration and exported-elem
 | `version` | `number` | Yes | - | Snapshot version to restore. |
 | `migration` | `unknown` | No | - | Explicit per-column directives for a lossy restore (set, from/map/else, coerce/else, or purge). |
 | `forceElementBreak` | `unknown` | No | - | Exported element names whose consumers may be broken by this restore. |
+
+### app-sync
+
+**Sync an app**
+
+Refresh an app's declared sources: pull each selected (model x source) pair and reconcile its rows.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `appId` | `string` | Yes | - | App ID whose sources should sync. |
+| `model` | `unknown` | No | - | Limit the sync to one model. |
+| `source` | `unknown` | No | - | Limit the sync to one declared source name. |
 
 ### app-upsert
 

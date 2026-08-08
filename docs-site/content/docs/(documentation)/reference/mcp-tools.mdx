@@ -733,6 +733,16 @@ Show a unified diff between two app snapshots, or between a snapshot and the cur
 
 Restore a historical snapshot through the same schema-migration and exported-element compatibility gates used for updates.
 
+### app-sync
+
+Refresh an app's declared sources. Each selected model/source pair runs through its source script and connection, then reconciles projected rows while preserving operator-managed fields.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `appId` | string | Yes | App ID whose sources should sync |
+| `model` | string | No | Limit the sync to one model |
+| `source` | string | No | Limit the sync to one declared source |
+
 ## KV Tools
 
 A Redis-like, namespaced key/value store. Calls auto-resolve namespace from your current context (Slack thread / PR / Linear issue / agent scratchpad / page). 2 MiB value cap, opt-in TTL.
