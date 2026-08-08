@@ -1,4 +1,4 @@
-import { Check, CheckCircle2, Copy, Eye, EyeOff, Hexagon, Loader2, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Copy, Eye, EyeOff, Loader2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -74,11 +74,11 @@ export function WelcomeCard() {
   }
 
   return (
-    <div className="flex min-h-[80vh] items-center justify-center">
+    <div className="flex flex-1 items-center justify-center">
       <Card className="w-full max-w-md border-border">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center">
-            <Hexagon className="h-10 w-10 text-primary" />
+            <img src="/logo.png" alt="Agent Swarm logo" className="h-12 w-12 object-contain" />
           </div>
           <CardTitle className="text-xl font-semibold">Agent Swarm</CardTitle>
           <CardDescription>Connect to your Agent Swarm API server to get started.</CardDescription>

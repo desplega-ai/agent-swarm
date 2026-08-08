@@ -1,14 +1,19 @@
+import { UserRound } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageHeader } from "@/components/ui/page-header";
+import { useCurrentUser } from "@/contexts/current-user-context";
 import { useConfig } from "@/hooks/use-config";
 import { ConnectionsSection } from "@/pages/config/components/connections-section";
 import { WelcomeCard } from "@/pages/config/components/welcome-card";
 
 /**
  * Connections settings page — server connections (API URL + key). Before any
- * connection exists, the WelcomeCard onboarding flow takes over the surface.
+ * connection exists, the full-page connect takeover in RootLayout owns the
+ * surface (the WelcomeCard fallback below is a safety net).
  */
 export default function ConnectionsPage() {
   const { isConfigured } = useConfig();
+  const { locked, user } = useCurrentUser();
 
   if (!isConfigured) {
     return <WelcomeCard />;
@@ -17,6 +22,15 @@ export default function ConnectionsPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader title="Connections" />
+      {locked && user ? (
+        <Alert>
+          <UserRound className="h-4 w-4" />
+          <AlertDescription>
+            You are logged in with the credentials of <strong>{user.name}</strong> — this connection
+            is bound to their user token and the identity cannot be switched.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <ConnectionsSection />
     </div>
   );
