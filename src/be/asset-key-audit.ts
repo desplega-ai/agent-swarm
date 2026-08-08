@@ -12,7 +12,7 @@ export type AssetKeyAuditCode =
 export type AssetKeyAuditIssue = {
   severity: AssetKeyAuditSeverity;
   code: AssetKeyAuditCode;
-  entityType: "task" | "workflow" | "schedule" | "page" | "file";
+  entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
   entityId: string;
   message: string;
 };
@@ -33,6 +33,8 @@ const KEY_TABLES = [
   { entityType: "workflow", sql: 'SELECT id, "key" as key FROM workflows' },
   { entityType: "schedule", sql: 'SELECT id, "key" as key FROM scheduled_tasks' },
   { entityType: "page", sql: 'SELECT id, "key" as key FROM pages' },
+  { entityType: "app", sql: 'SELECT id, "key" as key FROM apps' },
+  { entityType: "script", sql: 'SELECT id, "key" as key FROM scripts' },
   { entityType: "file", sql: 'SELECT id, "key" as key FROM asset_key_mappings' },
 ] as const;
 

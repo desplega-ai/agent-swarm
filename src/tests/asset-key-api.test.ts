@@ -5,7 +5,9 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import { createApp } from "../apps/store";
+import { closeDb, createAgent, createTaskExtended, createUser, getDb, initDb } from "../be/db";
+import { insertScript } from "../be/scripts/db";
 import { handleAssets } from "../http/assets";
 import { handlePages } from "../http/pages";
 import { handleSchedules } from "../http/schedules";
@@ -146,9 +148,44 @@ describe("asset namespace REST contract", () => {
     expect(page.status).toBe(201);
     expect(page.body.key).toBe("shared/team/");
 
+    const app = createApp({
+      name: "Namespaced app",
+      definition: { models: {}, pages: {}, defaultPage: "main" } as never,
+    });
+    const script = insertScript({
+      name: `namespaced-script-${Date.now()}`,
+      scope: "agent",
+      scopeId: agentId,
+      source: "export default async function () { return { ok: true }; }",
+      description: "Namespaced script",
+      intent: "Exercise asset namespace moves",
+      signatureJson: "{}",
+      agentId,
+      embeddingMode: "skip",
+    });
+    expect(
+      await api("PATCH", `/api/assets/app/${app.id}/key`, { key: "shared/team/" }, { agentId }),
+    ).toMatchObject({ status: 200, body: { entityType: "app", key: "shared/team/" } });
+    expect(
+      await api(
+        "PATCH",
+        `/api/assets/script/${script.id}/key`,
+        { key: "shared/team/" },
+        { agentId },
+      ),
+    ).toMatchObject({ status: 200, body: { entityType: "script", key: "shared/team/" } });
+    expect(
+      await api(
+        "PATCH",
+        `/api/assets/script/${script.id}/key`,
+        { key: "shared/other/" },
+        { agentId: secondAgentId },
+      ),
+    ).toMatchObject({ status: 403 });
+
     const aggregate = await api(
       "GET",
-      "/api/assets?keyPrefix=shared/team&types=task,workflow,schedule,page",
+      "/api/assets?keyPrefix=shared/team&types=task,workflow,schedule,page,app,script",
     );
     expect(aggregate.status).toBe(200);
     expect(aggregate.body.assets).toEqual(
@@ -165,8 +202,17 @@ describe("asset namespace REST contract", () => {
           key: "shared/team/",
         }),
         expect.objectContaining({ entityType: "page", id: page.body.id, key: "shared/team/" }),
+        expect.objectContaining({ entityType: "app", id: app.id, key: "shared/team/" }),
+        expect.objectContaining({ entityType: "script", id: script.id, key: "shared/team/" }),
       ]),
     );
+    expect(
+      getDb()
+        .prepare<{ entity_type: string }, [string, string]>(
+          "SELECT entity_type FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
+        )
+        .all(app.id, script.id),
+    ).toEqual([{ entity_type: "app" }, { entity_type: "script" }]);
     expect(JSON.stringify(aggregate.body)).not.toContain("namespaced task");
     expect(JSON.stringify(aggregate.body)).not.toContain("private content omitted");
 

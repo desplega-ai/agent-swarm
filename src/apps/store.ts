@@ -1,3 +1,4 @@
+import { defaultAssetKey } from "../assets/key";
 import { getDb } from "../be/db";
 import type { AppDefinition, AppValidationIssue } from "./definition";
 import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
@@ -105,12 +106,20 @@ export function createApp(input: {
   const id = input.id ?? crypto.randomUUID();
   const now = nextTimestamp();
   const row = getDb()
-    .prepare<AppDbRow, [string, string, string | null, string, string, string]>(
-      `INSERT INTO apps (id, name, description, definition, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+    .prepare<AppDbRow, [string, string, string | null, string, string, string, string]>(
+      `INSERT INTO apps (id, name, description, definition, created_at, updated_at, "key")
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        RETURNING id, name, description, definition, created_at, updated_at`,
     )
-    .get(id, input.name, input.description ?? null, encodeDefinition(input.definition), now, now);
+    .get(
+      id,
+      input.name,
+      input.description ?? null,
+      encodeDefinition(input.definition),
+      now,
+      now,
+      defaultAssetKey("app", id),
+    );
   if (!row) throw new Error("Failed to create app");
   return decodeApp(row);
 }

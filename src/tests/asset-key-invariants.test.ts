@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createApp } from "../apps/store";
 import { auditAssetKeys } from "../be/asset-key-audit";
 import {
   closeDb,
@@ -17,17 +18,35 @@ import {
   moveAssetKey,
   upsertAssetKeyMapping,
 } from "../be/db";
+import { insertScript } from "../be/scripts/db";
 import { createStandaloneScheduleTask } from "../scheduler/scheduler";
 
 const TEST_DB_PATH = "./test-asset-key-invariants.sqlite";
 
 let agentId: string;
 let userId: string;
+let appId: string;
+let scriptId: string;
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
   agentId = createAgent({ name: "namespace-worker", isLead: false, status: "idle" }).id;
   userId = createUser({ name: "Namespace User", email: "namespace@example.com" }).id;
+  appId = createApp({
+    name: "Default app",
+    definition: { models: {}, pages: {}, defaultPage: "main" } as never,
+  }).id;
+  scriptId = insertScript({
+    name: "default-script",
+    scope: "agent",
+    scopeId: agentId,
+    source: "export default async function () { return { ok: true }; }",
+    description: "Asset namespace test script",
+    intent: "Verify script asset keys",
+    signatureJson: "{}",
+    agentId,
+    embeddingMode: "skip",
+  }).id;
 });
 
 afterAll(() => {
@@ -59,7 +78,28 @@ describe("cross-entity asset namespace invariants", () => {
       `shared/schedule:${schedule.id}/`,
       `shared/page:${page.id}/`,
     ]);
+    expect(
+      getDb()
+        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
+        .get(appId)?.key,
+    ).toBe(`shared/app:${appId}/`);
+    expect(
+      getDb()
+        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
+        .get(scriptId)?.key,
+    ).toBe(`shared/script:${scriptId}/`);
     expect(auditAssetKeys(getDb()).fatalCount).toBe(0);
+  });
+
+  test("app and script triggers reject malformed keys", () => {
+    for (const [table, id] of [
+      ["apps", appId],
+      ["scripts", scriptId],
+    ] as const) {
+      expect(() =>
+        getDb().run(`UPDATE ${table} SET "key" = ? WHERE id = ?`, ["Shared/invalid", id]),
+      ).toThrow("invalid asset namespace key");
+    }
   });
 
   test("children inherit a parent namespace unless explicitly overridden", () => {
@@ -167,9 +207,61 @@ describe("cross-entity asset namespace invariants", () => {
     expect(summaries.some((asset) => asset.entityType === "workflow")).toBe(true);
     expect(summaries.some((asset) => asset.entityType === "schedule")).toBe(true);
     expect(summaries.some((asset) => asset.entityType === "page")).toBe(true);
+    expect(summaries.some((asset) => asset.entityType === "app" && asset.id === appId)).toBe(true);
+    expect(summaries.some((asset) => asset.entityType === "script" && asset.id === scriptId)).toBe(
+      true,
+    );
     expect(summaries.some((asset) => asset.entityType === "file")).toBe(true);
+    const expectedChecked = getDb()
+      .prepare<{ count: number }, []>(
+        `SELECT
+           (SELECT COUNT(*) FROM agent_tasks) +
+           (SELECT COUNT(*) FROM workflows) +
+           (SELECT COUNT(*) FROM scheduled_tasks) +
+           (SELECT COUNT(*) FROM pages) +
+           (SELECT COUNT(*) FROM apps) +
+           (SELECT COUNT(*) FROM scripts) +
+           (SELECT COUNT(*) FROM asset_key_mappings) AS count`,
+      )
+      .get()!.count;
+    expect(auditAssetKeys(getDb()).checked).toBe(expectedChecked);
     expect(JSON.stringify(summaries)).not.toContain("scheduled work");
     expect(JSON.stringify(summaries)).not.toContain("<p>ok</p>");
+  });
+
+  test("app and script moves update keys and write typed history rows", () => {
+    expect(
+      moveAssetKey({ entityType: "app", id: appId, key: "shared/products/", changedBy: userId }),
+    ).toBe(true);
+    expect(
+      moveAssetKey({
+        entityType: "script",
+        id: scriptId,
+        key: "shared/automation/",
+        changedBy: userId,
+      }),
+    ).toBe(true);
+
+    expect(
+      getDb()
+        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
+        .get(appId),
+    ).toEqual({ key: "shared/products/" });
+    expect(
+      getDb()
+        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
+        .get(scriptId),
+    ).toEqual({ key: "shared/automation/" });
+    expect(
+      getDb()
+        .prepare<{ entity_type: string; new_key: string }, [string, string]>(
+          "SELECT entity_type, new_key FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
+        )
+        .all(appId, scriptId),
+    ).toEqual([
+      { entity_type: "app", new_key: "shared/products/" },
+      { entity_type: "script", new_key: "shared/automation/" },
+    ]);
   });
 
   test("prefix filters treat SQL wildcard characters as literal key content", () => {

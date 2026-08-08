@@ -1,6 +1,6 @@
 # Asset Namespaces
 
-Use an asset `key` as directory-like grouping metadata across tasks, workflows, schedules, pages, and mapped provider files. Keep identity separate: entity IDs remain authoritative, task `contextKey` remains routing context, and many assets may intentionally share one key.
+Use an asset `key` as directory-like grouping metadata across tasks, workflows, schedules, pages, apps, scripts, and mapped provider files. Keep identity separate: entity IDs remain authoritative, task `contextKey` remains routing context, and many assets may intentionally share one key.
 
 ## Choose a namespace
 
@@ -29,7 +29,7 @@ Use entity list tools with `key` for an exact namespace or `keyPrefix` for a sub
 ```js
 const result = await window.swarmSdk.assets.list({
   keyPrefix: "shared/releases/",
-  types: "task,workflow,schedule,page,file",
+  types: "task,workflow,schedule,page,app,script,file",
   limit: 100,
 });
 ```

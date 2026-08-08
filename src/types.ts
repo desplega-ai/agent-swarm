@@ -25,7 +25,15 @@ export const AssetKeySchema = z
     "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form.",
   );
 
-export const AssetEntityTypeSchema = z.enum(["task", "workflow", "schedule", "page", "file"]);
+export const AssetEntityTypeSchema = z.enum([
+  "task",
+  "workflow",
+  "schedule",
+  "page",
+  "app",
+  "script",
+  "file",
+]);
 export type AssetEntityType = z.infer<typeof AssetEntityTypeSchema>;
 
 export const AssetProviderRefSchema = z

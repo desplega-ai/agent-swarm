@@ -34,6 +34,8 @@ describe("asset namespace key normalization", () => {
   test("builds resource-specific defaults inside the shared namespace", () => {
     expect(defaultAssetKey("task", "ABC-123")).toBe("shared/task:abc-123/");
     expect(defaultAssetKey("workflow", "workflow-id")).toBe("shared/workflow:workflow-id/");
+    expect(defaultAssetKey("app", "APP-ID")).toBe("shared/app:app-id/");
+    expect(defaultAssetKey("script", "SCRIPT-ID")).toBe("shared/script:script-id/");
     expect(defaultAssetKey("fs:agent-fs", "mapping-id")).toBe("shared/fs:agent-fs:mapping-id/");
   });
 

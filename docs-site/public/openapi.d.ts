@@ -3174,7 +3174,7 @@ export interface paths {
                                 /** @enum {string} */
                                 code: "missing-key" | "noncanonical-key" | "unknown-personal-user" | "missing-provider-mapping" | "provider-mapping-drift";
                                 /** @enum {string} */
-                                entityType: "task" | "workflow" | "schedule" | "page" | "file";
+                                entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
                                 entityId: string;
                                 message: string;
                             }[];
@@ -3216,7 +3216,7 @@ export interface paths {
                 query?: {
                     /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                     keyPrefix?: string;
-                    /** @description Comma-separated task,workflow,schedule,page,file list */
+                    /** @description Comma-separated task,workflow,schedule,page,app,script,file list */
                     types?: string;
                     limit?: number;
                 };
@@ -3325,6 +3325,180 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/assets/app/{id}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Move an app to another logical namespace */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        key: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Asset namespace updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
+                            id: string;
+                            /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                            key: string;
+                        };
+                    };
+                };
+                /** @description Invalid namespace */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Move not authorized */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Asset not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Moves blocked until audit warnings are repaired */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/assets/script/{id}/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Move a script to another logical namespace */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                        key: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Asset namespace updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
+                            id: string;
+                            /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                            key: string;
+                        };
+                    };
+                };
+                /** @description Invalid namespace */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Move not authorized */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Asset not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Moves blocked until audit warnings are repaired */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/assets/{entityType}/{id}/key": {
         parameters: {
             query?: never;
@@ -3347,7 +3521,7 @@ export interface paths {
                 query?: never;
                 header?: never;
                 path: {
-                    entityType: "task" | "workflow" | "schedule" | "page" | "file";
+                    entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
                     id: string;
                 };
                 cookie?: never;
@@ -3369,7 +3543,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             /** @enum {string} */
-                            entityType: "task" | "workflow" | "schedule" | "page" | "file";
+                            entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
                             id: string;
                             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
                             key: string;
@@ -19336,7 +19510,7 @@ export interface components {
         };
         AssetSummary: {
             /** @enum {string} */
-            entityType: "task" | "workflow" | "schedule" | "page" | "file";
+            entityType: "task" | "workflow" | "schedule" | "page" | "app" | "script" | "file";
             id: string;
             /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
             key: string;

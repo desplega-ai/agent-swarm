@@ -26,6 +26,7 @@ setDefaultTimeout(120_000);
 
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const CONFIG_SECRET_READER_ROLE_ID = "rbac-test-config-secret-reader";
+const APP_MANAGER_ROLE_ID = "rbac-test-app-manager";
 const CONFIG_SECRET_KEY = "RBAC_ADMISSION_SECRET";
 const CONFIG_SECRET_VALUE = "rbac-admission-secret-value";
 
@@ -75,6 +76,29 @@ function grantUserConfigSecretRead(dbPath: string, userId: string): void {
         `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
          VALUES ('user', ?, ?)`,
       ).run(userId, CONFIG_SECRET_READER_ROLE_ID);
+    })();
+  } finally {
+    db.close();
+  }
+}
+
+function grantUserAppManage(dbPath: string, userId: string): void {
+  const db = new Database(dbPath);
+  try {
+    db.run("PRAGMA busy_timeout = 5000");
+    db.transaction(() => {
+      db.prepare(
+        `INSERT OR IGNORE INTO roles (id, name, description, isBuiltin, grantsAll)
+         VALUES (?, ?, ?, 0, 0)`,
+      ).run(APP_MANAGER_ROLE_ID, "app-manager", "Test app manager");
+      db.prepare("INSERT OR IGNORE INTO role_permissions (roleId, verb) VALUES (?, ?)").run(
+        APP_MANAGER_ROLE_ID,
+        "app.manage",
+      );
+      db.prepare(
+        `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
+         VALUES ('user', ?, ?)`,
+      ).run(userId, APP_MANAGER_ROLE_ID);
     })();
   } finally {
     db.close();
@@ -205,6 +229,21 @@ describe("RBAC admission over real HTTP", () => {
     expect(defaultCreate.status).toBe(201);
     const taskId = defaultCreate.body.id as string;
 
+    const appCreate = await api(server.base, "POST", "/api/apps", {
+      body: {
+        name: "RBAC admission app",
+        definition: {
+          models: { note: { columns: { title: { kind: "string" } } } },
+          pages: {
+            main: { root: "root", elements: { root: { type: "Container", props: {} } } },
+          },
+          defaultPage: "main",
+        },
+      },
+    });
+    expect(appCreate.status).toBe(201);
+    const appId = appCreate.body.app.id as string;
+
     rewriteUserToRequester(dbPath, userId);
 
     const deniedTaskCreate = await api(server.base, "POST", "/api/tasks", {
@@ -213,6 +252,26 @@ describe("RBAC admission over real HTTP", () => {
     });
     expect(deniedTaskCreate.status).toBe(403);
     expect(deniedTaskCreate.body.error).toContain("admission: route has no permission verb");
+
+    const deniedAppMove = await api(server.base, "PATCH", `/api/assets/app/${appId}/key`, {
+      bearer: userToken,
+      body: { key: "shared/rbac-denied/" },
+    });
+    expect(deniedAppMove.status).toBe(403);
+    expect(deniedAppMove.body.error).toContain("missing permission 'app.manage'");
+
+    grantUserAppManage(dbPath, userId);
+
+    const allowedAppMove = await api(server.base, "PATCH", `/api/assets/app/${appId}/key`, {
+      bearer: userToken,
+      body: { key: "shared/rbac-allowed/" },
+    });
+    expect(allowedAppMove.status).toBe(200);
+    expect(allowedAppMove.body).toEqual({
+      entityType: "app",
+      id: appId,
+      key: "shared/rbac-allowed/",
+    });
 
     const allowedFavorite = await api(server.base, "PUT", "/api/favorites", {
       bearer: userToken,
@@ -311,6 +370,7 @@ describe("RBAC admission over real HTTP", () => {
     expect(denyRows.map((row) => row.resourceId).sort()).toEqual([
       "GET /api/agents/{id}/mcp-servers",
       "GET /api/scripts/{id}/apis/{endpointId}/secret",
+      "PATCH /api/assets/app/{id}/key",
       "POST /api/scripts/{id}/apis",
       "POST /api/tasks",
     ]);
@@ -333,6 +393,14 @@ describe("RBAC admission over real HTTP", () => {
         (row) =>
           row.resourceId === "PUT /api/favorites" &&
           row.verb === "favorite.write.own" &&
+          row.decision === "allow",
+      ),
+    ).toBe(true);
+    expect(
+      userHttpRows.some(
+        (row) =>
+          row.resourceId === "PATCH /api/assets/app/{id}/key" &&
+          row.verb === "app.manage" &&
           row.decision === "allow",
       ),
     ).toBe(true);

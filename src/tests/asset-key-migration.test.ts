@@ -3,6 +3,7 @@ import { closeDb, createTaskExtended, createUser, getDb, initDb } from "../be/db
 
 const FRESH_DB = "./test-asset-key-migration-fresh.sqlite";
 const HISTORICAL_DB = "./test-asset-key-migration-historical.sqlite";
+const HISTORY_REBUILD_DB = "./test-asset-key-migration-history-rebuild.sqlite";
 const LEGACY_STATUS_DB = "./test-asset-key-migration-legacy-status.sqlite";
 
 const globals = globalThis as typeof globalThis & {
@@ -33,15 +34,59 @@ function dropMigration115ForHistoricalFixture(): void {
     "idx_workflows_asset_key",
     "idx_scheduled_tasks_asset_key",
     "idx_pages_asset_key",
+    "idx_apps_asset_key",
+    "idx_scripts_asset_key",
   ]) {
     db.run(`DROP INDEX IF EXISTS "${index}"`);
   }
   db.run("DROP TABLE asset_key_history");
   db.run("DROP TABLE asset_key_mappings");
-  for (const table of ["agent_tasks", "workflows", "scheduled_tasks", "pages"]) {
+  for (const table of ["agent_tasks", "workflows", "scheduled_tasks", "pages", "apps", "scripts"]) {
     db.run(`ALTER TABLE "${table}" DROP COLUMN "key"`);
   }
-  db.run("DELETE FROM _migrations WHERE version = 115");
+  db.run("DELETE FROM _migrations WHERE version IN (115, 129)");
+}
+
+function dropMigration129ForHistoricalFixture(): void {
+  const db = getDb();
+  for (const trigger of [
+    "validate_apps_asset_key_insert",
+    "validate_apps_asset_key_update",
+    "validate_scripts_asset_key_insert",
+    "validate_scripts_asset_key_update",
+  ]) {
+    db.run(`DROP TRIGGER "${trigger}"`);
+  }
+  db.run("DROP INDEX idx_apps_asset_key");
+  db.run("DROP INDEX idx_scripts_asset_key");
+  db.run('ALTER TABLE apps DROP COLUMN "key"');
+  db.run('ALTER TABLE scripts DROP COLUMN "key"');
+
+  db.run(`
+    CREATE TABLE asset_key_history_before_129 (
+      id           TEXT PRIMARY KEY,
+      entity_type  TEXT NOT NULL CHECK (entity_type IN ('task', 'workflow', 'schedule', 'page', 'file')),
+      entity_id    TEXT NOT NULL,
+      previous_key TEXT,
+      new_key      TEXT NOT NULL,
+      changed_by   TEXT REFERENCES users(id),
+      changed_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )
+  `);
+  db.run(`
+    INSERT INTO asset_key_history_before_129 (
+      id, entity_type, entity_id, previous_key, new_key, changed_by, changed_at
+    )
+    SELECT id, entity_type, entity_id, previous_key, new_key, changed_by, changed_at
+    FROM asset_key_history
+  `);
+  db.run("DROP TABLE asset_key_history");
+  db.run("ALTER TABLE asset_key_history_before_129 RENAME TO asset_key_history");
+  db.run(`
+    CREATE INDEX idx_asset_key_history_entity
+      ON asset_key_history(entity_type, entity_id, changed_at DESC)
+  `);
+  db.run("DELETE FROM _migrations WHERE version = 129");
 }
 
 beforeAll(async () => {
@@ -50,6 +95,7 @@ beforeAll(async () => {
   closeDb();
   await removeDb(FRESH_DB);
   await removeDb(HISTORICAL_DB);
+  await removeDb(HISTORY_REBUILD_DB);
   await removeDb(LEGACY_STATUS_DB);
   initDb(FRESH_DB);
 });
@@ -60,12 +106,20 @@ afterAll(async () => {
   globals.__savedAssetKeyTemplate = undefined;
   await removeDb(FRESH_DB);
   await removeDb(HISTORICAL_DB);
+  await removeDb(HISTORY_REBUILD_DB);
   await removeDb(LEGACY_STATUS_DB);
 });
 
-describe("migration 115 asset namespace keys", () => {
+describe("asset namespace key migrations", () => {
   test("fresh schema has mandatory defaults, non-unique indexes, triggers, and mapping tables", () => {
-    for (const table of ["agent_tasks", "workflows", "scheduled_tasks", "pages"]) {
+    for (const table of [
+      "agent_tasks",
+      "workflows",
+      "scheduled_tasks",
+      "pages",
+      "apps",
+      "scripts",
+    ]) {
       const column = getDb()
         .prepare<{ name: string; notnull: number; dflt_value: string | null }, []>(
           `PRAGMA table_info("${table}")`,
@@ -89,6 +143,8 @@ describe("migration 115 asset namespace keys", () => {
       "idx_workflows_asset_key",
       "idx_scheduled_tasks_asset_key",
       "idx_pages_asset_key",
+      "idx_apps_asset_key",
+      "idx_scripts_asset_key",
     ]) {
       expect(indexes.has(index)).toBe(true);
     }
@@ -98,7 +154,7 @@ describe("migration 115 asset namespace keys", () => {
           "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'validate_%asset_key%'",
         )
         .get()?.count,
-    ).toBeGreaterThanOrEqual(8);
+    ).toBeGreaterThanOrEqual(12);
     for (const table of ["asset_key_mappings", "asset_key_history"]) {
       expect(
         getDb()
@@ -108,6 +164,13 @@ describe("migration 115 asset namespace keys", () => {
           .get(table)?.present,
       ).toBe(1);
     }
+    const historySchema = getDb()
+      .prepare<{ sql: string }, []>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'asset_key_history'",
+      )
+      .get()!.sql;
+    expect(historySchema).toContain("'app'");
+    expect(historySchema).toContain("'script'");
   });
 
   test("old insert statements may omit key and repeated shared namespaces are valid", () => {
@@ -132,14 +195,90 @@ describe("migration 115 asset namespace keys", () => {
       `INSERT INTO pages (agentId, slug, title, contentType, authMode, body)
        VALUES ('legacy-agent', 'legacy-page', 'Legacy page', 'text/html', 'authed', '<p>ok</p>')`,
     );
+    getDb().run(
+      `INSERT INTO apps (id, name, definition, created_at, updated_at)
+       VALUES (?, 'legacy app', '{}', ?, ?)`,
+      [crypto.randomUUID(), now, now],
+    );
+    getDb().run(
+      `INSERT INTO scripts (
+         id, name, scope, source, description, intent, signatureJson,
+         contentHash, createdAt, updatedAt
+       ) VALUES (?, 'legacy-script', 'global', 'export default () => null', '', '', '{}', '', ?, ?)`,
+      [crypto.randomUUID(), now, now],
+    );
 
-    for (const table of ["agent_tasks", "workflows", "scheduled_tasks", "pages"]) {
+    for (const table of [
+      "agent_tasks",
+      "workflows",
+      "scheduled_tasks",
+      "pages",
+      "apps",
+      "scripts",
+    ]) {
       const count = getDb()
         .prepare<{ count: number }, []>(
           `SELECT COUNT(*) AS count FROM "${table}" WHERE "key" = 'shared/'`,
         )
         .get()?.count;
       expect(count).toBeGreaterThan(0);
+    }
+  });
+
+  test("migration 129 preserves existing history rows while widening entity types", () => {
+    closeDb();
+    initDb(HISTORY_REBUILD_DB);
+
+    const historyId = crypto.randomUUID();
+    const entityId = crypto.randomUUID();
+    const user = createUser({ name: "History User", email: "history@example.com" });
+    const changedAt = "2026-08-08T12:34:56.789Z";
+    getDb().run(
+      `INSERT INTO asset_key_history (
+         id, entity_type, entity_id, previous_key, new_key, changed_by, changed_at
+       ) VALUES (?, 'task', ?, 'shared/inbox/', 'shared/archive/', ?, ?)`,
+      [historyId, entityId, user.id, changedAt],
+    );
+
+    dropMigration129ForHistoricalFixture();
+    closeDb();
+    initDb(HISTORY_REBUILD_DB);
+
+    try {
+      expect(
+        getDb()
+          .prepare<
+            {
+              id: string;
+              entity_type: string;
+              entity_id: string;
+              previous_key: string;
+              new_key: string;
+              changed_by: string;
+              changed_at: string;
+            },
+            [string]
+          >("SELECT * FROM asset_key_history WHERE id = ?")
+          .get(historyId),
+      ).toEqual({
+        id: historyId,
+        entity_type: "task",
+        entity_id: entityId,
+        previous_key: "shared/inbox/",
+        new_key: "shared/archive/",
+        changed_by: user.id,
+        changed_at: changedAt,
+      });
+      expect(
+        getDb()
+          .prepare<{ count: number }, []>(
+            "SELECT COUNT(*) AS count FROM _migrations WHERE version = 129",
+          )
+          .get()?.count,
+      ).toBe(1);
+    } finally {
+      closeDb();
+      initDb(FRESH_DB);
     }
   });
 
@@ -166,6 +305,13 @@ describe("migration 115 asset namespace keys", () => {
         taskId,
       ]),
     ).not.toThrow();
+
+    for (const table of ["apps", "scripts"]) {
+      const id = getDb().prepare<{ id: string }, []>(`SELECT id FROM ${table} LIMIT 1`).get()!.id;
+      expect(() =>
+        getDb().run(`UPDATE ${table} SET "key" = ? WHERE id = ?`, ["INVALID", id]),
+      ).toThrow("invalid asset namespace key");
+    }
   });
 
   test("upgrades a historical database, backfills attachment mappings, and is repeatable", async () => {
@@ -176,6 +322,8 @@ describe("migration 115 asset namespace keys", () => {
     const now = new Date().toISOString();
     const taskId = crypto.randomUUID();
     const attachmentId = crypto.randomUUID();
+    const appId = crypto.randomUUID();
+    const scriptId = crypto.randomUUID();
     getDb().run(
       `INSERT INTO agent_tasks (id, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, 'historical task', 'unassigned', 'api', ?, ?)`,
@@ -187,6 +335,18 @@ describe("migration 115 asset namespace keys", () => {
        VALUES (?, ?, 'artifact.md', 'agent-fs', 'reports/artifact.md', 'agent-fs',
                'reports/artifact.md', 'org', 'drive')`,
       [attachmentId, taskId],
+    );
+    getDb().run(
+      `INSERT INTO apps (id, name, definition, created_at, updated_at)
+       VALUES (?, 'historical app', '{}', ?, ?)`,
+      [appId, now, now],
+    );
+    getDb().run(
+      `INSERT INTO scripts (
+         id, name, scope, source, description, intent, signatureJson,
+         contentHash, createdAt, updatedAt
+       ) VALUES (?, 'historical-script', 'global', 'export default () => null', '', '', '{}', '', ?, ?)`,
+      [scriptId, now, now],
     );
     closeDb();
 
@@ -201,16 +361,22 @@ describe("migration 115 asset namespace keys", () => {
         )
         .get("reports/artifact.md"),
     ).toEqual({ key: "shared/", source_entity_id: attachmentId });
+    expect(getDb().query('SELECT "key" FROM apps WHERE id = ?').get(appId)).toEqual({
+      key: "shared/",
+    });
+    expect(getDb().query('SELECT "key" FROM scripts WHERE id = ?').get(scriptId)).toEqual({
+      key: "shared/",
+    });
 
     closeDb();
     expect(() => initDb(HISTORICAL_DB)).not.toThrow();
     expect(
       getDb()
         .prepare<{ count: number }, []>(
-          "SELECT COUNT(*) AS count FROM _migrations WHERE version = 115",
+          "SELECT COUNT(*) AS count FROM _migrations WHERE version IN (115, 129)",
         )
         .get()?.count,
-    ).toBe(1);
+    ).toBe(2);
   });
 
   test("preserves asset keys when upgrading a legacy restrictive task status schema", () => {

@@ -1,7 +1,14 @@
 export const DEFAULT_ASSET_KEY = "shared/" as const;
 export const ASSET_KEY_MAX_LENGTH = 255;
 
-export type AssetKeyResource = "task" | "workflow" | "schedule" | "page" | `fs:${string}`;
+export type AssetKeyResource =
+  | "task"
+  | "workflow"
+  | "schedule"
+  | "page"
+  | "app"
+  | "script"
+  | `fs:${string}`;
 
 export type SharedAssetNamespace = {
   root: "shared";

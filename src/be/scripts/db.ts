@@ -1,3 +1,4 @@
+import { defaultAssetKey } from "../../assets/key";
 import type {
   ScriptApiAuthMode,
   ScriptApiRecord,
@@ -123,6 +124,7 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
         [
           string,
           string,
+          string,
           ScriptScope,
           string | null,
           string,
@@ -142,15 +144,16 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
         ]
       >(
         `INSERT INTO scripts (
-          id, name, scope, scopeId, source, description, intent, signatureJson,
+          id, "key", name, scope, scopeId, source, description, intent, signatureJson,
           argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, createdByAgentId, createdAt, updatedAt,
           created_by, updated_by
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *`,
       )
       .get(
         id,
+        defaultAssetKey("script", id),
         args.name,
         args.scope,
         scopeId,

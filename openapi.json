@@ -850,6 +850,8 @@
               "workflow",
               "schedule",
               "page",
+              "app",
+              "script",
               "file"
             ]
           },
@@ -11213,6 +11215,8 @@
                               "workflow",
                               "schedule",
                               "page",
+                              "app",
+                              "script",
                               "file"
                             ]
                           },
@@ -11286,10 +11290,10 @@
           {
             "schema": {
               "type": "string",
-              "description": "Comma-separated task,workflow,schedule,page,file list"
+              "description": "Comma-separated task,workflow,schedule,page,app,script,file list"
             },
             "required": false,
-            "description": "Comma-separated task,workflow,schedule,page,file list",
+            "description": "Comma-separated task,workflow,schedule,page,app,script,file list",
             "name": "types",
             "in": "query"
           },
@@ -11424,6 +11428,254 @@
         }
       }
     },
+    "/api/assets/app/{id}/key": {
+      "patch": {
+        "summary": "Move an app to another logical namespace",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asset namespace updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entityType": {
+                      "type": "string",
+                      "enum": [
+                        "task",
+                        "workflow",
+                        "schedule",
+                        "page",
+                        "app",
+                        "script",
+                        "file"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255,
+                      "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                    }
+                  },
+                  "required": [
+                    "entityType",
+                    "id",
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid namespace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Move not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Moves blocked until audit warnings are repaired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/assets/script/{id}/key": {
+      "patch": {
+        "summary": "Move a script to another logical namespace",
+        "tags": [
+          "Assets"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255,
+                    "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                  }
+                },
+                "required": [
+                  "key"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Asset namespace updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entityType": {
+                      "type": "string",
+                      "enum": [
+                        "task",
+                        "workflow",
+                        "schedule",
+                        "page",
+                        "app",
+                        "script",
+                        "file"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255,
+                      "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                    }
+                  },
+                  "required": [
+                    "entityType",
+                    "id",
+                    "key"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid namespace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Move not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Asset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Moves blocked until audit warnings are repaired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/assets/{entityType}/{id}/key": {
       "patch": {
         "summary": "Move an asset to another logical namespace",
@@ -11445,6 +11697,8 @@
                 "workflow",
                 "schedule",
                 "page",
+                "app",
+                "script",
                 "file"
               ]
             },
@@ -11497,6 +11751,8 @@
                         "workflow",
                         "schedule",
                         "page",
+                        "app",
+                        "script",
                         "file"
                       ]
                     },

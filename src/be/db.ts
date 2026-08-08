@@ -3936,6 +3936,22 @@ function assetSummaryQueries(types: Set<AssetEntityType>): string[] {
        FROM pages`,
     );
   }
+  if (types.has("app")) {
+    queries.push(
+      `SELECT 'app' AS entityType, id, "key", name AS label,
+              updated_at AS updatedAt, NULL AS providerId, NULL AS providerOrgId,
+              NULL AS providerDriveId, NULL AS providerKey
+       FROM apps`,
+    );
+  }
+  if (types.has("script")) {
+    queries.push(
+      `SELECT 'script' AS entityType, id, "key", name AS label,
+              updatedAt, NULL AS providerId, NULL AS providerOrgId,
+              NULL AS providerDriveId, NULL AS providerKey
+       FROM scripts`,
+    );
+  }
   if (types.has("file")) {
     queries.push(
       `SELECT 'file' AS entityType, id, "key", provider_key AS label,
@@ -3951,7 +3967,9 @@ function assetSummaryQueries(types: Set<AssetEntityType>): string[] {
 
 export function listAssetSummaries(filters?: AssetSummaryFilters): AssetSummary[] {
   const requestedTypes = new Set<AssetEntityType>(
-    filters?.types?.length ? filters.types : ["task", "workflow", "schedule", "page", "file"],
+    filters?.types?.length
+      ? filters.types
+      : ["task", "workflow", "schedule", "page", "app", "script", "file"],
   );
   const queries = assetSummaryQueries(requestedTypes);
   if (queries.length === 0) return [];
@@ -4012,6 +4030,18 @@ function currentAssetKey(entityType: AssetEntityType, id: string): string | null
       return (
         getDb()
           .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM pages WHERE id = ?')
+          .get(id)?.key ?? null
+      );
+    case "app":
+      return (
+        getDb()
+          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
+          .get(id)?.key ?? null
+      );
+    case "script":
+      return (
+        getDb()
+          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
           .get(id)?.key ?? null
       );
     case "file":
@@ -4103,6 +4133,17 @@ export function moveAssetKey(input: {
         break;
       case "page":
         getDb().run('UPDATE pages SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
+          key,
+          now,
+          input.changedBy ?? null,
+          input.id,
+        ]);
+        break;
+      case "app":
+        getDb().run('UPDATE apps SET "key" = ?, updated_at = ? WHERE id = ?', [key, now, input.id]);
+        break;
+      case "script":
+        getDb().run('UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
           key,
           now,
           input.changedBy ?? null,
