@@ -130,6 +130,12 @@ import researchingContent from "../../../templates/skills/researching/content.md
 };
 import reviewingConfig from "../../../templates/skills/reviewing/config.json" with { type: "text" };
 import reviewingContent from "../../../templates/skills/reviewing/content.md" with { type: "text" };
+import scheduledTaskResilienceConfig from "../../../templates/skills/scheduled-task-resilience/config.json" with {
+  type: "text",
+};
+import scheduledTaskResilienceContent from "../../../templates/skills/scheduled-task-resilience/content.md" with {
+  type: "text",
+};
 import scriptBuilderConfig from "../../../templates/skills/script-builder/config.json" with {
   type: "text",
 };
@@ -280,6 +286,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: questioningConfig, body: questioningContent },
   { config: researchingConfig, body: researchingContent },
   { config: reviewingConfig, body: reviewingContent },
+  { config: scheduledTaskResilienceConfig, body: scheduledTaskResilienceContent },
   { config: scriptBuilderConfig, body: scriptBuilderContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
   { config: stepRunningConfig, body: stepRunningContent },

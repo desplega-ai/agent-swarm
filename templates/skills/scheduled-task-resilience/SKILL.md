@@ -1,0 +1,86 @@
+---
+name: scheduled-task-resilience
+description: Guardrails for polling, scheduled jobs, and long-running external operations. Use whenever a task waits on CI, builds, deploys, browser jobs, or another asynchronous API so work survives heartbeat checks without duplicate delivery.
+---
+
+# Scheduled Task Resilience
+
+Use these rules whenever a scheduled or regular task polls or waits on a long-running operation. They prevent heartbeat collisions, lost work, duplicate delivery, and sessions that fail after holding an external job open too long.
+
+## Rule 1 — Never use `ScheduleWakeup` with `delaySeconds >= 300`
+
+The runtime heartbeat staleness threshold may sit near the same window as the model prompt-cache TTL. Sleeping for five minutes or longer can therefore look like a dead worker and cause the heartbeat sweep to fail the task mid-poll.
+
+Instead:
+
+- For waits under four minutes, use a short shell sleep loop with no more than 270 seconds per iteration, then re-check.
+- For genuinely long waits such as CI builds, releases, or deploys, prefer a durable workflow or a follow-up task over `ScheduleWakeup`.
+- Record progress between iterations as described in Rule 3.
+
+```bash
+# Short waits only. Resolve PR_NUMBER from the current task or repository context.
+for attempt in 1 2 3 4 5; do
+  status=$(gh pr checks "$PR_NUMBER" --json state --jq '.[0].state')
+  [ "$status" = "SUCCESS" ] && break
+  sleep 240
+done
+```
+
+## Rule 2 — Tag retry tasks with `reboot-retry`
+
+Any task automatically retried after a session loss must include `reboot-retry` in its tags. If you recreate a lost task manually, add the same tag so the deployment's boot-sweep logic can identify it correctly.
+
+Resolve the original task from the current task's parent or retry metadata. Do not copy a task ID from another incident or deployment.
+
+## Rule 3 — Long polls must store progress every two to three minutes
+
+Workers that poll silently can look stale to the heartbeat sweep.
+
+Inside any polling block, call `store-progress` with a concrete progress message such as `polling CI status (attempt 3/10)`. Even when the remote state has not changed, the progress update records that the worker is still active.
+
+Resolve the active task ID from the current task context. Never embed an agent ID, task ID, organization ID, or other deployment-specific identifier in a reusable polling script.
+
+## Rule 4 — Diagnose repeated scheduled-task failures before retrying
+
+Two immediate failures with the same heartbeat-staleness reason usually indicate an infrastructure or lifecycle problem, not a transient job failure. Do not create a third identical attempt.
+
+- A worker should use the swarm's escalation channel or task handoff mechanism to report repeated heartbeat termination.
+- A lead should resolve the configured operator escalation destination from deployment or task metadata rather than hardcoding a Slack channel.
+- Include the affected task IDs in the incident report by reading them from the failed task records at runtime.
+
+## Rule 5 — Check for duplicate delivery before posting
+
+Concurrent sessions can pick up equivalent scheduled work. Before sending scheduled output to Slack, email, a blog, or another external destination:
+
+1. Query recent tasks using the current schedule ID or schedule tag.
+2. Search the destination history for an equivalent delivery in the relevant time window.
+3. If a recent completion already delivered the result, stop and record the duplicate detection with `store-progress`.
+
+Derive the schedule ID, destination, and time window from the current task and schedule records. Do not reuse identifiers or recipient addresses copied from another task.
+
+## Rule 6 — After the deliverable ships, complete and exit
+
+Do not call `ScheduleWakeup` merely to watch CI, a merge, or another downstream state after the requested deliverable already exists. A suspended post-shipping session can still be reaped and mark successful work as failed.
+
+Choose one path:
+
+1. **Workflow-driven task:** call `store-progress` with `status: "completed"` and the deliverable details, then exit. Let the workflow's next node handle downstream state.
+2. **Human-requested task needing later confirmation:** report the deliverable URL and current downstream status, complete the task, and let the lead or automation create a follow-up if the downstream check fails.
+3. **Rare in-process wait:** use a short shell sleep loop and store progress on every iteration. Do not suspend the session with `ScheduleWakeup`.
+
+The key distinction is whether work remains. `ScheduleWakeup` is only for a brief wait in the middle of active work; it is not a post-delivery monitoring mechanism.
+
+## Rule 7 — Use fire-then-follow-up for slow external jobs
+
+A worker session is not a durable job runner. Polling an external asynchronous API for tens of minutes can outlive the worker heartbeat even when the external job continues successfully.
+
+For browser automation, large data pulls, media processing, or any other external job expected to exceed roughly 20 minutes:
+
+1. Start the external actions.
+2. Store the returned action or task IDs, destination IDs, and a one-line resume recipe with `store-progress`.
+3. Persist the same recovery state in agent-fs, a durable workflow step, or another deployment-approved store.
+4. Complete the fire step and run collection, filtering, deduplication, and delivery in a fresh follow-up task.
+
+Resolve every identifier from the external API response and current task metadata. Never bake a prior run's IDs into the skill or follow-up template.
+
+When historical incident detail is useful, search the deployment's memory registry for heartbeat-reaper and long-running external-poll records instead of depending on copied task IDs or worker names.

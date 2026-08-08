@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "scheduled-task-resilience",
+  "displayName": "Scheduled Task Resilience",
+  "slug": "scheduled-task-resilience",
+  "title": "Scheduled Task Resilience",
+  "description": "Guardrails for polling, scheduled jobs, and long-running external operations. Use whenever a task waits on CI, builds, deploys, browser jobs, or another asynchronous API so work survives heartbeat checks without duplicate delivery.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["scheduling", "polling", "resilience"]
+}
