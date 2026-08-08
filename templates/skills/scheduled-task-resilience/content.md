@@ -13,13 +13,19 @@ Instead:
 - Between cycles, record progress as described in Rule 3, then start the next cycle in the next turn.
 - For genuinely long waits such as CI builds, releases, or deploys, prefer a durable workflow or a follow-up task over `ScheduleWakeup`.
 
+Aggregate **every** check run before you decide the poll is over. Reading a single row such as `.[0].state` reports one check and can look terminal while another required check is still pending or failing. `gh pr checks` also encodes the aggregate in its exit code: `0` all passed, `8` at least one pending, `1` at least one failed.
+
 ```bash
 # ONE cycle per agent turn. Resolve PR_NUMBER from the current task or repository context.
 sleep 240
-gh pr checks "$PR_NUMBER" --json state --jq '.[0].state'
+gh pr checks "$PR_NUMBER" --json name,state,bucket \
+  --jq 'if   any(.[]; .bucket == "pending") then "PENDING"
+        elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "FAILING"
+        else "PASSED" end'
+echo "gh_exit=$?"
 ```
 
-If the state is not yet terminal, call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
+If the aggregate is anything other than `PASSED` — or `gh_exit` is `8` — call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
 
 ## Rule 2 — Tag retry tasks with `reboot-retry`
 
