@@ -13,18 +13,18 @@ The runtime heartbeat staleness threshold may sit near the same window as the mo
 
 Instead:
 
-- For waits under four minutes, use a short shell sleep loop with no more than 270 seconds per iteration, then re-check.
+- For waits under four minutes, run **one** bounded sleep of at most 240 seconds followed by a **single** status check, as one shell call, then return control to the agent turn.
+- **Never batch sleeps into a single shell invocation.** A loop of five 240-second sleeps blocks the session for twenty minutes with no opportunity to record progress — the same staleness failure `ScheduleWakeup` causes, just spelled differently.
+- Between cycles, record progress as described in Rule 3, then start the next cycle in the next turn.
 - For genuinely long waits such as CI builds, releases, or deploys, prefer a durable workflow or a follow-up task over `ScheduleWakeup`.
-- Record progress between iterations as described in Rule 3.
 
 ```bash
-# Short waits only. Resolve PR_NUMBER from the current task or repository context.
-for attempt in 1 2 3 4 5; do
-  status=$(gh pr checks "$PR_NUMBER" --json state --jq '.[0].state')
-  [ "$status" = "SUCCESS" ] && break
-  sleep 240
-done
+# ONE cycle per agent turn. Resolve PR_NUMBER from the current task or repository context.
+sleep 240
+gh pr checks "$PR_NUMBER" --json state --jq '.[0].state'
 ```
+
+If the state is not yet terminal, call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
 
 ## Rule 2 — Tag retry tasks with `reboot-retry`
 
@@ -36,7 +36,7 @@ Resolve the original task from the current task's parent or retry metadata. Do n
 
 Workers that poll silently can look stale to the heartbeat sweep.
 
-Inside any polling block, call `store-progress` with a concrete progress message such as `polling CI status (attempt 3/10)`. Even when the remote state has not changed, the progress update records that the worker is still active.
+After every poll cycle — that is, after each shell call that sleeps and checks once — call `store-progress` with a concrete progress message such as `polling CI status (attempt 3/10)`. Even when the remote state has not changed, the progress update records that the worker is still active. This is only possible because each cycle returns control to the agent turn, which is why Rule 1 forbids batching sleeps.
 
 Resolve the active task ID from the current task context. Never embed an agent ID, task ID, organization ID, or other deployment-specific identifier in a reusable polling script.
 
@@ -66,7 +66,7 @@ Choose one path:
 
 1. **Workflow-driven task:** call `store-progress` with `status: "completed"` and the deliverable details, then exit. Let the workflow's next node handle downstream state.
 2. **Human-requested task needing later confirmation:** report the deliverable URL and current downstream status, complete the task, and let the lead or automation create a follow-up if the downstream check fails.
-3. **Rare in-process wait:** use a short shell sleep loop and store progress on every iteration. Do not suspend the session with `ScheduleWakeup`.
+3. **Rare in-process wait:** use the single-cycle sleep-then-check pattern from Rule 1, storing progress between cycles. Do not suspend the session with `ScheduleWakeup`, and do not batch sleeps into one shell call.
 
 The key distinction is whether work remains. `ScheduleWakeup` is only for a brief wait in the middle of active work; it is not a post-delivery monitoring mechanism.
 
