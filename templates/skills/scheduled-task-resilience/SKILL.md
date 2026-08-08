@@ -18,7 +18,7 @@ Instead:
 - Between cycles, record progress as described in Rule 3, then start the next cycle in the next turn.
 - For genuinely long waits such as CI builds, releases, or deploys, prefer a durable workflow or a follow-up task over `ScheduleWakeup`.
 
-Aggregate **every** check run before you decide the poll is over. Reading a single row such as `.[0].state` reports one check and can look terminal while another required check is still pending or failing. `gh pr checks` also encodes the aggregate in its exit code: `0` all passed, `8` at least one pending, `1` at least one failed.
+Aggregate **every** check run before you decide the poll is over. Reading a single row such as `.[0].state` reports one check and can look terminal while another required check is still pending or failing.
 
 ```bash
 # ONE cycle per agent turn. Resolve PR_NUMBER from the current task or repository context.
@@ -27,10 +27,11 @@ gh pr checks "$PR_NUMBER" --json name,state,bucket \
   --jq 'if   any(.[]; .bucket == "pending") then "PENDING"
         elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "FAILING"
         else "PASSED" end'
-echo "gh_exit=$?"
 ```
 
-If the aggregate is anything other than `PASSED` — or `gh_exit` is `8` — call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
+⚠️ Do not substitute the exit code for the aggregate here. Plain `gh pr checks <pr>` exits `8` while any check is pending and `1` on failure, but **`--json` suppresses that — it exits `0` even mid-run** (verified on gh 2.97.0). A cycle that adds `--json` and then reads `$?` reports success on a still-pending PR, which is the exact bug the aggregate exists to prevent.
+
+If the aggregate is anything other than `PASSED`, call `store-progress`, then run the same cycle again in the next turn. Cap the number of cycles; once the total wait approaches the heartbeat staleness threshold, hand off to a follow-up task instead of waiting longer.
 
 ## Rule 2 — Tag retry tasks with `reboot-retry`
 
