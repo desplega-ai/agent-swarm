@@ -7,6 +7,7 @@ import {
   getActiveConnection,
   getConnections,
   getDefaultConfig,
+  isUserTokenApiKey,
   removeConnection as removeStoredConnection,
   resetConfig as resetStoredConfig,
   saveConfig,
@@ -103,6 +104,32 @@ function extractUrlParams(
   );
   if (existing) {
     activateFn(existing.id);
+    return { pendingConnection: null, pendingIdentity };
+  }
+
+  // DES-771: a user-bound `aswt_` token arriving via URL params is the embed
+  // handshake. Save + activate it silently — the ApiClient authenticates from
+  // *saved* connections only, and an embedded iframe must not be interrupted
+  // by the "Name This Connection" modal. Same-URL token connections are
+  // updated in place (token rotation / different user) instead of piling up;
+  // operator-key connections to the same URL are never clobbered.
+  if (isUserTokenApiKey(apiKey)) {
+    const sameUrlToken = connections.find(
+      (c) => c.apiUrl.replace(/\/+$/, "") === normalizedUrl && isUserTokenApiKey(c.apiKey),
+    );
+    if (sameUrlToken) {
+      updateStoredConnection(sameUrlToken.id, { apiKey });
+      activateFn(sameUrlToken.id);
+    } else {
+      let host = normalizedUrl;
+      try {
+        host = new URL(normalizedUrl).host;
+      } catch {
+        // Keep the raw URL as the label if it doesn't parse.
+      }
+      const created = addStoredConnection({ name: `embed:${host}`, apiUrl: normalizedUrl, apiKey });
+      activateFn(created.id);
+    }
     return { pendingConnection: null, pendingIdentity };
   }
 

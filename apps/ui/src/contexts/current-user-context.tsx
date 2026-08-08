@@ -22,9 +22,12 @@
  * DES-771 (embedded dashboards): when the configured API key is a user-bound
  * `aswt_` token, the server already forces requester/audit attribution to
  * that user — a localStorage picker would only misrepresent it. The provider
- * resolves identity from `GET /api/whoami` instead, never enters
- * `needs-pick`, and exposes `locked: true` so the switcher/modal stay hidden.
- * Older servers (no /api/whoami) fall back to the legacy picker flow.
+ * resolves identity from `GET /api/whoami` instead and exposes `locked: true`
+ * for EVERY token-bound tab, so no switching affordance (switcher, identity
+ * modal, ?email= auto-bind, localStorage) ever engages under a user token.
+ * Older servers (no /api/whoami) land in `needs-pick` with the picker
+ * suppressed: the tab simply has no client-side identity claim, while the
+ * server keeps attributing writes from the token.
  */
 
 import {
@@ -55,9 +58,9 @@ export interface CurrentUserContextValue {
   setUserId: (id: string) => void;
   clearUser: () => void;
   /**
-   * Identity was derived from a user-bound `aswt_` token (DES-771). Switching
+   * The tab authenticates with a user-bound `aswt_` token (DES-771). Switching
    * is blocked — `setUserId`/`clearUser` are no-ops and the switcher/identity
-   * modal must not render.
+   * modal must not render — regardless of whether /api/whoami resolved.
    */
   locked: boolean;
 }
@@ -79,28 +82,16 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const storageKey = useMemo(() => deriveStorageKey(config.apiUrl, CARD_KEY), [config.apiUrl]);
 
   // DES-771: a user-bound `aswt_` bearer fixes the tab's identity server-side
-  // — resolve it from /api/whoami instead of localStorage. "fallback" covers
-  // older servers (whoami resolves null) and the pathological case of a
-  // non-user principal behind an aswt_-looking key: both re-enter the legacy
-  // picker flow below.
+  // — resolve it from /api/whoami instead of localStorage. `locked` is true
+  // for every token-bound tab (even while whoami is in flight or when an
+  // older server lacks the route): user switching must never be available
+  // under a user token, so there is deliberately NO picker fallback.
   const tokenBound = isUserTokenApiKey(config.apiKey);
   const whoamiQuery = useWhoami(tokenBound);
-  const tokenUser =
-    tokenBound && whoamiQuery.data?.kind === "user" ? (whoamiQuery.data.user ?? null) : null;
-  const tokenResolution: "off" | "pending" | "resolved" | "fallback" = !tokenBound
-    ? "off"
-    : whoamiQuery.isPending
-      ? "pending"
-      : tokenUser
-        ? "resolved"
-        : "fallback";
-  const locked = tokenResolution === "resolved";
+  const locked = tokenBound;
 
-  // Token-bound tabs never need the full user directory — skip the poll
-  // unless the legacy picker flow is (or may become) active.
-  const usersQuery = useUsers({
-    enabled: tokenResolution === "off" || tokenResolution === "fallback",
-  });
+  // Token-bound tabs never need the full user directory — skip the poll.
+  const usersQuery = useUsers({ enabled: !tokenBound });
   const [storedUserId, setStoredUserId] = useState<string | null>(() =>
     readStoredUserId(storageKey),
   );
@@ -157,10 +148,9 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   // really is unsupported, IdentityGate never renders the modal, so the
   // leftover in-memory state is harmless.
   useEffect(() => {
-    // Token-derived identity ignores ?email=/?name= hints entirely; while the
-    // token is still resolving, hold off so a hint can't race the whoami
-    // answer into localStorage.
-    if (tokenResolution === "pending" || tokenResolution === "resolved") return;
+    // Token-derived identity ignores ?email=/?name= hints entirely — a hint
+    // must never plant a localStorage claim under a user token.
+    if (tokenBound) return;
     if (!pendingIdentity) return;
     if (!identitySupported) return;
     if (usersQuery.isLoading) return;
@@ -177,7 +167,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [
-    tokenResolution,
+    tokenBound,
     pendingIdentity,
     identitySupported,
     usersQuery.isLoading,
@@ -186,18 +176,30 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     clearPendingIdentity,
   ]);
 
-  // Derive state + matched user. Token-derived identity short-circuits the
-  // localStorage/users-list flow — it can never enter `needs-pick`.
+  // Derive state + matched user. Token-bound tabs never touch the
+  // localStorage/users-list flow; on an older server (whoami resolves null)
+  // they land in `needs-pick` with the picker suppressed via `locked`.
   const { state, user } = useMemo<{ state: CurrentUserState; user: User | null }>(() => {
-    if (tokenResolution === "pending") return { state: "pending", user: null };
-    if (tokenResolution === "resolved") return { state: "ready", user: tokenUser };
+    if (tokenBound) {
+      if (whoamiQuery.isPending) return { state: "pending", user: null };
+      const tokenUser = whoamiQuery.data?.kind === "user" ? (whoamiQuery.data.user ?? null) : null;
+      if (tokenUser) return { state: "ready", user: tokenUser };
+      return { state: "needs-pick", user: null };
+    }
     if (usersQuery.isLoading) return { state: "pending", user: null };
     const users = usersQuery.data ?? [];
     if (!storedUserId) return { state: "needs-pick", user: null };
     const match = users.find((u) => u.id === storedUserId) ?? null;
     if (!match) return { state: "needs-pick", user: null };
     return { state: "ready", user: match };
-  }, [tokenResolution, tokenUser, usersQuery.isLoading, usersQuery.data, storedUserId]);
+  }, [
+    tokenBound,
+    whoamiQuery.isPending,
+    whoamiQuery.data,
+    usersQuery.isLoading,
+    usersQuery.data,
+    storedUserId,
+  ]);
 
   const value: CurrentUserContextValue = {
     state,
