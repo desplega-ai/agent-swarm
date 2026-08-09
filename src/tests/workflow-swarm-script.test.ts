@@ -235,6 +235,30 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output).toBeUndefined();
   });
 
+  test("named script source may contain literal mustache template data", async () => {
+    await saveScript(
+      "literal-mustache-source",
+      `export default async () => ({ template: "Hello {{customer_name}}" });`,
+    );
+
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "literal-mustache-source" },
+      context: {},
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "literal-template-node",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("success");
+    expect(result.output?.result).toEqual({ template: "Hello {{customer_name}}" });
+  });
+
   test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
     await upsertScriptConnection({
       slug: "workflowVendor",

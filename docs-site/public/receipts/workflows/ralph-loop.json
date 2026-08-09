@@ -11,7 +11,8 @@
         "config": {
           "runtime": "bash",
           "timeout": 5000,
-          "script": "set -e\nGOAL='{{trigger.goal}}'\nMAX='{{trigger.maxIterations}}'\nif [ -z \"$GOAL\" ] || [ \"$GOAL\" = \"null\" ]; then\n  echo 'ERROR: trigger.goal is required (string)' >&2\n  exit 1\nfi\nif [ -z \"$MAX\" ] || [ \"$MAX\" = \"null\" ]; then\n  echo 'ERROR: trigger.maxIterations is required (int)' >&2\n  exit 1\nfi\nif ! [[ \"$MAX\" =~ ^[0-9]+$ ]]; then\n  echo \"ERROR: trigger.maxIterations must be a positive integer (got: $MAX)\" >&2\n  exit 1\nfi\njq -n --arg g \"$GOAL\" --argjson m \"$MAX\" '{ok:true, goal:$g, maxIterations:$m}'\n"
+          "script": "set -e\nGOAL=\"$0\"\nMAX=\"$1\"\nif [ -z \"$GOAL\" ] || [ \"$GOAL\" = \"null\" ]; then\n  echo 'ERROR: trigger.goal is required (string)' >&2\n  exit 1\nfi\nif [ -z \"$MAX\" ] || [ \"$MAX\" = \"null\" ]; then\n  echo 'ERROR: trigger.maxIterations is required (int)' >&2\n  exit 1\nfi\nif ! [[ \"$MAX\" =~ ^[0-9]+$ ]]; then\n  echo \"ERROR: trigger.maxIterations must be a positive integer (got: $MAX)\" >&2\n  exit 1\nfi\njq -n --arg g \"$GOAL\" --argjson m \"$MAX\" '{ok:true, goal:$g, maxIterations:$m}'\n",
+          "args": ["{{trigger.goal}}", "{{trigger.maxIterations}}"]
         },
         "next": {
           "success": "init",
@@ -140,7 +141,8 @@
         "config": {
           "runtime": "bash",
           "timeout": 10000,
-          "script": "set -e\nITER={{iter.taskOutput.iteration}}\nMAX={{trigger.maxIterations}}\nif [ \"$ITER\" -ge \"$MAX\" ]; then\n  jq -n --argjson i $ITER --argjson m $MAX '{atMax:true, iteration:$i, max:$m}'\n  exit 1\nfi\njq -n --argjson i $ITER --argjson m $MAX '{atMax:false, iteration:$i, max:$m}'\n"
+          "script": "set -e\nITER=\"$0\"\nMAX=\"$1\"\nif [ \"$ITER\" -ge \"$MAX\" ]; then\n  jq -n --argjson i \"$ITER\" --argjson m \"$MAX\" '{atMax:true, iteration:$i, max:$m}'\n  exit 1\nfi\njq -n --argjson i \"$ITER\" --argjson m \"$MAX\" '{atMax:false, iteration:$i, max:$m}'\n",
+          "args": ["{{iter.taskOutput.iteration}}", "{{trigger.maxIterations}}"]
         },
         "next": {
           "success": "analysis",

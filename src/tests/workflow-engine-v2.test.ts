@@ -813,6 +813,54 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(step?.retryCount).toBe(0);
       expect(step?.output).toBeUndefined();
     });
+
+    test("bundled ralph-loop scripts execute with trigger and upstream values passed as args", async () => {
+      const receipt = (await Bun.file(
+        new URL("../../docs-site/public/receipts/workflows/ralph-loop.json", import.meta.url),
+      ).json()) as { definition: WorkflowDefinition };
+      const receiptNode = (id: string) => {
+        const node = receipt.definition.nodes.find((candidate) => candidate.id === id);
+        if (!node) throw new Error(`Missing ${id} in bundled ralph-loop receipt`);
+        return node;
+      };
+
+      const registry = createTestRegistry();
+      registry.register(new ScriptExecutor(mockDeps));
+      const workflow = makeWorkflow({
+        nodes: [
+          { ...receiptNode("validate-trigger"), next: "ralph-iteration" },
+          {
+            id: "ralph-iteration",
+            type: "script",
+            config: {
+              runtime: "bash",
+              script: `jq -n '{taskOutput:{iteration:1}}'`,
+            },
+            next: "max-check",
+          },
+          { ...receiptNode("max-check"), next: undefined },
+        ],
+      });
+
+      const runId = await startWorkflowExecution(
+        workflow,
+        { goal: "ship safely", maxIterations: 3 },
+        registry,
+      );
+      const run = getWorkflowRun(runId);
+      const steps = getWorkflowRunStepsByRunId(runId);
+
+      expect(run?.status).toBe("completed");
+      expect(steps.map((step) => [step.nodeId, step.status])).toEqual([
+        ["validate-trigger", "completed"],
+        ["ralph-iteration", "completed"],
+        ["max-check", "completed"],
+      ]);
+      expect(run?.context).toMatchObject({
+        "validate-trigger": { ok: true, goal: "ship safely", maxIterations: 3 },
+        "max-check": { atMax: false, iteration: 1, max: 3 },
+      });
+    });
   });
 
   // ─── Context Interpolation ────────────────────────────────
