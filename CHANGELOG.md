@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.131.0] - 2026-08-09
+
+### Added
+- **Asset namespaces now cover Swarm Apps and scripts** (#1150) — new resources receive deterministic `shared/app:<id>/` and `shared/script:<id>/` keys, appear in the cross-entity asset APIs, and preserve app RBAC plus agent/global script ownership when moved.
+- **User-token dashboards derive their identity from the authenticated principal** (#1147) — `GET /api/whoami` resolves operator and `aswt_` user credentials, embedded token connections stay tab-local, and user-bound tabs cannot claim or switch to a different dashboard identity.
+
+### Changed
+- **Scheduled-task resilience guidance is bundled as a seeded skill** (#1149) — workers get canonical guardrails for bounded CI polling, progress heartbeats, duplicate-delivery checks, and durable handoffs for slow external jobs.
+
 ## [1.130.0] - 2026-08-08
 
 ### Added

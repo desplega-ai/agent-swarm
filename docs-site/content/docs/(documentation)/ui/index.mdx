@@ -25,10 +25,10 @@ The Tasks page keeps its filters in the URL so views can be bookmarked and share
 
 We host the latest build at **[app.agent-swarm.dev](https://app.agent-swarm.dev)**.
 
-It is a **browser-storage-only** client: the connection details you enter (API URL + API key) are kept in your browser's local storage and requests go straight from your browser to your swarm's API. Nothing is proxied or persisted on our side, and the same hosted dashboard can connect to **any** swarm — a local dev server, your self-hosted deployment, or a cloud swarm. You can save multiple connections and switch between them from the sidebar.
+It is a **browser-storage-only** client: the connection details you enter (API URL + API key) stay in your browser and requests go straight from your browser to your swarm's API. Saved operator connections use local storage. Embedded `aswt_` user-token connections use tab-local session storage, resolve the authenticated identity through `GET /api/whoami`, and disable identity switching so the dashboard cannot misrepresent the user enforced by the server. Nothing is proxied or persisted on our side, and the same hosted dashboard can connect to **any** swarm — a local dev server, your self-hosted deployment, or a cloud swarm.
 
 <Callout type="info" title="Connecting">
-  Enter your API URL and key in the in-app connection panel, or open the dashboard with `?apiUrl=...&apiKey=...` query parameters to pre-fill a connection (the `onboard` wizard prints exactly such a URL). Your swarm's API must be reachable from your browser.
+  Enter your API URL and key in the in-app connection panel, or open the dashboard with `?apiUrl=...&apiKey=...` query parameters to pre-fill a connection (the `onboard` wizard prints exactly such a URL). Operator connections can be saved and switched from the sidebar. A query-parameter `aswt_` token activates silently for the current tab and remains bound to its authenticated user. Your swarm's API must be reachable from your browser.
 </Callout>
 
 ## Self-hosting
