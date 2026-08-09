@@ -1653,8 +1653,11 @@ export const WorkflowNodeSchema = z
       .record(z.string(), z.unknown())
       .describe(
         "Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. " +
+          "For script: { runtime, script, args?, timeout? }. " +
           "For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. " +
-          "Values support {{interpolation}} from the node's inputs context. " +
+          "Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. " +
+          "SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. " +
+          "Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). " +
           "NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, " +
           "while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}).",
       ),
@@ -1666,15 +1669,17 @@ export const WorkflowNodeSchema = z
       ),
     validation: StepValidationConfigSchema.optional(),
     retry: RetryPolicySchema.optional(),
-    // REQUIRED for cross-node data access — without this, only 'trigger' and 'input' are available for interpolation.
+    // REQUIRED for cross-node data access; built-in context roots remain available without aliases.
     inputs: z
       .record(z.string(), z.string())
       .optional()
       .describe(
         "REQUIRED for cross-node data access. Maps local names to context paths. " +
-          "Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. " +
+          "Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. " +
           'Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. ' +
-          'For trigger data: { "pr": "trigger.pullRequest" }.',
+          'For trigger data: { "pr": "trigger.pullRequest" }. ' +
+          "This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. " +
+          "Route those dynamic values through config.args (argv for inline scripts) instead.",
       ),
     inputSchema: z
       .record(z.string(), z.unknown())

@@ -19,9 +19,16 @@ export interface DeepInterpolateOptions {
   preserveRawTokens?: boolean;
 }
 
+const INTERPOLATION_TOKEN_RE = /\{\{([^}]+)\}\}/g;
+
+/** Return the normalized paths referenced by every {{path}} token in a string. */
+export function findInterpolationTokens(template: string): string[] {
+  return Array.from(template.matchAll(INTERPOLATION_TOKEN_RE), (match) => match[1]!.trim());
+}
+
 export function interpolate(template: string, ctx: Record<string, unknown>): InterpolateResult {
   const unresolved: string[] = [];
-  const result = template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
+  const result = template.replace(INTERPOLATION_TOKEN_RE, (_match, path: string) => {
     const keys = path.trim().split(".");
     let value: unknown = ctx;
     for (const key of keys) {

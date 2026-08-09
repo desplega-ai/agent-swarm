@@ -208,6 +208,33 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.scriptName).toBe("add-one");
   });
 
+  test("named script source with an interpolation token fails with the node and token named", async () => {
+    await saveScript(
+      "unresolved-source",
+      `export default async () => ({ value: "{{trigger.payload}}" });`,
+    );
+
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "unresolved-source", args: { payload: "safe-argv-data" } },
+      context: { trigger: { payload: "must-not-enter-source" } },
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "named-script-node",
+        workflowId: wf.id,
+        dryRun: false,
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain('node "named-script-node"');
+    expect(result.error).toContain("{{trigger.payload}}");
+    expect(result.error).toContain("config.args");
+    expect(result.output).toBeUndefined();
+  });
+
   test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
     await upsertScriptConnection({
       slug: "workflowVendor",

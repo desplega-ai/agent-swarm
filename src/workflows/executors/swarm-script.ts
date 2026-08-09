@@ -12,6 +12,7 @@ import {
 } from "../../scripts-runtime/executors/types";
 import { runScript } from "../../scripts-runtime/loader";
 import type { ExecutorMeta } from "../../types";
+import { findInterpolationTokens } from "../../utils/template";
 import { BaseExecutor, type ExecutorResult } from "./base";
 
 export const SWARM_SCRIPT_DEFAULT_TIMEOUT_MS = DEFAULT_SCRIPT_RESOURCES.wallClockMs;
@@ -74,6 +75,17 @@ export class SwarmScriptExecutor extends BaseExecutor<
 
     if (!resolved.ok) {
       return { status: "failed", error: resolved.error };
+    }
+
+    const sourceTokens = findInterpolationTokens(resolved.source);
+    if (sourceTokens.length > 0) {
+      const renderedTokens = [...new Set(sourceTokens)].map((token) => `{{${token}}}`).join(", ");
+      return {
+        status: "failed",
+        error:
+          `swarm-script body interpolation failed for node "${meta.nodeId}": unresolved token(s): ${renderedTokens}. ` +
+          "Named script source is not workflow-interpolated; pass dynamic values through config.args and read them from args.",
+      };
     }
 
     const credentials = await buildScriptCredentialBindingsWithFailures({

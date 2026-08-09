@@ -18600,7 +18600,7 @@ export interface paths {
                         type?: string;
                         /** @description Human-readable label for UI display */
                         label?: string;
-                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                        /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                         config?: {
                             [key: string]: unknown;
                         };
@@ -18610,7 +18610,7 @@ export interface paths {
                         };
                         validation?: components["schemas"]["StepValidationConfig"];
                         retry?: components["schemas"]["RetryPolicy"];
-                        /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. */
+                        /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
                         inputs?: {
                             [key: string]: string;
                         };
@@ -20277,7 +20277,7 @@ export interface components {
             type: string;
             /** @description Human-readable label for UI display */
             label?: string;
-            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+            /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
             config: {
                 [key: string]: unknown;
             };
@@ -20287,7 +20287,7 @@ export interface components {
             };
             validation?: components["schemas"]["StepValidationConfig"];
             retry?: components["schemas"]["RetryPolicy"];
-            /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. */
+            /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
             inputs?: {
                 [key: string]: string;
             };
@@ -20420,7 +20420,7 @@ export interface components {
                     type?: string;
                     /** @description Human-readable label for UI display */
                     label?: string;
-                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Values support {{interpolation}} from the node's inputs context. NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
+                    /** @description Executor-specific config. For agent-task: { template, outputSchema?, agentId?, tags?, priority?, dir?, vcsRepo?, model? }. For script: { runtime, script, args?, timeout? }. For swarm-script: { scriptName, scope?, pinHash?, args?, fsMode?, timeoutMs? (1000-300000) }. Agent-task templates and ordinary config values support {{interpolation}} from the node's inputs context, including trigger and declared upstream aliases. SECURITY: executable source for script/swarm-script nodes does not interpolate trigger.* or upstream node outputs; only input/workflow/swarm/run values are allowed in inline script source, and named swarm-script source is not workflow-interpolated. Pass dynamic values through config.args instead (inline script receives them as argv; swarm-script receives its args object). NOTE: config.outputSchema on agent-task nodes validates the AGENT's raw JSON output, while node-level outputSchema validates the EXECUTOR's return value ({taskId, taskOutput}). */
                     config?: {
                         [key: string]: unknown;
                     };
@@ -20430,7 +20430,7 @@ export interface components {
                     };
                     validation?: components["schemas"]["StepValidationConfig"];
                     retry?: components["schemas"]["RetryPolicy"];
-                    /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation — only 'trigger' and 'input' are. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. */
+                    /** @description REQUIRED for cross-node data access. Maps local names to context paths. Without this, upstream step outputs are NOT available for interpolation; built-in trigger/input/workflow/swarm/run context remains available. Example: { "cityData": "generate-city" } → use {{cityData.taskOutput.field}} in config templates. For trigger data: { "pr": "trigger.pullRequest" }. This mapping works in agent-task templates and ordinary config, but executable script/swarm-script source excludes trigger and upstream-output aliases. Route those dynamic values through config.args (argv for inline scripts) instead. */
                     inputs?: {
                         [key: string]: string;
                     };

@@ -8,7 +8,12 @@ import {
 import type { RetryPolicy } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { getSuccessors } from "./definition";
-import { buildNodeInterpolationCtx, interpolateNodeConfig, walkGraph } from "./engine";
+import {
+  buildNodeInterpolationCtx,
+  interpolateNodeConfig,
+  scriptBodyInterpolationError,
+  walkGraph,
+} from "./engine";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
 import { runStepValidation } from "./validation";
@@ -71,7 +76,19 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           // foreach with `over: "{{items}}"` burns all its retries on schema
           // rejections without ever re-dispatching.
           const inputCtx = buildNodeInterpolationCtx(node, ctx);
-          const { value: interpolatedValue } = interpolateNodeConfig(node, inputCtx);
+          const { value: interpolatedValue, scriptBodyUnresolved } = interpolateNodeConfig(
+            node,
+            inputCtx,
+          );
+          if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
+            checkpointStepFailure(
+              run.id,
+              step.id,
+              scriptBodyInterpolationError(node.id, scriptBodyUnresolved),
+              step.retryCount,
+            );
+            continue;
+          }
           const interpolatedConfig = interpolatedValue as Record<string, unknown>;
 
           // Get executor and re-run
