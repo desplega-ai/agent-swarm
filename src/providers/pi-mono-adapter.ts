@@ -363,7 +363,7 @@ export async function createPiRuntimeAuth(
   for (const [envKey, provider] of PI_RUNTIME_API_KEYS) {
     const apiKey = env[envKey];
     if (apiKey) {
-      await modelRuntime.setRuntimeApiKey(provider, apiKey, { allowNetwork: false });
+      await modelRuntime.setRuntimeApiKey(provider, apiKey);
     }
   }
 
