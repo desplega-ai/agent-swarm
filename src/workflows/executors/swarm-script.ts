@@ -52,9 +52,9 @@ const WORKFLOW_INTERPOLATION_ROOTS = new Set(["trigger", "input", "workflow", "s
 
 function findWorkflowSourceTokens(
   source: string,
-  context: Readonly<Record<string, unknown>>,
+  inputCtx: Readonly<Record<string, unknown>> | undefined,
 ): string[] {
-  const roots = new Set([...WORKFLOW_INTERPOLATION_ROOTS, ...Object.keys(context)]);
+  const roots = new Set([...WORKFLOW_INTERPOLATION_ROOTS, ...Object.keys(inputCtx ?? {})]);
   return findInterpolationTokens(source).filter((token) => {
     const root = token.split(".")[0];
     return root !== undefined && roots.has(root);
@@ -91,9 +91,9 @@ export class SwarmScriptExecutor extends BaseExecutor<
     }
 
     // Catalog source is never workflow-interpolated. Only reject tokens whose
-    // root is a source available to this node (builtins, declared aliases, or
-    // completed upstream nodes); other mustache syntax is literal script data.
-    const sourceTokens = findWorkflowSourceTokens(resolved.source, context);
+    // root is a source available to this node (builtins or declared aliases);
+    // other mustache syntax is literal script data.
+    const sourceTokens = findWorkflowSourceTokens(resolved.source, meta.inputCtx);
     if (sourceTokens.length > 0) {
       const renderedTokens = [...new Set(sourceTokens)].map((token) => `{{${token}}}`).join(", ");
       return {

@@ -259,6 +259,59 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ template: "Hello {{customer_name}}" });
   });
 
+  test("unrelated upstream node names do not turn literal source templates into workflow tokens", async () => {
+    await saveScript(
+      "literal-upstream-name",
+      `export default async () => ({ template: "Hello {{customer.name}}" });`,
+    );
+    const wf = makeWorkflow({
+      nodes: [
+        { id: "customer", type: "echo", config: { value: "Ada" }, next: "script" },
+        {
+          id: "script",
+          type: "swarm-script",
+          config: { scriptName: "literal-upstream-name" },
+        },
+      ],
+    });
+
+    const runId = await startWorkflowExecution(wf, {}, registry);
+    const run = getWorkflowRun(runId);
+    const steps = getWorkflowRunStepsByRunId(runId);
+    const scriptStep = steps.find((step) => step.nodeId === "script");
+
+    expect(run?.status).toBe("completed");
+    expect(scriptStep?.status).toBe("completed");
+    expect(scriptStep?.output).toMatchObject({
+      result: { template: "Hello {{customer.name}}" },
+    });
+  });
+
+  test("declared input aliases still identify workflow tokens in named script source", async () => {
+    await saveScript(
+      "declared-alias-source",
+      `export default async () => ({ value: "{{customer.name}}" });`,
+    );
+
+    const executor = new SwarmScriptExecutor(deps);
+    const wf = makeWorkflow({ nodes: [] });
+    const result = await executor.run({
+      config: { scriptName: "declared-alias-source" },
+      context: { upstream: { name: "Ada" } },
+      meta: {
+        runId: crypto.randomUUID(),
+        stepId: crypto.randomUUID(),
+        nodeId: "declared-alias-node",
+        workflowId: wf.id,
+        dryRun: false,
+        inputCtx: { customer: { name: "Ada" } },
+      },
+    });
+
+    expect(result.status).toBe("failed");
+    expect(result.error).toContain("{{customer.name}}");
+  });
+
   test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
     await upsertScriptConnection({
       slug: "workflowVendor",
