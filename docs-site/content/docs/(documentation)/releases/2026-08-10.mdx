@@ -1,11 +1,11 @@
 ---
 title: "Release Notes — Week of August 3 to August 10, 2026"
-description: "Swarm Apps become a full internal-app platform, OpenAPI reaches complete typed coverage, workflow fan-out lands, script execution is hardened, and 69 merged pull requests span 5 themes."
+description: "Swarm Apps become a full internal-app platform, OpenAPI reaches complete typed coverage, workflow fan-out lands, script execution is hardened, and 65 merged pull requests span 5 themes."
 ---
 
 ## Highlights
 
-**69 merged pull requests** across **5 themes** landed this week (v1.126.0 → v1.130.0). The headline: agents can now build versioned, schema-backed internal apps, connect them to live sources, and use generated TypeScript types — while the platform gains complete typed API responses and a hardened script execution boundary.
+**65 merged pull requests** across **5 themes** shipped from v1.126.0 through v1.130.0. This count is the 65 unique `(#NNNN)` references in `git log v1.126.0..v1.130.0` (64 PR-labeled commits; the unlabeled commit is the v1.127.0 release). The headline: agents can now build versioned, schema-backed internal apps, connect them to live sources, and use generated TypeScript types — while the platform gains complete typed API responses and a hardened script execution boundary.
 
 ### Swarm Apps: from schema to live internal tool
 
@@ -59,11 +59,7 @@ See [#1115](https://github.com/desplega-ai/agent-swarm/pull/1115), [#1132](https
 
 - **Skills move to live DB seeding** — Swarm-owned and vendored skills now have one versioned, live-updatable delivery path with collision, parity, and upstream-integrity checks. See [#1083](https://github.com/desplega-ai/agent-swarm/pull/1083) and [#1106](https://github.com/desplega-ai/agent-swarm/pull/1106).
 
-- **Token-derived dashboard identity** — Tabs authenticated with an `aswt_` user token derive identity from the server and hide misleading user-switching controls. Operator-key behavior remains unchanged. See [#1147](https://github.com/desplega-ai/agent-swarm/pull/1147).
-
 - **Host-agnostic MCP Registry publishing** — The project now publishes a registry entry for both remote and localhost package endpoints. See [#1135](https://github.com/desplega-ai/agent-swarm/pull/1135).
-
-- **App and script asset namespaces** — Apps and scripts receive validated resource keys with history, audits, moves, and API discovery support. See [#1150](https://github.com/desplega-ai/agent-swarm/pull/1150).
 
 - **Current agent-fs deployment pins** — Helm and Compose now track agent-fs 0.12.2, with a drift check to keep backend image pins aligned. See [#1109](https://github.com/desplega-ai/agent-swarm/pull/1109) and [#1127](https://github.com/desplega-ai/agent-swarm/pull/1127).
 
@@ -93,14 +89,22 @@ See [#1115](https://github.com/desplega-ai/agent-swarm/pull/1115), [#1132](https
 
 - **Aborted script fetches stop immediately** — `runtimeFetch` honors already-aborted signals and does not retry caller-cancelled requests. See [#1146](https://github.com/desplega-ai/agent-swarm/pull/1146).
 
-- **Unresolved script tokens fail before execution** — Inline and named workflow script bodies now reject unsupported workflow-style tokens with an explicit node and token diagnostic. See [#1153](https://github.com/desplega-ai/agent-swarm/pull/1153).
-
 ## Migration Notes
 
-- **Workflow script values belong in args** — Dynamic trigger or upstream values are no longer interpolated into executable script source. Pass them through the node's argument configuration and read them as data inside the script. Unresolved tokens in script bodies now fail before execution.
+- **Workflow script values belong in args** — Dynamic trigger or upstream values are no longer interpolated into executable script source. Pass them through the node's argument configuration and read them as data inside the script.
 
 - **Regenerate API clients** — The OpenAPI document now contains typed responses for every route plus shared named components and error responses. Regenerating clients will replace many previously untyped return values with concrete types.
 
 - **Cost totals may change after upgrade** — Cache-write TTLs, multi-model usage, web search, Codex turn accumulation, and OpenCode deduplication now participate in stored cost. Compare `harnessCostUsd` with the server result when auditing drift.
 
 - **Page session signing is independent** — Page sessions resolve `PAGE_SESSION_SECRET`, then `PAGE_SESSION_SECRET_FILE`, and otherwise use an auto-generated persisted secret. The swarm API key is no longer used as the signing fallback.
+
+## Merged after v1.130.0 — ships in the next release
+
+The following changes merged during the calendar week but are not ancestors of the v1.130.0 tag, so they are not included in the 65-PR release count above:
+
+- **Token-derived dashboard identity** — Tabs authenticated with an `aswt_` user token derive identity from the server and hide misleading user-switching controls. Operator-key behavior remains unchanged. See [#1147](https://github.com/desplega-ai/agent-swarm/pull/1147).
+
+- **App and script asset namespaces** — Apps and scripts receive validated resource keys with history, audits, moves, and API discovery support. See [#1150](https://github.com/desplega-ai/agent-swarm/pull/1150).
+
+- **Unresolved script tokens fail before execution** — Inline and named workflow script bodies now reject unsupported workflow-style tokens with an explicit node and token diagnostic. After upgrading to the next release, pass dynamic values through script args; unsupported workflow-style tokens in script bodies will fail before execution. See [#1153](https://github.com/desplega-ai/agent-swarm/pull/1153).
