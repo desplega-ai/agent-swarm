@@ -1682,7 +1682,16 @@ class ApiClient {
       headers: this.getHeaders(),
       body: JSON.stringify({ responses, respondedBy }),
     });
-    if (!res.ok) throw new Error(`Failed to respond to approval request: ${res.status}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const message =
+        body !== null &&
+        typeof body === "object" &&
+        typeof (body as { error?: unknown }).error === "string"
+          ? (body as { error: string }).error
+          : `Failed to respond to approval request: ${res.status}`;
+      throw new Error(message);
+    }
     return res.json();
   }
 

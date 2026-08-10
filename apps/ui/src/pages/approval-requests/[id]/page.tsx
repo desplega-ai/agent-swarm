@@ -21,6 +21,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { missingRequiredResponseIds } from "@/lib/approval-responses";
 import { formatSmartTime, normalizeNewlines } from "@/lib/utils";
 
 function QuestionField({
@@ -180,6 +181,7 @@ export default function ApprovalRequestDetailPage() {
   }
 
   const isPending = request.status === "pending";
+  const missingRequired = new Set(missingRequiredResponseIds(request.questions, responses));
 
   const handleSubmit = async () => {
     setError(null);
@@ -234,16 +236,23 @@ export default function ApprovalRequestDetailPage() {
                       </div>
                     )}
                   </CardHeader>
-                  <CardContent>
+                  <CardContent className="space-y-2">
                     {isPending ? (
-                      <QuestionField
-                        question={question}
-                        value={responses[question.id]}
-                        onChange={(val) =>
-                          setResponses((prev) => ({ ...prev, [question.id]: val }))
-                        }
-                        disabled={respondMutation.isPending}
-                      />
+                      <>
+                        <QuestionField
+                          question={question}
+                          value={responses[question.id]}
+                          onChange={(val) =>
+                            setResponses((prev) => ({ ...prev, [question.id]: val }))
+                          }
+                          disabled={respondMutation.isPending}
+                        />
+                        {missingRequired.has(question.id) && (
+                          <p className="text-xs text-status-error-strong">
+                            Required response missing or invalid.
+                          </p>
+                        )}
+                      </>
                     ) : (
                       <div className="text-sm">
                         <span className="text-muted-foreground">Response: </span>
@@ -262,7 +271,10 @@ export default function ApprovalRequestDetailPage() {
             {isPending && (
               <div className="space-y-2">
                 {error && <p className="text-sm text-status-error-strong">{error}</p>}
-                <Button onClick={handleSubmit} disabled={respondMutation.isPending}>
+                <Button
+                  onClick={handleSubmit}
+                  disabled={respondMutation.isPending || missingRequired.size > 0}
+                >
                   {respondMutation.isPending ? "Submitting..." : "Submit Response"}
                 </Button>
               </div>
