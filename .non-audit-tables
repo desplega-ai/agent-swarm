@@ -16,6 +16,7 @@ budget_refusal_notifications
 channel_activity_cursors
 channel_read_state
 context_versions
+devflow_audit_events   # append-only DevFlow domain audit trail (130)
 events
 memory_link
 memory_rating
