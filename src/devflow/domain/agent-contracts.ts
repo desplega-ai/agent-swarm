@@ -7,7 +7,15 @@ import {
 } from "./types";
 
 export const IntakeEvidenceSchema = z.strictObject({
-  classification: z.enum(["feature", "bug", "idea", "task", "architecture", "ops", "noise"]),
+  classification: z.enum([
+    "feature",
+    "bug",
+    "idea",
+    "task",
+    "architecture",
+    "ops",
+    "noise",
+  ]),
   title: z.string().min(1).max(120),
   description: z.string().min(1),
   suggestedPriority: DevFlowPrioritySchema.nullable(),
@@ -71,3 +79,165 @@ export const SpecEvidenceSchema = z.strictObject({
 export type SpecEvidence = z.infer<typeof SpecEvidenceSchema>;
 
 export const DEVFLOW_AGENT_CONTRACT_VERSION = "1.0.0";
+
+const nullableString = {
+  anyOf: [{ type: "string" }, { type: "null" }],
+} as const;
+const nullablePriority = {
+  anyOf: [{ type: "string", enum: ["p1", "p2", "p3"] }, { type: "null" }],
+} as const;
+
+const nfrJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    status: { type: "string", enum: ["met", "not_applicable", "open"] },
+    statement: { type: "string", minLength: 1 },
+  },
+  required: ["status", "statement"],
+} as const;
+
+export const DEVFLOW_AGENT_OUTPUT_SCHEMAS: Record<
+  "intake" | "scope" | "spec",
+  Record<string, unknown>
+> = {
+  intake: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      classification: {
+        type: "string",
+        enum: [
+          "feature",
+          "bug",
+          "idea",
+          "task",
+          "architecture",
+          "ops",
+          "noise",
+        ],
+      },
+      title: { type: "string", minLength: 1, maxLength: 120 },
+      description: { type: "string", minLength: 1 },
+      suggestedPriority: nullablePriority,
+      duplicateOf: nullableString,
+      duplicateConfidence: { type: "number", minimum: 0, maximum: 1 },
+      okrLinks: { type: "array", items: { type: "string" } },
+      isSecuritySensitiveSignal: { type: "boolean" },
+      customerSignalPresent: { type: "boolean" },
+      rationale: { type: "string", minLength: 1 },
+    },
+    required: [
+      "classification",
+      "title",
+      "description",
+      "suggestedPriority",
+      "duplicateOf",
+      "duplicateConfidence",
+      "okrLinks",
+      "isSecuritySensitiveSignal",
+      "customerSignalPresent",
+      "rationale",
+    ],
+  },
+  scope: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      problemStatement: { type: "string", minLength: 1 },
+      targetUsers: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", minLength: 1 },
+      },
+      successCriteria: {
+        type: "array",
+        minItems: 1,
+        items: { type: "string", minLength: 1 },
+      },
+      effortBand: { type: "string", enum: ["xs", "s", "m", "l", "xl"] },
+      openQuestions: { type: "array", items: { type: "string" } },
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+      rationale: { type: "string", minLength: 1 },
+    },
+    required: [
+      "problemStatement",
+      "targetUsers",
+      "successCriteria",
+      "effortBand",
+      "openQuestions",
+      "confidence",
+      "rationale",
+    ],
+  },
+  spec: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      acClauses: {
+        type: "array",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            given: { type: "string", minLength: 1 },
+            when: { type: "string", minLength: 1 },
+            then: { type: "string", minLength: 1 },
+            isTestable: { type: "boolean" },
+            testHint: { type: "string" },
+          },
+          required: ["given", "when", "then", "isTestable", "testHint"],
+        },
+      },
+      nfrDeclarations: {
+        type: "object",
+        additionalProperties: false,
+        properties: Object.fromEntries(
+          [
+            "supportability",
+            "testability",
+            "security",
+            "scalability",
+            "usability",
+            "maintainability",
+            "reliability",
+            "observability",
+            "performance",
+          ].map((category) => [category, nfrJsonSchema]),
+        ),
+        required: [
+          "supportability",
+          "testability",
+          "security",
+          "scalability",
+          "usability",
+          "maintainability",
+          "reliability",
+          "observability",
+          "performance",
+        ],
+      },
+      uxBehavior: { type: "string", minLength: 1 },
+      dataModelChanges: { type: "string", minLength: 1 },
+      integrationPoints: { type: "string", minLength: 1 },
+      outOfScope: { type: "string" },
+      openQuestions: { type: "array", items: { type: "string" } },
+      blastRadius: { type: "string", enum: ["low", "medium", "high"] },
+      threatModel: nullableString,
+      confidence: { type: "number", minimum: 0, maximum: 1 },
+    },
+    required: [
+      "acClauses",
+      "nfrDeclarations",
+      "uxBehavior",
+      "dataModelChanges",
+      "integrationPoints",
+      "outOfScope",
+      "openQuestions",
+      "blastRadius",
+      "threatModel",
+      "confidence",
+    ],
+  },
+};
