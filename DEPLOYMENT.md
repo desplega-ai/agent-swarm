@@ -24,7 +24,7 @@ This guide covers all deployment options for Agent Swarm.
 Protect your deployment with Single Sign-On. Three compatible deployment modes are documented in [`docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx`](./docs-site/content/docs/(documentation)/guides/self-hosted-sso.mdx) and the [Self-Hosted SSO guide](https://agent-swarm.dev/docs/guides/self-hosted-sso) on the docs site:
 
 1. **oauth2-proxy quickstart** — zero-code reverse-proxy gate. Example configs in [`examples/sso/`](./examples/sso/).
-2. **Native OIDC middleware** — proposed per-user `aswt_` token issuance (not yet implemented).
+2. **Native OIDC middleware** — proposed automatic OIDC-to-user token exchange (not yet implemented). Per-user `aswt_` tokens can already be minted from the People page or Users API.
 3. **Trusted-header mode** (recommended) — oauth2-proxy handles the IdP dance; the app trusts forwarded identity headers for per-user attribution.
 
 ---
@@ -189,17 +189,17 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.220)
+# Override the pinned Claude Code version (default: 2.1.226)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.220`
-- `PI_CODING_AGENT_VERSION=0.83.0`
-- `CODEX_VERSION=0.146.0`
-- `OPENCODE_VERSION=1.18.11`
-- `OPENCODE_SDK_VERSION=1.18.11`
+- `CLAUDE_CODE_VERSION=2.1.226`
+- `PI_CODING_AGENT_VERSION=0.84.1`
+- `CODEX_VERSION=0.147.0`
+- `OPENCODE_VERSION=1.18.15`
+- `OPENCODE_SDK_VERSION=1.18.15`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 

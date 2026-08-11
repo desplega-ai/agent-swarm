@@ -299,7 +299,7 @@ The `validate` executor runs after a step to check output quality. It can:
 
 ### Cross-Node Data Access (`inputs` Mapping)
 
-By default, upstream step outputs are **not** available for interpolation. Only `trigger` (trigger data) and `input` (workflow-level resolved inputs) are in scope. To access another node's output, declare an `inputs` mapping on the node:
+By default, upstream step outputs are **not** available for interpolation. Built-in `trigger`, `input`, `workflow`, `swarm`, and `run` context remains available for ordinary config values. To access another node's output, declare an `inputs` mapping on the node:
 
 ```json
 {
@@ -315,7 +315,9 @@ By default, upstream step outputs are **not** available for interpolation. Only 
 - Keys are local names used in `{{interpolation}}`, values are context paths (usually a node ID)
 - Agent-task output shape is `{ taskId, taskOutput }` — access fields via `localName.taskOutput.field`
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`
-- Without `inputs`, templates referencing upstream nodes silently resolve to empty strings
+- Without `inputs`, ordinary templates referencing upstream nodes resolve to empty strings and report the token in run diagnostics
+
+Executable source has a stricter boundary. Inline `script` source may interpolate only `input`, `workflow`, `swarm`, and `run`; pass trigger or upstream values through `config.args` so they arrive as argv instead of executable text. Named `swarm-script` source is never workflow-interpolated, so pass all dynamic values through its `args` object. Disallowed or unresolved source tokens fail the node before execution, while unrelated mustache strings remain literal data.
 
 ### Structured Output (`outputSchema`)
 
@@ -440,6 +442,8 @@ The `human-in-the-loop` executor pauses a workflow until a human responds via th
 Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, and `boolean`.
 
 When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port.
+
+The dashboard validates every required response before submission. Missing or invalid approval, text, select, and boolean answers are marked inline and keep **Submit Response** disabled; if the server rejects a response, its error is shown directly so the user can correct it.
 
 ## Loop Support
 

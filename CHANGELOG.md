@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.131.0] - 2026-08-11
+
+### Added
+- **User-token dashboards bind identity to the authenticated principal** (#1147) — a new `/api/whoami` route resolves `aswt_` tokens, embedded connections stay tab-local and activate automatically, and token-bound sessions expose a static identity instead of allowing user switching.
+- **Apps and scripts participate in canonical asset namespaces** (#1150) — migrations, listing/filtering, and permission-aware move endpoints add `app` and `script` asset keys while preserving owner and global-scope RBAC rules.
+- **Bundled scheduled-task resilience guidance standardizes bounded polling** (#1149) — recurring agents poll once per turn, treat unregistered checks as pending, aggregate all CI states, and stop promptly on failures.
+
+### Changed
+- **Worker harness pins track current compatible releases** (#1152, #1155) — Claude Code moves to 2.1.226, Codex to 0.147.0, OpenCode to 1.18.15, and the Pi harness family to 0.84.1.
+
+### Fixed
+- **Workflow script nodes reject unresolved workflow-input tokens before execution** (#1153, #1154) — validation is scoped to built-in and declared input roots so dynamic values must travel through `config.args` while unrelated literal mustache data remains intact.
+- **MCP OAuth honors each client's registered token-endpoint authentication method** (#1157) — code exchange, refresh, and revocation support Basic, body-post, and public clients consistently, preserve legacy clients, and redact transmitted credential forms from errors.
+- **Approval requests explain and block invalid required responses** (#1158) — text, select, boolean, and approval answers are validated before submission and missing questions are surfaced to the user.
+
 ## [1.130.0] - 2026-08-08
 
 ### Added

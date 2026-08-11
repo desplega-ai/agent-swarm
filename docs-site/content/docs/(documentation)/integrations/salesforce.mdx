@@ -75,6 +75,7 @@ Agent Swarm stores these manual-client fields:
 | `authorizeUrl` | Salesforce authorize endpoint, for example `https://login.salesforce.com/services/oauth2/authorize` |
 | `tokenUrl` | Salesforce token endpoint, for example `https://login.salesforce.com/services/oauth2/token` |
 | `scopes` | `mcp_api` and `refresh_token` |
+| `tokenEndpointAuthMethod` | Optional client authentication method: `client_secret_basic`, `client_secret_post`, or `none` |
 
 If you use the API instead of the dashboard, the same fields are accepted by:
 
@@ -87,11 +88,12 @@ curl -X POST "$MCP_BASE_URL/api/mcp-oauth/<mcp-server-id>/manual-client" \
     "authorizationServerIssuer": "https://login.salesforce.com",
     "authorizeUrl": "https://login.salesforce.com/services/oauth2/authorize",
     "tokenUrl": "https://login.salesforce.com/services/oauth2/token",
+    "tokenEndpointAuthMethod": "client_secret_post",
     "scopes": ["mcp_api", "refresh_token"]
   }'
 ```
 
-Add `"clientSecret": "<salesforce-consumer-secret>"` only when your Salesforce External Client App requires it.
+Add `"clientSecret": "<salesforce-consumer-secret>"` only when your Salesforce External Client App requires it. Set `tokenEndpointAuthMethod` to match how the pre-registered client authenticates. If omitted, manual clients preserve the legacy `client_secret_post` behavior unless discovery proves that method unsupported.
 
 ### 5. Set global secrets
 

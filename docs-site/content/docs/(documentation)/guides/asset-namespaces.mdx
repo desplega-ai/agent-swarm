@@ -1,13 +1,13 @@
 ---
 title: Asset Namespaces
-description: Group tasks, workflows, schedules, pages, and provider-backed files under canonical shared or personal namespace keys
+description: Group tasks, workflows, schedules, pages, apps, scripts, and provider-backed files under canonical shared or personal namespace keys
 ---
 
 Asset namespace keys provide one directory-like grouping contract across the swarm's primary assets. A key is metadata, not identity: many assets can use the same key, while each asset keeps its existing ID. A task's `contextKey` also remains a separate routing and conversation-context field.
 
 ## Key format
 
-Every task, workflow, schedule, and page has a non-null canonical `key`. Existing rows and writes that omit the field use `shared/`.
+Every task, workflow, schedule, page, app, and script has a non-null canonical `key`. Existing rows and writes that omit the field use `shared/`.
 
 - `shared/` and descendants such as `shared/releases/`
 - `personal/<user-id>/` and descendants such as `personal/<user-id>/drafts/`
@@ -16,7 +16,7 @@ Every task, workflow, schedule, and page has a non-null canonical `key`. Existin
 
 Empty segments, `.` or `..` traversal segments, backslashes, absolute paths, NUL bytes, and unknown roots are rejected. Repeated keys are expected and valid; database indexes on `key` are deliberately non-unique.
 
-When a workflow creates a task, the task inherits the workflow key unless the task node supplies one. Scheduler-created tasks inherit the schedule key. New standalone resources receive deterministic shared keys such as `shared/task:<id>/`, `shared/workflow:<id>/`, `shared/schedule:<id>/`, `shared/page:<id>/`, and `shared/fs:agent-fs:<id>/`. Older clients that omit the column at the SQL boundary still fall back safely to `shared/`.
+When a workflow creates a task, the task inherits the workflow key unless the task node supplies one. Scheduler-created tasks inherit the schedule key. New standalone resources receive deterministic shared keys such as `shared/task:<id>/`, `shared/workflow:<id>/`, `shared/schedule:<id>/`, `shared/page:<id>/`, `shared/app:<id>/`, `shared/script:<id>/`, and `shared/fs:agent-fs:<id>/`. Older clients that omit the column at the SQL boundary still fall back safely to `shared/`.
 
 <Callout type="warn">
 `personal/<user-id>/` is a namespace and write-ownership convention. It is **not** a privacy boundary or a read-visibility guarantee. Existing read permissions still govern every entity. Do not store sensitive content based only on a `personal/` key.
@@ -26,9 +26,9 @@ Writes to a `personal/<user-id>/` destination require the trusted user resolved 
 
 ## Cross-entity API
 
-`GET /api/assets` returns lightweight summaries across tasks, workflows, schedules, pages, and mapped files. It accepts `keyPrefix`, comma-separated `types`, and `limit` filters. Summaries contain labels and provider references but never task briefs, page bodies, workflow definitions, secrets, or file bytes.
+`GET /api/assets` returns lightweight summaries across tasks, workflows, schedules, pages, apps, scripts, and mapped files. It accepts `keyPrefix`, comma-separated `types`, and `limit` filters. Summaries contain labels and provider references but never task briefs, page bodies, workflow definitions, script source, secrets, or file bytes.
 
-`PATCH /api/assets/{entityType}/{id}/key` moves an asset to another logical namespace. Moving an external provider mapping requires operator authentication and changes only local namespace metadata; its provider ID, organization, drive, and provider key remain unchanged, and the server does not call the remote provider. A task attachment mapping moves with its parent task and cannot be detached through the file endpoint.
+`PATCH /api/assets/{entityType}/{id}/key` moves an asset to another logical namespace. App moves require `app.manage`; an agent-scoped script may be moved by its owning agent or an operator, while global scripts require lead/global write access. Moving an external provider mapping requires operator authentication and changes only local namespace metadata; its provider ID, organization, drive, and provider key remain unchanged, and the server does not call the remote provider. A task attachment mapping moves with its parent task and cannot be detached through the file endpoint.
 
 Operator-only `POST /api/assets/mappings` idempotently associates a provider tuple with a logical key. The tuple is unique, while the namespace key is not. Agent-fs task attachments receive mappings automatically and inherit their parent task's namespace.
 
@@ -39,7 +39,7 @@ HTML pages and JSON-page actions can use the domain-grouped asset methods instea
 ```js
 const grouped = await window.swarmSdk.assets.list({
   keyPrefix: "shared/releases/",
-  types: "task,workflow,schedule,page,file",
+  types: "task,workflow,schedule,page,app,script,file",
   limit: 100,
 });
 
@@ -50,8 +50,8 @@ The full domain also exposes `assets.audit()` and `assets.registerMapping(body)`
 
 ## Audit and rollout
 
-Operator-only `GET /api/assets/key-audit` checks all primary assets and mappings. Missing or noncanonical keys are structural failures. Unknown personal users, missing attachment mappings, and provider mapping drift are repairable warnings. Namespace moves are blocked while audit issues exist so operators can repair mapping state before introducing more drift.
+Operator-only `GET /api/assets/key-audit` checks all primary assets and mappings, including apps and scripts. Missing or noncanonical keys are structural failures. Unknown personal users, missing attachment mappings, and provider mapping drift are repairable warnings. Namespace moves are blocked while audit issues exist so operators can repair mapping state before introducing more drift.
 
 The same audit runs after migrations during server startup. Structural failures stop startup by default. `ASSET_KEY_AUDIT_DISABLE_STARTUP_HARD_FAIL=true` is a temporary recovery switch that reports the failure without aborting; repair the database and remove the switch before normal operation.
 
-Migration rollback is application-first: deploy the previous application version while leaving the additive columns, indexes, triggers, mapping table, and history table in place. Old code ignores them safely. Do not remove or rewrite the applied migration. If a later cleanup migration is required, take and verify a database backup first and ship it as a new forward-only migration.
+Existing apps and scripts are backfilled to `shared/`; new rows receive their deterministic resource keys. Migration rollback is application-first: deploy the previous application version while leaving the additive columns, indexes, triggers, mapping table, and history table in place. Old code ignores them safely. Do not remove or rewrite the applied migration. If a later cleanup migration is required, take and verify a database backup first and ship it as a new forward-only migration.

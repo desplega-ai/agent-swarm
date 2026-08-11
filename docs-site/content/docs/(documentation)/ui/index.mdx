@@ -17,6 +17,8 @@ Settings → Appearance lets each browser choose light, dark, or system mode and
 
 The Usage page can filter costs by canonical requester and shows **Cost by User** alongside the overall totals. Spend tied to a user is attributed to that identity; background work without a requester is grouped as **Unattributed (autonomous)** so operator-driven and autonomous spend remain distinguishable.
 
+When a dashboard tab authenticates with a user-bound `aswt_` token, the dashboard resolves the principal from `GET /api/whoami` and locks the tab to that user. Identity switching and local identity overrides stay hidden so requester and audit attribution cannot diverge from the bearer token. Operator-key sessions keep the existing user picker.
+
 ## Task list filters
 
 The Tasks page keeps its filters in the URL so views can be bookmarked and shared. In addition to status, agent, schedule, heartbeat visibility, and text search, the **Requested by** facet can show work attributed to a specific user, **Me** for the current dashboard identity, or **Unattributed** for tasks without a canonical requester. The requester filter is single-select and is never enabled by default.
@@ -25,7 +27,7 @@ The Tasks page keeps its filters in the URL so views can be bookmarked and share
 
 We host the latest build at **[app.agent-swarm.dev](https://app.agent-swarm.dev)**.
 
-It is a **browser-storage-only** client: the connection details you enter (API URL + API key) are kept in your browser's local storage and requests go straight from your browser to your swarm's API. Nothing is proxied or persisted on our side, and the same hosted dashboard can connect to **any** swarm — a local dev server, your self-hosted deployment, or a cloud swarm. You can save multiple connections and switch between them from the sidebar.
+It is a **browser-storage-only** client: operator connections you enter (API URL + API key) are kept in browser local storage, and requests go straight from your browser to your swarm's API. Embedded `?apiUrl=...&apiKey=aswt_...` user-token connections are tab-local in session storage, so separate tabs cannot overwrite one another's identity. Nothing is proxied or persisted on our side, and the same hosted dashboard can connect to **any** swarm — a local dev server, your self-hosted deployment, or a cloud swarm. Operator-key sessions can save multiple connections and switch between them from the sidebar.
 
 <Callout type="info" title="Connecting">
   Enter your API URL and key in the in-app connection panel, or open the dashboard with `?apiUrl=...&apiKey=...` query parameters to pre-fill a connection (the `onboard` wizard prints exactly such a URL). Your swarm's API must be reachable from your browser.

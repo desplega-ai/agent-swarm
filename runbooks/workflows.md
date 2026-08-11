@@ -12,7 +12,7 @@ Upstream outputs are **not** available by default. Declare an `inputs` mapping:
 - For trigger data: `{ "pr": "trigger.pullRequest" }` → `{{pr.number}}`.
 - For the current run: `{ "runId": "run.id" }` → `{{runId}}` (builtin, like `trigger`/`input` — useful for receipts/audit nodes correlating their output with the run).
 
-Without `inputs`, upstream references silently resolve to empty strings — check `diagnostics.unresolvedTokens`.
+Without `inputs`, upstream references are unavailable. Ordinary config values still render unresolved tokens as empty strings and report them in `diagnostics.unresolvedTokens`. Executable script source is stricter: disallowed or unresolved workflow tokens fail the node before execution.
 
 ## Structured output
 
@@ -140,6 +140,8 @@ There are two script-oriented workflow nodes:
 - `cwd`: optional working directory.
 - `timeout`: optional wall-clock timeout in milliseconds, from `1000` through `300000`; defaults to `30000`. This value applies to both the inline script executor and the workflow step watchdog.
 
+Inline executable source may interpolate only `input`, `workflow`, `swarm`, and `run` values. It may not splice `trigger` data or declared upstream aliases directly into source. Pass those dynamic values through `config.args`, which the script receives as argv. A disallowed or unresolved source token fails the node before execution instead of running partially blanked code.
+
 ### `swarm-script` config
 
 - `scriptName` (required): catalog script name.
@@ -148,6 +150,8 @@ There are two script-oriented workflow nodes:
 - `args`: optional JSON object passed to the script as its first argument. Values support normal workflow interpolation.
 - `fsMode`: optional, defaults to `none`. `workspace-rw` is reserved for v2 worker-side execution and fails in v1 with a clear workflow-node error.
 - `timeoutMs`: optional wall-clock timeout in milliseconds. Defaults to `30000` (30s), accepts integers from `1000` through `300000` (5m), and applies both to the workflow step timeout and the scripts-runtime `wallClockMs` resource budget.
+
+Catalog script source is never workflow-interpolated. If it contains a token rooted at a built-in workflow value or a declared input alias, the node fails with guidance to pass that value through `config.args`; unrelated mustache text remains literal script data.
 
 Agent-scoped lookup uses the workflow's `createdByAgentId`. If a workflow has no creator, `trigger.agentId` is accepted as a fallback; otherwise only global scripts can be resolved.
 
