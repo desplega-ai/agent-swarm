@@ -18981,6 +18981,1621 @@
         }
       }
     },
+    "/api/devflow/v1/repository-targets": {
+      "get": {
+        "summary": "List configured DevFlow implementation repositories",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Repository targets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "repositoryFullName": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          },
+                          "executionProfile": {
+                            "type": "string",
+                            "enum": [
+                              "command_center_factory"
+                            ]
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "repositoryFullName",
+                          "defaultBranch",
+                          "executionProfile",
+                          "isActive",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "targets"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Configure a DevFlow Command Center Factory target",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "repositoryFullName": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                  },
+                  "defaultBranch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 240,
+                    "default": "main"
+                  },
+                  "checkoutPath": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "repositoryFullName",
+                  "checkoutPath"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Repository target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "targets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "repositoryFullName": {
+                            "type": "string"
+                          },
+                          "defaultBranch": {
+                            "type": "string"
+                          },
+                          "executionProfile": {
+                            "type": "string",
+                            "enum": [
+                              "command_center_factory"
+                            ]
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "repositoryFullName",
+                          "defaultBranch",
+                          "executionProfile",
+                          "isActive",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "targets"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devflow/v1/work-items/{id}/implementation-intents": {
+      "get": {
+        "summary": "List immutable implementation intents and their Factory executions",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Implementation intents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "workItemId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "string"
+                          },
+                          "specVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "specDigest": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "repositoryTargetId": {
+                            "type": "string"
+                          },
+                          "desiredOutcome": {
+                            "type": "string"
+                          },
+                          "priority": {
+                            "type": "string",
+                            "enum": [
+                              "p1",
+                              "p2",
+                              "p3"
+                            ]
+                          },
+                          "riskSummary": {
+                            "type": "string"
+                          },
+                          "intentSnapshot": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "workItemId",
+                          "specId",
+                          "specVersion",
+                          "specDigest",
+                          "repositoryTargetId",
+                          "desiredOutcome",
+                          "priority",
+                          "riskSummary",
+                          "intentSnapshot",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    },
+                    "executions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "implementationIntentId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "queued",
+                              "factory_intake",
+                              "signoff_pending",
+                              "ready",
+                              "implementing",
+                              "pr_open",
+                              "finalizer_admitted",
+                              "merged",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "swarmTaskId": {
+                            "type": "string"
+                          },
+                          "headSha": {
+                            "type": "string"
+                          },
+                          "queueItemId": {
+                            "type": "string"
+                          },
+                          "queueItemRevision": {
+                            "type": "string"
+                          },
+                          "contractId": {
+                            "type": "string"
+                          },
+                          "canonicalContractPath": {
+                            "type": "string"
+                          },
+                          "factoryStatus": {
+                            "type": "string"
+                          },
+                          "surfaces": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "impactedSurfaces": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "architectureUnits": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "signoffs": {
+                            "type": "array",
+                            "items": {}
+                          },
+                          "artifacts": {},
+                          "pullRequest": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "finalizerReceipt": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "mergedCommitSha": {
+                            "type": "string"
+                          },
+                          "lastObservedAt": {
+                            "type": "string"
+                          },
+                          "failureCode": {
+                            "type": "string"
+                          },
+                          "failureDetail": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "implementationIntentId",
+                          "status",
+                          "surfaces",
+                          "impactedSurfaces",
+                          "architectureUnits",
+                          "signoffs",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "intents",
+                    "executions"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an immutable intent and dispatch it to Command Center Factory",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryTargetId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "desiredOutcome": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "riskSummary": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": [
+                      "p1",
+                      "p2",
+                      "p3"
+                    ]
+                  }
+                },
+                "required": [
+                  "repositoryTargetId",
+                  "desiredOutcome",
+                  "riskSummary"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Queued Factory execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "workItemId": {
+                            "type": "string"
+                          },
+                          "specId": {
+                            "type": "string"
+                          },
+                          "specVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "specDigest": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "repositoryTargetId": {
+                            "type": "string"
+                          },
+                          "desiredOutcome": {
+                            "type": "string"
+                          },
+                          "priority": {
+                            "type": "string",
+                            "enum": [
+                              "p1",
+                              "p2",
+                              "p3"
+                            ]
+                          },
+                          "riskSummary": {
+                            "type": "string"
+                          },
+                          "intentSnapshot": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "workItemId",
+                          "specId",
+                          "specVersion",
+                          "specDigest",
+                          "repositoryTargetId",
+                          "desiredOutcome",
+                          "priority",
+                          "riskSummary",
+                          "intentSnapshot",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    },
+                    "executions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "implementationIntentId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "queued",
+                              "factory_intake",
+                              "signoff_pending",
+                              "ready",
+                              "implementing",
+                              "pr_open",
+                              "finalizer_admitted",
+                              "merged",
+                              "failed",
+                              "cancelled"
+                            ]
+                          },
+                          "swarmTaskId": {
+                            "type": "string"
+                          },
+                          "headSha": {
+                            "type": "string"
+                          },
+                          "queueItemId": {
+                            "type": "string"
+                          },
+                          "queueItemRevision": {
+                            "type": "string"
+                          },
+                          "contractId": {
+                            "type": "string"
+                          },
+                          "canonicalContractPath": {
+                            "type": "string"
+                          },
+                          "factoryStatus": {
+                            "type": "string"
+                          },
+                          "surfaces": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "impactedSurfaces": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "architectureUnits": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "signoffs": {
+                            "type": "array",
+                            "items": {}
+                          },
+                          "artifacts": {},
+                          "pullRequest": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "finalizerReceipt": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "mergedCommitSha": {
+                            "type": "string"
+                          },
+                          "lastObservedAt": {
+                            "type": "string"
+                          },
+                          "failureCode": {
+                            "type": "string"
+                          },
+                          "failureDetail": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "implementationIntentId",
+                          "status",
+                          "surfaces",
+                          "impactedSurfaces",
+                          "architectureUnits",
+                          "signoffs",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "intents",
+                    "executions"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devflow/v1/factory-executions/{id}": {
+      "get": {
+        "summary": "Get independently verified Factory execution evidence",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Factory execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "execution": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "implementationIntentId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "factory_intake",
+                            "signoff_pending",
+                            "ready",
+                            "implementing",
+                            "pr_open",
+                            "finalizer_admitted",
+                            "merged",
+                            "failed",
+                            "cancelled"
+                          ]
+                        },
+                        "swarmTaskId": {
+                          "type": "string"
+                        },
+                        "headSha": {
+                          "type": "string"
+                        },
+                        "queueItemId": {
+                          "type": "string"
+                        },
+                        "queueItemRevision": {
+                          "type": "string"
+                        },
+                        "contractId": {
+                          "type": "string"
+                        },
+                        "canonicalContractPath": {
+                          "type": "string"
+                        },
+                        "factoryStatus": {
+                          "type": "string"
+                        },
+                        "surfaces": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "impactedSurfaces": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "architectureUnits": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "signoffs": {
+                          "type": "array",
+                          "items": {}
+                        },
+                        "artifacts": {},
+                        "pullRequest": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "finalizerReceipt": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "mergedCommitSha": {
+                          "type": "string"
+                        },
+                        "lastObservedAt": {
+                          "type": "string"
+                        },
+                        "failureCode": {
+                          "type": "string"
+                        },
+                        "failureDetail": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "implementationIntentId",
+                        "status",
+                        "surfaces",
+                        "impactedSurfaces",
+                        "architectureUnits",
+                        "signoffs",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "execution"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/devflow/v1/factory-executions/{id}/reconcile": {
+      "post": {
+        "summary": "Reconcile a Factory execution from canonical Git evidence",
+        "tags": [
+          "DevFlow"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Factory execution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "execution": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "implementationIntentId": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "factory_intake",
+                            "signoff_pending",
+                            "ready",
+                            "implementing",
+                            "pr_open",
+                            "finalizer_admitted",
+                            "merged",
+                            "failed",
+                            "cancelled"
+                          ]
+                        },
+                        "swarmTaskId": {
+                          "type": "string"
+                        },
+                        "headSha": {
+                          "type": "string"
+                        },
+                        "queueItemId": {
+                          "type": "string"
+                        },
+                        "queueItemRevision": {
+                          "type": "string"
+                        },
+                        "contractId": {
+                          "type": "string"
+                        },
+                        "canonicalContractPath": {
+                          "type": "string"
+                        },
+                        "factoryStatus": {
+                          "type": "string"
+                        },
+                        "surfaces": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "impactedSurfaces": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "architectureUnits": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "signoffs": {
+                          "type": "array",
+                          "items": {}
+                        },
+                        "artifacts": {},
+                        "pullRequest": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "finalizerReceipt": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "mergedCommitSha": {
+                          "type": "string"
+                        },
+                        "lastObservedAt": {
+                          "type": "string"
+                        },
+                        "failureCode": {
+                          "type": "string"
+                        },
+                        "failureDetail": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "implementationIntentId",
+                        "status",
+                        "surfaces",
+                        "impactedSurfaces",
+                        "architectureUnits",
+                        "signoffs",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "execution"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Preconditions not met",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/ecosystem": {
       "get": {
         "summary": "Get PM2 ecosystem config for agent services",

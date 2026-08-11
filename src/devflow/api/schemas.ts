@@ -6,11 +6,14 @@ import {
   DevFlowBlastRadiusSchema,
   DevFlowCreatedViaSchema,
   DevFlowEffortBandSchema,
+  DevFlowFactoryExecutionSchema,
+  DevFlowImplementationIntentSchema,
   DevFlowMembershipSchema,
   DevFlowNfrDeclarationSchema,
   DevFlowNfrStatusSchema,
   DevFlowOrganizationSchema,
   DevFlowPrioritySchema,
+  DevFlowRepositoryTargetSchema,
   DevFlowScopeSchema,
   DevFlowSpecSchema,
   DevFlowStateSchema,
@@ -149,6 +152,37 @@ export const SpecResponseSchema = z.object({
 });
 export const AgentRunsResponseSchema = z.object({
   runs: z.array(DevFlowAgentRunSchema),
+});
+
+export const PublicRepositoryTargetSchema = DevFlowRepositoryTargetSchema.omit({
+  checkoutPath: true,
+});
+
+export const RepositoryTargetBodySchema = z.object({
+  name: z.string().min(1).max(120),
+  repositoryFullName: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+  defaultBranch: z.string().min(1).max(240).default("main"),
+  checkoutPath: z.string().min(1),
+});
+
+export const RepositoryTargetsResponseSchema = z.object({
+  targets: z.array(PublicRepositoryTargetSchema),
+});
+
+export const CreateImplementationIntentBodySchema = z.object({
+  repositoryTargetId: z.string().uuid(),
+  desiredOutcome: z.string().min(1),
+  riskSummary: z.string().min(1),
+  priority: DevFlowPrioritySchema.optional(),
+});
+
+export const ImplementationIntentsResponseSchema = z.object({
+  intents: z.array(DevFlowImplementationIntentSchema),
+  executions: z.array(DevFlowFactoryExecutionSchema),
+});
+
+export const FactoryExecutionResponseSchema = z.object({
+  execution: DevFlowFactoryExecutionSchema,
 });
 export const AuditResponseSchema = WorkItemDetailResponseSchema.pick({
   audit: true,

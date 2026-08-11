@@ -161,4 +161,123 @@ describe("DevFlow HTTP API", () => {
       scope: { pmSignedOffAt: expect.any(String) },
     });
   });
+
+  test("configures tenant-scoped Factory targets without exposing server checkout paths", async () => {
+    const response = await fetch(`${baseUrl}/api/devflow/v1/repository-targets`, {
+      method: "POST",
+      headers: headers(pm.id, orgA),
+      body: JSON.stringify({
+        name: "Command Center",
+        repositoryFullName: "RebarHQ/sequencer_v3",
+        defaultBranch: "main",
+        checkoutPath: "/srv/devflow/repos/sequencer_v3",
+      }),
+    });
+    expect(response.status).toBe(201);
+    const body = (await response.json()) as { targets: Record<string, unknown>[] };
+    expect(body.targets[0]).toMatchObject({
+      name: "Command Center",
+      repositoryFullName: "RebarHQ/sequencer_v3",
+      executionProfile: "command_center_factory",
+    });
+    expect(body.targets[0]).not.toHaveProperty("checkoutPath");
+
+    const foreignList = await fetch(`${baseUrl}/api/devflow/v1/repository-targets`, {
+      headers: headers(other.id, orgB),
+    });
+    expect(await foreignList.json()).toEqual({ targets: [] });
+  });
+
+  test("turns Gate 2 authority into one immutable intent and queued Factory execution", async () => {
+    const item = repo.createWorkItem({
+      organizationId: orgA,
+      title: "Factory bridge",
+      description: "Execute an approved spec through Command Center.",
+      priority: "p2",
+      createdVia: "manual",
+      pmOwnerId: pm.id,
+    });
+    repo.upsertScope(orgA, item.id, {
+      problemStatement: "Approved specs need governed implementation.",
+      targetUsers: ["Product", "Engineering"],
+      successCriteria: ["Factory intake is digest linked"],
+      effortBand: "m",
+      openQuestions: [],
+      confidence: 0.9,
+      rationale: "Use the existing Factory authority.",
+    });
+    repo.signOffScope(orgA, item.id, new Date().toISOString());
+    repo.createSpecVersion(orgA, item.id, {
+      problemStatement: "Approved specs need governed implementation.",
+      userStories: "As a PM, I can send an approved spec to Factory.",
+      outOfScope: "Deployment",
+      uxBehavior: "Show Factory evidence.",
+      dataModelChanges: "Persist the intent and execution.",
+      integrationPoints: "Agent Swarm and Command Center Factory.",
+      threatModel: "Fail closed on authority mismatches.",
+      rollbackPlan: "Stop future dispatches.",
+      dependencyMap: [],
+      openQuestions: [],
+      acceptanceCriteria: [
+        {
+          given: "an approved spec",
+          when: "the PM sends it to Factory",
+          // biome-ignore lint/suspicious/noThenProperty: Acceptance criteria use Given/When/Then terminology.
+          then: "one linked execution is queued",
+          isTestable: true,
+        },
+      ],
+      nfrDeclarations: [],
+    });
+    repo.approveCurrentSpec(orgA, item.id, new Date().toISOString());
+    repo.createGateDecision({
+      organizationId: orgA,
+      workItemId: item.id,
+      gate: 2,
+      decision: "approved",
+      actorUserId: pm.id,
+      actorRole: "pm",
+      rationale: "Approved for implementation.",
+      preconditionSnapshot: { specApproved: true },
+    });
+    repo.updateWorkItem(orgA, item.id, { state: "specced" });
+    const target = repo.createRepositoryTarget({
+      organizationId: orgA,
+      name: "Command Center",
+      repositoryFullName: "RebarHQ/sequencer_v3",
+      checkoutPath: "/srv/devflow/repos/sequencer_v3",
+    });
+
+    const response = await fetch(
+      `${baseUrl}/api/devflow/v1/work-items/${item.id}/implementation-intents`,
+      {
+        method: "POST",
+        headers: headers(pm.id, orgA),
+        body: JSON.stringify({
+          repositoryTargetId: target.id,
+          desiredOutcome: "Create reviewed Factory intake.",
+          riskSummary: "Cross-repository orchestration",
+        }),
+      },
+    );
+    expect(response.status).toBe(202);
+    const body = (await response.json()) as {
+      intents: Array<{ id: string; specDigest: string }>;
+      executions: Array<{ status: string; swarmTaskId?: string }>;
+    };
+    expect(body.intents[0]?.specDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(body.executions[0]).toMatchObject({
+      status: "queued",
+      swarmTaskId: expect.any(String),
+    });
+
+    const list = await fetch(
+      `${baseUrl}/api/devflow/v1/work-items/${item.id}/implementation-intents`,
+      { headers: headers(pm.id, orgA) },
+    );
+    expect(await list.json()).toMatchObject({
+      intents: [{ id: body.intents[0]?.id }],
+      executions: [{ status: "queued" }],
+    });
+  });
 });

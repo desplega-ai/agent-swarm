@@ -6515,6 +6515,783 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devflow/v1/repository-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List configured DevFlow implementation repositories */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Repository targets */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            targets: {
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                repositoryFullName: string;
+                                defaultBranch: string;
+                                /** @enum {string} */
+                                executionProfile: "command_center_factory";
+                                isActive: boolean;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Configure a DevFlow Command Center Factory target */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        repositoryFullName: string;
+                        /** @default main */
+                        defaultBranch?: string;
+                        checkoutPath: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Repository target */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            targets: {
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                repositoryFullName: string;
+                                defaultBranch: string;
+                                /** @enum {string} */
+                                executionProfile: "command_center_factory";
+                                isActive: boolean;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/implementation-intents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List immutable implementation intents and their Factory executions */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Implementation intents */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            intents: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                specId: string;
+                                specVersion: number;
+                                specDigest: string;
+                                repositoryTargetId: string;
+                                desiredOutcome: string;
+                                /** @enum {string} */
+                                priority: "p1" | "p2" | "p3";
+                                riskSummary: string;
+                                intentSnapshot: {
+                                    [key: string]: unknown;
+                                };
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            executions: {
+                                id: string;
+                                organizationId: string;
+                                implementationIntentId: string;
+                                /** @enum {string} */
+                                status: "queued" | "factory_intake" | "signoff_pending" | "ready" | "implementing" | "pr_open" | "finalizer_admitted" | "merged" | "failed" | "cancelled";
+                                swarmTaskId?: string;
+                                headSha?: string;
+                                queueItemId?: string;
+                                queueItemRevision?: string;
+                                contractId?: string;
+                                canonicalContractPath?: string;
+                                factoryStatus?: string;
+                                surfaces: string[];
+                                impactedSurfaces: string[];
+                                architectureUnits: {
+                                    [key: string]: unknown;
+                                };
+                                signoffs: unknown[];
+                                artifacts?: unknown;
+                                pullRequest?: {
+                                    [key: string]: unknown;
+                                };
+                                finalizerReceipt?: {
+                                    [key: string]: unknown;
+                                };
+                                mergedCommitSha?: string;
+                                lastObservedAt?: string;
+                                failureCode?: string;
+                                failureDetail?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create an immutable intent and dispatch it to Command Center Factory */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        repositoryTargetId: string;
+                        desiredOutcome: string;
+                        riskSummary: string;
+                        /** @enum {string} */
+                        priority?: "p1" | "p2" | "p3";
+                    };
+                };
+            };
+            responses: {
+                /** @description Queued Factory execution */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            intents: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                specId: string;
+                                specVersion: number;
+                                specDigest: string;
+                                repositoryTargetId: string;
+                                desiredOutcome: string;
+                                /** @enum {string} */
+                                priority: "p1" | "p2" | "p3";
+                                riskSummary: string;
+                                intentSnapshot: {
+                                    [key: string]: unknown;
+                                };
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            executions: {
+                                id: string;
+                                organizationId: string;
+                                implementationIntentId: string;
+                                /** @enum {string} */
+                                status: "queued" | "factory_intake" | "signoff_pending" | "ready" | "implementing" | "pr_open" | "finalizer_admitted" | "merged" | "failed" | "cancelled";
+                                swarmTaskId?: string;
+                                headSha?: string;
+                                queueItemId?: string;
+                                queueItemRevision?: string;
+                                contractId?: string;
+                                canonicalContractPath?: string;
+                                factoryStatus?: string;
+                                surfaces: string[];
+                                impactedSurfaces: string[];
+                                architectureUnits: {
+                                    [key: string]: unknown;
+                                };
+                                signoffs: unknown[];
+                                artifacts?: unknown;
+                                pullRequest?: {
+                                    [key: string]: unknown;
+                                };
+                                finalizerReceipt?: {
+                                    [key: string]: unknown;
+                                };
+                                mergedCommitSha?: string;
+                                lastObservedAt?: string;
+                                failureCode?: string;
+                                failureDetail?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/factory-executions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get independently verified Factory execution evidence */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Factory execution */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            execution: {
+                                id: string;
+                                organizationId: string;
+                                implementationIntentId: string;
+                                /** @enum {string} */
+                                status: "queued" | "factory_intake" | "signoff_pending" | "ready" | "implementing" | "pr_open" | "finalizer_admitted" | "merged" | "failed" | "cancelled";
+                                swarmTaskId?: string;
+                                headSha?: string;
+                                queueItemId?: string;
+                                queueItemRevision?: string;
+                                contractId?: string;
+                                canonicalContractPath?: string;
+                                factoryStatus?: string;
+                                surfaces: string[];
+                                impactedSurfaces: string[];
+                                architectureUnits: {
+                                    [key: string]: unknown;
+                                };
+                                signoffs: unknown[];
+                                artifacts?: unknown;
+                                pullRequest?: {
+                                    [key: string]: unknown;
+                                };
+                                finalizerReceipt?: {
+                                    [key: string]: unknown;
+                                };
+                                mergedCommitSha?: string;
+                                lastObservedAt?: string;
+                                failureCode?: string;
+                                failureDetail?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/factory-executions/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile a Factory execution from canonical Git evidence */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Factory execution */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            execution: {
+                                id: string;
+                                organizationId: string;
+                                implementationIntentId: string;
+                                /** @enum {string} */
+                                status: "queued" | "factory_intake" | "signoff_pending" | "ready" | "implementing" | "pr_open" | "finalizer_admitted" | "merged" | "failed" | "cancelled";
+                                swarmTaskId?: string;
+                                headSha?: string;
+                                queueItemId?: string;
+                                queueItemRevision?: string;
+                                contractId?: string;
+                                canonicalContractPath?: string;
+                                factoryStatus?: string;
+                                surfaces: string[];
+                                impactedSurfaces: string[];
+                                architectureUnits: {
+                                    [key: string]: unknown;
+                                };
+                                signoffs: unknown[];
+                                artifacts?: unknown;
+                                pullRequest?: {
+                                    [key: string]: unknown;
+                                };
+                                finalizerReceipt?: {
+                                    [key: string]: unknown;
+                                };
+                                mergedCommitSha?: string;
+                                lastObservedAt?: string;
+                                failureCode?: string;
+                                failureDetail?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ecosystem": {
         parameters: {
             query?: never;

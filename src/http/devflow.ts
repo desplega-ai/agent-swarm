@@ -4,9 +4,14 @@ import { getDb } from "../be/db";
 import {
   AgentRunsResponseSchema,
   AuditResponseSchema,
+  CreateImplementationIntentBodySchema,
   CreateWorkItemBodySchema,
   CurrentOrganizationResponseSchema,
   DevFlowErrorResponseSchema,
+  FactoryExecutionResponseSchema,
+  ImplementationIntentsResponseSchema,
+  RepositoryTargetBodySchema,
+  RepositoryTargetsResponseSchema,
   ScopeBodySchema,
   ScopeResponseSchema,
   SpecBodySchema,
@@ -26,6 +31,8 @@ import {
 import { createDevFlowRepository, type DevFlowRepository } from "../devflow/repository";
 import { createAgentAdapter } from "../devflow/services/agent-adapter";
 import { createEvidenceService } from "../devflow/services/evidence-service";
+import { createFactoryAdapter } from "../devflow/services/factory-adapter";
+import { createImplementationIntentService } from "../devflow/services/implementation-intent-service";
 import { createTransitionService } from "../devflow/services/transition-service";
 import { can, type PermissionVerb } from "../rbac";
 import { getRequestAuth } from "../utils/request-auth-context";
@@ -273,6 +280,94 @@ const getAuditRoute = route({
   auth: { apiKey: true },
 });
 
+const listRepositoryTargetsRoute = route({
+  method: "get",
+  path: "/api/devflow/v1/repository-targets",
+  pattern: ["api", "devflow", "v1", "repository-targets"],
+  summary: "List configured DevFlow implementation repositories",
+  tags: ["DevFlow"],
+  responses: {
+    200: { description: "Repository targets", schema: RepositoryTargetsResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+});
+
+const createRepositoryTargetRoute = route({
+  method: "post",
+  path: "/api/devflow/v1/repository-targets",
+  pattern: ["api", "devflow", "v1", "repository-targets"],
+  summary: "Configure a DevFlow Command Center Factory target",
+  tags: ["DevFlow"],
+  body: RepositoryTargetBodySchema,
+  responses: {
+    201: { description: "Repository target", schema: RepositoryTargetsResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "devflow.factory.execute" },
+});
+
+const listImplementationIntentsRoute = route({
+  method: "get",
+  path: "/api/devflow/v1/work-items/{id}/implementation-intents",
+  pattern: ["api", "devflow", "v1", "work-items", null, "implementation-intents"],
+  summary: "List immutable implementation intents and their Factory executions",
+  tags: ["DevFlow"],
+  params: z.object({ id: z.string().uuid() }),
+  responses: {
+    200: { description: "Implementation intents", schema: ImplementationIntentsResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+});
+
+const createImplementationIntentRoute = route({
+  method: "post",
+  path: "/api/devflow/v1/work-items/{id}/implementation-intents",
+  pattern: ["api", "devflow", "v1", "work-items", null, "implementation-intents"],
+  summary: "Create an immutable intent and dispatch it to Command Center Factory",
+  tags: ["DevFlow"],
+  params: z.object({ id: z.string().uuid() }),
+  body: CreateImplementationIntentBodySchema,
+  responses: {
+    202: { description: "Queued Factory execution", schema: ImplementationIntentsResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "devflow.factory.execute" },
+});
+
+const getFactoryExecutionRoute = route({
+  method: "get",
+  path: "/api/devflow/v1/factory-executions/{id}",
+  pattern: ["api", "devflow", "v1", "factory-executions", null],
+  summary: "Get independently verified Factory execution evidence",
+  tags: ["DevFlow"],
+  params: z.object({ id: z.string().uuid() }),
+  responses: {
+    200: { description: "Factory execution", schema: FactoryExecutionResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+});
+
+const reconcileFactoryExecutionRoute = route({
+  method: "post",
+  path: "/api/devflow/v1/factory-executions/{id}/reconcile",
+  pattern: ["api", "devflow", "v1", "factory-executions", null, "reconcile"],
+  summary: "Reconcile a Factory execution from canonical Git evidence",
+  tags: ["DevFlow"],
+  params: z.object({ id: z.string().uuid() }),
+  body: z.object({}),
+  responses: {
+    200: { description: "Factory execution", schema: FactoryExecutionResponseSchema },
+    ...errorResponses,
+  },
+  auth: { apiKey: true },
+  rbac: { permission: "devflow.factory.execute" },
+});
+
 type RequestContext = { repo: DevFlowRepository; context: DevFlowContext };
 
 function oneHeader(req: IncomingMessage, name: string): string | undefined {
@@ -325,7 +420,10 @@ function ensurePermission(
   res: ServerResponse,
   verb: Extract<
     PermissionVerb,
-    "devflow.work-item.write" | "devflow.gate.approve" | "devflow.agent-run.start"
+    | "devflow.work-item.write"
+    | "devflow.gate.approve"
+    | "devflow.agent-run.start"
+    | "devflow.factory.execute"
   >,
   userId: string,
 ): boolean {
@@ -376,6 +474,11 @@ function detail(repo: DevFlowRepository, organizationId: string, id: string) {
   };
 }
 
+function publicRepositoryTarget(target: ReturnType<DevFlowRepository["createRepositoryTarget"]>) {
+  const { checkoutPath: _checkoutPath, ...publicTarget } = target;
+  return publicTarget;
+}
+
 export async function handleDevFlow(
   req: IncomingMessage,
   res: ServerResponse,
@@ -397,6 +500,12 @@ export async function handleDevFlow(
     startAgentRunRoute,
     reconcileAgentRunRoute,
     getAuditRoute,
+    listRepositoryTargetsRoute,
+    createRepositoryTargetRoute,
+    listImplementationIntentsRoute,
+    createImplementationIntentRoute,
+    getFactoryExecutionRoute,
+    reconcileFactoryExecutionRoute,
   ];
   if (!routes.some((candidate) => candidate.match(req.method, pathSegments))) return false;
 
@@ -408,6 +517,8 @@ export async function handleDevFlow(
       repo,
       evidence: createEvidenceService(repo, transitions),
     });
+    const factoryAdapter = createFactoryAdapter({ repo });
+    const intentService = createImplementationIntentService(repo);
 
     if (currentOrganizationRoute.match(req.method, pathSegments)) {
       const organization = repo.getOrganization(context.organizationId)!;
@@ -558,6 +669,83 @@ export async function handleDevFlow(
       if (!parsed || !ensurePermission(req, res, "devflow.agent-run.start", actorId)) return true;
       const run = adapter.reconcileAgentRun(context, parsed.params.id);
       reconcileAgentRunRoute.respond(res, 200, { runs: [run] });
+      return true;
+    }
+    if (listRepositoryTargetsRoute.match(req.method, pathSegments)) {
+      listRepositoryTargetsRoute.respond(res, 200, {
+        targets: repo.listRepositoryTargets(context.organizationId).map(publicRepositoryTarget),
+      });
+      return true;
+    }
+    if (createRepositoryTargetRoute.match(req.method, pathSegments)) {
+      const parsed = await createRepositoryTargetRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.factory.execute", actorId)) return true;
+      const target = repo.createRepositoryTarget({
+        organizationId: context.organizationId,
+        ...parsed.body,
+      });
+      createRepositoryTargetRoute.respond(res, 201, {
+        targets: [publicRepositoryTarget(target)],
+      });
+      return true;
+    }
+    if (listImplementationIntentsRoute.match(req.method, pathSegments)) {
+      const parsed = await listImplementationIntentsRoute.parse(
+        req,
+        res,
+        pathSegments,
+        queryParams,
+      );
+      if (!parsed) return true;
+      if (!repo.getWorkItem(context.organizationId, parsed.params.id)) {
+        throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
+      }
+      const intents = repo.listImplementationIntents(context.organizationId, parsed.params.id);
+      listImplementationIntentsRoute.respond(res, 200, {
+        intents,
+        executions: intents.flatMap((intent) =>
+          repo.listFactoryExecutions(context.organizationId, intent.id),
+        ),
+      });
+      return true;
+    }
+    if (createImplementationIntentRoute.match(req.method, pathSegments)) {
+      const parsed = await createImplementationIntentRoute.parse(
+        req,
+        res,
+        pathSegments,
+        queryParams,
+      );
+      if (!parsed || !ensurePermission(req, res, "devflow.factory.execute", actorId)) return true;
+      const intent = intentService.create(context, parsed.params.id, parsed.body);
+      const execution = factoryAdapter.startExecution(context, intent.id);
+      createImplementationIntentRoute.respond(res, 202, {
+        intents: [intent],
+        executions: [execution],
+      });
+      return true;
+    }
+    if (getFactoryExecutionRoute.match(req.method, pathSegments)) {
+      const parsed = await getFactoryExecutionRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed) return true;
+      const execution = repo.getFactoryExecution(context.organizationId, parsed.params.id);
+      if (!execution) {
+        throw new DevFlowError(404, "factory_execution_not_found", "Factory execution not found.");
+      }
+      getFactoryExecutionRoute.respond(res, 200, { execution });
+      return true;
+    }
+    if (reconcileFactoryExecutionRoute.match(req.method, pathSegments)) {
+      const parsed = await reconcileFactoryExecutionRoute.parse(
+        req,
+        res,
+        pathSegments,
+        queryParams,
+      );
+      if (!parsed || !ensurePermission(req, res, "devflow.factory.execute", actorId)) return true;
+      reconcileFactoryExecutionRoute.respond(res, 200, {
+        execution: factoryAdapter.reconcileExecution(context, parsed.params.id),
+      });
       return true;
     }
     const parsed = await getAuditRoute.parse(req, res, pathSegments, queryParams);

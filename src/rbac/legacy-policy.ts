@@ -146,6 +146,7 @@ export const LEGACY_POLICY = {
   "devflow.work-item.write": anyAuthenticated,
   "devflow.gate.approve": anyAuthenticated,
   "devflow.agent-run.start": anyAuthenticated,
+  "devflow.factory.execute": anyAuthenticated,
   "user.manage": leadOnly,
   "agent.profile.update.any": leadOnly,
   "agent.context.read.any": leadOnly,

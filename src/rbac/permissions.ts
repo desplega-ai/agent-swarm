@@ -29,6 +29,10 @@ export const PERMISSIONS = {
     description: "Start or reconcile a structured DevFlow Agent Swarm run.",
     namespace: "devflow",
   },
+  "devflow.factory.execute": {
+    description: "Configure repository targets and execute approved DevFlow intents via Factory.",
+    namespace: "devflow",
+  },
   "user.manage": {
     description: "Create, update, or deactivate user profiles.",
     namespace: "user",
