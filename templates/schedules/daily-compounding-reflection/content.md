@@ -122,19 +122,26 @@ Skills are the swarm's procedural knowledge — tested playbooks for how to do t
 
 ### 3A. Identify Skill Candidates
 - Review completed tasks: Was any task done by researching something that should have been a skill?
-- Look for repeated patterns: Has the same type of task been done 3+ times with a stable approach?
+- Skillify a reusable method the first time it has been validated.
 - Check failed tasks: Did an agent waste context on research that a skill could have prevented?
 - Review agent sessions: Did any agent ignore an existing skill and re-derive the same knowledge? (This is a skill discoverability problem.)
 
 ### 3B. Create New Skills
 For each candidate:
 1. Draft the skill content (procedure, examples, gotchas)
-2. Use `skill-create` with clear name, description, and `agentAutoTrigger` field
+2. Use `skill-create` with full skill content containing a clear name and description
 3. Use `skill-install` to install it for relevant agents
 4. The description and trigger fields are CRITICAL — they determine whether agents find and use the skill
 
 ### 3C. Update Existing Skills
-- Use `skill-list` with `includeContent: true` to review current skills
+- Use `db-query` to review current skill bodies directly from the `skills` table:
+  ```sql
+  SELECT name, description, content
+  FROM skills
+  WHERE isEnabled = 1
+  ORDER BY name;
+  ```
+- Before accepting any zero-hit content audit as clean, carry a positive control through the same search path: choose a distinctive token visibly present in one returned skill body and verify that the audit finds it. If the positive control returns zero, treat the audit as invalid rather than clean.
 - Are any skills outdated (e.g., referencing old APIs, wrong procedures)?
 - Are any skills not being used? Check if the description/trigger is too vague
 - Update skills with `skill-update` as needed
