@@ -19,15 +19,19 @@ import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
 import { registerCancelTaskTool } from "./tools/cancel-task";
+import { registerConcludeMeetingTool } from "./tools/conclude-meeting";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
+import { registerContributeMeetingTool } from "./tools/contribute-meeting";
 import { registerCreateChannelTool } from "./tools/create-channel";
+import { registerCreateMeetingTool } from "./tools/create-meeting";
 import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
 import { registerCredentialBindingsTool } from "./tools/credential-bindings";
 import { registerDbQueryTool } from "./tools/db-query";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
+import { registerGetMeetingTool } from "./tools/get-meeting";
 import { registerGetMetricsTool } from "./tools/get-metrics";
 import { registerGetSwarmTool } from "./tools/get-swarm";
 import { registerGetTaskDetailsTool } from "./tools/get-task-details";
@@ -44,6 +48,7 @@ import {
 } from "./tools/kv";
 // Messaging capability
 import { registerListChannelsTool } from "./tools/list-channels";
+import { registerListMeetingsTool } from "./tools/list-meetings";
 import { registerListServicesTool } from "./tools/list-services";
 import { registerManageUserTool } from "./tools/manage-user";
 // MCP Servers capability
@@ -189,6 +194,7 @@ export const ALL_CAPABILITIES = [
   "memory",
   "workflows",
   "pages",
+  "meetings",
   "metrics",
   "kv",
   "slack",
@@ -215,6 +221,7 @@ const DEFAULT_CAPABILITIES: string = [
   "memory",
   "workflows",
   "pages",
+  "meetings",
   "metrics",
   "kv",
   "slack",
@@ -482,6 +489,16 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
     registerAppUpsertTool(server);
     registerCreatePageTool(server);
     registerDeletePageTool(server);
+  }
+
+  // Meetings capability — structured, gated multi-agent decision records
+  // (see src/be/migrations/130_meetings.sql).
+  if (hasCapability("meetings")) {
+    registerCreateMeetingTool(server);
+    registerContributeMeetingTool(server);
+    registerConcludeMeetingTool(server);
+    registerGetMeetingTool(server);
+    registerListMeetingsTool(server);
   }
 
   // Metrics capability - time-series metrics (DB-backed, for dashboards).

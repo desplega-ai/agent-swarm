@@ -71,6 +71,7 @@ import { handleMcpBridge } from "./mcp-bridge";
 import { handleMcpOAuth } from "./mcp-oauth";
 import { handleMcpServers } from "./mcp-servers";
 import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
+import { handleMeetings } from "./meetings";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
 import { handleModelsCatalog } from "./models-catalog";
@@ -328,6 +329,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleConfig(req, res, pathSegments, queryParams),
         () => handleFs(req, res, pathSegments, queryParams, myAgentId),
         () => handleKv(req, res, pathSegments, queryParams),
+        () => handleMeetings(req, res, pathSegments, queryParams, myAgentId),
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),

@@ -50,6 +50,9 @@ import type {
   McpServer,
   McpServersResponse,
   McpUserConfigResponse,
+  MeetingDetail,
+  MeetingStatus,
+  MeetingsResponse,
   MessagesResponse,
   Metric,
   MetricRunResult,
@@ -732,6 +735,29 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/schedules/${id}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch schedule: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchMeetings(filters?: {
+    status?: MeetingStatus;
+    agentId?: string;
+    limit?: number;
+  }): Promise<MeetingsResponse> {
+    const params = new URLSearchParams();
+    if (filters?.status) params.set("status", filters.status);
+    if (filters?.agentId) params.set("agentId", filters.agentId);
+    if (filters?.limit !== undefined) params.set("limit", String(filters.limit));
+    const qs = params.toString();
+    const url = `${this.getBaseUrl()}/api/meetings${qs ? `?${qs}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch meetings: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchMeeting(id: string): Promise<MeetingDetail> {
+    const url = `${this.getBaseUrl()}/api/meetings/${id}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch meeting: ${res.status}`);
     return res.json();
   }
 

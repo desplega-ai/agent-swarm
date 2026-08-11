@@ -35,6 +35,7 @@ import "./oauth-locks";
 import "./oauth-callback";
 import "./oauth-generic";
 import "./page-proxy";
+import "./meetings";
 import "./pages";
 import "./pages-public";
 import "./prompt-templates";

@@ -152,6 +152,11 @@ export const SDK_TOOL_NAME_MAP = {
   app_upsert: "app-upsert",
   page_create: "create_page",
   page_delete: "delete-page", // destructive
+  meeting_create: "create_meeting",
+  meeting_contribute: "contribute_to_meeting",
+  meeting_conclude: "conclude_meeting",
+  meeting_get: "get_meeting",
+  meeting_list: "list_meetings",
   metric_create: "create_metric",
 
   // ── human input ──

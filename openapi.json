@@ -2063,6 +2063,179 @@
           "definition"
         ]
       },
+      "Meeting": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "agenda": {
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "concluded",
+              "cancelled"
+            ]
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "concludedBy": {
+            "type": "string"
+          },
+          "concludedAt": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "agentId",
+          "title",
+          "agenda",
+          "participants",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "MeetingTemplate": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "agenda": {
+            "type": "string"
+          },
+          "rounds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "description",
+          "agenda",
+          "rounds"
+        ]
+      },
+      "MeetingDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Meeting"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "contributions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MeetingContribution"
+                }
+              },
+              "attendance": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/MeetingAttendance"
+                }
+              },
+              "fullyAttended": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "contributions",
+              "attendance",
+              "fullyAttended"
+            ]
+          }
+        ]
+      },
+      "MeetingContribution": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "meetingId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "round": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "meetingId",
+          "agentId",
+          "round",
+          "content",
+          "createdAt"
+        ]
+      },
+      "MeetingAttendance": {
+        "type": "object",
+        "properties": {
+          "participant": {
+            "type": "string"
+          },
+          "present": {
+            "type": "boolean"
+          },
+          "contributionCount": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "participant",
+          "present",
+          "contributionCount"
+        ]
+      },
       "Page": {
         "type": "object",
         "properties": {
@@ -8489,6 +8662,7 @@
                               "memory",
                               "workflows",
                               "pages",
+                              "meetings",
                               "metrics",
                               "kv",
                               "slack",
@@ -8541,6 +8715,7 @@
                               "memory",
                               "workflows",
                               "pages",
+                              "meetings",
                               "metrics",
                               "kv",
                               "slack",
@@ -20453,6 +20628,394 @@
           },
           "401": {
             "description": "No or invalid page-session cookie",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings": {
+      "post": {
+        "summary": "Open a structured meeting",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "agenda": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "template": {
+                    "type": "string"
+                  },
+                  "participants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  }
+                },
+                "required": [
+                  "title",
+                  "participants"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Meeting created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Meeting"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or unknown template",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List meetings",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "concluded",
+                "cancelled"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": false,
+            "name": "agentId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "required": false,
+            "name": "offset",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "meetings": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Meeting"
+                      }
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "meetings",
+                    "limit",
+                    "offset"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/templates": {
+      "get": {
+        "summary": "List built-in meeting templates",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Template list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "templates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MeetingTemplate"
+                      }
+                    }
+                  },
+                  "required": [
+                    "templates"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{id}": {
+      "get": {
+        "summary": "Get a meeting with contributions + attendance",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Meeting detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{id}/contributions": {
+      "post": {
+        "summary": "Record a contribution to a meeting",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "round": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Contribution recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingContribution"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Meeting is not open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meetings/{id}/conclude": {
+      "post": {
+        "summary": "Conclude a meeting (attendance + conclusion gate)",
+        "tags": [
+          "Meetings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "conclusion": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "conclusion"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Meeting concluded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeetingDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Meeting not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Gate not satisfied (attendance/state/empty conclusion)",
             "content": {
               "application/json": {
                 "schema": {

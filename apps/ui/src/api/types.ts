@@ -932,6 +932,51 @@ export interface ScheduledTasksResponse {
   scheduledTasks: ScheduledTask[];
 }
 
+// Structured Meetings — mirrored from the backend (src/types.ts).
+export type MeetingStatus = "open" | "concluded" | "cancelled";
+
+export interface Meeting {
+  id: string;
+  agentId: string;
+  title: string;
+  agenda: string;
+  template?: string;
+  participants: string[];
+  status: MeetingStatus;
+  conclusion?: string;
+  concludedBy?: string;
+  concludedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MeetingContribution {
+  id: string;
+  meetingId: string;
+  agentId: string;
+  round: number;
+  content: string;
+  createdAt: string;
+}
+
+export interface MeetingAttendance {
+  participant: string;
+  present: boolean;
+  contributionCount: number;
+}
+
+export interface MeetingDetail extends Meeting {
+  contributions: MeetingContribution[];
+  attendance: MeetingAttendance[];
+  fullyAttended: boolean;
+}
+
+export interface MeetingsResponse {
+  meetings: Meeting[];
+  limit: number;
+  offset: number;
+}
+
 export type SwarmConfigScope = "global" | "agent" | "repo";
 
 export interface SwarmConfig {

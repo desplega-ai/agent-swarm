@@ -25,6 +25,7 @@
     "kv",
     "mcp-oauth",
     "mcp-servers",
+    "meetings",
     "memory",
     "metrics",
     "oauth",

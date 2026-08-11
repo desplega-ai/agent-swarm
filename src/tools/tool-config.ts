@@ -176,6 +176,13 @@ export const DEFERRED_TOOLS = new Set([
   "create_page",
   "delete-page",
 
+  // Structured meetings (5)
+  "create_meeting",
+  "contribute_to_meeting",
+  "conclude_meeting",
+  "get_meeting",
+  "list_meetings",
+
   // KV store (5)
   "kv-get",
   "kv-set",

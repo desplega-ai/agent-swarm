@@ -59,16 +59,22 @@ const PIN_REASON =
 
 const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/app-list.ts": "app summaries are list-level; per-app filtering is future work",
+  "src/tools/conclude-meeting.ts":
+    "collaboration primitive; the attendance + conclusion gate in the db layer is the real control",
+  "src/tools/contribute-meeting.ts": PIN_REASON,
   "src/tools/create-channel.ts": PIN_REASON,
+  "src/tools/create-meeting.ts": PIN_REASON,
   "src/tools/create-metric.ts": PIN_REASON,
   "src/tools/create-page.ts": PIN_REASON,
   "src/tools/db-query.ts": PIN_REASON,
+  "src/tools/get-meeting.ts": PIN_REASON,
   "src/tools/get-metrics.ts": PIN_REASON,
   "src/tools/get-swarm.ts": PIN_REASON,
   "src/tools/join-swarm.ts": PIN_REASON,
   "src/tools/kv/kv-get.ts": PIN_REASON,
   "src/tools/kv/kv-list.ts": PIN_REASON,
   "src/tools/list-channels.ts": PIN_REASON,
+  "src/tools/list-meetings.ts": PIN_REASON,
   "src/tools/list-services.ts": PIN_REASON,
   "src/tools/mcp-servers/mcp-server-get.ts": PIN_REASON,
   "src/tools/mcp-servers/mcp-server-list.ts": PIN_REASON,

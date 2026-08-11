@@ -2000,6 +2000,79 @@ export const PageSchema = z
 export type Page = z.infer<typeof PageSchema>;
 
 // ---------------------------------------------------------------------------
+// Structured Meetings — gated multi-agent decision records.
+// Enums here MUST stay in sync with the CHECK constraints in
+// src/be/migrations/130_meetings.sql.
+// ---------------------------------------------------------------------------
+
+export const MeetingStatusSchema = z.enum(["open", "concluded", "cancelled"]);
+export type MeetingStatus = z.infer<typeof MeetingStatusSchema>;
+
+export const MeetingSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    title: z.string(),
+    agenda: z.string(),
+    template: z.string().optional(),
+    participants: z.array(z.string()),
+    status: MeetingStatusSchema,
+    conclusion: z.string().optional(),
+    concludedBy: z.string().optional(),
+    concludedAt: z.string().optional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .openapi("Meeting");
+export type Meeting = z.infer<typeof MeetingSchema>;
+
+export const MeetingContributionSchema = z
+  .object({
+    id: z.string(),
+    meetingId: z.string(),
+    agentId: z.string(),
+    round: z.number().int().min(1),
+    content: z.string(),
+    createdAt: z.string(),
+  })
+  .openapi("MeetingContribution");
+export type MeetingContribution = z.infer<typeof MeetingContributionSchema>;
+
+/**
+ * Per-participant attendance status for a meeting. `present` is true once the
+ * participant has recorded at least one contribution — the signal the
+ * conclusion gate checks.
+ */
+export const MeetingAttendanceSchema = z
+  .object({
+    participant: z.string(),
+    present: z.boolean(),
+    contributionCount: z.number().int().min(0),
+  })
+  .openapi("MeetingAttendance");
+export type MeetingAttendance = z.infer<typeof MeetingAttendanceSchema>;
+
+/** Detail shape: a meeting plus its contributions and computed attendance. */
+export const MeetingDetailSchema = MeetingSchema.extend({
+  contributions: z.array(MeetingContributionSchema),
+  attendance: z.array(MeetingAttendanceSchema),
+  fullyAttended: z.boolean(),
+}).openapi("MeetingDetail");
+export type MeetingDetail = z.infer<typeof MeetingDetailSchema>;
+
+/** A built-in meeting template — scaffolds agenda + suggested rounds. */
+export const MeetingTemplateSchema = z
+  .object({
+    key: z.string(),
+    title: z.string(),
+    description: z.string(),
+    agenda: z.string(),
+    rounds: z.array(z.string()),
+  })
+  .openapi("MeetingTemplate");
+export type MeetingTemplate = z.infer<typeof MeetingTemplateSchema>;
+
+// ---------------------------------------------------------------------------
 // Slim list-endpoint variants
 // ---------------------------------------------------------------------------
 // List endpoints default to these slimmed shapes — heavy fields (`body`,

@@ -22,6 +22,7 @@ import { LayoutGridIcon } from "@/components/icons/layout-grid";
 import { Link2Icon } from "@/components/icons/link-2";
 import { ListTodoIcon } from "@/components/icons/list-todo";
 import { MessageSquareIcon } from "@/components/icons/message-square";
+import { MessagesSquareIcon } from "@/components/icons/messages-square";
 import { SettingsIcon } from "@/components/icons/settings";
 import { UsersIcon } from "@/components/icons/users";
 import { WorkflowIcon } from "@/components/icons/workflow";
@@ -131,6 +132,7 @@ const navGroups: NavGroup[] = [
       { title: "Agents", path: "/agents", icon: UsersIcon },
       { title: "People", path: "/people", icon: ContactIcon, gate: { minVersion: "1.80.0" } },
       { title: "Workflows", path: "/workflows", icon: WorkflowIcon },
+      { title: "Meetings", path: "/meetings", icon: MessagesSquareIcon },
       { title: "Scripts", path: "/scripts", icon: FileClockIcon },
       { title: "Schedules", path: "/schedules", icon: ClockIcon },
     ],

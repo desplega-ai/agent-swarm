@@ -49,6 +49,11 @@ import type {
   McpServerScope,
   McpServerTransport,
   McpServerWithInstallInfo,
+  Meeting,
+  MeetingAttendance,
+  MeetingContribution,
+  MeetingDetail,
+  MeetingStatus,
   Metric,
   MetricDefinition,
   MetricSnapshot,
@@ -10131,6 +10136,296 @@ export function deletePage(id: string): boolean {
     return getDb().run("DELETE FROM pages WHERE id = ?", [id]);
   })();
   return result.changes > 0;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Structured Meetings — gated multi-agent decision records.
+// The attendance + conclusion gate lives in `concludeMeeting` (lowest level)
+// so it cannot be bypassed by any caller (MCP tool or HTTP route).
+// ───────────────────────────────────────────────────────────────────────────
+
+type MeetingRow = {
+  id: string;
+  agentId: string;
+  title: string;
+  agenda: string;
+  template: string | null;
+  participants: string;
+  status: string;
+  conclusion: string | null;
+  concludedBy: string | null;
+  concludedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type MeetingContributionRow = {
+  id: string;
+  meetingId: string;
+  agentId: string;
+  round: number;
+  content: string;
+  createdAt: string;
+};
+
+function rowToMeeting(row: MeetingRow): Meeting {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    title: row.title,
+    agenda: row.agenda,
+    template: row.template ?? undefined,
+    participants: safeParseStringArray(row.participants),
+    status: row.status as MeetingStatus,
+    conclusion: row.conclusion ?? undefined,
+    concludedBy: row.concludedBy ?? undefined,
+    concludedAt: row.concludedAt ? normalizeDateRequired(row.concludedAt) : undefined,
+    createdAt: normalizeDateRequired(row.createdAt),
+    updatedAt: normalizeDateRequired(row.updatedAt),
+  };
+}
+
+function rowToMeetingContribution(row: MeetingContributionRow): MeetingContribution {
+  return {
+    id: row.id,
+    meetingId: row.meetingId,
+    agentId: row.agentId,
+    round: row.round,
+    content: row.content,
+    createdAt: normalizeDateRequired(row.createdAt),
+  };
+}
+
+/** Defensive JSON.parse for the `participants` TEXT column → string[]. */
+function safeParseStringArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function createMeeting(data: {
+  agentId: string;
+  title: string;
+  agenda: string;
+  template?: string;
+  participants: string[];
+}): Meeting {
+  const id = crypto.randomUUID().replace(/-/g, "");
+  // De-dupe + trim participants; drop empties.
+  const participants = [
+    ...new Set(data.participants.map((p) => p.trim()).filter((p) => p.length > 0)),
+  ];
+  const row = getDb()
+    .prepare<MeetingRow, (string | null)[]>(
+      `INSERT INTO meetings (id, agentId, title, agenda, template, participants)
+       VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    )
+    .get(
+      id,
+      data.agentId,
+      data.title,
+      data.agenda,
+      data.template ?? null,
+      JSON.stringify(participants),
+    );
+  if (!row) throw new Error("Failed to create meeting");
+  return rowToMeeting(row);
+}
+
+export function getMeeting(id: string): Meeting | null {
+  const row = getDb().prepare<MeetingRow, [string]>("SELECT * FROM meetings WHERE id = ?").get(id);
+  return row ? rowToMeeting(row) : null;
+}
+
+export function listMeetingContributions(meetingId: string): MeetingContribution[] {
+  return getDb()
+    .prepare<MeetingContributionRow, [string]>(
+      "SELECT * FROM meeting_contributions WHERE meetingId = ? ORDER BY createdAt ASC, round ASC",
+    )
+    .all(meetingId)
+    .map(rowToMeetingContribution);
+}
+
+/**
+ * Compute per-participant attendance from the contribution set. A participant
+ * is `present` once at least one of their contributions exists. Contributions
+ * from non-participants (observers) are ignored for attendance but still
+ * appear in the meeting record.
+ */
+export function computeMeetingAttendance(
+  participants: string[],
+  contributions: MeetingContribution[],
+): { attendance: MeetingAttendance[]; fullyAttended: boolean } {
+  const counts = new Map<string, number>();
+  for (const c of contributions) {
+    counts.set(c.agentId, (counts.get(c.agentId) ?? 0) + 1);
+  }
+  const attendance: MeetingAttendance[] = participants.map((participant) => {
+    const contributionCount = counts.get(participant) ?? 0;
+    return { participant, present: contributionCount > 0, contributionCount };
+  });
+  const fullyAttended = attendance.every((a) => a.present);
+  return { attendance, fullyAttended };
+}
+
+export function getMeetingDetail(id: string): MeetingDetail | null {
+  const meeting = getMeeting(id);
+  if (!meeting) return null;
+  const contributions = listMeetingContributions(id);
+  const { attendance, fullyAttended } = computeMeetingAttendance(
+    meeting.participants,
+    contributions,
+  );
+  return { ...meeting, contributions, attendance, fullyAttended };
+}
+
+export interface MeetingListOptions {
+  status?: MeetingStatus;
+  agentId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export function listMeetings(opts: MeetingListOptions = {}): Meeting[] {
+  let query = "SELECT * FROM meetings";
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
+  if (opts.status) {
+    clauses.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts.agentId) {
+    clauses.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+  if (clauses.length > 0) query += ` WHERE ${clauses.join(" AND ")}`;
+  query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
+  params.push(opts.limit ?? 100, opts.offset ?? 0);
+  return getDb()
+    .prepare<MeetingRow, (string | number)[]>(query)
+    .all(...params)
+    .map(rowToMeeting);
+}
+
+export function countMeetings(opts: Pick<MeetingListOptions, "status" | "agentId"> = {}): number {
+  let query = "SELECT COUNT(*) as n FROM meetings";
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (opts.status) {
+    clauses.push("status = ?");
+    params.push(opts.status);
+  }
+  if (opts.agentId) {
+    clauses.push("agentId = ?");
+    params.push(opts.agentId);
+  }
+  if (clauses.length > 0) query += ` WHERE ${clauses.join(" AND ")}`;
+  const row = getDb()
+    .prepare<{ n: number }, string[]>(query)
+    .get(...params);
+  return row?.n ?? 0;
+}
+
+/** Error thrown when a meeting cannot be concluded (gate not satisfied). */
+export class MeetingConclusionError extends Error {
+  constructor(
+    message: string,
+    readonly reason: "not-open" | "attendance" | "empty-conclusion",
+    readonly missingParticipants: string[] = [],
+  ) {
+    super(message);
+    this.name = "MeetingConclusionError";
+  }
+}
+
+/**
+ * Record a contribution ("turn") for a meeting. Allowed only while the meeting
+ * is `open`. Returns the created contribution.
+ */
+export function addMeetingContribution(data: {
+  meetingId: string;
+  agentId: string;
+  content: string;
+  round?: number;
+}): MeetingContribution {
+  const meeting = getMeeting(data.meetingId);
+  if (!meeting) throw new Error(`Meeting ${data.meetingId} not found`);
+  if (meeting.status !== "open") {
+    throw new MeetingConclusionError(
+      `Meeting ${data.meetingId} is ${meeting.status}; cannot contribute.`,
+      "not-open",
+    );
+  }
+  const id = crypto.randomUUID().replace(/-/g, "");
+  const row = getDb().transaction(() => {
+    const inserted = getDb()
+      .prepare<MeetingContributionRow, (string | number)[]>(
+        `INSERT INTO meeting_contributions (id, meetingId, agentId, round, content)
+         VALUES (?, ?, ?, ?, ?) RETURNING *`,
+      )
+      .get(id, data.meetingId, data.agentId, data.round ?? 1, data.content);
+    getDb().run("UPDATE meetings SET updatedAt = CURRENT_TIMESTAMP WHERE id = ?", [data.meetingId]);
+    return inserted;
+  })();
+  if (!row) throw new Error("Failed to record contribution");
+  return rowToMeetingContribution(row);
+}
+
+/**
+ * Conclude a meeting. Hard gate: the meeting must be `open`, every expected
+ * participant must have contributed (attendance), and the conclusion must be
+ * non-empty. Throws `MeetingConclusionError` otherwise. This is the load-
+ * bearing control of the whole feature — keep it here (lowest level).
+ */
+export function concludeMeeting(data: {
+  meetingId: string;
+  agentId: string;
+  conclusion: string;
+}): MeetingDetail {
+  const conclusion = data.conclusion.trim();
+  const meeting = getMeeting(data.meetingId);
+  if (!meeting) throw new Error(`Meeting ${data.meetingId} not found`);
+  if (meeting.status !== "open") {
+    throw new MeetingConclusionError(`Meeting is already ${meeting.status}.`, "not-open");
+  }
+  if (conclusion.length === 0) {
+    throw new MeetingConclusionError("A non-empty conclusion is required.", "empty-conclusion");
+  }
+  const contributions = listMeetingContributions(data.meetingId);
+  const { attendance, fullyAttended } = computeMeetingAttendance(
+    meeting.participants,
+    contributions,
+  );
+  if (!fullyAttended) {
+    const missing = attendance.filter((a) => !a.present).map((a) => a.participant);
+    throw new MeetingConclusionError(
+      `Attendance gate: ${missing.length} participant(s) have not contributed: ${missing.join(", ")}.`,
+      "attendance",
+      missing,
+    );
+  }
+  getDb().run(
+    `UPDATE meetings
+       SET status = 'concluded', conclusion = ?, concludedBy = ?,
+           concludedAt = CURRENT_TIMESTAMP, updatedAt = CURRENT_TIMESTAMP
+     WHERE id = ?`,
+    [conclusion, data.agentId, data.meetingId],
+  );
+  const detail = getMeetingDetail(data.meetingId);
+  if (!detail) throw new Error("Meeting disappeared after conclude");
+  return detail;
+}
+
+/** Cancel an open meeting (records no conclusion). */
+export function cancelMeeting(id: string): Meeting | null {
+  getDb().run(
+    "UPDATE meetings SET status = 'cancelled', updatedAt = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open'",
+    [id],
+  );
+  return getMeeting(id);
 }
 
 /**

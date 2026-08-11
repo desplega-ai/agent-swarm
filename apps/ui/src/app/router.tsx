@@ -16,6 +16,8 @@ const ChatPage = lazy(() => import("@/pages/chat/page"));
 const ServicesPage = lazy(() => import("@/pages/services/page"));
 const SchedulesPage = lazy(() => import("@/pages/schedules/page"));
 const ScheduleDetailPage = lazy(() => import("@/pages/schedules/[id]/page"));
+const MeetingsPage = lazy(() => import("@/pages/meetings/page"));
+const MeetingDetailPage = lazy(() => import("@/pages/meetings/[id]/page"));
 const UsageContent = lazy(() =>
   import("@/pages/usage/usage-content").then((m) => ({ default: m.UsageContent })),
 );
@@ -127,6 +129,8 @@ export const router = createBrowserRouter([
       { path: "services", element: <ServicesPage /> },
       { path: "schedules", element: <SchedulesPage /> },
       { path: "schedules/:id", element: <ScheduleDetailPage /> },
+      { path: "meetings", element: <MeetingsPage /> },
+      { path: "meetings/:id", element: <MeetingDetailPage /> },
       { path: "workflows", element: <WorkflowsPage /> },
       { path: "workflows/:id", element: <WorkflowDetailPage /> },
       { path: "workflow-runs/:id", element: <WorkflowRunDetailPage /> },
