@@ -1,0 +1,510 @@
+---
+title: App recipes
+description: Worked definitions for DB-only records, Linear and GitHub delivery tracking, and gated meeting decisions.
+---
+
+<Callout type="warn" title="Beta — requires agent-swarm 1.129.0 or later">
+Apps are in **beta**. The definition contract and APIs may change between releases. Core Apps require **agent-swarm 1.129.0**; source-backed model sync requires **1.130.0**; canonical asset namespace support for Apps requires **1.131.0**.
+</Callout>
+
+These recipes are starting points, not screenshots of a fixed product template. Send the included message to your lead agent, or copy the `app-upsert` input and adjust the names and fields. After creation, use `app-get` followed by focused `app-patch` calls rather than replacing a definition you have not just read.
+
+## DB-only: Team Notes
+
+This is the smallest complete pattern: one model stored only in the swarm database, one named query, a form, and a table. It has no source, connection, saved script, or sync action. Rows change only through App mutations.
+
+```json
+{
+  "name": "Team Notes",
+  "description": "Keep decisions and follow-ups in one shared register",
+  "definition": {
+    "models": {
+      "note": {
+        "columns": {
+          "title": { "kind": "string", "required": true },
+          "category": {
+            "kind": "enum",
+            "enum": ["decision", "follow_up", "context"],
+            "default": "context"
+          },
+          "owner": { "kind": "string" },
+          "followUp": { "kind": "date" },
+          "archived": { "kind": "boolean", "default": false }
+        }
+      }
+    },
+    "queries": {
+      "activeNotes": {
+        "model": "note",
+        "filter": { "archived": false },
+        "sort": { "column": "createdAt", "dir": "desc" }
+      }
+    },
+    "pages": {
+      "main": {
+        "title": "Team notes",
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": { "direction": "column", "gap": "lg", "padding": "md" },
+            "children": ["heading", "createCard", "notesCard"]
+          },
+          "heading": {
+            "type": "Heading",
+            "props": { "text": "Team notes", "level": "h1" }
+          },
+          "createCard": {
+            "type": "Card",
+            "props": { "title": "Add a note" },
+            "children": ["createForm"]
+          },
+          "createForm": {
+            "type": "Form",
+            "props": {
+              "id": "newNote",
+              "fields": [
+                { "name": "title", "label": "Note", "kind": "text", "required": true },
+                {
+                  "name": "category",
+                  "label": "Category",
+                  "kind": "enum",
+                  "options": ["decision", "follow_up", "context"]
+                },
+                { "name": "owner", "label": "Owner" },
+                { "name": "followUp", "label": "Follow up", "kind": "date" }
+              ],
+              "submitLabel": "Add note",
+              "onSubmit": [
+                {
+                  "action": "app.mutate",
+                  "params": {
+                    "model": "note",
+                    "op": "create",
+                    "values": { "$form": "" }
+                  }
+                }
+              ]
+            }
+          },
+          "notesCard": {
+            "type": "Card",
+            "props": { "title": "Open notes" },
+            "children": ["notesTable"]
+          },
+          "notesTable": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/activeNotes/data" },
+              "loading": { "$state": "/queries/activeNotes/loading" },
+              "error": { "$state": "/queries/activeNotes/error" },
+              "emptyMessage": "No active notes yet.",
+              "columns": [
+                { "key": "title", "label": "Note" },
+                { "key": "category", "label": "Category", "kind": "badge" },
+                { "key": "owner", "label": "Owner" },
+                { "key": "followUp", "label": "Follow up", "kind": "date" }
+              ],
+              "rowActions": [
+                {
+                  "label": "Archive",
+                  "variant": "outline",
+                  "actions": [
+                    {
+                      "action": "app.mutate",
+                      "params": {
+                        "model": "note",
+                        "op": "update",
+                        "rowId": { "$row": "id" },
+                        "values": { "archived": true }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  }
+}
+```
+
+### Message to your lead
+
+> Create the DB-only Team Notes App from the recipe. Keep every row in the swarm database—do not add a source or connection. Validate the definition, add three clearly fictional sample notes so I can verify the table, and return the App URL.
+
+## Project management: Linear and GitHub
+
+Source sync requires agent-swarm 1.130.0 or later. This recipe keeps Linear issues and GitHub issues in separate models because each source owns its own join key and projected columns. App-owned notes remain editable, while the next refresh replaces source-bound fields.
+
+Before creating the App:
+
+1. A lead or operator must register the `linear` and `github` connection slugs. Do not paste tokens into an App definition or task message. The pull scripts must use the registered typed client or an approved credential binding; naming a source connection validates and preflights it but does not authorize egress by itself.
+2. Save one pull script per source. Each must return `{ "records": [{ "key": "...", "fields": { ... } }], "complete": true }`, or `complete: false` when paging or limits may omit records.
+3. The seeded `github-issues-pull` script can provide the GitHub side. Save a Linear pull script that emits the fields used below.
+4. Replace the two obvious UUID placeholders with the real saved-script IDs. An agent-owned script can be wired only by its owner. If a script is global and ownerless, only the lead or operator can wire or change that source.
+
+```json
+{
+  "name": "Delivery Radar",
+  "description": "Review active Linear work and GitHub issues from one App",
+  "definition": {
+    "models": {
+      "linearIssue": {
+        "columns": {
+          "externalKey": { "kind": "string" },
+          "identifier": {
+            "kind": "string",
+            "source": { "of": "linear", "field": "identifier" }
+          },
+          "title": {
+            "kind": "string",
+            "source": { "of": "linear", "field": "title" }
+          },
+          "status": {
+            "kind": "string",
+            "source": { "of": "linear", "field": "state" }
+          },
+          "owner": {
+            "kind": "string",
+            "source": { "of": "linear", "field": "assignee" }
+          },
+          "url": {
+            "kind": "string",
+            "source": { "of": "linear", "field": "url" }
+          },
+          "externalUpdatedAt": {
+            "kind": "date",
+            "source": { "of": "linear", "field": "updatedAt", "transform": "date-parse" }
+          },
+          "note": { "kind": "string" }
+        },
+        "sources": {
+          "linear": {
+            "connector": "script",
+            "scriptId": "11111111-1111-4111-8111-111111111111",
+            "joinKey": "externalKey",
+            "args": { "team": "ENG", "states": ["Todo", "In Progress"] },
+            "connection": "linear"
+          }
+        }
+      },
+      "githubIssue": {
+        "columns": {
+          "externalKey": { "kind": "string" },
+          "issueNumber": {
+            "kind": "number",
+            "source": { "of": "github", "field": "number" }
+          },
+          "title": {
+            "kind": "string",
+            "source": { "of": "github", "field": "title" }
+          },
+          "status": {
+            "kind": "string",
+            "source": { "of": "github", "field": "state" }
+          },
+          "owner": {
+            "kind": "string",
+            "source": { "of": "github", "field": "userLogin" }
+          },
+          "url": {
+            "kind": "string",
+            "source": { "of": "github", "field": "htmlUrl" }
+          },
+          "externalUpdatedAt": {
+            "kind": "date",
+            "source": { "of": "github", "field": "updatedAt", "transform": "date-parse" }
+          },
+          "note": { "kind": "string" }
+        },
+        "sources": {
+          "github": {
+            "connector": "script",
+            "scriptId": "22222222-2222-4222-8222-222222222222",
+            "joinKey": "externalKey",
+            "args": { "repo": "your-org/your-repo", "state": "open" },
+            "connection": "github"
+          }
+        }
+      }
+    },
+    "queries": {
+      "linearIssues": {
+        "model": "linearIssue",
+        "sort": { "column": "externalUpdatedAt", "dir": "desc" }
+      },
+      "githubIssues": {
+        "model": "githubIssue",
+        "sort": { "column": "externalUpdatedAt", "dir": "desc" }
+      }
+    },
+    "actions": {
+      "refreshSources": { "kind": "sync" }
+    },
+    "pages": {
+      "main": {
+        "title": "Delivery radar",
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": { "direction": "column", "gap": "lg", "padding": "md" },
+            "children": ["heading", "intro", "refresh", "sources"]
+          },
+          "heading": {
+            "type": "Heading",
+            "props": { "text": "Delivery radar", "level": "h1" }
+          },
+          "intro": {
+            "type": "Text",
+            "props": {
+              "content": "Source-owned delivery data with App-owned notes and visible freshness.",
+              "tone": "muted"
+            }
+          },
+          "refresh": {
+            "type": "Button",
+            "props": { "label": "Refresh Linear and GitHub", "busyWith": "refreshSources" },
+            "on": {
+              "press": [
+                { "action": "app.action", "params": { "name": "refreshSources" } }
+              ]
+            }
+          },
+          "sources": {
+            "type": "Grid",
+            "props": { "columns": { "base": 1, "lg": 2 }, "gap": "md" },
+            "children": ["linearCard", "githubCard"]
+          },
+          "linearCard": {
+            "type": "Card",
+            "props": { "title": "Linear" },
+            "children": ["linearTable"]
+          },
+          "linearTable": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/linearIssues/data" },
+              "loading": { "$state": "/queries/linearIssues/loading" },
+              "error": { "$state": "/queries/linearIssues/error" },
+              "columns": [
+                { "key": "identifier", "label": "Issue" },
+                { "key": "title", "label": "Title" },
+                { "key": "status", "label": "Status", "kind": "badge" },
+                { "key": "owner", "label": "Owner" },
+                { "key": "stale", "label": "Stale", "kind": "badge" },
+                { "key": "syncedAt", "label": "Synced", "kind": "date" }
+              ]
+            }
+          },
+          "githubCard": {
+            "type": "Card",
+            "props": { "title": "GitHub" },
+            "children": ["githubTable"]
+          },
+          "githubTable": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/githubIssues/data" },
+              "loading": { "$state": "/queries/githubIssues/loading" },
+              "error": { "$state": "/queries/githubIssues/error" },
+              "columns": [
+                { "key": "issueNumber", "label": "Issue", "kind": "number" },
+                { "key": "title", "label": "Title" },
+                { "key": "status", "label": "Status", "kind": "badge" },
+                { "key": "owner", "label": "Reporter" },
+                { "key": "stale", "label": "Stale", "kind": "badge" },
+                { "key": "syncedAt", "label": "Synced", "kind": "date" }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  }
+}
+```
+
+The `connection` field validates and preflights the named connection, then passes its slug to the script as `args.connection`; the pull script still owns the actual API calls, authentication mechanism, and paging. The seeded `github-issues-pull` uses an approved `GITHUB_TOKEN` egress placeholder, so its run-as identity also needs that credential binding for `api.github.com`. A complete pull marks source-owned rows that disappeared as stale. An incomplete pull does not.
+
+### Message to your lead
+
+> On agent-swarm 1.130.0 or later, build the Delivery Radar App from the recipe. Use our registered `linear` and `github` connections; do not embed credentials. Reuse the seeded `github-issues-pull` script where its output matches the recipe, and save a Linear pull script that emits identifier, title, state, assignee, URL, and updatedAt. Replace both placeholder script IDs, create the App, run the first sync, and report the per-source counts and App URL. Tell me before creation if a connection or global-script step is lead-gated or missing.
+
+## Meetings: gated decision records
+
+This is what a Meetings-style approval flow looks like as an App: the meeting-specific schema, policy, and interface stay in one versioned definition. It is an example of using App primitives for the workflow; it is not a verdict on any other implementation.
+
+Replace the placeholder `scriptId` with a saved gate script. That script must use the supplied decision row and `app.id`, verify the required independent reviews, and update the row only when the gate passes. A script action returning `ok` does not change App data by itself.
+
+```json
+{
+  "name": "Meeting Decisions",
+  "description": "Capture proposals and enforce review gates before approval",
+  "definition": {
+    "models": {
+      "decision": {
+        "columns": {
+          "meetingRef": { "kind": "string", "required": true },
+          "proposal": { "kind": "string", "required": true },
+          "owner": { "kind": "string", "required": true },
+          "status": {
+            "kind": "enum",
+            "enum": ["pending_review", "reviews_requested", "approved", "rejected"],
+            "default": "pending_review"
+          },
+          "reviewers": { "kind": "string" },
+          "rationale": { "kind": "string" },
+          "decidedAt": { "kind": "date" }
+        }
+      }
+    },
+    "queries": {
+      "pendingDecisions": {
+        "model": "decision",
+        "filter": { "status": "pending_review" },
+        "sort": { "column": "createdAt", "dir": "asc" }
+      },
+      "allDecisions": {
+        "model": "decision",
+        "sort": { "column": "updatedAt", "dir": "desc" }
+      }
+    },
+    "actions": {
+      "requestReviews": {
+        "kind": "task",
+        "prompt": "Collect independent reviews for the supplied meeting decision. Return each reviewer, recommendation, rationale, and evidence. Do not approve or mutate the decision row."
+      },
+      "validateGate": {
+        "kind": "script",
+        "scriptId": "33333333-3333-4333-8333-333333333333",
+        "args": { "requiredReviews": 2 }
+      }
+    },
+    "pages": {
+      "main": {
+        "title": "Meeting decisions",
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": { "direction": "column", "gap": "lg", "padding": "md" },
+            "children": ["heading", "intro", "createCard", "pendingCard"]
+          },
+          "heading": {
+            "type": "Heading",
+            "props": { "text": "Meeting decisions", "level": "h1" }
+          },
+          "intro": {
+            "type": "Alert",
+            "props": {
+              "title": "Approval gate",
+              "message": "A decision remains pending until the validation script verifies the required independent reviews.",
+              "tone": "info"
+            }
+          },
+          "createCard": {
+            "type": "Card",
+            "props": { "title": "Record a proposal" },
+            "children": ["createForm"]
+          },
+          "createForm": {
+            "type": "Form",
+            "props": {
+              "id": "newDecision",
+              "fields": [
+                { "name": "meetingRef", "label": "Meeting", "required": true },
+                { "name": "proposal", "label": "Proposal", "kind": "text", "required": true },
+                { "name": "owner", "label": "Decision owner", "required": true },
+                { "name": "reviewers", "label": "Required reviewers" }
+              ],
+              "submitLabel": "Record proposal",
+              "onSubmit": [
+                {
+                  "action": "app.mutate",
+                  "params": {
+                    "model": "decision",
+                    "op": "create",
+                    "values": { "$form": "" }
+                  }
+                }
+              ]
+            }
+          },
+          "pendingCard": {
+            "type": "Card",
+            "props": { "title": "Awaiting review" },
+            "children": ["pendingTable"]
+          },
+          "pendingTable": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/pendingDecisions/data" },
+              "loading": { "$state": "/queries/pendingDecisions/loading" },
+              "error": { "$state": "/queries/pendingDecisions/error" },
+              "emptyMessage": "No decisions are waiting for review.",
+              "columns": [
+                { "key": "proposal", "label": "Proposal" },
+                { "key": "meetingRef", "label": "Meeting" },
+                { "key": "owner", "label": "Owner" },
+                { "key": "status", "label": "Gate", "kind": "badge" },
+                { "key": "reviewers", "label": "Reviewers" }
+              ],
+              "rowActions": [
+                {
+                  "label": "Request reviews",
+                  "variant": "outline",
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "requestReviews",
+                        "input": { "decision": { "$row": "" } }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "label": "Validate gate",
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": {
+                        "name": "validateGate",
+                        "input": { "decision": { "$row": "" } }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  }
+}
+```
+
+Keep evidence in durable review artifacts or dedicated review rows if you need structured reviewer-by-reviewer history. The `reviewers` string above is intentionally the simplest usable field, not a substitute for an audit model.
+
+### Message to your lead
+
+> Build the Meeting Decisions App from the recipe as the Apps-based form of a gated meeting workflow. Save a validation script that requires two independent reviews, rejects self-approval, records the rationale and decision timestamp, and updates the selected row only after the gate passes. Replace the placeholder script ID, seed two fictional pending decisions, exercise one successful and one rejected gate, and return the App URL plus the definition diff. Keep the framing informative; do not compare or disparage another implementation.
+
+## Verify any recipe
+
+After creation:
+
+1. Run `app-get` and confirm the stored definition matches the intended models, sources, actions, and pages.
+2. Open `/apps/<id>` and exercise every form and row action with fictional data.
+3. For source-backed Apps, run `app-sync` once and inspect every pass's `pulled`, `created`, `updated`, `refreshed`, `markedStale`, and `warnings` counts.
+4. Use `app-history` and `app-diff` before a schema change. Prefer `app-patch`; use `app-rollback` only after reading the migration report.
+
+For the iteration contract, return to [Build an App](/docs/apps/build-an-app). For source ownership and freshness rules, see [App concepts](/docs/apps/concepts#source-backed-models).

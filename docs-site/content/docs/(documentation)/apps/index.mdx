@@ -34,10 +34,25 @@ Build a core feature only when the capability is infrastructure that every swarm
 - **Personalization:** per-user settings and viewer-specific theme overrides live outside shared row data.
 - **Access control:** App lifecycle and use permissions follow swarm RBAC and ownership rules.
 
+## What Apps look like
+
+The Apps catalog gives every live App a stable dashboard route. The examples below use seeded sample data; they contain no customer records or credentials.
+
+![The Apps catalog with Launch Readiness, Customer Signals, and Decision Register examples](/apps/apps-list.png)
+
+Each App renders its validated page definition against live named-query data. This Launch Readiness example combines metrics, filters, a populated table, and an action that can dispatch work to the swarm.
+
+![A populated Launch Readiness App with metrics, filters, milestones, and actions](/apps/app-detail.png)
+
+Per-user configuration stays outside the shared definition and rows. The settings drawer exposes those private values alongside the viewer's theme override.
+
+![The Launch Readiness settings drawer with theme and per-user preferences](/apps/app-settings.png)
+
 ## Start here
 
 - [Understand the App primitives](/docs/apps/concepts).
 - [Build and iterate on an App](/docs/apps/build-an-app), including a complete example and messages you can send to the lead agent.
+- [Start from a worked recipe](/docs/apps/recipes) for a DB-only tracker, a Linear and GitHub delivery view, or gated meeting decisions.
 - Open the [Apps dashboard surface](/docs/ui#apps) to use the result.
 - Use the [Apps API reference](/docs/api-reference/apps) for lifecycle, row, query, sync, history, and user-config endpoints.
 
