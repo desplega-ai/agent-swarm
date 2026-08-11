@@ -831,12 +831,34 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
     expect(cost).toBeCloseTo(4.5, 10);
   });
 
-  test("computeClaudeManagedCostUsd returns expected USD for sonnet-5 introductory rate", () => {
+  test("computeClaudeManagedCostUsd uses sonnet-5 introductory rate through 2026-08-31", () => {
     // 1M input tokens × $2.00/Mtok = $2.00
     // 100k output tokens × $10.00/Mtok = $1.00
     // total = $3.00. The introductory rate applies through 2026-08-31.
-    const cost = computeClaudeManagedCostUsd("claude-sonnet-5", 1_000_000, 100_000, 0, 0);
+    const cost = computeClaudeManagedCostUsd(
+      "claude-sonnet-5",
+      1_000_000,
+      100_000,
+      0,
+      0,
+      Date.parse("2026-08-31T23:59:59.999Z"),
+    );
     expect(cost).toBeCloseTo(3.0, 10);
+  });
+
+  test("computeClaudeManagedCostUsd uses sonnet-5 standard rate from 2026-09-01", () => {
+    // 1M input tokens × $3.00/Mtok = $3.00
+    // 100k output tokens × $15.00/Mtok = $1.50
+    // total = $4.50 from the first instant of 2026-09-01 UTC.
+    const cost = computeClaudeManagedCostUsd(
+      "claude-sonnet-5",
+      1_000_000,
+      100_000,
+      0,
+      0,
+      Date.parse("2026-09-01T00:00:00.000Z"),
+    );
+    expect(cost).toBeCloseTo(4.5, 10);
   });
 
   test("computeClaudeManagedCostUsd factors cache-read and cache-write at correct rates", () => {
@@ -886,6 +908,15 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
       outputPerMillion: 10.0,
       cacheReadPerMillion: 0.2,
       cacheWritePerMillion: 2.5,
+      scheduledChange: {
+        effectiveAt: "2026-09-01T00:00:00.000Z",
+        pricing: {
+          inputPerMillion: 3.0,
+          outputPerMillion: 15.0,
+          cacheReadPerMillion: 0.3,
+          cacheWritePerMillion: 3.75,
+        },
+      },
     });
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-sonnet-4-6"]).toBeDefined();
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-4-7"]).toBeDefined();

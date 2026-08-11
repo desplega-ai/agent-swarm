@@ -38,8 +38,8 @@ export const CLAUDE_MANAGED_MODELS = [
 
 export type ClaudeManagedModel = (typeof CLAUDE_MANAGED_MODELS)[number];
 
-/** Pricing per million tokens (USD). */
-export interface ClaudeManagedModelPricing {
+/** Token rates per million tokens (USD). */
+export interface ClaudeManagedTokenPricing {
   /** USD per million uncached input tokens. */
   inputPerMillion: number;
   /** USD per million output tokens. */
@@ -48,6 +48,15 @@ export interface ClaudeManagedModelPricing {
   cacheReadPerMillion: number;
   /** USD per million tokens written to prompt cache (5-minute TTL). */
   cacheWritePerMillion: number;
+}
+
+/** Pricing per million tokens (USD), including an optional scheduled rate change. */
+export interface ClaudeManagedModelPricing extends ClaudeManagedTokenPricing {
+  scheduledChange?: {
+    /** ISO timestamp at which the replacement rates take effect. */
+    effectiveAt: string;
+    pricing: ClaudeManagedTokenPricing;
+  };
 }
 
 /**
@@ -89,6 +98,15 @@ export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeMana
     outputPerMillion: 10.0,
     cacheReadPerMillion: 0.2,
     cacheWritePerMillion: 2.5,
+    scheduledChange: {
+      effectiveAt: "2026-09-01T00:00:00.000Z",
+      pricing: {
+        inputPerMillion: 3.0,
+        outputPerMillion: 15.0,
+        cacheReadPerMillion: 0.3,
+        cacheWritePerMillion: 3.75,
+      },
+    },
   },
   "claude-sonnet-4-6": {
     inputPerMillion: 3.0,
@@ -146,9 +164,10 @@ export function computeClaudeManagedCostUsd(
   outputTokens: number,
   cacheReadTokens: number,
   cacheWriteTokens: number,
+  pricedAtMs: number = Date.now(),
 ): number {
-  const pricing = CLAUDE_MANAGED_MODEL_PRICING[model as ClaudeManagedModel];
-  if (!pricing) {
+  const configuredPricing = CLAUDE_MANAGED_MODEL_PRICING[model as ClaudeManagedModel];
+  if (!configuredPricing) {
     if (!warnedUnknownModels.has(model)) {
       warnedUnknownModels.add(model);
       console.warn(
@@ -158,6 +177,11 @@ export function computeClaudeManagedCostUsd(
     }
     return 0;
   }
+  const pricing =
+    configuredPricing.scheduledChange &&
+    pricedAtMs >= Date.parse(configuredPricing.scheduledChange.effectiveAt)
+      ? configuredPricing.scheduledChange.pricing
+      : configuredPricing;
   const inputCost = (inputTokens / 1_000_000) * pricing.inputPerMillion;
   const outputCost = (outputTokens / 1_000_000) * pricing.outputPerMillion;
   const cacheReadCost = (cacheReadTokens / 1_000_000) * pricing.cacheReadPerMillion;
