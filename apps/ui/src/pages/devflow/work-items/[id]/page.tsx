@@ -1,11 +1,12 @@
 import type { ColDef } from "ag-grid-community";
-import { Bot, CheckCircle2, RefreshCw, Save } from "lucide-react";
+import { Bot, CheckCircle2, Factory, RefreshCw, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import type {
   DevFlowAgentMode,
   DevFlowAgentRun,
   DevFlowAuditEvent,
+  DevFlowFactoryExecution,
   DevFlowNfrDeclaration,
   DevFlowScope,
   DevFlowSpec,
@@ -13,8 +14,12 @@ import type {
   DevFlowWorkItemType,
 } from "@/api/devflow-types";
 import {
+  useCreateDevFlowImplementationIntent,
+  useDevFlowImplementationIntents,
+  useDevFlowRepositoryTargets,
   useDevFlowWorkItem,
   useReconcileDevFlowAgentRun,
+  useReconcileDevFlowFactoryExecution,
   useSaveDevFlowScope,
   useSaveDevFlowSpec,
   useStartDevFlowAgentRun,
@@ -36,6 +41,7 @@ import {
   Relationship,
   Relationships,
 } from "@/components/ui/detail-page-layout";
+import { DefinitionList, InfoRow } from "@/components/ui/info-row";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -622,6 +628,140 @@ function AgentActions({
   );
 }
 
+function ImplementationPanel({ item, spec }: { item: DevFlowWorkItem; spec: DevFlowSpec | null }) {
+  const targets = useDevFlowRepositoryTargets();
+  const authority = useDevFlowImplementationIntents(item.id);
+  const createIntent = useCreateDevFlowImplementationIntent(item.id);
+  const reconcile = useReconcileDevFlowFactoryExecution();
+  const [selectedTargetId, setSelectedTargetId] = useState("");
+  const [desiredOutcome, setDesiredOutcome] = useState("");
+  const [riskSummary, setRiskSummary] = useState("");
+  const activeTargets = targets.data?.targets.filter((target) => target.isActive) ?? [];
+  const targetId = selectedTargetId || activeTargets[0]?.id || "";
+  const executions = authority.data?.executions ?? [];
+  const latestExecution = executions.at(-1);
+  const canDispatch =
+    item.state === "specced" &&
+    spec?.status === "approved" &&
+    Boolean(targetId && desiredOutcome.trim() && riskSummary.trim());
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Command Center Factory</CardTitle>
+        <CardDescription>
+          Convert approved product authority into one immutable implementation intent. Factory merge
+          is not deployment or DevFlow completion.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {activeTargets.length ? (
+          <>
+            <SettingsRow label="Repository" htmlFor="factory-repository">
+              <Select value={targetId} onValueChange={setSelectedTargetId}>
+                <SelectTrigger id="factory-repository">
+                  <SelectValue placeholder="Choose a repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeTargets.map((target) => (
+                    <SelectItem key={target.id} value={target.id}>
+                      {target.name} · {target.repositoryFullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+            <SettingsRow label="Desired outcome" htmlFor="factory-outcome">
+              <Textarea
+                id="factory-outcome"
+                value={desiredOutcome}
+                onChange={(event) => setDesiredOutcome(event.target.value)}
+                placeholder="What must the implementation deliver?"
+              />
+            </SettingsRow>
+            <SettingsRow label="Risk summary" htmlFor="factory-risk">
+              <Textarea
+                id="factory-risk"
+                value={riskSummary}
+                onChange={(event) => setRiskSummary(event.target.value)}
+                placeholder="Name the material implementation and rollout risks."
+              />
+            </SettingsRow>
+            <Button
+              onClick={() =>
+                createIntent.mutate({
+                  repositoryTargetId: targetId,
+                  desiredOutcome: desiredOutcome.trim(),
+                  riskSummary: riskSummary.trim(),
+                  priority: item.priority,
+                })
+              }
+              disabled={!canDispatch || createIntent.isPending}
+            >
+              <Factory /> Send approved spec to Factory
+            </Button>
+          </>
+        ) : (
+          <AlertCallout tone="warning">
+            No active repository target is configured. Add one through the DevFlow repository
+            targets API before dispatching implementation.
+          </AlertCallout>
+        )}
+        {item.state !== "specced" || spec?.status !== "approved" ? (
+          <AlertCallout tone="pending">
+            Gate 2 and an approved current spec are required before Factory intake.
+          </AlertCallout>
+        ) : null}
+        {latestExecution ? (
+          <FactoryReceipt
+            execution={latestExecution}
+            onReconcile={() => reconcile.mutate(latestExecution.id)}
+            reconciling={reconcile.isPending}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FactoryReceipt({
+  execution,
+  onReconcile,
+  reconciling,
+}: {
+  execution: DevFlowFactoryExecution;
+  onReconcile: () => void;
+  reconciling: boolean;
+}) {
+  return (
+    <AlertCallout tone={execution.status === "failed" ? "error" : "info"} icon={Factory}>
+      <DefinitionList>
+        <InfoRow label="Execution status">
+          <Badge variant="outline" size="tag">
+            {execution.status.replaceAll("_", " ")}
+          </Badge>
+        </InfoRow>
+        {execution.contractId ? (
+          <InfoRow label="Factory contract">{execution.contractId}</InfoRow>
+        ) : null}
+        {execution.headSha ? (
+          <InfoRow label="Verified revision">
+            <span className="font-mono">{execution.headSha.slice(0, 12)}</span>
+          </InfoRow>
+        ) : null}
+        {execution.failureDetail ? (
+          <InfoRow label="Failure">{execution.failureDetail}</InfoRow>
+        ) : null}
+        {!["failed", "cancelled", "merged"].includes(execution.status) ? (
+          <Button size="sm" variant="outline" onClick={onReconcile} disabled={reconciling}>
+            <RefreshCw /> Reconcile canonical evidence
+          </Button>
+        ) : null}
+      </DefinitionList>
+    </AlertCallout>
+  );
+}
+
 export default function DevFlowWorkbenchPage() {
   const { id = "" } = useParams();
   const { data, isLoading, error } = useDevFlowWorkItem(id);
@@ -682,6 +822,7 @@ export default function DevFlowWorkbenchPage() {
               <TabsTrigger value="item">Item</TabsTrigger>
               <TabsTrigger value="scope">Scope</TabsTrigger>
               <TabsTrigger value="spec">Spec</TabsTrigger>
+              <TabsTrigger value="implementation">Implementation</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>
             </TabsList>
             <TabsContent value="item">
@@ -697,6 +838,9 @@ export default function DevFlowWorkbenchPage() {
                 spec={spec}
                 blastRadius={item.blastRadius}
               />
+            </TabsContent>
+            <TabsContent value="implementation">
+              <ImplementationPanel item={item} spec={spec} />
             </TabsContent>
             <TabsContent value="activity" className="space-y-4">
               <Card>

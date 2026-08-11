@@ -150,3 +150,49 @@ export function useReconcileDevFlowAgentRun(id: string) {
     onError: (error) => toast.error(error.message),
   });
 }
+
+export function useDevFlowRepositoryTargets() {
+  const userId = useDevFlowUserId();
+  return useQuery({
+    queryKey: ["devflow", "repository-targets", userId],
+    queryFn: () => api.fetchDevFlowRepositoryTargets(userId),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+}
+
+export function useDevFlowImplementationIntents(id: string) {
+  const userId = useDevFlowUserId();
+  return useQuery({
+    queryKey: ["devflow", "implementation-intents", userId, id],
+    queryFn: () => api.fetchDevFlowImplementationIntents(userId, id),
+    enabled: !!userId && !!id,
+    refetchInterval: 5_000,
+  });
+}
+
+export function useCreateDevFlowImplementationIntent(id: string) {
+  const userId = useDevFlowUserId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.createDevFlowImplementationIntent>[2]) =>
+      api.createDevFlowImplementationIntent(userId, id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["devflow", "implementation-intents"] });
+      toast.success("Factory execution queued");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+}
+
+export function useReconcileDevFlowFactoryExecution() {
+  const userId = useDevFlowUserId();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (executionId: string) => api.reconcileDevFlowFactoryExecution(userId, executionId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["devflow", "implementation-intents"] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+}

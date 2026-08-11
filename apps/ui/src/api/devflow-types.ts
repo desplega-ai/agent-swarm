@@ -182,6 +182,78 @@ export interface DevFlowWorkItemPage {
   nextOffset?: number;
 }
 
+export interface DevFlowRepositoryTarget {
+  id: string;
+  organizationId: string;
+  name: string;
+  repositoryFullName: string;
+  defaultBranch: string;
+  executionProfile: "command_center_factory";
+  isActive: boolean;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface DevFlowImplementationIntent {
+  id: string;
+  organizationId: string;
+  workItemId: string;
+  specId: string;
+  specVersion: number;
+  specDigest: string;
+  repositoryTargetId: string;
+  desiredOutcome: string;
+  priority: DevFlowPriority;
+  riskSummary: string;
+  intentSnapshot: Record<string, unknown>;
+  createdByUserId: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export type DevFlowFactoryExecutionStatus =
+  | "queued"
+  | "factory_intake"
+  | "signoff_pending"
+  | "ready"
+  | "implementing"
+  | "pr_open"
+  | "finalizer_admitted"
+  | "merged"
+  | "failed"
+  | "cancelled";
+
+export interface DevFlowFactoryExecution {
+  id: string;
+  organizationId: string;
+  implementationIntentId: string;
+  status: DevFlowFactoryExecutionStatus;
+  swarmTaskId?: string;
+  headSha?: string;
+  queueItemId?: string;
+  queueItemRevision?: string;
+  contractId?: string;
+  canonicalContractPath?: string;
+  factoryStatus?: string;
+  surfaces: string[];
+  impactedSurfaces: string[];
+  architectureUnits: Record<string, unknown>;
+  signoffs: unknown[];
+  artifacts: unknown;
+  finalizerReceipt?: Record<string, unknown>;
+  mergedCommitSha?: string;
+  lastObservedAt?: string;
+  failureCode?: string;
+  failureDetail?: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+}
+
+export interface DevFlowImplementationIntentsResponse {
+  intents: DevFlowImplementationIntent[];
+  executions: DevFlowFactoryExecution[];
+}
+
 export interface DevFlowScopeInput {
   problemStatement: string;
   targetUsers: string[];

@@ -4,8 +4,10 @@ import {
   type DevFlowAgentMode,
   type DevFlowAgentRun,
   DevFlowApiError,
+  type DevFlowImplementationIntentsResponse,
   type DevFlowMembership,
   type DevFlowOrganization,
+  type DevFlowRepositoryTarget,
   type DevFlowScope,
   type DevFlowScopeInput,
   type DevFlowSpec,
@@ -383,6 +385,50 @@ class ApiClient {
   ): Promise<{ runs: DevFlowAgentRun[] }> {
     return this.devFlowRequest(
       `/api/devflow/v1/agent-runs/${encodeURIComponent(runId)}/reconcile`,
+      userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  async fetchDevFlowRepositoryTargets(
+    userId: string,
+  ): Promise<{ targets: DevFlowRepositoryTarget[] }> {
+    return this.devFlowRequest("/api/devflow/v1/repository-targets", userId);
+  }
+
+  async fetchDevFlowImplementationIntents(
+    userId: string,
+    workItemId: string,
+  ): Promise<DevFlowImplementationIntentsResponse> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(workItemId)}/implementation-intents`,
+      userId,
+    );
+  }
+
+  async createDevFlowImplementationIntent(
+    userId: string,
+    workItemId: string,
+    input: {
+      repositoryTargetId: string;
+      desiredOutcome: string;
+      riskSummary: string;
+      priority?: DevFlowWorkItemDetail["item"]["priority"];
+    },
+  ): Promise<DevFlowImplementationIntentsResponse> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(workItemId)}/implementation-intents`,
+      userId,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
+  async reconcileDevFlowFactoryExecution(
+    userId: string,
+    executionId: string,
+  ): Promise<{ execution: DevFlowImplementationIntentsResponse["executions"][number] }> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/factory-executions/${encodeURIComponent(executionId)}/reconcile`,
       userId,
       { method: "POST", body: JSON.stringify({}) },
     );
