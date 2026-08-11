@@ -5,11 +5,7 @@ import {
   DEVFLOW_AGENT_OUTPUT_SCHEMAS,
 } from "../domain/agent-contracts";
 import { DevFlowError } from "../domain/errors";
-import type {
-  DevFlowAgentMode,
-  DevFlowAgentRun,
-  DevFlowContext,
-} from "../domain/types";
+import type { DevFlowAgentMode, DevFlowAgentRun, DevFlowContext } from "../domain/types";
 import { buildDevFlowAgentPrompt, DEVFLOW_PROMPT_VERSION } from "../prompts";
 import type { DevFlowRepository } from "../repository";
 import type { DevFlowEvidenceService } from "./evidence-service";
@@ -44,10 +40,7 @@ export interface DevFlowAgentAdapter {
     workItemId: string,
     mode: DevFlowAgentMode,
   ): DevFlowAgentRun;
-  reconcileAgentRun(
-    context: DevFlowContext,
-    agentRunId: string,
-  ): DevFlowAgentRun;
+  reconcileAgentRun(context: DevFlowContext, agentRunId: string): DevFlowAgentRun;
 }
 
 const modeState: Record<DevFlowAgentMode, string> = {
@@ -57,13 +50,7 @@ const modeState: Record<DevFlowAgentMode, string> = {
 };
 
 const activeStatuses = new Set(["queued", "running"]);
-const swarmQueuedStatuses = new Set([
-  "backlog",
-  "unassigned",
-  "offered",
-  "reviewing",
-  "pending",
-]);
+const swarmQueuedStatuses = new Set(["backlog", "unassigned", "offered", "reviewing", "pending"]);
 const swarmFailedStatuses = new Set(["failed", "cancelled", "superseded"]);
 
 function realRuntime(): SwarmTaskRuntime {
@@ -99,12 +86,7 @@ export function createAgentAdapter(input: {
   return {
     startAgentRun(context, workItemId, mode) {
       const item = repo.getWorkItem(context.organizationId, workItemId);
-      if (!item)
-        throw new DevFlowError(
-          404,
-          "not_found",
-          "DevFlow work item not found.",
-        );
+      if (!item) throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
       if (item.state !== modeState[mode]) {
         throw new DevFlowError(
           409,
@@ -131,25 +113,16 @@ export function createAgentAdapter(input: {
           buildDevFlowAgentPrompt({
             mode,
             workItem: item,
-            scope:
-              mode === "spec"
-                ? repo.getScope(context.organizationId, workItemId)
-                : undefined,
+            scope: mode === "spec" ? repo.getScope(context.organizationId, workItemId) : undefined,
           }),
           {
             source: "api",
             taskType: `devflow-${mode}`,
-            tags: [
-              "devflow",
-              `devflow:${mode}`,
-              `organization:${context.organizationId}`,
-            ],
-            priority:
-              item.priority === "p1" ? 90 : item.priority === "p2" ? 60 : 40,
+            tags: ["devflow", `devflow:${mode}`, `organization:${context.organizationId}`],
+            priority: item.priority === "p1" ? 90 : item.priority === "p2" ? 60 : 40,
             status: "unassigned",
             outputSchema: DEVFLOW_AGENT_OUTPUT_SCHEMAS[mode],
-            requestedByUserId:
-              context.actorKind === "user" ? context.actorId : undefined,
+            requestedByUserId: context.actorKind === "user" ? context.actorId : undefined,
             contextKey: `devflow:${context.organizationId}:${workItemId}:${mode}:${run.id}`,
           },
         );
@@ -164,10 +137,7 @@ export function createAgentAdapter(input: {
         });
         return updated;
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Unable to create Swarm task";
+        const message = error instanceof Error ? error.message : "Unable to create Swarm task";
         repo.updateAgentRun(context.organizationId, run.id, {
           status: "failed",
           errorMessage: message,
@@ -179,32 +149,15 @@ export function createAgentAdapter(input: {
 
     reconcileAgentRun(context, agentRunId) {
       const run = repo.getAgentRun(context.organizationId, agentRunId);
-      if (!run)
-        throw new DevFlowError(
-          404,
-          "not_found",
-          "DevFlow agent run not found.",
-        );
-      if (
-        run.evidenceAppliedAt ||
-        run.status === "succeeded" ||
-        run.status === "failed"
-      )
+      if (!run) throw new DevFlowError(404, "not_found", "DevFlow agent run not found.");
+      if (run.evidenceAppliedAt || run.status === "succeeded" || run.status === "failed")
         return run;
       if (!run.swarmTaskId) {
-        throw new DevFlowError(
-          409,
-          "agent_run_not_dispatched",
-          "Agent run has no Swarm task.",
-        );
+        throw new DevFlowError(409, "agent_run_not_dispatched", "Agent run has no Swarm task.");
       }
       const task = runtime.get(run.swarmTaskId);
       if (!task) {
-        throw new DevFlowError(
-          409,
-          "swarm_task_not_found",
-          "The linked Swarm task was not found.",
-        );
+        throw new DevFlowError(409, "swarm_task_not_found", "The linked Swarm task was not found.");
       }
 
       if (swarmQueuedStatuses.has(task.status)) return run;
@@ -245,8 +198,7 @@ export function createAgentAdapter(input: {
       try {
         output = JSON.parse(task.output ?? "");
       } catch {
-        const message =
-          "Completed Swarm task did not return valid JSON evidence.";
+        const message = "Completed Swarm task did not return valid JSON evidence.";
         return repo.updateAgentRun(context.organizationId, run.id, {
           status: "failed",
           errorMessage: message,

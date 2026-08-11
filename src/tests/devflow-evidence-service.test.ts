@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createUser, getDb, initDb } from "../be/db";
-import { NFR_CATEGORIES, type DevFlowAgentMode } from "../devflow/domain/types";
+import { type DevFlowAgentMode, NFR_CATEGORIES } from "../devflow/domain/types";
 import { createDevFlowRepository, type DevFlowRepository } from "../devflow/repository";
 import {
   createEvidenceService,
@@ -144,6 +144,7 @@ describe("DevFlow evidence service", () => {
           {
             given: "a populated report",
             when: "the user selects Export CSV",
+            // biome-ignore lint/suspicious/noThenProperty: Test fixture models a Given/When/Then criterion.
             then: "a valid CSV downloads",
             isTestable: true,
             testHint: "API integration test",

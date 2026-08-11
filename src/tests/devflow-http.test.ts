@@ -1,16 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
 import { unlink } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { closeDb, createUser, getDb, initDb } from "../be/db";
-import {
-  createDevFlowRepository,
-  type DevFlowRepository,
-} from "../devflow/repository";
+import { createDevFlowRepository, type DevFlowRepository } from "../devflow/repository";
 import { createTransitionService } from "../devflow/services/transition-service";
 import { handleDevFlow } from "../http/devflow";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -48,8 +40,7 @@ function makeServer(users: Map<string, User>): Server {
 async function listen(server: Server): Promise<string> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  if (!address || typeof address === "string")
-    throw new Error("Server did not bind");
+  if (!address || typeof address === "string") throw new Error("Server did not bind");
   return `http://127.0.0.1:${address.port}`;
 }
 
@@ -96,17 +87,14 @@ describe("DevFlow HTTP API", () => {
   }
 
   test("captures, lists, and resolves work items only inside the selected tenant", async () => {
-    const createdResponse = await fetch(
-      `${baseUrl}/api/devflow/v1/work-items`,
-      {
-        method: "POST",
-        headers: headers(pm.id, orgA),
-        body: JSON.stringify({
-          title: "Tenant A request",
-          description: "Only A can see this.",
-        }),
-      },
-    );
+    const createdResponse = await fetch(`${baseUrl}/api/devflow/v1/work-items`, {
+      method: "POST",
+      headers: headers(pm.id, orgA),
+      body: JSON.stringify({
+        title: "Tenant A request",
+        description: "Only A can see this.",
+      }),
+    });
     expect(createdResponse.status).toBe(201);
     const created = (await createdResponse.json()) as { item: { id: string } };
 
@@ -117,12 +105,9 @@ describe("DevFlow HTTP API", () => {
       total: 1,
     });
 
-    const foreignRead = await fetch(
-      `${baseUrl}/api/devflow/v1/work-items/${created.item.id}`,
-      {
-        headers: headers(other.id, orgB),
-      },
-    );
+    const foreignRead = await fetch(`${baseUrl}/api/devflow/v1/work-items/${created.item.id}`, {
+      headers: headers(other.id, orgB),
+    });
     expect(foreignRead.status).toBe(404);
     expect(await foreignRead.json()).toMatchObject({ error_code: "not_found" });
   });
@@ -144,22 +129,19 @@ describe("DevFlow HTTP API", () => {
       { toState: "triaged", rationale: "Classified" },
     );
 
-    const scopeResponse = await fetch(
-      `${baseUrl}/api/devflow/v1/work-items/${item.id}/scope`,
-      {
-        method: "PUT",
-        headers: headers(pm.id, orgA),
-        body: JSON.stringify({
-          problemStatement: "Operators cannot export a report.",
-          targetUsers: ["Operations"],
-          successCriteria: ["A CSV downloads in under five seconds"],
-          effortBand: "s",
-          openQuestions: [],
-          confidence: 0.9,
-          rationale: "The boundary is narrow.",
-        }),
-      },
-    );
+    const scopeResponse = await fetch(`${baseUrl}/api/devflow/v1/work-items/${item.id}/scope`, {
+      method: "PUT",
+      headers: headers(pm.id, orgA),
+      body: JSON.stringify({
+        problemStatement: "Operators cannot export a report.",
+        targetUsers: ["Operations"],
+        successCriteria: ["A CSV downloads in under five seconds"],
+        effortBand: "s",
+        openQuestions: [],
+        confidence: 0.9,
+        rationale: "The boundary is narrow.",
+      }),
+    });
     expect(scopeResponse.status).toBe(200);
 
     const transitionResponse = await fetch(

@@ -19,10 +19,7 @@ export type LegacyRule = {
   /** Human-readable reason attached to deny decisions. */
   denyReason: string;
   /** Pure predicate — true = allow. Never touches the DB. */
-  evaluate: (
-    principal: RbacPrincipal,
-    resource: RbacResource | undefined,
-  ) => boolean;
+  evaluate: (principal: RbacPrincipal, resource: RbacResource | undefined) => boolean;
 };
 
 // ── Named rules (research §3 Rule column) ────────────────────────────────────
@@ -95,10 +92,7 @@ const requesterOwnsTask: LegacyRule = {
   // the task's requestedByUserId.
   evaluate: (principal, resource) => {
     if (principal.kind !== "user") return true;
-    return (
-      resource?.kind === "task" &&
-      resource.requestedByUserId === principal.userId
-    );
+    return resource?.kind === "task" && resource.requestedByUserId === principal.userId;
   },
 };
 
@@ -110,11 +104,7 @@ const memoryOwnerOrLeadSwarm: LegacyRule = {
   denyReason: "requires memory owner, or lead agent for swarm-scoped memories",
   evaluate: (principal, resource) => {
     if (principal.kind !== "agent" || resource?.kind !== "owned") return false;
-    if (
-      resource.ownerAgentId != null &&
-      resource.ownerAgentId === principal.agentId
-    )
-      return true;
+    if (resource.ownerAgentId != null && resource.ownerAgentId === principal.agentId) return true;
     return principal.isLead && resource.scope === "swarm";
   },
 };
@@ -128,16 +118,14 @@ const memoryOwnerOrLeadSwarm: LegacyRule = {
  */
 const taskFsMutate: LegacyRule = {
   name: "operator-or-user-or-lead-or-task-owner",
-  denyReason:
-    "requires operator, user, lead agent, task assignee, or task creator",
+  denyReason: "requires operator, user, lead agent, task assignee, or task creator",
   evaluate: (principal, resource) => {
     if (principal.kind === "operator" || principal.kind === "user") return true;
     if (principal.isLead) return true;
     if (resource?.kind !== "task") return false;
     return (
       (resource.agentId != null && resource.agentId === principal.agentId) ||
-      (resource.creatorAgentId != null &&
-        resource.creatorAgentId === principal.agentId)
+      (resource.creatorAgentId != null && resource.creatorAgentId === principal.agentId)
     );
   },
 };

@@ -1,6 +1,8 @@
 import type { DevFlowState } from "./types";
 
-export const SLICE_ONE_TRANSITIONS: Readonly<Partial<Record<DevFlowState, readonly DevFlowState[]>>> = {
+export const SLICE_ONE_TRANSITIONS: Readonly<
+  Partial<Record<DevFlowState, readonly DevFlowState[]>>
+> = {
   captured: ["triaged", "archived"],
   triaged: ["scoped", "archived"],
   scoped: ["specced", "blocked", "archived"],

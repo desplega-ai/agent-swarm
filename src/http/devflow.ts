@@ -19,14 +19,11 @@ import {
 } from "../devflow/api/schemas";
 import { DevFlowError } from "../devflow/domain/errors";
 import {
+  type DevFlowContext,
   DevFlowStateSchema,
   DevFlowWorkItemTypeSchema,
-  type DevFlowContext,
 } from "../devflow/domain/types";
-import {
-  createDevFlowRepository,
-  type DevFlowRepository,
-} from "../devflow/repository";
+import { createDevFlowRepository, type DevFlowRepository } from "../devflow/repository";
 import { createAgentAdapter } from "../devflow/services/agent-adapter";
 import { createEvidenceService } from "../devflow/services/evidence-service";
 import { createTransitionService } from "../devflow/services/transition-service";
@@ -286,14 +283,9 @@ function oneHeader(req: IncomingMessage, name: string): string | undefined {
 function resolveContext(req: IncomingMessage): RequestContext {
   const repo = createDevFlowRepository(getDb());
   const auth = getRequestAuth(req);
-  const userId =
-    auth?.kind === "user" ? auth.userId : oneHeader(req, "x-devflow-user-id");
+  const userId = auth?.kind === "user" ? auth.userId : oneHeader(req, "x-devflow-user-id");
   if (!userId) {
-    throw new DevFlowError(
-      403,
-      "user_identity_required",
-      "DevFlow requires a user identity.",
-    );
+    throw new DevFlowError(403, "user_identity_required", "DevFlow requires a user identity.");
   }
   const preferredOrganizationId = oneHeader(req, "x-devflow-organization-id");
   let membership = preferredOrganizationId
@@ -329,13 +321,11 @@ function resolveContext(req: IncomingMessage): RequestContext {
 }
 
 function ensurePermission(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<
     PermissionVerb,
-    | "devflow.work-item.write"
-    | "devflow.gate.approve"
-    | "devflow.agent-run.start"
+    "devflow.work-item.write" | "devflow.gate.approve" | "devflow.agent-run.start"
   >,
   userId: string,
 ): boolean {
@@ -369,17 +359,14 @@ function sendDevFlowError(res: ServerResponse, error: unknown): void {
     JSON.stringify({
       error: devflowError.message,
       error_code: devflowError.errorCode,
-      ...(Object.keys(devflowError.details).length
-        ? { details: devflowError.details }
-        : {}),
+      ...(Object.keys(devflowError.details).length ? { details: devflowError.details } : {}),
     }),
   );
 }
 
 function detail(repo: DevFlowRepository, organizationId: string, id: string) {
   const item = repo.getWorkItem(organizationId, id);
-  if (!item)
-    throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
+  if (!item) throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
   return {
     item,
     scope: repo.getScope(organizationId, id),
@@ -411,8 +398,7 @@ export async function handleDevFlow(
     reconcileAgentRunRoute,
     getAuditRoute,
   ];
-  if (!routes.some((candidate) => candidate.match(req.method, pathSegments)))
-    return false;
+  if (!routes.some((candidate) => candidate.match(req.method, pathSegments))) return false;
 
   try {
     const { repo, context } = resolveContext(req);
@@ -430,12 +416,7 @@ export async function handleDevFlow(
       return true;
     }
     if (listWorkItemsRoute.match(req.method, pathSegments)) {
-      const parsed = await listWorkItemsRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
+      const parsed = await listWorkItemsRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       listWorkItemsRoute.respond(
         res,
@@ -445,17 +426,8 @@ export async function handleDevFlow(
       return true;
     }
     if (createWorkItemRoute.match(req.method, pathSegments)) {
-      const parsed = await createWorkItemRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.work-item.write", actorId)
-      )
-        return true;
+      const parsed = await createWorkItemRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.work-item.write", actorId)) return true;
       const item = repo.transaction(() => {
         const created = repo.createWorkItem({
           organizationId: context.organizationId,
@@ -471,46 +443,20 @@ export async function handleDevFlow(
         });
         return created;
       });
-      createWorkItemRoute.respond(
-        res,
-        201,
-        detail(repo, context.organizationId, item.id),
-      );
+      createWorkItemRoute.respond(res, 201, detail(repo, context.organizationId, item.id));
       return true;
     }
     if (getWorkItemRoute.match(req.method, pathSegments)) {
-      const parsed = await getWorkItemRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
+      const parsed = await getWorkItemRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
-      getWorkItemRoute.respond(
-        res,
-        200,
-        detail(repo, context.organizationId, parsed.params.id),
-      );
+      getWorkItemRoute.respond(res, 200, detail(repo, context.organizationId, parsed.params.id));
       return true;
     }
     if (updateWorkItemRoute.match(req.method, pathSegments)) {
-      const parsed = await updateWorkItemRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.work-item.write", actorId)
-      )
-        return true;
+      const parsed = await updateWorkItemRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.work-item.write", actorId)) return true;
       repo.transaction(() => {
-        repo.updateWorkItem(
-          context.organizationId,
-          parsed.params.id,
-          parsed.body,
-        );
+        repo.updateWorkItem(context.organizationId, parsed.params.id, parsed.body);
         repo.appendAuditEvent({
           context,
           workItemId: parsed.params.id,
@@ -518,25 +464,12 @@ export async function handleDevFlow(
           metadata: { fields: Object.keys(parsed.body) },
         });
       });
-      updateWorkItemRoute.respond(
-        res,
-        200,
-        detail(repo, context.organizationId, parsed.params.id),
-      );
+      updateWorkItemRoute.respond(res, 200, detail(repo, context.organizationId, parsed.params.id));
       return true;
     }
     if (transitionWorkItemRoute.match(req.method, pathSegments)) {
-      const parsed = await transitionWorkItemRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.gate.approve", actorId)
-      )
-        return true;
+      const parsed = await transitionWorkItemRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.gate.approve", actorId)) return true;
       transitions.transition(context, parsed.params.id, parsed.body);
       transitionWorkItemRoute.respond(
         res,
@@ -546,19 +479,10 @@ export async function handleDevFlow(
       return true;
     }
     if (getScopeRoute.match(req.method, pathSegments)) {
-      const parsed = await getScopeRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
+      const parsed = await getScopeRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       if (!repo.getWorkItem(context.organizationId, parsed.params.id)) {
-        throw new DevFlowError(
-          404,
-          "not_found",
-          "DevFlow work item not found.",
-        );
+        throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
       }
       getScopeRoute.respond(res, 200, {
         scope: repo.getScope(context.organizationId, parsed.params.id),
@@ -566,23 +490,10 @@ export async function handleDevFlow(
       return true;
     }
     if (putScopeRoute.match(req.method, pathSegments)) {
-      const parsed = await putScopeRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.work-item.write", actorId)
-      )
-        return true;
+      const parsed = await putScopeRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.work-item.write", actorId)) return true;
       const scope = repo.transaction(() => {
-        const saved = repo.upsertScope(
-          context.organizationId,
-          parsed.params.id,
-          parsed.body,
-        );
+        const saved = repo.upsertScope(context.organizationId, parsed.params.id, parsed.body);
         repo.appendAuditEvent({
           context,
           workItemId: parsed.params.id,
@@ -595,19 +506,10 @@ export async function handleDevFlow(
       return true;
     }
     if (getSpecRoute.match(req.method, pathSegments)) {
-      const parsed = await getSpecRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
+      const parsed = await getSpecRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       if (!repo.getWorkItem(context.organizationId, parsed.params.id)) {
-        throw new DevFlowError(
-          404,
-          "not_found",
-          "DevFlow work item not found.",
-        );
+        throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
       }
       getSpecRoute.respond(res, 200, {
         spec: repo.getCurrentSpec(context.organizationId, parsed.params.id),
@@ -615,23 +517,10 @@ export async function handleDevFlow(
       return true;
     }
     if (putSpecRoute.match(req.method, pathSegments)) {
-      const parsed = await putSpecRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.work-item.write", actorId)
-      )
-        return true;
+      const parsed = await putSpecRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.work-item.write", actorId)) return true;
       const spec = repo.transaction(() => {
-        const saved = repo.createSpecVersion(
-          context.organizationId,
-          parsed.params.id,
-          parsed.body,
-        );
+        const saved = repo.createSpecVersion(context.organizationId, parsed.params.id, parsed.body);
         repo.updateWorkItem(context.organizationId, parsed.params.id, {
           blastRadius: parsed.body.blastRadius,
         });
@@ -647,19 +536,10 @@ export async function handleDevFlow(
       return true;
     }
     if (listAgentRunsRoute.match(req.method, pathSegments)) {
-      const parsed = await listAgentRunsRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
+      const parsed = await listAgentRunsRoute.parse(req, res, pathSegments, queryParams);
       if (!parsed) return true;
       if (!repo.getWorkItem(context.organizationId, parsed.params.id)) {
-        throw new DevFlowError(
-          404,
-          "not_found",
-          "DevFlow work item not found.",
-        );
+        throw new DevFlowError(404, "not_found", "DevFlow work item not found.");
       }
       listAgentRunsRoute.respond(res, 200, {
         runs: repo.listAgentRuns(context.organizationId, parsed.params.id),
@@ -667,47 +547,20 @@ export async function handleDevFlow(
       return true;
     }
     if (startAgentRunRoute.match(req.method, pathSegments)) {
-      const parsed = await startAgentRunRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.agent-run.start", actorId)
-      )
-        return true;
-      const run = adapter.startAgentRun(
-        context,
-        parsed.params.id,
-        parsed.body.mode,
-      );
+      const parsed = await startAgentRunRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.agent-run.start", actorId)) return true;
+      const run = adapter.startAgentRun(context, parsed.params.id, parsed.body.mode);
       startAgentRunRoute.respond(res, 202, { runs: [run] });
       return true;
     }
     if (reconcileAgentRunRoute.match(req.method, pathSegments)) {
-      const parsed = await reconcileAgentRunRoute.parse(
-        req,
-        res,
-        pathSegments,
-        queryParams,
-      );
-      if (
-        !parsed ||
-        !ensurePermission(req, res, "devflow.agent-run.start", actorId)
-      )
-        return true;
+      const parsed = await reconcileAgentRunRoute.parse(req, res, pathSegments, queryParams);
+      if (!parsed || !ensurePermission(req, res, "devflow.agent-run.start", actorId)) return true;
       const run = adapter.reconcileAgentRun(context, parsed.params.id);
       reconcileAgentRunRoute.respond(res, 200, { runs: [run] });
       return true;
     }
-    const parsed = await getAuditRoute.parse(
-      req,
-      res,
-      pathSegments,
-      queryParams,
-    );
+    const parsed = await getAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!repo.getWorkItem(context.organizationId, parsed.params.id)) {
       throw new DevFlowError(404, "not_found", "DevFlow work item not found.");

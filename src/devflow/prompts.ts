@@ -1,8 +1,4 @@
-import type {
-  DevFlowAgentMode,
-  DevFlowScope,
-  DevFlowWorkItem,
-} from "./domain/types";
+import type { DevFlowAgentMode, DevFlowScope, DevFlowWorkItem } from "./domain/types";
 
 export const DEVFLOW_PROMPT_VERSION = "1.0.0";
 

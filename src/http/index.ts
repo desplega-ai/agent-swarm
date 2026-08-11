@@ -31,10 +31,7 @@ import {
   withSpanContext,
 } from "../otel";
 import { clearAuditSink, isRbacEnabled, setAuditSink } from "../rbac";
-import {
-  startScriptRunSupervisor,
-  stopScriptRunSupervisor,
-} from "../script-workflows/supervisor";
+import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
@@ -78,11 +75,7 @@ import { closeIdleMcpUserTransports, handleMcpUser } from "./mcp-user";
 import { handleMemory, startMemoryGc, stopMemoryGc } from "./memory";
 import { handleMetrics } from "./metrics";
 import { handleModelsCatalog } from "./models-catalog";
-import {
-  handleOAuthCallback,
-  startOAuthPendingGc,
-  stopOAuthPendingGc,
-} from "./oauth-callback";
+import { handleOAuthCallback, startOAuthPendingGc, stopOAuthPendingGc } from "./oauth-callback";
 import { handleGenericOAuth } from "./oauth-generic";
 import { handleOAuthLocks } from "./oauth-locks";
 import { handlePageProxy } from "./page-proxy";
@@ -160,9 +153,7 @@ function scheduleApiGc(reason: string): boolean {
     const startedAt = Date.now();
     try {
       gc();
-      console.log(
-        `[HTTP] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`,
-      );
+      console.log(`[HTTP] Explicit GC completed after ${reason} in ${Date.now() - startedAt}ms`);
     } catch (err) {
       console.warn(`[HTTP] Explicit GC failed after ${reason}: ${err}`);
     }
@@ -176,23 +167,17 @@ function startApiGcInterval() {
 
   const gc = (globalThis as GcCapableGlobal).gc;
   if (typeof gc !== "function") {
-    console.log(
-      "[HTTP] Explicit GC unavailable; idle MCP transport sweeps remain enabled",
-    );
+    console.log("[HTTP] Explicit GC unavailable; idle MCP transport sweeps remain enabled");
   }
 
   const interval = setInterval(() => {
-    const closedOwnerTransports = closeIdleMcpTransports(
-      transports,
-      transportActivity,
-      {
-        idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
-        label: "MCP",
-        onClose: (id) => {
-          delete mcpSessionAgents[id];
-        },
+    const closedOwnerTransports = closeIdleMcpTransports(transports, transportActivity, {
+      idleTimeoutMs: MCP_TRANSPORT_IDLE_TIMEOUT_MS,
+      label: "MCP",
+      onClose: (id) => {
+        delete mcpSessionAgents[id];
       },
-    );
+    });
     const closedUserTransports = closeIdleMcpUserTransports(
       transportsUser,
       sessionUsers,
@@ -216,16 +201,13 @@ if (globalState.__httpServer) {
   globalState.__httpServer.close();
 }
 
-const transports: Record<string, StreamableHTTPServerTransport> =
-  globalState.__transports ?? {};
+const transports: Record<string, StreamableHTTPServerTransport> = globalState.__transports ?? {};
 const mcpSessionAgents: McpSessionAgents = globalState.__mcpSessionAgents ?? {};
 const transportsUser: Record<string, StreamableHTTPServerTransport> =
   globalState.__transportsUser ?? {};
 const sessionUsers: Record<string, string> = globalState.__sessionUsers ?? {};
-const transportActivity: McpTransportActivity =
-  globalState.__transportActivity ?? {};
-const transportActivityUser: McpTransportActivity =
-  globalState.__transportActivityUser ?? {};
+const transportActivity: McpTransportActivity = globalState.__transportActivity ?? {};
+const transportActivityUser: McpTransportActivity = globalState.__transportActivityUser ?? {};
 
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
@@ -268,10 +250,7 @@ const httpServer = createHttpServer(async (req, res) => {
     // group/filter/aggregate by endpoint as a first-class field. `http.route` is
     // omitted (not fabricated) for unmatched core/MCP/404 paths. Raw path stays
     // on `url.path`.
-    const { spanName, httpRoute } = describeRequestRoute(
-      req.method,
-      pathSegments,
-    );
+    const { spanName, httpRoute } = describeRequestRoute(req.method, pathSegments);
     // Standard OTel HTTP server semconv attributes — host, scheme, protocol
     // version, user-agent (the method/path/route/status are set inline below).
     const semconv = httpServerSemconvAttributes(req);
@@ -295,8 +274,7 @@ const httpServer = createHttpServer(async (req, res) => {
         spanEnded = true;
         span.setAttributes({
           "http.response.status_code": statusCode,
-          "agentswarm.http.duration_ms":
-            Math.round((performance.now() - startTime) * 10) / 10,
+          "agentswarm.http.duration_ms": Math.round((performance.now() - startTime) * 10) / 10,
         });
         if (statusCode >= 500) {
           span.setStatus({ code: 2, message: `HTTP ${statusCode}` });
@@ -320,14 +298,7 @@ const httpServer = createHttpServer(async (req, res) => {
       setCorsHeaders(req, res);
 
       // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
-      if (
-        await handleCore(
-          req,
-          res,
-          req.headers["x-agent-id"] as string | undefined,
-          apiKey,
-        )
-      )
+      if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey))
         return;
 
       const queryParams = parseQueryParams(req.url || "");
@@ -348,8 +319,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleTasks(req, res, pathSegments, queryParams, myAgentId),
         () => handleStats(req, res, pathSegments, queryParams, myAgentId),
         () => handleStatus(req, res, pathSegments, queryParams),
-        () =>
-          handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
+        () => handleActiveSessions(req, res, pathSegments, queryParams, myAgentId),
         () => handlePricing(req, res, pathSegments, queryParams, myAgentId),
         () => handleSchedules(req, res, pathSegments, queryParams, myAgentId),
         () => handleWorkflows(req, res, pathSegments, queryParams, myAgentId),
@@ -367,22 +337,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
         () => handleRepos(req, res, pathSegments, queryParams),
         () => handleSkills(req, res, pathSegments, queryParams, myAgentId),
-        () =>
-          handleScriptConnections(
-            req,
-            res,
-            pathSegments,
-            queryParams,
-            myAgentId,
-          ),
-        () =>
-          handleScriptConnectionProxy(
-            req,
-            res,
-            pathSegments,
-            queryParams,
-            myAgentId,
-          ),
+        () => handleScriptConnections(req, res, pathSegments, queryParams, myAgentId),
+        () => handleScriptConnectionProxy(req, res, pathSegments, queryParams, myAgentId),
         () => handleScriptRuns(req, res, pathSegments, queryParams, myAgentId),
         () => handleScripts(req, res, pathSegments, queryParams, myAgentId),
         () => handleX(req, res, pathSegments),
@@ -405,16 +361,8 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleSessions(req, res, pathSegments, queryParams),
         () => handleInboxState(req, res, pathSegments, queryParams),
         () => handleTaskTemplates(req, res, pathSegments, queryParams),
-        () =>
-          handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
-        () =>
-          handleMcpUser(
-            req,
-            res,
-            transportsUser,
-            sessionUsers,
-            transportActivityUser,
-          ),
+        () => handleMcp(req, res, transports, transportActivity, mcpSessionAgents),
+        () => handleMcpUser(req, res, transportsUser, sessionUsers, transportActivityUser),
       ];
 
       try {
@@ -560,10 +508,7 @@ let startupConfigsInjected: string[] = [];
 try {
   startupConfigsInjected = loadGlobalConfigsIntoEnv(false);
 } catch (err) {
-  console.error(
-    "[startup] Failed to load global swarm configs before listen:",
-    err,
-  );
+  console.error("[startup] Failed to load global swarm configs before listen:", err);
   throw err;
 }
 
@@ -714,8 +659,7 @@ httpServer
     // 15-min tick, first run ~1 min after boot). Complements the tracker-only
     // keepalive above — see src/be/oauth-refresh-sweep.ts.
     if (process.env.OAUTH_REFRESH_SWEEP_DISABLE !== "true") {
-      const { startOAuthRefreshSweep } =
-        await import("../be/oauth-refresh-sweep");
+      const { startOAuthRefreshSweep } = await import("../be/oauth-refresh-sweep");
       startOAuthRefreshSweep();
     }
 
@@ -733,10 +677,7 @@ httpServer
     import("../be/memory/boot-reembed")
       .then(({ runBootReembed }) => runBootReembed())
       .catch((err) => {
-        console.error(
-          "[boot-reembed] startup backfill failed (non-fatal):",
-          err,
-        );
+        console.error("[boot-reembed] startup backfill failed (non-fatal):", err);
       });
 
     // Background backfill: embed any scripts that were seeded without embeddings
@@ -745,10 +686,7 @@ httpServer
     import("../be/scripts/boot-reembed")
       .then(({ runBootReembedScripts }) => runBootReembedScripts())
       .catch((err) => {
-        console.error(
-          "[boot-reembed-scripts] startup backfill failed (non-fatal):",
-          err,
-        );
+        console.error("[boot-reembed-scripts] startup backfill failed (non-fatal):", err);
       });
 
     // One-time scrub: retroactively redact any session_logs rows containing
@@ -757,10 +695,7 @@ httpServer
     import("../be/boot-scrub-logs")
       .then(({ runBootScrubLogs }) => runBootScrubLogs())
       .catch((err) => {
-        console.error(
-          "[boot-scrub-logs] startup scrub failed (non-fatal):",
-          err,
-        );
+        console.error("[boot-scrub-logs] startup scrub failed (non-fatal):", err);
       });
   })
   .on("error", (err) => {

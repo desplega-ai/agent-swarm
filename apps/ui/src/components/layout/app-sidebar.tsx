@@ -125,6 +125,18 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    id: "devflow",
+    label: "DEVFLOW",
+    items: [
+      {
+        title: "Pipeline",
+        path: "/devflow/pipeline",
+        icon: WorkflowIcon,
+        children: [{ title: "Idea Inbox", path: "/devflow/inbox" }],
+      },
+    ],
+  },
+  {
     id: "swarm",
     label: "SWARM",
     items: [

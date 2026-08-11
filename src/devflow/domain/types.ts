@@ -145,6 +145,7 @@ export const DevFlowAcceptanceCriterionSchema = z.object({
   specId: z.string(),
   given: z.string(),
   when: z.string(),
+  // biome-ignore lint/suspicious/noThenProperty: Acceptance criteria deliberately use Given/When/Then terminology.
   then: z.string(),
   isTestable: z.boolean(),
   testHint: z.string(),

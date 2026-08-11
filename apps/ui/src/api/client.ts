@@ -1,5 +1,20 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
+import {
+  type DevFlowAgentMode,
+  type DevFlowAgentRun,
+  DevFlowApiError,
+  type DevFlowMembership,
+  type DevFlowOrganization,
+  type DevFlowScope,
+  type DevFlowScopeInput,
+  type DevFlowSpec,
+  type DevFlowSpecInput,
+  type DevFlowState,
+  type DevFlowWorkItemDetail,
+  type DevFlowWorkItemPage,
+  type DevFlowWorkItemType,
+} from "./devflow-types";
 import type {
   AgentAvatar,
   AgentMcpServersResponse,
@@ -233,6 +248,144 @@ class ApiClient {
       return "";
     }
     return config.apiUrl;
+  }
+
+  private async devFlowRequest<T>(path: string, userId: string, init?: RequestInit): Promise<T> {
+    const headers = new Headers(this.getHeaders());
+    headers.set("x-devflow-user-id", userId);
+    const res = await fetch(`${this.getBaseUrl()}${path}`, { ...init, headers });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        error_code?: string;
+        details?: Record<string, unknown>;
+      };
+      throw new DevFlowApiError(
+        body.error ?? `DevFlow request failed: ${res.status}`,
+        res.status,
+        body.error_code ?? "request_failed",
+        body.details,
+      );
+    }
+    return res.json() as Promise<T>;
+  }
+
+  async fetchDevFlowOrganization(
+    userId: string,
+  ): Promise<{ organization: DevFlowOrganization; membership: DevFlowMembership }> {
+    return this.devFlowRequest("/api/devflow/v1/organizations/current", userId);
+  }
+
+  async fetchDevFlowWorkItems(
+    userId: string,
+    filters?: { state?: DevFlowState; type?: DevFlowWorkItemType; search?: string },
+  ): Promise<DevFlowWorkItemPage> {
+    const query = new URLSearchParams();
+    if (filters?.state) query.set("state", filters.state);
+    if (filters?.type) query.set("type", filters.type);
+    if (filters?.search) query.set("search", filters.search);
+    const suffix = query.size ? `?${query}` : "";
+    return this.devFlowRequest(`/api/devflow/v1/work-items${suffix}`, userId);
+  }
+
+  async fetchDevFlowWorkItem(userId: string, id: string): Promise<DevFlowWorkItemDetail> {
+    return this.devFlowRequest(`/api/devflow/v1/work-items/${encodeURIComponent(id)}`, userId);
+  }
+
+  async createDevFlowWorkItem(
+    userId: string,
+    input: { title: string; description: string; type?: DevFlowWorkItemType },
+  ): Promise<DevFlowWorkItemDetail> {
+    return this.devFlowRequest("/api/devflow/v1/work-items", userId, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async updateDevFlowWorkItem(
+    userId: string,
+    id: string,
+    input: Partial<
+      Pick<
+        DevFlowWorkItemDetail["item"],
+        "title" | "description" | "type" | "priority" | "blastRadius" | "isSecuritySensitive"
+      >
+    >,
+  ): Promise<DevFlowWorkItemDetail> {
+    return this.devFlowRequest(`/api/devflow/v1/work-items/${encodeURIComponent(id)}`, userId, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async transitionDevFlowWorkItem(
+    userId: string,
+    id: string,
+    input: {
+      toState: DevFlowState;
+      rationale: string;
+      blockerReason?: string;
+      archiveReason?: string;
+    },
+  ): Promise<DevFlowWorkItemDetail> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(id)}/transitions`,
+      userId,
+      { method: "POST", body: JSON.stringify(input) },
+    );
+  }
+
+  async saveDevFlowScope(
+    userId: string,
+    id: string,
+    input: DevFlowScopeInput,
+  ): Promise<{ scope: DevFlowScope }> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(id)}/scope`,
+      userId,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  async saveDevFlowSpec(
+    userId: string,
+    id: string,
+    input: DevFlowSpecInput,
+  ): Promise<{ spec: DevFlowSpec }> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(id)}/spec`,
+      userId,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  async startDevFlowAgentRun(
+    userId: string,
+    id: string,
+    mode: DevFlowAgentMode,
+  ): Promise<{ runs: DevFlowAgentRun[] }> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/work-items/${encodeURIComponent(id)}/agent-runs`,
+      userId,
+      { method: "POST", body: JSON.stringify({ mode }) },
+    );
+  }
+
+  async reconcileDevFlowAgentRun(
+    userId: string,
+    runId: string,
+  ): Promise<{ runs: DevFlowAgentRun[] }> {
+    return this.devFlowRequest(
+      `/api/devflow/v1/agent-runs/${encodeURIComponent(runId)}/reconcile`,
+      userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   }
 
   async fetchModelsCatalog(): Promise<ModelsCatalogResponse> {

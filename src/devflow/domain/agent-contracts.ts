@@ -7,15 +7,7 @@ import {
 } from "./types";
 
 export const IntakeEvidenceSchema = z.strictObject({
-  classification: z.enum([
-    "feature",
-    "bug",
-    "idea",
-    "task",
-    "architecture",
-    "ops",
-    "noise",
-  ]),
+  classification: z.enum(["feature", "bug", "idea", "task", "architecture", "ops", "noise"]),
   title: z.string().min(1).max(120),
   description: z.string().min(1),
   suggestedPriority: DevFlowPrioritySchema.nullable(),
@@ -50,6 +42,7 @@ export const SpecEvidenceSchema = z.strictObject({
       z.strictObject({
         given: z.string().min(1),
         when: z.string().min(1),
+        // biome-ignore lint/suspicious/noThenProperty: Acceptance criteria deliberately use Given/When/Then terminology.
         then: z.string().min(1),
         isTestable: z.boolean(),
         testHint: z.string(),
@@ -110,15 +103,7 @@ export const DEVFLOW_AGENT_OUTPUT_SCHEMAS: Record<
     properties: {
       classification: {
         type: "string",
-        enum: [
-          "feature",
-          "bug",
-          "idea",
-          "task",
-          "architecture",
-          "ops",
-          "noise",
-        ],
+        enum: ["feature", "bug", "idea", "task", "architecture", "ops", "noise"],
       },
       title: { type: "string", minLength: 1, maxLength: 120 },
       description: { type: "string", minLength: 1 },
@@ -186,6 +171,7 @@ export const DEVFLOW_AGENT_OUTPUT_SCHEMAS: Record<
           properties: {
             given: { type: "string", minLength: 1 },
             when: { type: "string", minLength: 1 },
+            // biome-ignore lint/suspicious/noThenProperty: JSON Schema mirrors the acceptance-criterion contract.
             then: { type: "string", minLength: 1 },
             isTestable: { type: "boolean" },
             testHint: { type: "string" },

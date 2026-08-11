@@ -2,11 +2,11 @@ import type { ZodError, ZodType } from "zod";
 import {
   IntakeEvidenceSchema,
   ScopeEvidenceSchema,
-  SpecEvidenceSchema,
   type SpecEvidence,
+  SpecEvidenceSchema,
 } from "../domain/agent-contracts";
 import { DevFlowError } from "../domain/errors";
-import { NFR_CATEGORIES, type DevFlowContext } from "../domain/types";
+import { type DevFlowContext, NFR_CATEGORIES } from "../domain/types";
 import type { DevFlowRepository } from "../repository";
 import type { DevFlowTransitionService } from "./transition-service";
 
@@ -76,7 +76,8 @@ export function createEvidenceService(
                 "Intake evidence can only be applied to a captured item.",
               );
             }
-            const classification = output.classification === "noise" ? item.type : output.classification;
+            const classification =
+              output.classification === "noise" ? item.type : output.classification;
             repo.updateWorkItem(context.organizationId, item.id, {
               type: classification,
               title: output.title,
@@ -162,7 +163,8 @@ export function createEvidenceService(
           });
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Agent evidence application failed";
+        const message =
+          error instanceof Error ? error.message : "Agent evidence application failed";
         repo.updateAgentRun(context.organizationId, run.id, {
           status: "failed",
           errorMessage: message,

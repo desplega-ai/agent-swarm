@@ -88,10 +88,7 @@ export const UpdateWorkItemBodySchema = z
     blastRadius: DevFlowBlastRadiusSchema.optional(),
     isSecuritySensitive: z.boolean().optional(),
   })
-  .refine(
-    (value) => Object.keys(value).length > 0,
-    "At least one field is required",
-  );
+  .refine((value) => Object.keys(value).length > 0, "At least one field is required");
 
 export const TransitionBodySchema = z.object({
   toState: DevFlowStateSchema,
@@ -110,14 +107,14 @@ export const ScopeBodySchema = z.object({
   rationale: z.string().min(1),
 });
 
-export const AcceptanceCriterionInputSchema =
-  DevFlowAcceptanceCriterionSchema.pick({
-    given: true,
-    when: true,
-    then: true,
-    isTestable: true,
-    testHint: true,
-  });
+export const AcceptanceCriterionInputSchema = DevFlowAcceptanceCriterionSchema.pick({
+  given: true,
+  when: true,
+  // biome-ignore lint/suspicious/noThenProperty: Acceptance criteria deliberately use Given/When/Then terminology.
+  then: true,
+  isTestable: true,
+  testHint: true,
+});
 
 export const NfrDeclarationInputSchema = z.object({
   category: DevFlowNfrDeclarationSchema.shape.category,

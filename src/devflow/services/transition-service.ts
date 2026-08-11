@@ -1,10 +1,10 @@
 import { DevFlowError } from "../domain/errors";
 import { DISABLED_FORWARD_TRANSITIONS, isSliceOneTransition } from "../domain/transitions";
 import {
-  NFR_CATEGORIES,
   type DevFlowContext,
   type DevFlowRole,
   type DevFlowState,
+  NFR_CATEGORIES,
 } from "../domain/types";
 import type { DevFlowRepository } from "../repository";
 
@@ -32,11 +32,7 @@ export interface DevFlowTransitionService {
   ): TransitionResult;
 }
 
-function assertRole(
-  role: DevFlowRole,
-  allowed: readonly DevFlowRole[],
-  message: string,
-): void {
+function assertRole(role: DevFlowRole, allowed: readonly DevFlowRole[], message: string): void {
   if (!allowed.includes(role)) {
     throw new DevFlowError(403, "insufficient_permission", message, {
       actor_role: role,
@@ -72,7 +68,9 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
 
         const fromState = item.state;
         const isBlockedRestore =
-          fromState === "blocked" && item.previousState === request.toState && request.toState !== "blocked";
+          fromState === "blocked" &&
+          item.previousState === request.toState &&
+          request.toState !== "blocked";
         const isEnabled = isSliceOneTransition(fromState, request.toState) || isBlockedRestore;
         if (!isEnabled) {
           const edge = `${fromState}:${request.toState}`;
@@ -121,12 +119,9 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
           assertRole(membership.role, ["pm", "pm_director", "admin"], "Gate 1 requires a PM role.");
           const scope = repo.getScope(context.organizationId, workItemId);
           if (!scope) {
-            throw new DevFlowError(
-              422,
-              "preconditions_not_met",
-              "Gate 1 scope is incomplete.",
-              { missing_fields: ["scope"] },
-            );
+            throw new DevFlowError(422, "preconditions_not_met", "Gate 1 scope is incomplete.", {
+              missing_fields: ["scope"],
+            });
           }
           const missingFields: string[] = [];
           if (!scope.problemStatement.trim()) missingFields.push("problemStatement");
@@ -134,12 +129,9 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
           if (!scope.successCriteria.length) missingFields.push("successCriteria");
           if (!scope.effortBand) missingFields.push("effortBand");
           if (missingFields.length > 0) {
-            throw new DevFlowError(
-              422,
-              "preconditions_not_met",
-              "Gate 1 scope is incomplete.",
-              { missing_fields: missingFields },
-            );
+            throw new DevFlowError(422, "preconditions_not_met", "Gate 1 scope is incomplete.", {
+              missing_fields: missingFields,
+            });
           }
           gate = 1;
           preconditionSnapshot = { scopeId: scope.id, confidence: scope.confidence };
@@ -168,17 +160,21 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
           } else {
             if (!spec.acceptanceCriteria.length) missingFields.push("acceptanceCriteria");
             untestableIds.push(
-              ...spec.acceptanceCriteria.filter((criterion) => !criterion.isTestable).map((c) => c.id),
+              ...spec.acceptanceCriteria
+                .filter((criterion) => !criterion.isTestable)
+                .map((c) => c.id),
             );
             const byCategory = new Map(spec.nfrDeclarations.map((nfr) => [nfr.category, nfr]));
             for (const category of NFR_CATEGORIES) {
               const nfr = byCategory.get(category);
-              if (!nfr || nfr.status === "pending" || !nfr.statement.trim()) pendingNfrs.push(category);
+              if (!nfr || nfr.status === "pending" || !nfr.statement.trim())
+                pendingNfrs.push(category);
             }
             if (!spec.uxBehavior.trim()) missingFields.push("uxBehavior");
             if (!spec.dataModelChanges.trim()) missingFields.push("dataModelChanges");
             if (!spec.integrationPoints.trim()) missingFields.push("integrationPoints");
-            if (item.isSecuritySensitive && !spec.threatModel?.trim()) missingFields.push("threatModel");
+            if (item.isSecuritySensitive && !spec.threatModel?.trim())
+              missingFields.push("threatModel");
           }
           if (!item.blastRadius) missingFields.push("blastRadius");
           if (missingFields.length || untestableIds.length || pendingNfrs.length) {
@@ -186,7 +182,8 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
             if (untestableIds.length) phrases.push("all acceptance criteria must be testable");
             if (pendingNfrs.length) phrases.push("all NFR declarations must be resolved");
             if (missingFields.includes("threatModel")) phrases.push("a threat model is required");
-            if (missingFields.length && phrases.length === 0) phrases.push("required spec fields are missing");
+            if (missingFields.length && phrases.length === 0)
+              phrases.push("required spec fields are missing");
             throw new DevFlowError(
               422,
               "preconditions_not_met",
@@ -213,18 +210,19 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
             throw new DevFlowError(403, "insufficient_permission", "Blocking requires a user.");
           }
           if (!request.blockerReason?.trim()) {
-            throw new DevFlowError(
-              422,
-              "preconditions_not_met",
-              "A blocker reason is required.",
-              { missing_fields: ["blockerReason"] },
-            );
+            throw new DevFlowError(422, "preconditions_not_met", "A blocker reason is required.", {
+              missing_fields: ["blockerReason"],
+            });
           }
         }
 
         if (isBlockedRestore) {
           if (!membership || !context.actorId) {
-            throw new DevFlowError(403, "insufficient_permission", "Resolving a blocker requires a user.");
+            throw new DevFlowError(
+              403,
+              "insufficient_permission",
+              "Resolving a blocker requires a user.",
+            );
           }
           const blockedEvent = repo
             .listAuditEvents(context.organizationId, workItemId)
@@ -250,12 +248,9 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
             "Archiving requires an admin or PM director role.",
           );
           if (!request.archiveReason?.trim()) {
-            throw new DevFlowError(
-              422,
-              "preconditions_not_met",
-              "An archive reason is required.",
-              { missing_fields: ["archiveReason"] },
-            );
+            throw new DevFlowError(422, "preconditions_not_met", "An archive reason is required.", {
+              missing_fields: ["archiveReason"],
+            });
           }
         }
 
@@ -276,14 +271,19 @@ export function createTransitionService(repo: DevFlowRepository): DevFlowTransit
         repo.updateWorkItem(context.organizationId, workItemId, {
           state: request.toState,
           previousState:
-            request.toState === "blocked" ? fromState : isBlockedRestore ? undefined : item.previousState,
+            request.toState === "blocked"
+              ? fromState
+              : isBlockedRestore
+                ? undefined
+                : item.previousState,
           blockerReason:
             request.toState === "blocked"
               ? request.blockerReason
               : isBlockedRestore
                 ? undefined
                 : item.blockerReason,
-          archiveReason: request.toState === "archived" ? request.archiveReason : item.archiveReason,
+          archiveReason:
+            request.toState === "archived" ? request.archiveReason : item.archiveReason,
         });
         const action =
           request.toState === "blocked"

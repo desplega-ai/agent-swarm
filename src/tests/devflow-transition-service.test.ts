@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { closeDb, createUser, getDb, initDb } from "../be/db";
-import { NFR_CATEGORIES, type DevFlowContext, type DevFlowState } from "../devflow/domain/types";
+import { type DevFlowContext, type DevFlowState, NFR_CATEGORIES } from "../devflow/domain/types";
 import { createDevFlowRepository, type DevFlowRepository } from "../devflow/repository";
 import {
   createTransitionService,
@@ -87,6 +87,7 @@ describe("DevFlow transition service", () => {
         {
           given: "a report with rows",
           when: "the user exports CSV",
+          // biome-ignore lint/suspicious/noThenProperty: Test fixture models a Given/When/Then criterion.
           then: "a valid CSV downloads",
           isTestable: overrides.testable ?? true,
         },
