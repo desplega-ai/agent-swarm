@@ -1,6 +1,14 @@
-import type { DevFlowAgentMode, DevFlowScope, DevFlowWorkItem } from "./domain/types";
+import { resolveTemplate } from "../prompts/resolver";
+import type {
+  DevFlowAgentMode,
+  DevFlowImplementationIntent,
+  DevFlowScope,
+  DevFlowWorkItem,
+} from "./domain/types";
+import "../prompts/devflow-factory";
 
 export const DEVFLOW_PROMPT_VERSION = "1.0.0";
+export const DEVFLOW_FACTORY_PROMPT_VERSION = "1.0.0";
 
 const objectiveByMode: Record<DevFlowAgentMode, string> = {
   intake:
@@ -39,4 +47,25 @@ export function buildDevFlowAgentPrompt(input: {
       2,
     ),
   ].join("\n");
+}
+
+export function buildDevFlowFactoryPrompt(intent: DevFlowImplementationIntent): string {
+  return resolveTemplate("devflow.factory.intake", {
+    intentJson: JSON.stringify(
+      {
+        id: intent.id,
+        workItemId: intent.workItemId,
+        specId: intent.specId,
+        specVersion: intent.specVersion,
+        specDigest: intent.specDigest,
+        repositoryTargetId: intent.repositoryTargetId,
+        desiredOutcome: intent.desiredOutcome,
+        priority: intent.priority,
+        riskSummary: intent.riskSummary,
+        snapshot: intent.intentSnapshot,
+      },
+      null,
+      2,
+    ),
+  }).text;
 }

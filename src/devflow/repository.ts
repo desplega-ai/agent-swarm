@@ -548,7 +548,7 @@ type FactoryExecutionRow = {
   swarmTaskId: string | null;
   headSha: string | null;
   queueItemId: string | null;
-  queueItemRevision: number | null;
+  queueItemRevision: string | null;
   contractId: string | null;
   canonicalContractPath: string | null;
   factoryStatus: string | null;
@@ -573,7 +573,7 @@ function factoryExecutionFromRow(row: FactoryExecutionRow): DevFlowFactoryExecut
     swarmTaskId: optionalString(row.swarmTaskId),
     headSha: optionalString(row.headSha),
     queueItemId: optionalString(row.queueItemId),
-    queueItemRevision: row.queueItemRevision ?? undefined,
+    queueItemRevision: optionalString(row.queueItemRevision),
     contractId: optionalString(row.contractId),
     canonicalContractPath: optionalString(row.canonicalContractPath),
     factoryStatus: optionalString(row.factoryStatus),
