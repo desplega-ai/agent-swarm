@@ -4293,6 +4293,2228 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devflow/v1/organizations/current": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current DevFlow organization and membership */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current organization */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            organization: {
+                                id: string;
+                                name: string;
+                                slug: string;
+                                settings: {
+                                    [key: string]: unknown;
+                                };
+                                isActive: boolean;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            membership: {
+                                organizationId: string;
+                                userId: string;
+                                /** @enum {string} */
+                                role: "admin" | "pm_director" | "pm" | "engineering_lead" | "architect" | "senior_developer" | "execution_lead" | "qa" | "viewer";
+                                isActive: boolean;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant-scoped DevFlow work items */
+        get: {
+            parameters: {
+                query?: {
+                    state?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                    type?: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                    search?: string;
+                    limit?: number;
+                    offset?: number | null;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Work item page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items: {
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                type: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                                /** @enum {string} */
+                                state: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                previousState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                blockerReason?: string;
+                                archiveReason?: string;
+                                title: string;
+                                description: string;
+                                /** @enum {string} */
+                                priority?: "p1" | "p2" | "p3";
+                                storyPoints?: number;
+                                sprintId?: string;
+                                sprintProbability?: number;
+                                /** @enum {string} */
+                                blastRadius?: "low" | "medium" | "high";
+                                isSecuritySensitive: boolean;
+                                duplicateOf?: string;
+                                duplicateConfidence?: number;
+                                classificationRationale?: string;
+                                pmOwnerId: string;
+                                engineeringOwnerId?: string;
+                                assignedToUserId?: string;
+                                /** @enum {string} */
+                                createdVia: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                                sourceMetadata: {
+                                    [key: string]: unknown;
+                                };
+                                capturedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            total: number;
+                            nextOffset?: number;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Capture a DevFlow work item */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        title: string;
+                        description: string;
+                        /** @enum {string} */
+                        type?: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                        /** @enum {string} */
+                        priority?: "p1" | "p2" | "p3";
+                        /**
+                         * @default manual
+                         * @enum {string}
+                         */
+                        createdVia?: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                        sourceMetadata?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Captured work item */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: {
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                type: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                                /** @enum {string} */
+                                state: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                previousState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                blockerReason?: string;
+                                archiveReason?: string;
+                                title: string;
+                                description: string;
+                                /** @enum {string} */
+                                priority?: "p1" | "p2" | "p3";
+                                storyPoints?: number;
+                                sprintId?: string;
+                                sprintProbability?: number;
+                                /** @enum {string} */
+                                blastRadius?: "low" | "medium" | "high";
+                                isSecuritySensitive: boolean;
+                                duplicateOf?: string;
+                                duplicateConfidence?: number;
+                                classificationRationale?: string;
+                                pmOwnerId: string;
+                                engineeringOwnerId?: string;
+                                assignedToUserId?: string;
+                                /** @enum {string} */
+                                createdVia: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                                sourceMetadata: {
+                                    [key: string]: unknown;
+                                };
+                                capturedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            agentRuns: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            audit: {
+                                id: string;
+                                organizationId: string;
+                                workItemId?: string;
+                                /** @enum {string} */
+                                actorKind: "user" | "agent" | "system";
+                                actorId?: string;
+                                action: string;
+                                /** @enum {string} */
+                                beforeState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                afterState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a DevFlow work item and its evidence */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Work item detail */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: {
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                type: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                                /** @enum {string} */
+                                state: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                previousState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                blockerReason?: string;
+                                archiveReason?: string;
+                                title: string;
+                                description: string;
+                                /** @enum {string} */
+                                priority?: "p1" | "p2" | "p3";
+                                storyPoints?: number;
+                                sprintId?: string;
+                                sprintProbability?: number;
+                                /** @enum {string} */
+                                blastRadius?: "low" | "medium" | "high";
+                                isSecuritySensitive: boolean;
+                                duplicateOf?: string;
+                                duplicateConfidence?: number;
+                                classificationRationale?: string;
+                                pmOwnerId: string;
+                                engineeringOwnerId?: string;
+                                assignedToUserId?: string;
+                                /** @enum {string} */
+                                createdVia: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                                sourceMetadata: {
+                                    [key: string]: unknown;
+                                };
+                                capturedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            agentRuns: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            audit: {
+                                id: string;
+                                organizationId: string;
+                                workItemId?: string;
+                                /** @enum {string} */
+                                actorKind: "user" | "agent" | "system";
+                                actorId?: string;
+                                action: string;
+                                /** @enum {string} */
+                                beforeState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                afterState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update editable DevFlow work item fields */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        title?: string;
+                        description?: string;
+                        /** @enum {string} */
+                        type?: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                        /** @enum {string} */
+                        priority?: "p1" | "p2" | "p3";
+                        /** @enum {string} */
+                        blastRadius?: "low" | "medium" | "high";
+                        isSecuritySensitive?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Updated work item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: {
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                type: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                                /** @enum {string} */
+                                state: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                previousState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                blockerReason?: string;
+                                archiveReason?: string;
+                                title: string;
+                                description: string;
+                                /** @enum {string} */
+                                priority?: "p1" | "p2" | "p3";
+                                storyPoints?: number;
+                                sprintId?: string;
+                                sprintProbability?: number;
+                                /** @enum {string} */
+                                blastRadius?: "low" | "medium" | "high";
+                                isSecuritySensitive: boolean;
+                                duplicateOf?: string;
+                                duplicateConfidence?: number;
+                                classificationRationale?: string;
+                                pmOwnerId: string;
+                                engineeringOwnerId?: string;
+                                assignedToUserId?: string;
+                                /** @enum {string} */
+                                createdVia: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                                sourceMetadata: {
+                                    [key: string]: unknown;
+                                };
+                                capturedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            agentRuns: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            audit: {
+                                id: string;
+                                organizationId: string;
+                                workItemId?: string;
+                                /** @enum {string} */
+                                actorKind: "user" | "agent" | "system";
+                                actorId?: string;
+                                action: string;
+                                /** @enum {string} */
+                                beforeState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                afterState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Request a deterministic DevFlow lifecycle transition */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        toState: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                        rationale: string;
+                        blockerReason?: string;
+                        archiveReason?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Transitioned work item */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            item: {
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                type: "idea" | "feature" | "bug" | "task" | "architecture" | "ops";
+                                /** @enum {string} */
+                                state: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                previousState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                blockerReason?: string;
+                                archiveReason?: string;
+                                title: string;
+                                description: string;
+                                /** @enum {string} */
+                                priority?: "p1" | "p2" | "p3";
+                                storyPoints?: number;
+                                sprintId?: string;
+                                sprintProbability?: number;
+                                /** @enum {string} */
+                                blastRadius?: "low" | "medium" | "high";
+                                isSecuritySensitive: boolean;
+                                duplicateOf?: string;
+                                duplicateConfidence?: number;
+                                classificationRationale?: string;
+                                pmOwnerId: string;
+                                engineeringOwnerId?: string;
+                                assignedToUserId?: string;
+                                /** @enum {string} */
+                                createdVia: "manual" | "slack" | "fathom" | "github" | "email" | "api";
+                                sourceMetadata: {
+                                    [key: string]: unknown;
+                                };
+                                capturedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                            agentRuns: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            audit: {
+                                id: string;
+                                organizationId: string;
+                                workItemId?: string;
+                                /** @enum {string} */
+                                actorKind: "user" | "agent" | "system";
+                                actorId?: string;
+                                action: string;
+                                /** @enum {string} */
+                                beforeState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                afterState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/scope": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current DevFlow scope */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current scope */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        /** Create or revise a DevFlow scope draft */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        problemStatement: string;
+                        targetUsers: string[];
+                        successCriteria: string[];
+                        /** @enum {string} */
+                        effortBand: "xs" | "s" | "m" | "l" | "xl";
+                        openQuestions: string[];
+                        confidence: number;
+                        rationale: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved scope */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            scope: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                problemStatement: string;
+                                targetUsers: string[];
+                                successCriteria: string[];
+                                /** @enum {string} */
+                                effortBand: "xs" | "s" | "m" | "l" | "xl";
+                                openQuestions: string[];
+                                confidence: number;
+                                rationale: string;
+                                agentRunId?: string;
+                                pmSignedOffAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/spec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current DevFlow spec version */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current spec */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        /** Create a new immutable DevFlow spec version */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        problemStatement: string;
+                        outOfScope: string;
+                        uxBehavior: string;
+                        dataModelChanges: string;
+                        integrationPoints: string;
+                        threatModel?: string;
+                        rollbackPlan?: string;
+                        dependencyMap: string[];
+                        openQuestions: string[];
+                        acceptanceCriteria: {
+                            given: string;
+                            when: string;
+                            then: string;
+                            isTestable: boolean;
+                            testHint: string;
+                        }[];
+                        nfrDeclarations: {
+                            /** @enum {string} */
+                            category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                            /** @enum {string} */
+                            status: "addressed" | "not_applicable" | "pending";
+                            statement: string;
+                        }[];
+                        /** @enum {string} */
+                        blastRadius: "low" | "medium" | "high";
+                    };
+                };
+            };
+            responses: {
+                /** @description Saved spec */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            spec: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "draft" | "approved";
+                                problemStatement: string;
+                                userStories: string;
+                                outOfScope: string;
+                                uxBehavior: string;
+                                dataModelChanges: string;
+                                integrationPoints: string;
+                                threatModel?: string;
+                                rollbackPlan?: string;
+                                dependencyMap: string[];
+                                openQuestions: string[];
+                                draftedByAgentRunId?: string;
+                                approvedAt?: string;
+                                acceptanceCriteria: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    given: string;
+                                    when: string;
+                                    then: string;
+                                    isTestable: boolean;
+                                    testHint: string;
+                                    /** @enum {string} */
+                                    testStatus: "unverified" | "passing" | "failing" | "skipped";
+                                    linkedTestId?: string;
+                                }[];
+                                nfrDeclarations: {
+                                    id: string;
+                                    organizationId: string;
+                                    specId: string;
+                                    /** @enum {string} */
+                                    category: "supportability" | "testability" | "security" | "scalability" | "usability" | "maintainability" | "reliability" | "observability" | "performance";
+                                    /** @enum {string} */
+                                    status: "addressed" | "not_applicable" | "pending";
+                                    statement: string;
+                                    reviewedAt?: string;
+                                }[];
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            } | null;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/agent-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Agent Swarm runs for a DevFlow item */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Agent runs */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            runs: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Start bounded DevFlow work on Agent Swarm */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        mode: "intake" | "scope" | "spec";
+                    };
+                };
+            };
+            responses: {
+                /** @description Queued agent run */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            runs: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/agent-runs/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile a DevFlow run with its Agent Swarm task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Reconciled agent run */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            runs: {
+                                id: string;
+                                organizationId: string;
+                                workItemId: string;
+                                /** @enum {string} */
+                                mode: "intake" | "scope" | "spec";
+                                /** @enum {string} */
+                                status: "queued" | "running" | "succeeded" | "failed" | "timed_out";
+                                swarmTaskId?: string;
+                                workflowRunId?: string;
+                                contractVersion: string;
+                                promptVersion: string;
+                                evidence?: unknown;
+                                evidenceAppliedAt?: string;
+                                latencyMs?: number;
+                                costUsd?: number;
+                                errorMessage?: string;
+                                startedAt?: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devflow/v1/work-items/{id}/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get immutable DevFlow audit evidence */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Audit events */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            audit: {
+                                id: string;
+                                organizationId: string;
+                                workItemId?: string;
+                                /** @enum {string} */
+                                actorKind: "user" | "agent" | "system";
+                                actorId?: string;
+                                action: string;
+                                /** @enum {string} */
+                                beforeState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                /** @enum {string} */
+                                afterState?: "captured" | "triaged" | "scoped" | "specced" | "sized" | "planned" | "building" | "in_review" | "deployed" | "monitoring" | "done" | "blocked" | "archived";
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+                /** @description Preconditions not met */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                            details?: {
+                                [key: string]: unknown;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/ecosystem": {
         parameters: {
             query?: never;

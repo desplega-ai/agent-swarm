@@ -167,7 +167,10 @@ export interface DevFlowAuditEvent {
   createdAt: string;
 }
 
-export interface DevFlowGateDecision extends Omit<GateDecisionInput, "preconditionSnapshot"> {
+export interface DevFlowGateDecision extends Omit<
+  GateDecisionInput,
+  "preconditionSnapshot"
+> {
   id: string;
   preconditionSnapshot: Record<string, unknown>;
   decidedAt: string;
@@ -179,7 +182,11 @@ export interface DevFlowRepository {
   getOrganization(id: string): DevFlowOrganization | null;
   getOrganizationBySlug(slug: string): DevFlowOrganization | null;
   addMembership(input: CreateMembershipInput): DevFlowMembership;
-  getMembership(organizationId: string, userId: string): DevFlowMembership | null;
+  getMembership(
+    organizationId: string,
+    userId: string,
+  ): DevFlowMembership | null;
+  findMembershipForUser(userId: string): DevFlowMembership | null;
   createWorkItem(input: CreateWorkItemInput): DevFlowWorkItem;
   getWorkItem(organizationId: string, id: string): DevFlowWorkItem | null;
   listWorkItems(organizationId: string, filters: WorkItemFilters): WorkItemPage;
@@ -206,17 +213,35 @@ export interface DevFlowRepository {
     >,
   ): DevFlowWorkItem;
   getScope(organizationId: string, workItemId: string): DevFlowScope | null;
-  upsertScope(organizationId: string, workItemId: string, input: UpsertScopeInput): DevFlowScope;
-  signOffScope(organizationId: string, workItemId: string, at: string): DevFlowScope;
-  getCurrentSpec(organizationId: string, workItemId: string): DevFlowSpec | null;
+  upsertScope(
+    organizationId: string,
+    workItemId: string,
+    input: UpsertScopeInput,
+  ): DevFlowScope;
+  signOffScope(
+    organizationId: string,
+    workItemId: string,
+    at: string,
+  ): DevFlowScope;
+  getCurrentSpec(
+    organizationId: string,
+    workItemId: string,
+  ): DevFlowSpec | null;
   createSpecVersion(
     organizationId: string,
     workItemId: string,
     input: CreateSpecInput,
   ): DevFlowSpec;
-  approveCurrentSpec(organizationId: string, workItemId: string, at: string): DevFlowSpec;
+  approveCurrentSpec(
+    organizationId: string,
+    workItemId: string,
+    at: string,
+  ): DevFlowSpec;
   createGateDecision(input: GateDecisionInput): DevFlowGateDecision;
-  listGateDecisions(organizationId: string, workItemId: string): DevFlowGateDecision[];
+  listGateDecisions(
+    organizationId: string,
+    workItemId: string,
+  ): DevFlowGateDecision[];
   createAgentRun(input: CreateAgentRunInput): DevFlowAgentRun;
   getAgentRun(organizationId: string, id: string): DevFlowAgentRun | null;
   listAgentRuns(organizationId: string, workItemId: string): DevFlowAgentRun[];
@@ -240,7 +265,10 @@ export interface DevFlowRepository {
     >,
   ): DevFlowAgentRun;
   appendAuditEvent(input: AuditEventInput): DevFlowAuditEvent;
-  listAuditEvents(organizationId: string, workItemId?: string): DevFlowAuditEvent[];
+  listAuditEvents(
+    organizationId: string,
+    workItemId?: string,
+  ): DevFlowAuditEvent[];
 }
 
 function now(): string {
@@ -291,7 +319,10 @@ type MembershipRow = {
 };
 
 function membershipFromRow(row: MembershipRow): DevFlowMembership {
-  return DevFlowMembershipSchema.parse({ ...row, isActive: row.isActive === 1 });
+  return DevFlowMembershipSchema.parse({
+    ...row,
+    isActive: row.isActive === 1,
+  });
 }
 
 type WorkItemRow = {
@@ -398,7 +429,9 @@ function agentRunFromRow(row: AgentRunRow): DevFlowAgentRun {
     ...row,
     swarmTaskId: optionalString(row.swarmTaskId),
     workflowRunId: optionalString(row.workflowRunId),
-    evidence: row.evidenceJson ? parseJson(row.evidenceJson, undefined) : undefined,
+    evidence: row.evidenceJson
+      ? parseJson(row.evidenceJson, undefined)
+      : undefined,
     evidenceAppliedAt: optionalString(row.evidenceAppliedAt),
     latencyMs: row.latencyMs ?? undefined,
     costUsd: row.costUsd ?? undefined,
@@ -409,7 +442,10 @@ function agentRunFromRow(row: AgentRunRow): DevFlowAgentRun {
 }
 
 export function createDevFlowRepository(db: Database): DevFlowRepository {
-  function getWorkItem(organizationId: string, id: string): DevFlowWorkItem | null {
+  function getWorkItem(
+    organizationId: string,
+    id: string,
+  ): DevFlowWorkItem | null {
     const row = db
       .prepare<WorkItemRow, [string, string]>(
         "SELECT * FROM devflow_work_items WHERE organizationId = ? AND id = ?",
@@ -418,7 +454,10 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
     return row ? workItemFromRow(row) : null;
   }
 
-  function getAgentRun(organizationId: string, id: string): DevFlowAgentRun | null {
+  function getAgentRun(
+    organizationId: string,
+    id: string,
+  ): DevFlowAgentRun | null {
     const row = db
       .prepare<AgentRunRow, [string, string]>(
         "SELECT * FROM devflow_agent_runs WHERE organizationId = ? AND id = ?",
@@ -427,36 +466,37 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
     return row ? agentRunFromRow(row) : null;
   }
 
-  function getCurrentSpec(organizationId: string, workItemId: string): DevFlowSpec | null {
+  function getCurrentSpec(
+    organizationId: string,
+    workItemId: string,
+  ): DevFlowSpec | null {
     const row = db
       .prepare<Record<string, unknown>, [string, string]>(
         `SELECT * FROM devflow_specs
          WHERE organizationId = ? AND workItemId = ?
          ORDER BY version DESC LIMIT 1`,
       )
-      .get(organizationId, workItemId) as
-      | {
-          id: string;
-          organizationId: string;
-          workItemId: string;
-          version: number;
-          status: string;
-          problemStatement: string;
-          userStories: string;
-          outOfScope: string;
-          uxBehavior: string;
-          dataModelChanges: string;
-          integrationPoints: string;
-          threatModel: string | null;
-          rollbackPlan: string | null;
-          dependencyMapJson: string;
-          openQuestionsJson: string;
-          draftedByAgentRunId: string | null;
-          approvedAt: string | null;
-          createdAt: string;
-          lastUpdatedAt: string;
-        }
-      | null;
+      .get(organizationId, workItemId) as {
+      id: string;
+      organizationId: string;
+      workItemId: string;
+      version: number;
+      status: string;
+      problemStatement: string;
+      userStories: string;
+      outOfScope: string;
+      uxBehavior: string;
+      dataModelChanges: string;
+      integrationPoints: string;
+      threatModel: string | null;
+      rollbackPlan: string | null;
+      dependencyMapJson: string;
+      openQuestionsJson: string;
+      draftedByAgentRunId: string | null;
+      approvedAt: string | null;
+      createdAt: string;
+      lastUpdatedAt: string;
+    } | null;
     if (!row) return null;
     const acceptanceCriteria = db
       .prepare<Record<string, unknown>, [string, string]>(
@@ -489,7 +529,8 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
       .map((entry) =>
         DevFlowNfrDeclarationSchema.parse({
           ...entry,
-          reviewedAt: (entry as { reviewedAt?: string | null }).reviewedAt ?? undefined,
+          reviewedAt:
+            (entry as { reviewedAt?: string | null }).reviewedAt ?? undefined,
         }),
       );
     return DevFlowSpecSchema.parse({
@@ -514,26 +555,40 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
       const timestamp = now();
       const id = input.id ?? crypto.randomUUID();
       const row = db
-        .prepare<OrganizationRow, [string, string, string, string, string, string]>(
+        .prepare<
+          OrganizationRow,
+          [string, string, string, string, string, string]
+        >(
           `INSERT INTO devflow_organizations
            (id, name, slug, settingsJson, createdAt, lastUpdatedAt)
            VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
         )
-        .get(id, input.name, input.slug, JSON.stringify(input.settings ?? {}), timestamp, timestamp);
+        .get(
+          id,
+          input.name,
+          input.slug,
+          JSON.stringify(input.settings ?? {}),
+          timestamp,
+          timestamp,
+        );
       if (!row) throw new Error("Failed to create DevFlow organization");
       return organizationFromRow(row);
     },
 
     getOrganization(id) {
       const row = db
-        .prepare<OrganizationRow, [string]>("SELECT * FROM devflow_organizations WHERE id = ?")
+        .prepare<OrganizationRow, [string]>(
+          "SELECT * FROM devflow_organizations WHERE id = ?",
+        )
         .get(id);
       return row ? organizationFromRow(row) : null;
     },
 
     getOrganizationBySlug(slug) {
       const row = db
-        .prepare<OrganizationRow, [string]>("SELECT * FROM devflow_organizations WHERE slug = ?")
+        .prepare<OrganizationRow, [string]>(
+          "SELECT * FROM devflow_organizations WHERE slug = ?",
+        )
         .get(slug);
       return row ? organizationFromRow(row) : null;
     },
@@ -549,7 +604,13 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
              role = excluded.role, isActive = 1, lastUpdatedAt = excluded.lastUpdatedAt
            RETURNING *`,
         )
-        .get(input.organizationId, input.userId, input.role, timestamp, timestamp);
+        .get(
+          input.organizationId,
+          input.userId,
+          input.role,
+          timestamp,
+          timestamp,
+        );
       if (!row) throw new Error("Failed to create DevFlow membership");
       return membershipFromRow(row);
     },
@@ -564,9 +625,25 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
       return row ? membershipFromRow(row) : null;
     },
 
+    findMembershipForUser(userId) {
+      const row = db
+        .prepare<MembershipRow, [string]>(
+          `SELECT * FROM devflow_organization_memberships
+           WHERE userId = ? AND isActive = 1 ORDER BY createdAt ASC LIMIT 1`,
+        )
+        .get(userId);
+      return row ? membershipFromRow(row) : null;
+    },
+
     createWorkItem(input) {
-      const membership = this.getMembership(input.organizationId, input.pmOwnerId);
-      if (!membership) throw new Error("PM owner must be an active member of the organization");
+      const membership = this.getMembership(
+        input.organizationId,
+        input.pmOwnerId,
+      );
+      if (!membership)
+        throw new Error(
+          "PM owner must be an active member of the organization",
+        );
       const timestamp = now();
       const id = input.id ?? crypto.randomUUID();
       const row = db
@@ -631,7 +708,8 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
       return {
         items: rows.map(workItemFromRow),
         total,
-        nextOffset: offset + rows.length < total ? offset + rows.length : undefined,
+        nextOffset:
+          offset + rows.length < total ? offset + rows.length : undefined,
       };
     },
 
@@ -651,7 +729,9 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
         duplicateConfidence: "duplicateConfidence",
         classificationRationale: "classificationRationale",
       };
-      const entries = Object.entries(patch).filter(([key]) => key in columnByKey);
+      const entries = Object.entries(patch).filter(
+        ([key]) => key in columnByKey,
+      );
       if (entries.length === 0) {
         const current = getWorkItem(organizationId, id);
         if (!current) throw new Error("DevFlow work item not found");
@@ -680,7 +760,8 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
     },
 
     upsertScope(organizationId, workItemId, input) {
-      if (!getWorkItem(organizationId, workItemId)) throw new Error("DevFlow work item not found");
+      if (!getWorkItem(organizationId, workItemId))
+        throw new Error("DevFlow work item not found");
       const timestamp = now();
       const row = db
         .prepare<ScopeRow, (string | number | null)[]>(
@@ -734,7 +815,8 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
     getCurrentSpec,
 
     createSpecVersion(organizationId, workItemId, input) {
-      if (!getWorkItem(organizationId, workItemId)) throw new Error("DevFlow work item not found");
+      if (!getWorkItem(organizationId, workItemId))
+        throw new Error("DevFlow work item not found");
       const current = getCurrentSpec(organizationId, workItemId);
       const version = (current?.version ?? 0) + 1;
       const specId = crypto.randomUUID();
@@ -867,8 +949,13 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
           actorUserId: String(row.actorUserId),
           actorRole: row.actorRole as DevFlowRole,
           rationale: String(row.rationale),
-          preconditionSnapshot: parseJson(String(row.preconditionSnapshotJson), {}),
-          approvalRequestId: row.approvalRequestId ? String(row.approvalRequestId) : undefined,
+          preconditionSnapshot: parseJson(
+            String(row.preconditionSnapshotJson),
+            {},
+          ),
+          approvalRequestId: row.approvalRequestId
+            ? String(row.approvalRequestId)
+            : undefined,
           decidedAt: String(row.decidedAt),
         }));
     },
@@ -925,7 +1012,9 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
         startedAt: "startedAt",
         finishedAt: "finishedAt",
       };
-      const entries = Object.entries(patch).filter(([key]) => key in columnByKey);
+      const entries = Object.entries(patch).filter(
+        ([key]) => key in columnByKey,
+      );
       if (entries.length === 0) {
         const current = getAgentRun(organizationId, id);
         if (!current) throw new Error("DevFlow agent run not found");
@@ -1001,10 +1090,16 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
         actorKind: row.actorKind as DevFlowContext["actorKind"],
         actorId: row.actorId ? String(row.actorId) : undefined,
         action: String(row.action),
-        beforeState: row.beforeState ? (row.beforeState as DevFlowState) : undefined,
-        afterState: row.afterState ? (row.afterState as DevFlowState) : undefined,
+        beforeState: row.beforeState
+          ? (row.beforeState as DevFlowState)
+          : undefined,
+        afterState: row.afterState
+          ? (row.afterState as DevFlowState)
+          : undefined,
         metadata: parseJson(String(row.metadataJson), {}),
-        correlationId: row.correlationId ? String(row.correlationId) : undefined,
+        correlationId: row.correlationId
+          ? String(row.correlationId)
+          : undefined,
         createdAt: String(row.createdAt),
       }));
     },

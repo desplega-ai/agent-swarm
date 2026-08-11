@@ -91,7 +91,10 @@ const nfrJsonSchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    status: { type: "string", enum: ["met", "not_applicable", "open"] },
+    status: {
+      type: "string",
+      enum: ["addressed", "not_applicable", "pending"],
+    },
     statement: { type: "string", minLength: 1 },
   },
   required: ["status", "statement"],

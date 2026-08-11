@@ -16,7 +16,8 @@ export const BUILTIN_ROLES = [
   {
     id: DEFAULT_ROLE_ID,
     name: "admin",
-    description: "Full access including verb-less routes (legacy-equivalent default).",
+    description:
+      "Full access including verb-less routes (legacy-equivalent default).",
     isBuiltin: true,
     grantsAll: true,
     verbs: [] as PermissionVerb[],
@@ -24,10 +25,14 @@ export const BUILTIN_ROLES = [
   {
     id: "rbac-role-requester",
     name: "requester",
-    description: "Own-task lifecycle: what legacy policy grants user principals.",
+    description:
+      "Own-task lifecycle: what legacy policy grants user principals.",
     isBuiltin: true,
     grantsAll: false,
     verbs: [
+      "devflow.work-item.write",
+      "devflow.gate.approve",
+      "devflow.agent-run.start",
       "task.create.own",
       "task.read.own",
       "task.cancel.own",
@@ -130,7 +135,9 @@ function requireRoleId(roleName: string): string {
 function validateBuiltinVerb(roleName: string, verb: string): PermissionVerb {
   const parsed = PermissionVerbSchema.safeParse(verb);
   if (!parsed.success) {
-    throw new Error(`Invalid RBAC permission verb "${verb}" in built-in role "${roleName}"`);
+    throw new Error(
+      `Invalid RBAC permission verb "${verb}" in built-in role "${roleName}"`,
+    );
   }
   return parsed.data;
 }
@@ -149,7 +156,10 @@ function validatedBuiltinVerbSets(): Map<string, Set<PermissionVerb>> {
 
 const loggedInvalidGrantVerbs = new Set<string>();
 
-function parseDatabaseGrantVerb(roleId: string, verb: string): PermissionVerb | null {
+function parseDatabaseGrantVerb(
+  roleId: string,
+  verb: string,
+): PermissionVerb | null {
   const parsed = PermissionVerbSchema.safeParse(verb);
   if (parsed.success) {
     return parsed.data;
@@ -234,7 +244,9 @@ export function listUserRoles(userId: string): UserRole[] {
     .map(roleRowToUserRole);
 }
 
-export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncStats {
+export function ensureRbacSeedsSynced(opts?: {
+  quiet?: boolean;
+}): RbacSeedSyncStats {
   const db = getDb();
   const desiredVerbsByRoleId = validatedBuiltinVerbSets();
 
@@ -242,7 +254,10 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
     `INSERT OR IGNORE INTO roles (id, name, description, isBuiltin, grantsAll)
      VALUES (?, ?, ?, 1, ?)`,
   );
-  const updateRole = db.prepare<null, [string, string, number, string, string, string, number]>(
+  const updateRole = db.prepare<
+    null,
+    [string, string, number, string, string, string, number]
+  >(
     `UPDATE roles
      SET name = ?, description = ?, isBuiltin = 1, grantsAll = ?, lastUpdatedAt = CURRENT_TIMESTAMP
      WHERE id = ?
@@ -291,7 +306,12 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
   db.transaction(() => {
     for (const role of BUILTIN_ROLES) {
       const grantsAll = role.grantsAll ? 1 : 0;
-      const insertResult = insertRole.run(role.id, role.name, role.description, grantsAll);
+      const insertResult = insertRole.run(
+        role.id,
+        role.name,
+        role.description,
+        grantsAll,
+      );
       stats.rolesInserted += insertResult.changes;
       if (insertResult.changes === 0) {
         const updateResult = updateRole.run(
@@ -329,15 +349,22 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
     }
 
     for (const role of BUILTIN_ROLES) {
-      const desiredVerbs = desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
+      const desiredVerbs =
+        desiredVerbsByRoleId.get(role.id) ?? new Set<PermissionVerb>();
       const existingRows = selectRolePermissions.all(role.id);
       for (const row of existingRows) {
         if (!desiredVerbs.has(row.verb as PermissionVerb)) {
-          stats.permissionsDeleted += deleteRolePermission.run(role.id, row.verb).changes;
+          stats.permissionsDeleted += deleteRolePermission.run(
+            role.id,
+            row.verb,
+          ).changes;
         }
       }
       for (const verb of desiredVerbs) {
-        stats.permissionsInserted += insertRolePermission.run(role.id, verb).changes;
+        stats.permissionsInserted += insertRolePermission.run(
+          role.id,
+          verb,
+        ).changes;
       }
     }
 
@@ -347,7 +374,8 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
     // are deactivated, not stripped. When RBAC reaches GA with real role
     // management, zero roles becomes a deliberate deny-all posture and this
     // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
-    stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
+    stats.usersBackfilled +=
+      backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
   })();
 
   if (!opts?.quiet) {
@@ -375,10 +403,15 @@ function printRolesTable(rows: RbacRoleSummaryRow[]): void {
   ]);
   const headers = ["name", "builtin", "grantsAll", "verbs", "attachedUsers"];
   const widths = headers.map((header, column) =>
-    Math.max(header.length, ...tableRows.map((row) => row[column]?.length ?? 0)),
+    Math.max(
+      header.length,
+      ...tableRows.map((row) => row[column]?.length ?? 0),
+    ),
   );
   const format = (row: string[]) =>
-    row.map((cell, column) => cell.padEnd(widths[column] ?? cell.length)).join("  ");
+    row
+      .map((cell, column) => cell.padEnd(widths[column] ?? cell.length))
+      .join("  ");
 
   console.log("Roles:");
   console.log(format(headers));

@@ -17,6 +17,18 @@
 import * as z from "zod";
 
 export const PERMISSIONS = {
+  "devflow.work-item.write": {
+    description: "Create or update work items in a DevFlow organization.",
+    namespace: "devflow",
+  },
+  "devflow.gate.approve": {
+    description: "Request a role-checked DevFlow lifecycle gate decision.",
+    namespace: "devflow",
+  },
+  "devflow.agent-run.start": {
+    description: "Start or reconcile a structured DevFlow Agent Swarm run.",
+    namespace: "devflow",
+  },
   "user.manage": {
     description: "Create, update, or deactivate user profiles.",
     namespace: "user",
@@ -54,7 +66,8 @@ export const PERMISSIONS = {
     namespace: "task",
   },
   "task.action.own": {
-    description: "Run actions (follow-up, retry, ...) on a task the principal requested.",
+    description:
+      "Run actions (follow-up, retry, ...) on a task the principal requested.",
     namespace: "task",
   },
   "task.fs.mutate": {
@@ -70,7 +83,8 @@ export const PERMISSIONS = {
     namespace: "memory",
   },
   "memory.delete.any": {
-    description: "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
+    description:
+      "Delete a memory entry (own entries, or swarm-scoped entries as lead).",
     namespace: "memory",
   },
   "channel.delete": {
@@ -114,15 +128,18 @@ export const PERMISSIONS = {
     namespace: "script-connection",
   },
   "script-connection.invoke": {
-    description: "Invoke a script MCP connection through the server-side proxy.",
+    description:
+      "Invoke a script MCP connection through the server-side proxy.",
     namespace: "script-connection",
   },
   "oauth-app.manage": {
-    description: "Register, update, delete, disconnect, or discover OAuth apps.",
+    description:
+      "Register, update, delete, disconnect, or discover OAuth apps.",
     namespace: "oauth-app",
   },
   "oauth-authorization.manage": {
-    description: "Start, refresh, or revoke labeled OAuth authorizations on an OAuth app.",
+    description:
+      "Start, refresh, or revoke labeled OAuth authorizations on an OAuth app.",
     namespace: "oauth-authorization",
   },
   "config.write.any": {
@@ -190,7 +207,8 @@ export const PERMISSIONS = {
     namespace: "mcp-server",
   },
   "mcp-oauth.authorize.any": {
-    description: "Start an MCP-server OAuth authorize flow for a caller-supplied user scope.",
+    description:
+      "Start an MCP-server OAuth authorize flow for a caller-supplied user scope.",
     namespace: "mcp-oauth",
   },
   "kv.write.any": {
@@ -202,7 +220,8 @@ export const PERMISSIONS = {
     namespace: "page",
   },
   "app.manage": {
-    description: "Create, update, delete, or roll back apps, and inspect app version history.",
+    description:
+      "Create, update, delete, or roll back apps, and inspect app version history.",
     namespace: "app",
   },
   "app.use": {
@@ -245,6 +264,9 @@ export const PERMISSIONS = {
 
 export type PermissionVerb = keyof typeof PERMISSIONS;
 
-export const PERMISSION_VERBS = Object.keys(PERMISSIONS) as [PermissionVerb, ...PermissionVerb[]];
+export const PERMISSION_VERBS = Object.keys(PERMISSIONS) as [
+  PermissionVerb,
+  ...PermissionVerb[],
+];
 
 export const PermissionVerbSchema = z.enum(PERMISSION_VERBS);
