@@ -134,14 +134,16 @@ For each candidate:
 4. The description and trigger fields are CRITICAL — they determine whether agents find and use the skill
 
 ### 3C. Update Existing Skills
-- Use `db-query` to review current skill bodies directly from the `skills` table:
+- Audit skill bodies inside a one-off `script-run`, using `ctx.swarm.db_query`; do not load the bodies into model context with direct `db-query`, and do not use `skill-list includeContent`.
+- Inside the script, count the enabled skills, then fetch them in explicit pages smaller than the 100-row tool cap (for example, 50 rows at a time):
   ```sql
-  SELECT name, description, content
-  FROM skills
-  WHERE isEnabled = 1
-  ORDER BY name;
+  SELECT COUNT(*) FROM skills WHERE isEnabled = 1;
+  SELECT name, description, content FROM skills
+  WHERE isEnabled = 1 ORDER BY name LIMIT 50 OFFSET <offset>;
   ```
+- Inspect each page inside the script, continue until the final short page, and return only aggregate counts plus a compact list of findings (skill name, issue, and proposed action) — never the skill bodies. Require the processed-row count to equal the initial count before treating the audit as complete. Script-internal `ctx.swarm.*` calls bypass the model-context response ceiling and instead fail loudly at the separate 64 MiB guard; pagination also prevents silent row truncation.
 - Before accepting any zero-hit content audit as clean, carry a positive control through the same search path: choose a distinctive token visibly present in one returned skill body and verify that the audit finds it. If the positive control returns zero, treat the audit as invalid rather than clean.
+- Carry a negative control too: search for a freshly invented token that cannot be present and require zero matches. Report both control counts with the processed-row count.
 - Are any skills outdated (e.g., referencing old APIs, wrong procedures)?
 - Are any skills not being used? Check if the description/trigger is too vague
 - Update skills with `skill-update` as needed
