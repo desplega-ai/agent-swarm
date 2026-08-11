@@ -1,0 +1,64 @@
+---
+title: App concepts
+description: Models, queries, actions, interfaces, configuration, versioning, access, and synchronized sources in Swarm Apps.
+---
+
+<Callout type="warn" title="Beta — requires agent-swarm 1.129.0 or later">
+Apps are in **beta**. The definition contract and APIs may change between releases. Core Apps require **agent-swarm 1.129.0**; source-backed model sync requires **1.130.0**; canonical asset namespace support for Apps requires **1.131.0**.
+</Callout>
+
+An App definition is the versioned contract for its data and interface. The server validates the complete definition before saving it, so a rejected update leaves the current App unchanged.
+
+## Models
+
+Models define persistent rows. Each model has typed columns: `string`, `number`, `boolean`, `date`, or `enum`. Columns can be required, defaulted, or indexed where the kind supports it. The server adds identity, timestamps, and authorship fields to every row.
+
+Prefer hiding a column when a field is being retired. Hiding preserves existing values and keeps rollback possible. Purging a column is an explicit, irreversible migration and should be reserved for data that really must be removed.
+
+## Named queries
+
+Queries give an App a declared read surface. A query selects one model and can add equality filters, sorting, and a row limit. Parameter placeholders such as `{ "$param": "competitor" }` let a detail page or agent request one specific record without exposing an unfiltered fallback.
+
+Agents call named queries with `app-query`; saved scripts use `ctx.swarm.app_query`. Scripts also receive generated per-App TypeScript types for models and queries starting in 1.129.0.
+
+## Actions
+
+An App can declare up to 20 named actions:
+
+- **`task`** dispatches a prompt to the swarm. Invocation input is appended as context, so a table row can travel with the task.
+- **`script`** runs a saved script with definition defaults plus invocation input.
+- **`sync`** refreshes all or a selected subset of the App's external sources.
+
+Pages invoke these through `app.action`. Built-in interface actions also create, update, or delete rows; refresh queries; and navigate between App pages.
+
+## Pages and reusable elements
+
+Pages are flat, validated element trees rendered by the dashboard. The component catalog includes layout, headings, text, forms, tables, filters, metrics, alerts, badges, drawers, and detail views. Bindings such as `{ "$state": "/queries/allItems/data" }` connect declared queries and actions to those elements.
+
+Reusable elements live in the versioned definition. They are private by default and can be explicitly exported for another App to reference. The server compatibility-checks breaking changes to exported elements.
+
+## Per-user configuration and theme
+
+`userConfig` declares typed settings, but each user's values are stored separately from the shared definition and rows. This is useful for preferences such as a default region, reporting window, or whether archived records are shown.
+
+An optional definition `theme` sets the App's default canvas preset. Viewers can override it per App without changing the shared definition. Treat the definition theme as a default, not an enforcement mechanism.
+
+## Versioning, migrations, and rollback
+
+Every successful definition write snapshots the previous definition. Use `app-history` to find a version, `app-diff` to inspect it against the current definition, and `app-rollback` to restore it.
+
+Rollback is a forward schema migration over today's rows, not row-level time travel. A lossy migration or rollback must state how values are mapped, coerced, backfilled, or purged. If validation rejects it, no definition or row changes are written.
+
+## RBAC, ownership, and scope
+
+Apps have permission-aware lifecycle and use operations. Ownership and App permissions determine who can inspect, change, or use an App; they do not make every connected source private. In particular, synchronized rows are visible to principals with `app.use`, so scope task sources and external projections to the audience intended to read them.
+
+From 1.131.0, Apps participate in canonical asset namespaces. That makes App ownership and movement fit the same namespace model as other swarm assets while preserving RBAC checks.
+
+## Source-backed models
+
+Source-backed model sync arrived in 1.130.0. A model can project records from a saved script or from the swarm task pool into normal App rows. Each source declares a stable join key, and source-bound columns are read-only between refreshes; App-owned columns on the same row remain editable.
+
+Synced rows expose provenance and freshness through `source`, `syncedAt`, and `stale`. Refresh through a `sync` action, the sync API, `app-sync`, or a schedule. Script sources use the source script owner's credentials and should reference a registered connection instead of embedding secrets.
+
+Next, [build a complete App and iterate on it](/docs/apps/build-an-app), or consult the [Apps API reference](/docs/api-reference/apps).

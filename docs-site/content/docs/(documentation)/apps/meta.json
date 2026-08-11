@@ -1,0 +1,5 @@
+{
+  "title": "Apps",
+  "description": "Build schema-backed applications that agents and people can operate together",
+  "pages": ["index", "concepts", "build-an-app"]
+}

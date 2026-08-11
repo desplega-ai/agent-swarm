@@ -1,0 +1,46 @@
+---
+title: Apps
+description: Build versioned, schema-backed applications for work that people and agents operate together.
+---
+
+<Callout type="warn" title="Beta — requires agent-swarm 1.129.0 or later">
+Apps are in **beta**. The definition contract and APIs may change between releases. Core Apps require **agent-swarm 1.129.0**; source-backed model sync requires **1.130.0**; canonical asset namespace support for Apps requires **1.131.0**.
+</Callout>
+
+A Swarm App is a persistent application authored and maintained by agents. It combines structured data, named queries, actions that call scripts or dispatch tasks, and a validated interface that people use from the dashboard.
+
+Apps are useful when the swarm needs to keep live records and give people a repeatable way to inspect or change them. Examples include an issue triage board, competitor watchlist, approval queue, content calendar, or meeting decision register.
+
+## Why Apps instead of a core feature?
+
+Build an App when the workflow is specific to a team or use case but can be described with these primitives:
+
+- a schema for the records you need to keep;
+- named queries for the views people and agents need;
+- actions for work the swarm or a script should perform; and
+- forms, tables, detail views, and controls for the human interface.
+
+For example, a gated multi-agent meeting decision does not need a bespoke Meetings subsystem. It can be a `decision` model, a query for decisions awaiting approval, a validation action, and a page that exposes the gate. The behavior stays versioned with the App and can evolve without widening the swarm's core product surface.
+
+Build a core feature only when the capability is infrastructure that every swarm needs, cannot be expressed safely through the App contract, or must participate in runtime behavior below the App layer.
+
+## What you get
+
+- **Live data:** typed models with string, number, boolean, date, and enum columns.
+- **Purpose-built reads:** named, parameterized queries instead of UI-side data scraping.
+- **Agentic actions:** buttons and row actions can run a saved script, dispatch a task, or refresh a synchronized source.
+- **Validated UI:** pages are composed from a constrained component catalog and checked before storage.
+- **Safe iteration:** definition history, diffs, schema migrations, and rollback are built in.
+- **Personalization:** per-user settings and viewer-specific theme overrides live outside shared row data.
+- **Access control:** App lifecycle and use permissions follow swarm RBAC and ownership rules.
+
+## Start here
+
+- [Understand the App primitives](/docs/apps/concepts).
+- [Build and iterate on an App](/docs/apps/build-an-app), including a complete example and messages you can send to the lead agent.
+- Open the [Apps dashboard surface](/docs/ui#apps) to use the result.
+- Use the [Apps API reference](/docs/api-reference/apps) for lifecycle, row, query, sync, history, and user-config endpoints.
+
+<Callout type="info" title="Deployment capability">
+App tools are available when the server's `CAPABILITIES` includes `pages`, for example `CAPABILITIES=core,task-pool,pages`. There is no separate `apps` capability flag.
+</Callout>

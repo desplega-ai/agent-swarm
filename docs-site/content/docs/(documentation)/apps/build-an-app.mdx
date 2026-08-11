@@ -1,0 +1,192 @@
+---
+title: Build an App
+description: Create a schema-backed App through the lead agent, then iterate with focused, validated patches.
+---
+
+<Callout type="warn" title="Beta — requires agent-swarm 1.129.0 or later">
+Apps are in **beta**. The definition contract and APIs may change between releases. Core Apps require **agent-swarm 1.129.0**; source-backed model sync requires **1.130.0**; canonical asset namespace support for Apps requires **1.131.0**.
+</Callout>
+
+The most direct way to build an App is to describe the outcome to your lead agent. The lead can use the `/apps` skill to turn the request into a validated definition, create it with `app-upsert`, and return the dashboard URL.
+
+## A complete watchlist App
+
+This smaller, sanitized example is derived from a real Competitor Tracker App. It keeps the same useful shape—typed records, a sorted query, a task action, a creation form, and a table row action—without publishing any live rows or organization-specific prompts.
+
+Ask the lead to create the following with `app-upsert`:
+
+```json
+{
+  "name": "Watchlist Tracker",
+  "description": "Track products worth revisiting and dispatch fresh research",
+  "definition": {
+    "models": {
+      "subject": {
+        "columns": {
+          "name": { "kind": "string", "required": true, "index": true },
+          "category": {
+            "kind": "enum",
+            "enum": ["direct", "adjacent", "reference"],
+            "default": "reference"
+          },
+          "status": {
+            "kind": "enum",
+            "enum": ["active", "paused", "archived"],
+            "default": "active"
+          },
+          "summary": { "kind": "string" },
+          "url": { "kind": "string" },
+          "lastReviewed": { "kind": "date" }
+        }
+      }
+    },
+    "queries": {
+      "allSubjects": {
+        "model": "subject",
+        "sort": { "column": "name", "dir": "asc" },
+        "limit": 300
+      }
+    },
+    "actions": {
+      "research": {
+        "kind": "task",
+        "prompt": "Research the supplied watchlist subject against current primary sources. Report what changed, the strongest point of differentiation, and any corrections the stored row needs."
+      }
+    },
+    "pages": {
+      "main": {
+        "title": "Watchlist",
+        "root": "root",
+        "elements": {
+          "root": {
+            "type": "Stack",
+            "props": { "direction": "column", "gap": "lg", "padding": "md" },
+            "children": ["heading", "addCard", "tableCard"]
+          },
+          "heading": {
+            "type": "Heading",
+            "props": { "text": "Watchlist", "level": "h1" }
+          },
+          "addCard": {
+            "type": "Card",
+            "props": { "title": "Add a subject" },
+            "children": ["addForm"]
+          },
+          "addForm": {
+            "type": "Form",
+            "props": {
+              "id": "newSubject",
+              "fields": [
+                { "name": "name", "label": "Name", "required": true },
+                { "name": "category", "label": "Category", "kind": "enum", "options": ["direct", "adjacent", "reference"] },
+                { "name": "summary", "label": "Summary", "kind": "text" },
+                { "name": "url", "label": "URL" }
+              ],
+              "submitLabel": "Add subject",
+              "onSubmit": [
+                {
+                  "action": "app.mutate",
+                  "params": { "model": "subject", "op": "create", "values": { "$form": "" } }
+                }
+              ]
+            }
+          },
+          "tableCard": {
+            "type": "Card",
+            "props": { "title": "Tracked subjects" },
+            "children": ["table"]
+          },
+          "table": {
+            "type": "Table",
+            "props": {
+              "data": { "$state": "/queries/allSubjects/data" },
+              "loading": { "$state": "/queries/allSubjects/loading" },
+              "error": { "$state": "/queries/allSubjects/error" },
+              "emptyMessage": "Nothing on the watchlist yet.",
+              "columns": [
+                { "key": "name", "label": "Name" },
+                { "key": "category", "label": "Category", "kind": "badge" },
+                { "key": "status", "label": "Status", "kind": "badge" },
+                { "key": "summary", "label": "Summary" },
+                { "key": "lastReviewed", "label": "Last reviewed", "kind": "date" }
+              ],
+              "rowActions": [
+                {
+                  "label": "Research",
+                  "actions": [
+                    {
+                      "action": "app.action",
+                      "params": { "name": "research", "input": { "subject": { "$row": "" } } }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "defaultPage": "main"
+  }
+}
+```
+
+The response includes an App ID and `/apps/<id>` URL. Open that route in the [dashboard](/docs/ui) to add a row and dispatch the Research action.
+
+## How a Meetings workflow maps to an App
+
+A meeting decision register can use the same primitives:
+
+| Need | App primitive |
+|---|---|
+| Durable decision record | A `decision` model with meeting ID, proposal, status, approvers, rationale, and decision date |
+| Approval inbox | A `pendingDecisions` named query filtered to `status: "pending"` |
+| Multi-agent validation gate | A named script action that checks the required reviews and applies the approved transition |
+| Human control | A table or detail page with Review and Approve actions |
+| Team-specific access | App ownership and `app.use` permissions |
+| Auditable changes | Row authorship plus definition history, diff, and rollback |
+
+This keeps the meeting-specific schema and policy in the App. If the approval rule changes, patch the action and UI instead of adding another permanent subsystem to the swarm.
+
+## Messages to send your lead agent
+
+These messages are intentionally complete enough to paste into Slack as-is.
+
+### Create an App
+
+> Build me an App called Customer Signals. Track company, signal type, source URL, observed date, summary, owner, and status. I need a newest-first view, filters for owner and status, a form to add a signal, and a row action that asks the swarm to investigate it. Show me the App when it is ready.
+
+### Add a view
+
+> Update Customer Signals with a second page called Account detail. Clicking a company in the main table should open that page and show every signal for the selected company, newest first. Keep the current page and data unchanged otherwise.
+
+### Add an action
+
+> Add a Triage row action to Customer Signals. It should send the complete selected row to the lead with a prompt to verify the source, assess urgency, and recommend the next step. Confirm before dispatching the task.
+
+### Evolve the schema
+
+> Change Customer Signals so the old priority string becomes an enum with low, medium, and high. Map urgent to high, normal to medium, and everything else to low. Hide the old field instead of purging it, and update every query and page binding in the same patch.
+
+### Synchronize an external source
+
+> On agent-swarm 1.130.0 or later, sync open GitHub issues from our registered GitHub connection into Customer Signals. Use issue number as the join key, project title, URL, labels, and opened date into source-owned columns, keep owner and notes editable, and add a Refresh action plus synced and stale columns to the table.
+
+### Personalize the App
+
+> Add per-user settings for default owner and whether archived signals are shown. Use those preferences in the page without storing them on shared rows. Keep the current theme as the definition default and let viewers override it.
+
+## The authoring loop
+
+Agents should make App changes through a read-patch-validate loop:
+
+1. Run `app-list` to discover the App ID when it is not already known.
+2. Run `app-get` and read the complete current definition.
+3. Use `app-upsert` only for creation or an intentional full replacement. For iteration, prefer `app-patch` with the smallest coherent subtree.
+4. If validation rejects the update, fix every returned `issues[]` entry and retry. The rejected write did not change the saved App.
+5. Open `/apps/<id>` in the dashboard and verify the affected form, query, and action.
+6. Before a risky change, inspect `app-history` and `app-diff`. Use `app-rollback` when restoring an earlier definition is safer than another patch.
+
+Definition patches use JSON Merge Patch semantics. Arrays and scalar values replace; many declarations—including page elements, actions, columns, and parameters—are atomic, so restate the complete declaration you want to keep. Never guess the current definition or send a partial definition through `app-upsert`.
+
+For endpoint details, see the [Apps API reference](/docs/api-reference/apps). For the definition primitives, return to [App concepts](/docs/apps/concepts).
