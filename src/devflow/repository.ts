@@ -9,6 +9,10 @@ import {
   type DevFlowContext,
   type DevFlowCreatedVia,
   type DevFlowEffortBandSchema,
+  type DevFlowFactoryExecution,
+  DevFlowFactoryExecutionSchema,
+  type DevFlowImplementationIntent,
+  DevFlowImplementationIntentSchema,
   type DevFlowMembership,
   DevFlowMembershipSchema,
   type DevFlowNfrCategory,
@@ -17,6 +21,8 @@ import {
   type DevFlowOrganization,
   DevFlowOrganizationSchema,
   type DevFlowPriority,
+  type DevFlowRepositoryTarget,
+  DevFlowRepositoryTargetSchema,
   type DevFlowRole,
   type DevFlowScope,
   DevFlowScopeSchema,
@@ -130,6 +136,61 @@ export interface CreateAgentRunInput {
   promptVersion: string;
 }
 
+export interface CreateRepositoryTargetInput {
+  id?: string;
+  organizationId: string;
+  name: string;
+  repositoryFullName: string;
+  defaultBranch?: string;
+  checkoutPath: string;
+}
+
+export interface CreateImplementationIntentInput {
+  id?: string;
+  organizationId: string;
+  workItemId: string;
+  specId: string;
+  specVersion: number;
+  specDigest: string;
+  repositoryTargetId: string;
+  desiredOutcome: string;
+  priority: DevFlowPriority;
+  riskSummary: string;
+  intentSnapshot: Record<string, unknown>;
+  createdByUserId: string;
+}
+
+export interface CreateFactoryExecutionInput {
+  id?: string;
+  organizationId: string;
+  implementationIntentId: string;
+}
+
+export type UpdateFactoryExecutionInput = Partial<
+  Pick<
+    DevFlowFactoryExecution,
+    | "status"
+    | "swarmTaskId"
+    | "headSha"
+    | "queueItemId"
+    | "queueItemRevision"
+    | "contractId"
+    | "canonicalContractPath"
+    | "factoryStatus"
+    | "surfaces"
+    | "impactedSurfaces"
+    | "architectureUnits"
+    | "signoffs"
+    | "artifacts"
+    | "pullRequest"
+    | "finalizerReceipt"
+    | "mergedCommitSha"
+    | "lastObservedAt"
+    | "failureCode"
+    | "failureDetail"
+  >
+>;
+
 export interface GateDecisionInput {
   organizationId: string;
   workItemId: string;
@@ -238,6 +299,31 @@ export interface DevFlowRepository {
       >
     >,
   ): DevFlowAgentRun;
+  createRepositoryTarget(input: CreateRepositoryTargetInput): DevFlowRepositoryTarget;
+  getRepositoryTarget(organizationId: string, id: string): DevFlowRepositoryTarget | null;
+  listRepositoryTargets(organizationId: string): DevFlowRepositoryTarget[];
+  updateRepositoryTarget(
+    organizationId: string,
+    id: string,
+    patch: Partial<Pick<DevFlowRepositoryTarget, "name" | "defaultBranch" | "isActive">>,
+  ): DevFlowRepositoryTarget;
+  createImplementationIntent(input: CreateImplementationIntentInput): DevFlowImplementationIntent;
+  getImplementationIntent(organizationId: string, id: string): DevFlowImplementationIntent | null;
+  listImplementationIntents(
+    organizationId: string,
+    workItemId: string,
+  ): DevFlowImplementationIntent[];
+  createFactoryExecution(input: CreateFactoryExecutionInput): DevFlowFactoryExecution;
+  getFactoryExecution(organizationId: string, id: string): DevFlowFactoryExecution | null;
+  listFactoryExecutions(
+    organizationId: string,
+    implementationIntentId: string,
+  ): DevFlowFactoryExecution[];
+  updateFactoryExecution(
+    organizationId: string,
+    id: string,
+    patch: UpdateFactoryExecutionInput,
+  ): DevFlowFactoryExecution;
   appendAuditEvent(input: AuditEventInput): DevFlowAuditEvent;
   listAuditEvents(organizationId: string, workItemId?: string): DevFlowAuditEvent[];
 }
@@ -410,6 +496,103 @@ function agentRunFromRow(row: AgentRunRow): DevFlowAgentRun {
   });
 }
 
+type RepositoryTargetRow = {
+  id: string;
+  organizationId: string;
+  name: string;
+  repositoryFullName: string;
+  defaultBranch: string;
+  executionProfile: string;
+  checkoutPath: string;
+  isActive: number;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function repositoryTargetFromRow(row: RepositoryTargetRow): DevFlowRepositoryTarget {
+  return DevFlowRepositoryTargetSchema.parse({
+    ...row,
+    isActive: row.isActive === 1,
+  });
+}
+
+type ImplementationIntentRow = {
+  id: string;
+  organizationId: string;
+  workItemId: string;
+  specId: string;
+  specVersion: number;
+  specDigest: string;
+  repositoryTargetId: string;
+  desiredOutcome: string;
+  priority: string;
+  riskSummary: string;
+  intentSnapshotJson: string;
+  createdByUserId: string;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function implementationIntentFromRow(row: ImplementationIntentRow): DevFlowImplementationIntent {
+  return DevFlowImplementationIntentSchema.parse({
+    ...row,
+    intentSnapshot: parseJson(row.intentSnapshotJson, {}),
+  });
+}
+
+type FactoryExecutionRow = {
+  id: string;
+  organizationId: string;
+  implementationIntentId: string;
+  status: string;
+  swarmTaskId: string | null;
+  headSha: string | null;
+  queueItemId: string | null;
+  queueItemRevision: number | null;
+  contractId: string | null;
+  canonicalContractPath: string | null;
+  factoryStatus: string | null;
+  surfacesJson: string;
+  impactedSurfacesJson: string;
+  architectureUnitsJson: string;
+  signoffsJson: string;
+  artifactsJson: string;
+  pullRequestJson: string | null;
+  finalizerReceiptJson: string | null;
+  mergedCommitSha: string | null;
+  lastObservedAt: string | null;
+  failureCode: string | null;
+  failureDetail: string | null;
+  createdAt: string;
+  lastUpdatedAt: string;
+};
+
+function factoryExecutionFromRow(row: FactoryExecutionRow): DevFlowFactoryExecution {
+  return DevFlowFactoryExecutionSchema.parse({
+    ...row,
+    swarmTaskId: optionalString(row.swarmTaskId),
+    headSha: optionalString(row.headSha),
+    queueItemId: optionalString(row.queueItemId),
+    queueItemRevision: row.queueItemRevision ?? undefined,
+    contractId: optionalString(row.contractId),
+    canonicalContractPath: optionalString(row.canonicalContractPath),
+    factoryStatus: optionalString(row.factoryStatus),
+    surfaces: parseJson(row.surfacesJson, []),
+    impactedSurfaces: parseJson(row.impactedSurfacesJson, []),
+    architectureUnits: parseJson(row.architectureUnitsJson, {}),
+    signoffs: parseJson(row.signoffsJson, []),
+    artifacts: parseJson(row.artifactsJson, []),
+    pullRequest: row.pullRequestJson ? parseJson(row.pullRequestJson, {}) : undefined,
+    finalizerReceipt: row.finalizerReceiptJson
+      ? parseJson(row.finalizerReceiptJson, {})
+      : undefined,
+    mergedCommitSha: optionalString(row.mergedCommitSha),
+    lastObservedAt: optionalString(row.lastObservedAt),
+    failureCode: optionalString(row.failureCode),
+    failureDetail: optionalString(row.failureDetail),
+  });
+}
+
 export function createDevFlowRepository(db: Database): DevFlowRepository {
   function getWorkItem(organizationId: string, id: string): DevFlowWorkItem | null {
     const row = db
@@ -427,6 +610,39 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
       )
       .get(organizationId, id);
     return row ? agentRunFromRow(row) : null;
+  }
+
+  function getRepositoryTarget(organizationId: string, id: string): DevFlowRepositoryTarget | null {
+    const row = db
+      .prepare<RepositoryTargetRow, [string, string]>(
+        `SELECT * FROM devflow_repository_targets
+         WHERE organizationId = ? AND id = ?`,
+      )
+      .get(organizationId, id);
+    return row ? repositoryTargetFromRow(row) : null;
+  }
+
+  function getImplementationIntent(
+    organizationId: string,
+    id: string,
+  ): DevFlowImplementationIntent | null {
+    const row = db
+      .prepare<ImplementationIntentRow, [string, string]>(
+        `SELECT * FROM devflow_implementation_intents
+         WHERE organizationId = ? AND id = ?`,
+      )
+      .get(organizationId, id);
+    return row ? implementationIntentFromRow(row) : null;
+  }
+
+  function getFactoryExecution(organizationId: string, id: string): DevFlowFactoryExecution | null {
+    const row = db
+      .prepare<FactoryExecutionRow, [string, string]>(
+        `SELECT * FROM devflow_factory_executions
+         WHERE organizationId = ? AND id = ?`,
+      )
+      .get(organizationId, id);
+    return row ? factoryExecutionFromRow(row) : null;
   }
 
   function getCurrentSpec(organizationId: string, workItemId: string): DevFlowSpec | null {
@@ -959,6 +1175,180 @@ export function createDevFlowRepository(db: Database): DevFlowRepository {
         .get(...values, now(), organizationId, id);
       if (!row) throw new Error("DevFlow agent run not found");
       return agentRunFromRow(row);
+    },
+
+    createRepositoryTarget(input) {
+      const timestamp = now();
+      const row = db
+        .prepare<RepositoryTargetRow, string[]>(
+          `INSERT INTO devflow_repository_targets
+           (id, organizationId, name, repositoryFullName, defaultBranch,
+            executionProfile, checkoutPath, createdAt, lastUpdatedAt)
+           VALUES (?, ?, ?, ?, ?, 'command_center_factory', ?, ?, ?) RETURNING *`,
+        )
+        .get(
+          input.id ?? crypto.randomUUID(),
+          input.organizationId,
+          input.name,
+          input.repositoryFullName,
+          input.defaultBranch ?? "main",
+          input.checkoutPath,
+          timestamp,
+          timestamp,
+        );
+      if (!row) throw new Error("Failed to create DevFlow repository target");
+      return repositoryTargetFromRow(row);
+    },
+
+    getRepositoryTarget,
+
+    listRepositoryTargets(organizationId) {
+      return db
+        .prepare<RepositoryTargetRow, [string]>(
+          `SELECT * FROM devflow_repository_targets
+           WHERE organizationId = ? ORDER BY name, createdAt`,
+        )
+        .all(organizationId)
+        .map(repositoryTargetFromRow);
+    },
+
+    updateRepositoryTarget(organizationId, id, patch) {
+      const columnByKey: Record<string, string> = {
+        name: "name",
+        defaultBranch: "defaultBranch",
+        isActive: "isActive",
+      };
+      const entries = Object.entries(patch).filter(([key]) => key in columnByKey);
+      if (entries.length === 0) {
+        const current = getRepositoryTarget(organizationId, id);
+        if (!current) throw new Error("DevFlow repository target not found");
+        return current;
+      }
+      const assignments = entries.map(([key]) => `${columnByKey[key]} = ?`);
+      const values = entries.map(([, value]) => sqlBinding(value));
+      const row = db
+        .prepare<RepositoryTargetRow, (string | number | null)[]>(
+          `UPDATE devflow_repository_targets
+           SET ${assignments.join(", ")}, lastUpdatedAt = ?
+           WHERE organizationId = ? AND id = ? RETURNING *`,
+        )
+        .get(...values, now(), organizationId, id);
+      if (!row) throw new Error("DevFlow repository target not found");
+      return repositoryTargetFromRow(row);
+    },
+
+    createImplementationIntent(input) {
+      const timestamp = now();
+      const row = db
+        .prepare<ImplementationIntentRow, (string | number)[]>(
+          `INSERT INTO devflow_implementation_intents
+           (id, organizationId, workItemId, specId, specVersion, specDigest,
+            repositoryTargetId, desiredOutcome, priority, riskSummary,
+            intentSnapshotJson, createdByUserId, createdAt, lastUpdatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        )
+        .get(
+          input.id ?? crypto.randomUUID(),
+          input.organizationId,
+          input.workItemId,
+          input.specId,
+          input.specVersion,
+          input.specDigest,
+          input.repositoryTargetId,
+          input.desiredOutcome,
+          input.priority,
+          input.riskSummary,
+          JSON.stringify(input.intentSnapshot),
+          input.createdByUserId,
+          timestamp,
+          timestamp,
+        );
+      if (!row) throw new Error("Failed to create DevFlow implementation intent");
+      return implementationIntentFromRow(row);
+    },
+
+    getImplementationIntent,
+
+    listImplementationIntents(organizationId, workItemId) {
+      return db
+        .prepare<ImplementationIntentRow, [string, string]>(
+          `SELECT * FROM devflow_implementation_intents
+           WHERE organizationId = ? AND workItemId = ? ORDER BY createdAt DESC`,
+        )
+        .all(organizationId, workItemId)
+        .map(implementationIntentFromRow);
+    },
+
+    createFactoryExecution(input) {
+      const timestamp = now();
+      const row = db
+        .prepare<FactoryExecutionRow, string[]>(
+          `INSERT INTO devflow_factory_executions
+           (id, organizationId, implementationIntentId, status, createdAt, lastUpdatedAt)
+           VALUES (?, ?, ?, 'queued', ?, ?) RETURNING *`,
+        )
+        .get(
+          input.id ?? crypto.randomUUID(),
+          input.organizationId,
+          input.implementationIntentId,
+          timestamp,
+          timestamp,
+        );
+      if (!row) throw new Error("Failed to create DevFlow Factory execution");
+      return factoryExecutionFromRow(row);
+    },
+
+    getFactoryExecution,
+
+    listFactoryExecutions(organizationId, implementationIntentId) {
+      return db
+        .prepare<FactoryExecutionRow, [string, string]>(
+          `SELECT * FROM devflow_factory_executions
+           WHERE organizationId = ? AND implementationIntentId = ? ORDER BY createdAt DESC`,
+        )
+        .all(organizationId, implementationIntentId)
+        .map(factoryExecutionFromRow);
+    },
+
+    updateFactoryExecution(organizationId, id, patch) {
+      const columnByKey: Record<string, string> = {
+        status: "status",
+        swarmTaskId: "swarmTaskId",
+        headSha: "headSha",
+        queueItemId: "queueItemId",
+        queueItemRevision: "queueItemRevision",
+        contractId: "contractId",
+        canonicalContractPath: "canonicalContractPath",
+        factoryStatus: "factoryStatus",
+        surfaces: "surfacesJson",
+        impactedSurfaces: "impactedSurfacesJson",
+        architectureUnits: "architectureUnitsJson",
+        signoffs: "signoffsJson",
+        artifacts: "artifactsJson",
+        pullRequest: "pullRequestJson",
+        finalizerReceipt: "finalizerReceiptJson",
+        mergedCommitSha: "mergedCommitSha",
+        lastObservedAt: "lastObservedAt",
+        failureCode: "failureCode",
+        failureDetail: "failureDetail",
+      };
+      const entries = Object.entries(patch).filter(([key]) => key in columnByKey);
+      if (entries.length === 0) {
+        const current = getFactoryExecution(organizationId, id);
+        if (!current) throw new Error("DevFlow Factory execution not found");
+        return current;
+      }
+      const assignments = entries.map(([key]) => `${columnByKey[key]} = ?`);
+      const values = entries.map(([, value]) => sqlBinding(value));
+      const row = db
+        .prepare<FactoryExecutionRow, (string | number | null)[]>(
+          `UPDATE devflow_factory_executions
+           SET ${assignments.join(", ")}, lastUpdatedAt = ?
+           WHERE organizationId = ? AND id = ? RETURNING *`,
+        )
+        .get(...values, now(), organizationId, id);
+      if (!row) throw new Error("DevFlow Factory execution not found");
+      return factoryExecutionFromRow(row);
     },
 
     appendAuditEvent(input) {

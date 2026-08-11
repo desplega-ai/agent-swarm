@@ -221,6 +221,80 @@ export const DevFlowAgentRunSchema = z.object({
 });
 export type DevFlowAgentRun = z.infer<typeof DevFlowAgentRunSchema>;
 
+export const DevFlowRepositoryTargetSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  name: z.string(),
+  repositoryFullName: z.string(),
+  defaultBranch: z.string(),
+  executionProfile: z.literal("command_center_factory"),
+  checkoutPath: z.string(),
+  isActive: z.boolean(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type DevFlowRepositoryTarget = z.infer<typeof DevFlowRepositoryTargetSchema>;
+
+export const DevFlowImplementationIntentSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  workItemId: z.string(),
+  specId: z.string(),
+  specVersion: z.number().int().positive(),
+  specDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+  repositoryTargetId: z.string(),
+  desiredOutcome: z.string(),
+  priority: DevFlowPrioritySchema,
+  riskSummary: z.string(),
+  intentSnapshot: z.record(z.string(), z.unknown()),
+  createdByUserId: z.string(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type DevFlowImplementationIntent = z.infer<typeof DevFlowImplementationIntentSchema>;
+
+export const DevFlowFactoryExecutionStatusSchema = z.enum([
+  "queued",
+  "factory_intake",
+  "signoff_pending",
+  "ready",
+  "implementing",
+  "pr_open",
+  "finalizer_admitted",
+  "merged",
+  "failed",
+  "cancelled",
+]);
+export type DevFlowFactoryExecutionStatus = z.infer<typeof DevFlowFactoryExecutionStatusSchema>;
+
+export const DevFlowFactoryExecutionSchema = z.object({
+  id: z.string(),
+  organizationId: z.string(),
+  implementationIntentId: z.string(),
+  status: DevFlowFactoryExecutionStatusSchema,
+  swarmTaskId: z.string().optional(),
+  headSha: z.string().optional(),
+  queueItemId: z.string().optional(),
+  queueItemRevision: z.number().int().optional(),
+  contractId: z.string().optional(),
+  canonicalContractPath: z.string().optional(),
+  factoryStatus: z.string().optional(),
+  surfaces: z.array(z.string()),
+  impactedSurfaces: z.array(z.string()),
+  architectureUnits: z.record(z.string(), z.unknown()),
+  signoffs: z.array(z.unknown()),
+  artifacts: z.array(z.unknown()),
+  pullRequest: z.record(z.string(), z.unknown()).optional(),
+  finalizerReceipt: z.record(z.string(), z.unknown()).optional(),
+  mergedCommitSha: z.string().optional(),
+  lastObservedAt: z.string().optional(),
+  failureCode: z.string().optional(),
+  failureDetail: z.string().optional(),
+  createdAt: z.string(),
+  lastUpdatedAt: z.string(),
+});
+export type DevFlowFactoryExecution = z.infer<typeof DevFlowFactoryExecutionSchema>;
+
 export interface DevFlowContext {
   organizationId: string;
   actorKind: "user" | "agent" | "system";
