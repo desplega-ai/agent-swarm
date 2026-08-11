@@ -57,7 +57,7 @@ export interface ClaudeManagedModelPricing {
  * - claude-fable-5:   $10 / $50 / $1.00 / $12.50   (verified 2026-06-10)
  * - claude-mythos-5:  $10 / $50 / $1.00 / $12.50   (limited availability, verified 2026-06-10)
  * - claude-opus-5:    $5 / $25 / $0.50 / $6.25     (verified 2026-07-25)
- * - claude-sonnet-5:  $3 / $15 / $0.30 / $3.75     (verified 2026-06-30; intro $2/$10 through 2026-08-31)
+ * - claude-sonnet-5:  $2 / $10 / $0.20 / $2.50     (introductory rate, verified 2026-08-11; $3/$15 from 2026-09-01)
  * - claude-sonnet-4-6: $3 / $15 / $0.30 / $3.75    (in / out / cache-read / cache-write)
  * - claude-opus-4-8:   $5 / $25 / $0.50 / $6.25    (verified 2026-05-28)
  * - claude-opus-4-7:   $15 / $75 / $1.50 / $18.75  (STALE — was correct at launch, Anthropic has since dropped Opus to $5/$25)
@@ -83,12 +83,12 @@ export const CLAUDE_MANAGED_MODEL_PRICING: Record<ClaudeManagedModel, ClaudeMana
     cacheReadPerMillion: 1.0,
     cacheWritePerMillion: 12.5,
   },
-  // intro $2/$10 through 2026-08-31
+  // Introductory rate through 2026-08-31; changes to $3/$15 from 2026-09-01.
   "claude-sonnet-5": {
-    inputPerMillion: 3.0,
-    outputPerMillion: 15.0,
-    cacheReadPerMillion: 0.3,
-    cacheWritePerMillion: 3.75,
+    inputPerMillion: 2.0,
+    outputPerMillion: 10.0,
+    cacheReadPerMillion: 0.2,
+    cacheWritePerMillion: 2.5,
   },
   "claude-sonnet-4-6": {
     inputPerMillion: 3.0,
