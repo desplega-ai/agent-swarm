@@ -176,7 +176,7 @@
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@openai/codex-sdk": "^0.147.0",
-    "@opencode-ai/sdk": "^1.18.15",
+    "@opencode-ai/sdk": "^1.18.16",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.218.0",
