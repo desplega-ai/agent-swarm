@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.131.1] - 2026-08-12
+
+### Added
+- **Swarm Apps documentation now includes an end-to-end builder guide** (#1162) — concepts, implementation steps, worked recipes, and dashboard screenshots explain how to design, create, and operate schema-backed Apps.
+
+### Changed
+- **Claude Managed cost accounting follows Sonnet 5's scheduled pricing** (#1160) — usage applies the introductory token rates through August and automatically switches to the standard rates on September 1.
+
+### Fixed
+- **Daily reflection skill audits use complete, controlled database queries** (#1163) — the bundled schedule pages through enabled skill bodies inside a script, returns stable identifiers, and requires positive and negative controls before accepting a clean audit.
+
 ## [1.131.0] - 2026-08-11
 
 ### Added
