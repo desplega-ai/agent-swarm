@@ -35,20 +35,36 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
 };
 
 /**
- * Bun's Linux runtime reserves several GB of virtual address space at
- * startup, so any sandboxed command whose argv[0] is `bun` needs a much
- * higher RLIMIT_AS floor than a plain shell/python process or the harness is
- * killed before user code ever runs. `buildSandboxedCommand` applies this
- * automatically — callers don't need to special-case it.
+ * Bun and Node reserve several GB of virtual address space and start runtime
+ * threads before user code runs. Give their process trees enough RLIMIT_AS
+ * and RLIMIT_NPROC headroom to boot while retaining the stricter defaults for
+ * direct non-interpreter commands.
  */
 export const BUN_SANDBOX_VIRTUAL_MEMORY_MB = 4096;
+export const JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS = 512;
+
+const JAVASCRIPT_RUNTIMES = new Set(["bun", "bunx", "node", "nodejs", "npx"]);
+const SHELL_RUNTIMES = new Set(["bash", "dash", "sh"]);
+
+function commandBasename(command: string): string {
+  return command.slice(command.lastIndexOf("/") + 1);
+}
+
+function usesInterpreterSandboxProfile(innerCommand: readonly string[]): boolean {
+  const runtime = commandBasename(innerCommand[0] ?? "");
+  // A shell can invoke another interpreter through arbitrary valid shell
+  // grammar (substitutions, functions, variables, heredocs, and more). Treat
+  // the shell itself as the runtime boundary instead of letting untrusted
+  // source text select its own resource profile through brittle parsing.
+  return JAVASCRIPT_RUNTIMES.has(runtime) || SHELL_RUNTIMES.has(runtime);
+}
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /**
- * Wrap `innerCommand` in a POSIX `sh -c` prelude that applies the resource
+ * Wrap `innerCommand` in a shell prelude that applies the resource
  * ulimits above, then `exec`s into a completely clean environment (`env -i`)
  * containing ONLY the entries in `env`. This is the enforcement point for
  * two invariants every spawn-user-code path must uphold:
@@ -60,7 +76,10 @@ function shellQuote(value: string): string {
  *     token / API key in `env`; pass secrets over stdin instead so they
  *     never appear in `/proc/<pid>/environ` or a child's `process.env`.
  *
- * No-ops (returns `innerCommand` unchanged) on win32, where `ulimit`/`env -i`
+ * JavaScript-capable runtime trees use Bash intentionally: Ubuntu's `/bin/sh` is
+ * dash, whose `ulimit` does not implement `-u` (RLIMIT_NPROC). Other commands
+ * retain the existing POSIX-sh sandbox behavior and its strict profile. No-ops
+ * (returns `innerCommand` unchanged) on win32, where `ulimit`/`env -i`
  * don't exist — matches the existing native.ts behavior. Because this no-op
  * means `env` is never applied on win32, callers MUST pass `env` itself
  * (not just `{ PATH }`) to `Bun.spawn` on that platform — use
@@ -74,15 +93,18 @@ export function buildSandboxedCommand(
 ): string[] {
   if (process.platform === "win32") return [...innerCommand];
 
-  const virtualMemoryMb =
-    innerCommand[0] === "bun"
-      ? Math.max(limits.virtualMemoryMb, BUN_SANDBOX_VIRTUAL_MEMORY_MB)
-      : limits.virtualMemoryMb;
+  const usesInterpreterProfile = usesInterpreterSandboxProfile(innerCommand);
+  const virtualMemoryMb = usesInterpreterProfile
+    ? Math.max(limits.virtualMemoryMb, BUN_SANDBOX_VIRTUAL_MEMORY_MB)
+    : limits.virtualMemoryMb;
+  const maxProcs = usesInterpreterProfile
+    ? Math.max(limits.maxProcs, JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS)
+    : limits.maxProcs;
 
   const ulimits = [
     `ulimit -v ${Math.floor(virtualMemoryMb * 1024)} 2>/dev/null || true`,
     `ulimit -t ${limits.cpuTimeSec} 2>/dev/null || true`,
-    `ulimit -u ${limits.maxProcs} 2>/dev/null || true`,
+    `ulimit -u ${maxProcs} 2>/dev/null || true`,
     `ulimit -f ${limits.maxFileKb} 2>/dev/null || true`,
     `ulimit -n ${limits.maxFdCount} 2>/dev/null || true`,
   ].join("; ");
@@ -92,7 +114,11 @@ export function buildSandboxedCommand(
     .join(" ");
   const quotedInner = innerCommand.map(shellQuote).join(" ");
 
-  return ["sh", "-c", `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`];
+  return [
+    usesInterpreterProfile ? "bash" : "sh",
+    "-c",
+    `${ulimits}; exec env -i ${envAssignments} ${quotedInner}`,
+  ];
 }
 
 /**
@@ -101,7 +127,7 @@ export function buildSandboxedCommand(
  *
  * On POSIX, `buildSandboxedCommand` wraps the command in an `env -i` prelude
  * that injects `env` itself into the child — Bun.spawn only needs PATH to
- * locate the `sh` binary that runs the prelude.
+ * locate the shell binary that runs the prelude.
  *
  * On win32, `buildSandboxedCommand` is a no-op (no `ulimit`/`env -i`), so
  * there is no prelude to inject `env` — it must go through Bun.spawn's own

@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import {
+  BUN_SANDBOX_VIRTUAL_MEMORY_MB,
   buildSandboxedCommand,
   createCappedStreamState,
+  DEFAULT_SANDBOX_LIMITS,
+  JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS,
   readStreamCapped,
   sandboxSpawnEnv,
   snapshotCapped,
 } from "../utils/sandboxed-process";
+
+const TEST_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: "/tmp" };
+
+function sandboxPrelude(command: readonly string[]): string {
+  return buildSandboxedCommand(command, TEST_ENV)[2] ?? "";
+}
 
 /**
  * Temporarily override `process.platform` for the duration of `fn`, then
@@ -53,6 +62,42 @@ describe("sandboxSpawnEnv", () => {
       }),
     );
     expect(cmd).toEqual(["bun", "run", "harness.ts"]);
+  });
+});
+
+describe("buildSandboxedCommand runtime-aware limits", () => {
+  test.each(["bun", "node", "npx"])("raises AS and nproc for direct %s commands", (runtime) => {
+    const command = buildSandboxedCommand([runtime, "--version"], TEST_ENV);
+    expect(command[0]).toBe("bash");
+    expect(command[2]).toContain(`ulimit -v ${BUN_SANDBOX_VIRTUAL_MEMORY_MB * 1024}`);
+    expect(command[2]).toContain(`ulimit -u ${JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS}`);
+  });
+
+  test.each(["bash", "sh", "dash"])("propagates the runtime profile through %s -c", (shell) => {
+    const script = "bun /opt/meme-post.bundle.js";
+    const prelude = sandboxPrelude([shell, "-c", script]);
+    expect(prelude).toContain(`ulimit -v ${BUN_SANDBOX_VIRTUAL_MEMORY_MB * 1024}`);
+    expect(prelude).toContain(`ulimit -u ${JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS}`);
+  });
+
+  test("keeps strict defaults for direct non-interpreter commands", () => {
+    const command = buildSandboxedCommand(["git", "status", "--short"], TEST_ENV);
+    expect(command[0]).toBe("sh");
+    const prelude = command[2] ?? "";
+    expect(prelude).toContain(`ulimit -v ${DEFAULT_SANDBOX_LIMITS.virtualMemoryMb * 1024}`);
+    expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
+  });
+
+  test("the raised profile starts a shell-wrapped Bun process with real nproc enforcement", () => {
+    const result = Bun.spawnSync(
+      buildSandboxedCommand(
+        ["bash", "-c", "bun -e 'console.log(JSON.stringify({ started: true }))'"],
+        TEST_ENV,
+      ),
+      { env: sandboxSpawnEnv(TEST_ENV) },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual({ started: true });
   });
 });
 
