@@ -17,6 +17,7 @@ import {
   stopAuditGc,
   stopAuditWriter,
 } from "../be/rbac-audit";
+import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
@@ -441,6 +442,9 @@ async function shutdown() {
   // Stop memory expired-row garbage collector
   stopMemoryGc();
 
+  // Stop scratch-script retention garbage collector
+  stopScratchScriptGc();
+
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
   stopAuditWriter();
@@ -561,6 +565,7 @@ try {
 setAuditSink(enqueueAuditRow);
 startAuditWriter();
 startAuditGc();
+startScratchScriptGc();
 
 // business-use initialization (no-op if envs not set)
 initialize();

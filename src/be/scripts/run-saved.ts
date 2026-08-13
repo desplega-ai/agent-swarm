@@ -5,6 +5,7 @@ import {
   getScriptMcpConnectionDescriptors,
 } from "../script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../script-credential-broker";
+import { touchScratchScriptLastUsed } from "./db";
 
 export function getSavedScriptOwnerAgentId(script: ScriptRecord): string | null {
   return script.scopeId ?? script.createdByAgentId;
@@ -19,7 +20,7 @@ export async function runSavedScriptAsAgent(args: {
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: args.agentId,
   });
-  return runScript({
+  const output = await runScript({
     source: args.script.source,
     args: args.input,
     fsMode: args.script.fsMode,
@@ -29,4 +30,8 @@ export async function runSavedScriptAsAgent(args: {
     apiConnections: getScriptApiConnectionDescriptors({ agentId: args.agentId }),
     mcpConnections: getScriptMcpConnectionDescriptors({ agentId: args.agentId }),
   });
+  if (output.exitCode === 0 && !output.error && !output.runtimeError) {
+    touchScratchScriptLastUsed(args.script.id);
+  }
+  return output;
 }

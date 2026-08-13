@@ -25,6 +25,7 @@ import {
   listScripts,
   listScriptVersions,
   rotateScriptApiSecret,
+  touchScratchScriptLastUsed,
   updateScriptApi,
   upsertScriptByName,
 } from "../be/scripts/db";
@@ -695,12 +696,14 @@ export async function handleScripts(
 
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;
+    let namedScript: ScriptRecord | null = null;
     if (parsed.body.name) {
       const script = resolveScript(parsed.body.name, agent.id, parsed.body.scope);
       if (!script) {
         jsonError(res, "Script not found", 404);
         return true;
       }
+      namedScript = script;
       source = script.source;
       fsMode = script.fsMode;
     }
@@ -722,10 +725,15 @@ export async function handleScripts(
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agent.id }),
     });
+    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
+
+    if (namedScript?.isScratch && ok) {
+      touchScratchScriptLastUsed(namedScript.id);
+    }
 
     // Persist output to KV when idempotencyKey is provided and run succeeded
     let kvSaved: { namespace: string; key: string } | undefined;
-    if (parsed.body.idempotencyKey && !output.error && output.exitCode === 0) {
+    if (parsed.body.idempotencyKey && ok) {
       const kvNamespace = `script:executions`;
       const kvKey = parsed.body.idempotencyKey;
       const kvValue = {
@@ -745,7 +753,7 @@ export async function handleScripts(
     }
 
     let autoSaved: { slug: string; reason: string } | undefined;
-    if (parsed.body.source && !output.error && output.exitCode === 0) {
+    if (parsed.body.source && ok) {
       const slug = scratchSlug(parsed.body.intent, parsed.body.source);
       await upsertScriptByName({
         name: slug,
@@ -767,7 +775,6 @@ export async function handleScripts(
     // Persist the inline run (no journal) so one-off executions show up alongside
     // durable workflow runs in the Script Runs dashboard. Best-effort: recording
     // must never fail the actual execution.
-    const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
     const runError = ok
       ? undefined
       : scrubSecrets(

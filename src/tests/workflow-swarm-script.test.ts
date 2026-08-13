@@ -11,7 +11,7 @@ import {
   initDb,
 } from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
-import { upsertScriptByName } from "../be/scripts/db";
+import { getScript, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
@@ -90,7 +90,7 @@ function makeWorkflow(def: WorkflowDefinition): Workflow {
   return wf;
 }
 
-async function saveScript(name: string, source: string) {
+async function saveScript(name: string, source: string, isScratch = false) {
   return upsertScriptByName({
     name,
     scope: "agent",
@@ -101,6 +101,7 @@ async function saveScript(name: string, source: string) {
     signatureJson,
     agentId,
     typeChecked: true,
+    isScratch,
   });
 }
 
@@ -185,14 +186,19 @@ describe("SwarmScriptExecutor", () => {
 
   test("A workflow with one swarm-script node resolves by name + runs + returns result", async () => {
     await saveScript(
-      "add-one",
+      "scratch-add-one-a1b2c3d4",
       `export default async (args: { value: number }) => ({ value: args.value + 1 });`,
+      true,
     );
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?")
+      .run(old, "scratch-add-one-a1b2c3d4", agentId);
 
     const executor = new SwarmScriptExecutor(deps);
     const wf = makeWorkflow({ nodes: [] });
     const result = await executor.run({
-      config: { scriptName: "add-one", args: { value: 6 } },
+      config: { scriptName: "scratch-add-one-a1b2c3d4", args: { value: 6 } },
       context: {},
       meta: {
         runId: crypto.randomUUID(),
@@ -205,7 +211,10 @@ describe("SwarmScriptExecutor", () => {
 
     expect(result.status).toBe("success");
     expect(result.output?.result).toEqual({ value: 7 });
-    expect(result.output?.scriptName).toBe("add-one");
+    expect(result.output?.scriptName).toBe("scratch-add-one-a1b2c3d4");
+    expect(
+      getScript({ name: "scratch-add-one-a1b2c3d4", scope: "agent", scopeId: agentId })?.updatedAt,
+    ).not.toBe(old);
   });
 
   test("named script source with an interpolation token fails with the node and token named", async () => {

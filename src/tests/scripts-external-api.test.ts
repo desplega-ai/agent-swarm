@@ -8,6 +8,7 @@ import {
   createScriptApi,
   getScriptApiById,
   getScriptApiSecret,
+  getScriptById,
   insertScript,
   listScriptApisForScript,
 } from "../be/scripts/db";
@@ -49,9 +50,9 @@ const DOUBLER_SOURCE =
 let workerId: string;
 let savedEnv: NodeJS.ProcessEnv;
 
-function insertDoubler(opts: { argsJsonSchema?: string | null } = {}) {
+function insertDoubler(opts: { argsJsonSchema?: string | null; isScratch?: boolean } = {}) {
   return insertScript({
-    name: `doubler-${crypto.randomUUID().slice(0, 8)}`,
+    name: `${opts.isScratch ? "scratch-" : ""}doubler-${crypto.randomUUID().slice(0, 8)}`,
     scope: "agent",
     scopeId: workerId,
     source: DOUBLER_SOURCE,
@@ -61,6 +62,7 @@ function insertDoubler(opts: { argsJsonSchema?: string | null } = {}) {
     argsJsonSchema: opts.argsJsonSchema ?? null,
     agentId: workerId,
     typeChecked: true,
+    isScratch: opts.isScratch,
   });
 }
 
@@ -262,7 +264,9 @@ describe("management routes", () => {
 
 describe("public execution route", () => {
   test("none-mode endpoint runs and returns the wrapped envelope", async () => {
-    const script = insertDoubler();
+    const script = insertDoubler({ isScratch: true });
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
     const endpoint = createScriptApi({
       scriptId: script.id,
       agentId: workerId,
@@ -285,6 +289,7 @@ describe("public execution route", () => {
     expect(body.result).toEqual({ doubled: 42 });
     expect(body.error).toBeNull();
     expect(typeof body.durationMs).toBe("number");
+    expect(getScriptById(script.id)?.updatedAt).not.toBe(old);
   });
 
   test("external endpoint runs receive ctx.mcp connections (parity with /api/scripts/run)", async () => {

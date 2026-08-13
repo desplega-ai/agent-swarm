@@ -4,7 +4,7 @@ import {
   getScriptMcpConnectionDescriptors,
 } from "../../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
-import { getScript, getScriptVersion } from "../../be/scripts/db";
+import { getScript, getScriptVersion, touchScratchScriptLastUsed } from "../../be/scripts/db";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   MAX_SCRIPT_WALL_CLOCK_MS,
@@ -118,6 +118,9 @@ export class SwarmScriptExecutor extends BaseExecutor<
       mcpConnections: getScriptMcpConnectionDescriptors({ agentId: agentId ?? undefined }),
       timeoutMs: config.timeoutMs,
     });
+    if (output.exitCode === 0 && !output.error && !output.runtimeError) {
+      touchScratchScriptLastUsed(resolved.script.id);
+    }
 
     const workflowOutput = {
       result: output.result,

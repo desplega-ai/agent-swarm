@@ -226,11 +226,17 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       args.signatureJson !== existing.signatureJson ||
       argsJsonSchema !== existing.argsJsonSchema;
     const promotedFromScratch = existing.isScratch && !isScratch;
+    const refreshScratchLastUsed =
+      existing.scope === "agent" &&
+      existing.name.startsWith("scratch-") &&
+      existing.isScratch &&
+      isScratch;
     if (
       fsMode !== existing.fsMode ||
       isScratch !== existing.isScratch ||
       typeChecked !== existing.typeChecked ||
-      trackedMetadataChanged
+      trackedMetadataChanged ||
+      refreshScratchLastUsed
     ) {
       const row = getDb()
         .prepare<
@@ -464,6 +470,17 @@ export function deleteScript(args: ScriptIdentity): boolean {
 
   const result = getDb().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
   return result.changes > 0;
+}
+
+export function touchScratchScriptLastUsed(id: string): boolean {
+  return (
+    getDb()
+      .prepare(
+        `UPDATE scripts SET updatedAt = ?
+         WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
+      )
+      .run(new Date().toISOString(), id).changes > 0
+  );
 }
 
 // ─── External script APIs (script_apis) ──────────────────────────────────────

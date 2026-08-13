@@ -501,6 +501,18 @@ describe("/api/scripts HTTP", () => {
     const inlineBody = await inline.json();
     expect(inlineBody.result).toEqual({ ok: "not typechecked" });
     expect(inlineBody.autoSaved.slug).toContain("scratch-inline-type-error-still-runs");
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?")
+      .run("2026-07-01T00:00:00.000Z", inlineBody.autoSaved.slug, workerId);
+    const reusedScratch = await dispatch("/api/scripts/run", {
+      method: "POST",
+      agentId: workerId,
+      body: JSON.stringify({ name: inlineBody.autoSaved.slug }),
+    });
+    expect(reusedScratch.status).toBe(200);
+    expect(
+      getScript({ name: inlineBody.autoSaved.slug, scope: "agent", scopeId: workerId })?.updatedAt,
+    ).not.toBe("2026-07-01T00:00:00.000Z");
 
     const beforeFailed = listScripts({
       scope: "agent",

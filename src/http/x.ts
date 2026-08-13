@@ -12,6 +12,7 @@ import {
   getScriptApiSecret,
   getScriptById,
   recordScriptApiUsage,
+  touchScratchScriptLastUsed,
 } from "../be/scripts/db";
 import {
   MAX_SCRIPT_WALL_CLOCK_MS,
@@ -250,6 +251,7 @@ export async function handleX(
 
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
   const error = ok ? null : buildExecutionError(output);
+  if (ok) touchScratchScriptLastUsed(script.id);
 
   // Usage + observability — best-effort, must never fail the response.
   try {
