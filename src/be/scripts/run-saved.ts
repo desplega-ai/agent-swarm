@@ -5,7 +5,7 @@ import {
   getScriptMcpConnectionDescriptors,
 } from "../script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../script-credential-broker";
-import { touchScratchScriptLastUsed } from "./db";
+import { restoreScratchScriptLastUsedIfUnchanged, touchScratchScriptLastUsed } from "./db";
 
 export function getSavedScriptOwnerAgentId(script: ScriptRecord): string | null {
   return script.scopeId ?? script.createdByAgentId;
@@ -20,7 +20,7 @@ export async function runSavedScriptAsAgent(args: {
   // Touch before executing (not just after) so a scratch script that's already
   // stale when a run starts can't be reaped by the retention sweep while the
   // run — which may take up to the runtime's wall-clock ceiling — is in flight.
-  if (args.script.isScratch) touchScratchScriptLastUsed(args.script.id);
+  const runStartTouch = args.script.isScratch ? touchScratchScriptLastUsed(args.script.id) : null;
 
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: args.agentId,
@@ -37,6 +37,11 @@ export async function runSavedScriptAsAgent(args: {
   });
   if (output.exitCode === 0 && !output.error && !output.runtimeError) {
     touchScratchScriptLastUsed(args.script.id);
+  } else if (runStartTouch) {
+    // The run-start touch didn't pan out — restore the pre-run timestamp so a
+    // failed invocation doesn't buy the script another retention window, as
+    // long as no concurrent run has touched it since.
+    restoreScratchScriptLastUsedIfUnchanged(args.script.id, args.script.updatedAt, runStartTouch);
   }
   return output;
 }

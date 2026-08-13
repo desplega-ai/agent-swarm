@@ -24,6 +24,7 @@ import {
   listScriptApisForScript,
   listScripts,
   listScriptVersions,
+  restoreScratchScriptLastUsedIfUnchanged,
   rotateScriptApiSecret,
   touchScratchScriptLastUsed,
   updateScriptApi,
@@ -716,7 +717,9 @@ export async function handleScripts(
     const startedAt = new Date().toISOString();
     // Touch before executing so an already-stale scratch script isn't reaped
     // by the retention sweep while this run is still in flight.
-    if (namedScript?.isScratch) touchScratchScriptLastUsed(namedScript.id);
+    const runStartTouch = namedScript?.isScratch
+      ? touchScratchScriptLastUsed(namedScript.id)
+      : null;
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
     const output = await runScript({
       source: source as string,
@@ -732,6 +735,11 @@ export async function handleScripts(
 
     if (namedScript?.isScratch && ok) {
       touchScratchScriptLastUsed(namedScript.id);
+    } else if (namedScript?.isScratch && runStartTouch) {
+      // Failed run — restore the pre-run timestamp so it doesn't buy the
+      // script another retention window, unless a concurrent run already
+      // touched it since.
+      restoreScratchScriptLastUsedIfUnchanged(namedScript.id, namedScript.updatedAt, runStartTouch);
     }
 
     // Persist output to KV when idempotencyKey is provided and run succeeded

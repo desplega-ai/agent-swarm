@@ -175,6 +175,38 @@ describe("scratch script retention", () => {
     expect(output.exitCode).toBe(0);
   });
 
+  test("a failed saved-script execution restores the pre-run last-used time instead of extending it", async () => {
+    const script = insertScript({
+      name: "scratch-failing-a1b2c3d4",
+      scope: "agent",
+      scopeId: "agent-1",
+      source: "export default () => { throw new Error('boom'); }",
+      description: "scratch-failing",
+      intent: "scratch-failing",
+      signatureJson,
+      isScratch: true,
+    });
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
+    const staleScript = getScript({
+      name: script.name,
+      scope: "agent",
+      scopeId: "agent-1",
+    });
+    if (!staleScript) throw new Error("expected script to exist");
+
+    const output = await runSavedScriptAsAgent({
+      script: staleScript,
+      input: null,
+      agentId: "agent-1",
+    });
+
+    expect(output.exitCode).not.toBe(0);
+    expect(getScript({ name: script.name, scope: "agent", scopeId: "agent-1" })?.updatedAt).toBe(
+      old,
+    );
+  });
+
   test("migration grants existing agent scratch rows a fresh retention window only", () => {
     const agentScratch = addScript("scratch-existing-a1b2c3d4", true);
     const namedWithPrefix = addScript("scratch-existing-named-a1b2c3d4", false);

@@ -472,14 +472,39 @@ export function deleteScript(args: ScriptIdentity): boolean {
   return result.changes > 0;
 }
 
-export function touchScratchScriptLastUsed(id: string): boolean {
+/** Bumps updatedAt and returns the timestamp actually written, or null if the row didn't match. */
+export function touchScratchScriptLastUsed(
+  id: string,
+  at: string = new Date().toISOString(),
+): string | null {
+  const result = getDb()
+    .prepare(
+      `UPDATE scripts SET updatedAt = ?
+       WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
+    )
+    .run(at, id);
+  return result.changes > 0 ? at : null;
+}
+
+/**
+ * Rolls back an in-flight run-start touch after the run turns out to have
+ * failed, so a failed invocation doesn't extend the retention window the way
+ * a successful one does. Only applies if nothing has touched the row since
+ * (CAS on updatedAt) — a concurrent run's touch, in-flight or successful,
+ * always wins over this rollback.
+ */
+export function restoreScratchScriptLastUsedIfUnchanged(
+  id: string,
+  priorUpdatedAt: string,
+  expectedUpdatedAt: string,
+): boolean {
   return (
     getDb()
       .prepare(
         `UPDATE scripts SET updatedAt = ?
-         WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
+         WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*' AND updatedAt = ?`,
       )
-      .run(new Date().toISOString(), id).changes > 0
+      .run(priorUpdatedAt, id, expectedUpdatedAt).changes > 0
   );
 }
 

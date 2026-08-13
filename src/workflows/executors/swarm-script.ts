@@ -4,7 +4,12 @@ import {
   getScriptMcpConnectionDescriptors,
 } from "../../be/script-connections";
 import { buildScriptCredentialBindingsWithFailures } from "../../be/script-credential-broker";
-import { getScript, getScriptVersion, touchScratchScriptLastUsed } from "../../be/scripts/db";
+import {
+  getScript,
+  getScriptVersion,
+  restoreScratchScriptLastUsedIfUnchanged,
+  touchScratchScriptLastUsed,
+} from "../../be/scripts/db";
 import {
   DEFAULT_SCRIPT_RESOURCES,
   MAX_SCRIPT_WALL_CLOCK_MS,
@@ -106,7 +111,9 @@ export class SwarmScriptExecutor extends BaseExecutor<
 
     // Touch before executing so an already-stale scratch script isn't reaped
     // by the retention sweep while this run is still in flight.
-    if (resolved.script.isScratch) touchScratchScriptLastUsed(resolved.script.id);
+    const runStartTouch = resolved.script.isScratch
+      ? touchScratchScriptLastUsed(resolved.script.id)
+      : null;
 
     const credentials = await buildScriptCredentialBindingsWithFailures({
       agentId: agentId ?? undefined,
@@ -124,6 +131,15 @@ export class SwarmScriptExecutor extends BaseExecutor<
     });
     if (output.exitCode === 0 && !output.error && !output.runtimeError) {
       touchScratchScriptLastUsed(resolved.script.id);
+    } else if (resolved.script.isScratch && runStartTouch) {
+      // Failed run — restore the pre-run timestamp so it doesn't buy the
+      // script another retention window, unless a concurrent run already
+      // touched it since.
+      restoreScratchScriptLastUsedIfUnchanged(
+        resolved.script.id,
+        resolved.script.updatedAt,
+        runStartTouch,
+      );
     }
 
     const workflowOutput = {
