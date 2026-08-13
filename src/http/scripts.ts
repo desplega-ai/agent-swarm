@@ -714,6 +714,9 @@ export async function handleScripts(
     }
 
     const startedAt = new Date().toISOString();
+    // Touch before executing so an already-stale scratch script isn't reaped
+    // by the retention sweep while this run is still in flight.
+    if (namedScript?.isScratch) touchScratchScriptLastUsed(namedScript.id);
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
     const output = await runScript({
       source: source as string,

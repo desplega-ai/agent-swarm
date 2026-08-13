@@ -129,6 +129,24 @@ describe("scratch script retention", () => {
     ).not.toBe(old);
   });
 
+  test("a stale scratch script survives a GC tick that fires while its run is still in flight", async () => {
+    const script = addScript("scratch-inflight-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
+
+    // Don't await yet: runSavedScriptAsAgent touches last-used synchronously
+    // before its first `await`, so by the time this line returns the row is
+    // already fresh — mirroring a run that's still executing when the daily
+    // GC tick fires.
+    const runPromise = runSavedScriptAsAgent({ script, input: null, agentId: "agent-1" });
+
+    expect(purgeExpiredScratchScripts(NOW)).toBe(0);
+    expect(getScript({ name: script.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+
+    const output = await runPromise;
+    expect(output.exitCode).toBe(0);
+  });
+
   test("migration grants existing agent scratch rows a fresh retention window only", () => {
     const agentScratch = addScript("scratch-existing-a1b2c3d4", true);
     const namedWithPrefix = addScript("scratch-existing-named-a1b2c3d4", false);

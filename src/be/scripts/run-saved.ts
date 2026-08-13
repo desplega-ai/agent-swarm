@@ -17,6 +17,11 @@ export async function runSavedScriptAsAgent(args: {
   input: unknown;
   agentId: string;
 }) {
+  // Touch before executing (not just after) so a scratch script that's already
+  // stale when a run starts can't be reaped by the retention sweep while the
+  // run — which may take up to the runtime's wall-clock ceiling — is in flight.
+  if (args.script.isScratch) touchScratchScriptLastUsed(args.script.id);
+
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: args.agentId,
   });

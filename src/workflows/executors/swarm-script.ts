@@ -104,6 +104,10 @@ export class SwarmScriptExecutor extends BaseExecutor<
       };
     }
 
+    // Touch before executing so an already-stale scratch script isn't reaped
+    // by the retention sweep while this run is still in flight.
+    if (resolved.script.isScratch) touchScratchScriptLastUsed(resolved.script.id);
+
     const credentials = await buildScriptCredentialBindingsWithFailures({
       agentId: agentId ?? undefined,
     });

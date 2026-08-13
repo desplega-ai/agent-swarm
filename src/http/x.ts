@@ -229,6 +229,10 @@ export async function handleX(
   const timeoutMs = resolveTimeoutMs(req);
   const startedAt = new Date().toISOString();
 
+  // Touch before executing so an already-stale scratch script isn't reaped by
+  // the retention sweep while this run is still in flight.
+  if (script.isScratch) touchScratchScriptLastUsed(script.id);
+
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: endpoint.agentId,
   });
