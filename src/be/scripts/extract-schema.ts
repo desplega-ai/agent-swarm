@@ -7,10 +7,12 @@
  * Extraction is best-effort and non-blocking — failures return null.
  */
 
+import { fileURLToPath } from "node:url";
+
 const TIMEOUT_MS = 5_000;
 
 function extractorPath(): string {
-  return new URL("../../scripts-runtime/extract-args-schema.ts", import.meta.url).pathname;
+  return fileURLToPath(new URL("../../scripts-runtime/extract-args-schema.ts", import.meta.url));
 }
 
 export async function extractArgsJsonSchema(source: string): Promise<string | null> {

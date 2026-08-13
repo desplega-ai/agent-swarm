@@ -3136,6 +3136,1713 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ariahq/v1/engine-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List AriaHQ engine drafts and published versions */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Engine catalog */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            drafts: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                brief: string;
+                                /** @enum {string} */
+                                status: "queued" | "running" | "ready" | "failed";
+                                swarmTaskId?: string;
+                                proposedContract?: {
+                                    engineKey: string;
+                                    name: string;
+                                    objective: string;
+                                    caseType: string;
+                                    triggers: ("manual" | "slack" | "schedule" | "webhook" | "event")[];
+                                    stages: {
+                                        id: string;
+                                        name: string;
+                                        /** @enum {string} */
+                                        kind: "agent" | "approval";
+                                        objective: string;
+                                        requiredEvidence: string[];
+                                        tools: string[];
+                                        next?: string;
+                                        approverRoles?: string[];
+                                        outputSchema?: {
+                                            [key: string]: unknown;
+                                        };
+                                    }[];
+                                    knowledgePolicy: {
+                                        allowedSources: string[];
+                                        requiredEvidence: string[];
+                                        /** @enum {string} */
+                                        conflictPolicy: "escalate" | "abstain";
+                                    };
+                                    actions: {
+                                        key: string;
+                                        description: string;
+                                        externalWrite: boolean;
+                                        authority: string[];
+                                    }[];
+                                    completionCriteria: string[];
+                                    openQuestions: string[];
+                                };
+                                errorMessage?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                            engines: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                /** Format: uuid */
+                                draftId: string;
+                                engineKey: string;
+                                name: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "published" | "retired";
+                                contract: {
+                                    engineKey: string;
+                                    name: string;
+                                    objective: string;
+                                    caseType: string;
+                                    triggers: ("manual" | "slack" | "schedule" | "webhook" | "event")[];
+                                    stages: {
+                                        id: string;
+                                        name: string;
+                                        /** @enum {string} */
+                                        kind: "agent" | "approval";
+                                        objective: string;
+                                        requiredEvidence: string[];
+                                        tools: string[];
+                                        next?: string;
+                                        approverRoles?: string[];
+                                        outputSchema?: {
+                                            [key: string]: unknown;
+                                        };
+                                    }[];
+                                    knowledgePolicy: {
+                                        allowedSources: string[];
+                                        requiredEvidence: string[];
+                                        /** @enum {string} */
+                                        conflictPolicy: "escalate" | "abstain";
+                                    };
+                                    actions: {
+                                        key: string;
+                                        description: string;
+                                        externalWrite: boolean;
+                                        authority: string[];
+                                    }[];
+                                    completionCriteria: string[];
+                                    openQuestions: string[];
+                                };
+                                /** Format: uuid */
+                                workflowId: string;
+                                publishedByUserId: string;
+                                publishedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Start a governed AriaHQ engine draft */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        brief: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Draft task started */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            draft: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                brief: string;
+                                /** @enum {string} */
+                                status: "queued" | "running" | "ready" | "failed";
+                                swarmTaskId?: string;
+                                proposedContract?: {
+                                    engineKey: string;
+                                    name: string;
+                                    objective: string;
+                                    caseType: string;
+                                    triggers: ("manual" | "slack" | "schedule" | "webhook" | "event")[];
+                                    stages: {
+                                        id: string;
+                                        name: string;
+                                        /** @enum {string} */
+                                        kind: "agent" | "approval";
+                                        objective: string;
+                                        requiredEvidence: string[];
+                                        tools: string[];
+                                        next?: string;
+                                        approverRoles?: string[];
+                                        outputSchema?: {
+                                            [key: string]: unknown;
+                                        };
+                                    }[];
+                                    knowledgePolicy: {
+                                        allowedSources: string[];
+                                        requiredEvidence: string[];
+                                        /** @enum {string} */
+                                        conflictPolicy: "escalate" | "abstain";
+                                    };
+                                    actions: {
+                                        key: string;
+                                        description: string;
+                                        externalWrite: boolean;
+                                        authority: string[];
+                                    }[];
+                                    completionCriteria: string[];
+                                    openQuestions: string[];
+                                };
+                                errorMessage?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/engine-drafts/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile an AriaHQ engine drafting task */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Reconciled draft */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            draft: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                brief: string;
+                                /** @enum {string} */
+                                status: "queued" | "running" | "ready" | "failed";
+                                swarmTaskId?: string;
+                                proposedContract?: {
+                                    engineKey: string;
+                                    name: string;
+                                    objective: string;
+                                    caseType: string;
+                                    triggers: ("manual" | "slack" | "schedule" | "webhook" | "event")[];
+                                    stages: {
+                                        id: string;
+                                        name: string;
+                                        /** @enum {string} */
+                                        kind: "agent" | "approval";
+                                        objective: string;
+                                        requiredEvidence: string[];
+                                        tools: string[];
+                                        next?: string;
+                                        approverRoles?: string[];
+                                        outputSchema?: {
+                                            [key: string]: unknown;
+                                        };
+                                    }[];
+                                    knowledgePolicy: {
+                                        allowedSources: string[];
+                                        requiredEvidence: string[];
+                                        /** @enum {string} */
+                                        conflictPolicy: "escalate" | "abstain";
+                                    };
+                                    actions: {
+                                        key: string;
+                                        description: string;
+                                        externalWrite: boolean;
+                                        authority: string[];
+                                    }[];
+                                    completionCriteria: string[];
+                                    openQuestions: string[];
+                                };
+                                errorMessage?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/engine-drafts/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a validated AriaHQ engine contract */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Published engine */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            engine: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                /** Format: uuid */
+                                draftId: string;
+                                engineKey: string;
+                                name: string;
+                                version: number;
+                                /** @enum {string} */
+                                status: "published" | "retired";
+                                contract: {
+                                    engineKey: string;
+                                    name: string;
+                                    objective: string;
+                                    caseType: string;
+                                    triggers: ("manual" | "slack" | "schedule" | "webhook" | "event")[];
+                                    stages: {
+                                        id: string;
+                                        name: string;
+                                        /** @enum {string} */
+                                        kind: "agent" | "approval";
+                                        objective: string;
+                                        requiredEvidence: string[];
+                                        tools: string[];
+                                        next?: string;
+                                        approverRoles?: string[];
+                                        outputSchema?: {
+                                            [key: string]: unknown;
+                                        };
+                                    }[];
+                                    knowledgePolicy: {
+                                        allowedSources: string[];
+                                        requiredEvidence: string[];
+                                        /** @enum {string} */
+                                        conflictPolicy: "escalate" | "abstain";
+                                    };
+                                    actions: {
+                                        key: string;
+                                        description: string;
+                                        externalWrite: boolean;
+                                        authority: string[];
+                                    }[];
+                                    completionCriteria: string[];
+                                    openQuestions: string[];
+                                };
+                                /** Format: uuid */
+                                workflowId: string;
+                                publishedByUserId: string;
+                                publishedAt: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/knowledge/records": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ingest a versioned AriaHQ knowledge record */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        kind: "source_evidence" | "canonical_fact" | "derived_insight";
+                        /** @enum {string} */
+                        sourceKind: "slack" | "google_drive" | "call_recording" | "crm" | "github" | "manual" | "ariahq";
+                        sourceRef: string;
+                        sourceRevision: string;
+                        /** Format: uri */
+                        sourceUrl?: string;
+                        /** @enum {string} */
+                        audience: "internal" | "client";
+                        clientKey?: string;
+                        title: string;
+                        content: string;
+                        /** @enum {string} */
+                        verificationStatus: "raw" | "verified" | "conflicted";
+                        /** Format: date-time */
+                        effectiveAt: string;
+                        /** Format: date-time */
+                        expiresAt?: string;
+                        /** @default {} */
+                        metadata?: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Knowledge record */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            record: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                /** @enum {string} */
+                                kind: "source_evidence" | "canonical_fact" | "derived_insight";
+                                /** @enum {string} */
+                                sourceKind: "slack" | "google_drive" | "call_recording" | "crm" | "github" | "manual" | "ariahq";
+                                sourceRef: string;
+                                sourceRevision: string;
+                                sourceUrl?: string;
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                title: string;
+                                content: string;
+                                /** @enum {string} */
+                                verificationStatus: "raw" | "verified" | "conflicted" | "superseded";
+                                effectiveAt: string;
+                                expiresAt?: string;
+                                checksum: string;
+                                metadata: {
+                                    [key: string]: unknown;
+                                };
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask Aria using source-backed organizational evidence */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        question: string;
+                        limit?: number;
+                    };
+                };
+            };
+            responses: {
+                /** @description Answer task and evidence bundle */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {string} */
+                            status: "dispatched" | "abstained";
+                            bundle: {
+                                question: string;
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                evidence: {
+                                    /** Format: uuid */
+                                    recordId: string;
+                                    /** @enum {string} */
+                                    kind: "source_evidence" | "canonical_fact" | "derived_insight";
+                                    content: string;
+                                    /** @enum {string} */
+                                    verificationStatus: "raw" | "verified" | "conflicted" | "superseded";
+                                    effectiveAt: string;
+                                    citation: string;
+                                }[];
+                                hasConflict: boolean;
+                            };
+                            /** Format: uuid */
+                            taskId?: string;
+                            message?: string;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/knowledge-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant-scoped AriaHQ knowledge sources */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Knowledge sources */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            sources: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                key: string;
+                                name: string;
+                                /** @enum {string} */
+                                sourceKind: "slack" | "google_drive" | "call_recording" | "crm" | "github" | "manual" | "ariahq";
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                /** @enum {string} */
+                                adapter: "openapi" | "webhook";
+                                connectionSlug?: string;
+                                /** Format: uuid */
+                                runAsAgentId: string;
+                                syncConfig: {
+                                    [key: string]: unknown;
+                                };
+                                cursor?: string;
+                                /** Format: uuid */
+                                scheduleId?: string;
+                                enabled: boolean;
+                                /** @enum {string} */
+                                lastSyncStatus?: "running" | "completed" | "failed";
+                                lastSyncAt?: string;
+                                lastErrorMessage?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Provision a tenant-scoped AriaHQ knowledge source and optional schedule */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        key: string;
+                        name: string;
+                        /** @enum {string} */
+                        sourceKind: "slack" | "google_drive" | "call_recording" | "crm" | "github" | "manual" | "ariahq";
+                        /** @enum {string} */
+                        audience: "internal" | "client";
+                        clientKey?: string;
+                        /** @enum {string} */
+                        adapter: "openapi" | "webhook";
+                        connectionSlug?: string;
+                        /** Format: uuid */
+                        runAsAgentId: string;
+                        syncConfig: {
+                            [key: string]: unknown;
+                        };
+                        schedule?: {
+                            cronExpression?: string;
+                            intervalMs?: number;
+                            /** @default UTC */
+                            timezone?: string;
+                            /** @default true */
+                            enabled?: boolean;
+                        };
+                    };
+                };
+            };
+            responses: {
+                /** @description Provisioned knowledge source */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            source: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                key: string;
+                                name: string;
+                                /** @enum {string} */
+                                sourceKind: "slack" | "google_drive" | "call_recording" | "crm" | "github" | "manual" | "ariahq";
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                /** @enum {string} */
+                                adapter: "openapi" | "webhook";
+                                connectionSlug?: string;
+                                /** Format: uuid */
+                                runAsAgentId: string;
+                                syncConfig: {
+                                    [key: string]: unknown;
+                                };
+                                cursor?: string;
+                                /** Format: uuid */
+                                scheduleId?: string;
+                                enabled: boolean;
+                                /** @enum {string} */
+                                lastSyncStatus?: "running" | "completed" | "failed";
+                                lastSyncAt?: string;
+                                lastErrorMessage?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                            schedule?: {
+                                /** Format: uuid */
+                                id: string;
+                                /** @description Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form. */
+                                key: string;
+                                name: string;
+                                description?: string;
+                                cronExpression?: string;
+                                intervalMs?: number;
+                                taskTemplate?: string;
+                                taskType?: string;
+                                /** @default [] */
+                                tags: string[];
+                                /** @default 50 */
+                                priority: number;
+                                targetAgentId?: string;
+                                /** @default true */
+                                enabled: boolean;
+                                /** Format: date-time */
+                                lastRunAt?: string;
+                                /** Format: date-time */
+                                nextRunAt?: string;
+                                createdByAgentId?: string;
+                                /** @default UTC */
+                                timezone: string;
+                                /** @default 0 */
+                                consecutiveErrors: number;
+                                /** Format: date-time */
+                                lastErrorAt?: string;
+                                lastErrorMessage?: string;
+                                model?: string;
+                                /** @enum {string} */
+                                modelTier?: "smol" | "regular" | "smart" | "ultra";
+                                /**
+                                 * @default recurring
+                                 * @enum {string}
+                                 */
+                                scheduleType: "recurring" | "one_time";
+                                /**
+                                 * @default agent-task
+                                 * @enum {string}
+                                 */
+                                targetType: "agent-task" | "workflow" | "script";
+                                /** Format: uuid */
+                                workflowId?: string;
+                                scriptName?: string;
+                                scriptArgs?: {
+                                    [key: string]: unknown;
+                                };
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                lastUpdatedAt: string;
+                                createdBy?: string;
+                                updatedBy?: string;
+                                favorite?: boolean;
+                            };
+                            webhookSecret?: string;
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/knowledge-sources/{id}/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Push normalized evidence into an authenticated AriaHQ webhook source */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        nextCursor?: string;
+                        records: {
+                            sourceRef: string;
+                            sourceRevision: string;
+                            /** Format: uri */
+                            sourceUrl?: string;
+                            title: string;
+                            content: string;
+                            /** Format: date-time */
+                            effectiveAt: string;
+                            /** @default {} */
+                            metadata?: {
+                                [key: string]: unknown;
+                            };
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Webhook evidence accepted */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            run: {
+                                /** Format: uuid */
+                                id: string;
+                                /** Format: uuid */
+                                sourceId: string;
+                                /** Format: uuid */
+                                agentId: string;
+                                /** @enum {string} */
+                                status: "running" | "completed" | "failed";
+                                cursorBefore?: string;
+                                cursorAfter?: string;
+                                recordsSeen: number;
+                                recordsCreated: number;
+                                recordsReused: number;
+                                errorMessage?: string;
+                                startedAt: string;
+                                finishedAt?: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            };
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/slack-surfaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List AriaHQ Slack surfaces */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slack surfaces */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            surfaces: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                workspaceId: string;
+                                channelId: string;
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                /** @enum {string} */
+                                captureMode: "mention_only" | "designated_channel";
+                                pmOwnerId: string;
+                                isActive: boolean;
+                                /** @enum {string} */
+                                verificationStatus: "pending" | "verified" | "failed";
+                                verifiedAt?: string;
+                                verificationError?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Configure an AriaHQ Slack surface */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        workspaceId: string;
+                        channelId: string;
+                        /** @enum {string} */
+                        audience: "internal" | "client";
+                        clientKey?: string;
+                        /** @enum {string} */
+                        captureMode: "mention_only" | "designated_channel";
+                        pmOwnerId: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Slack surface */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            surfaces: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                workspaceId: string;
+                                channelId: string;
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                /** @enum {string} */
+                                captureMode: "mention_only" | "designated_channel";
+                                pmOwnerId: string;
+                                isActive: boolean;
+                                /** @enum {string} */
+                                verificationStatus: "pending" | "verified" | "failed";
+                                verifiedAt?: string;
+                                verificationError?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/slack-surfaces/{id}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Verify Aria's workspace and channel access for a Slack surface */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Verified Slack surface */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            surfaces: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                name: string;
+                                workspaceId: string;
+                                channelId: string;
+                                /** @enum {string} */
+                                audience: "internal" | "client";
+                                clientKey?: string;
+                                /** @enum {string} */
+                                captureMode: "mention_only" | "designated_channel";
+                                pmOwnerId: string;
+                                isActive: boolean;
+                                /** @enum {string} */
+                                verificationStatus: "pending" | "verified" | "failed";
+                                verifiedAt?: string;
+                                verificationError?: string;
+                                createdByUserId: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ariahq/v1/client-intakes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tenant-scoped client intake projections */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Client intakes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            intakes: {
+                                /** Format: uuid */
+                                id: string;
+                                organizationId: string;
+                                /** Format: uuid */
+                                slackSurfaceId: string;
+                                /** Format: uuid */
+                                workItemId: string;
+                                messageTs: string;
+                                threadTs: string;
+                                externalUserId: string;
+                                /** @enum {string} */
+                                clientStatus: "captured" | "reviewing" | "needs_information" | "accepted" | "in_progress" | "released" | "resolved" | "closed";
+                                publicSummary: string;
+                                createdAt: string;
+                                lastUpdatedAt: string;
+                            }[];
+                        };
+                    };
+                };
+                /** @description Forbidden */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Conflict */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+                /** @description Invalid request */
+                422: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            error: string;
+                            error_code: string;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/assets/key-audit": {
         parameters: {
             query?: never;

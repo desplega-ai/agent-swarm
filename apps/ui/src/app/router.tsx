@@ -61,6 +61,10 @@ const AppDetailPage = lazy(() => import("@/pages/apps/[id]/page"));
 const DevFlowInboxPage = lazy(() => import("@/pages/devflow/inbox/page"));
 const DevFlowPipelinePage = lazy(() => import("@/pages/devflow/pipeline/page"));
 const DevFlowWorkbenchPage = lazy(() => import("@/pages/devflow/work-items/[id]/page"));
+const AriaHqPage = lazy(() => import("@/pages/ariahq/page"));
+const AriaEngineStudioPage = lazy(() => import("@/pages/ariahq/engines/page"));
+const AriaKnowledgePage = lazy(() => import("@/pages/ariahq/knowledge/page"));
+const AriaSourcesPage = lazy(() => import("@/pages/ariahq/sources/page"));
 const NotFoundPage = lazy(() => import("@/pages/not-found/page"));
 
 /**
@@ -187,6 +191,10 @@ export const router = createBrowserRouter([
       // A named page of a multi-page app. Same component as `apps/:id` (which
       // renders the app's `defaultPage`) — both URLs stay valid, no redirect.
       { path: "apps/:id/p/:page", element: <AppDetailPage /> },
+      { path: "ariahq", element: <AriaHqPage /> },
+      { path: "ariahq/engines", element: <AriaEngineStudioPage /> },
+      { path: "ariahq/knowledge", element: <AriaKnowledgePage /> },
+      { path: "ariahq/sources", element: <AriaSourcesPage /> },
       { path: "devflow", element: <Navigate to="/devflow/pipeline" replace /> },
       { path: "devflow/inbox", element: <DevFlowInboxPage /> },
       { path: "devflow/pipeline", element: <DevFlowPipelinePage /> },

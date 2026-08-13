@@ -1,5 +1,13 @@
 import type { LiveModelsCatalog } from "@/lib/agent-runtime-models";
 import { getConfig } from "@/lib/config";
+import type {
+  AriaClientIntake,
+  AriaEngineDraft,
+  AriaEngineVersion,
+  AriaKnowledgeAnswer,
+  AriaKnowledgeSource,
+  AriaSlackSurface,
+} from "./ariahq-types";
 import {
   type DevFlowAgentMode,
   type DevFlowAgentRun,
@@ -270,6 +278,68 @@ class ApiClient {
       );
     }
     return res.json() as Promise<T>;
+  }
+
+  async fetchAriaEngineCatalog(
+    userId: string,
+  ): Promise<{ drafts: AriaEngineDraft[]; engines: AriaEngineVersion[] }> {
+    return this.devFlowRequest("/api/ariahq/v1/engine-drafts", userId);
+  }
+
+  async createAriaEngineDraft(
+    userId: string,
+    input: { name: string; brief: string },
+  ): Promise<{ draft: AriaEngineDraft }> {
+    return this.devFlowRequest("/api/ariahq/v1/engine-drafts", userId, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async reconcileAriaEngineDraft(userId: string, id: string): Promise<{ draft: AriaEngineDraft }> {
+    return this.devFlowRequest(
+      `/api/ariahq/v1/engine-drafts/${encodeURIComponent(id)}/reconcile`,
+      userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  async publishAriaEngineDraft(userId: string, id: string): Promise<{ engine: AriaEngineVersion }> {
+    return this.devFlowRequest(
+      `/api/ariahq/v1/engine-drafts/${encodeURIComponent(id)}/publish`,
+      userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  async askAria(userId: string, question: string): Promise<AriaKnowledgeAnswer> {
+    return this.devFlowRequest("/api/ariahq/v1/knowledge/search", userId, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    });
+  }
+
+  async fetchAriaClientIntakes(userId: string): Promise<{ intakes: AriaClientIntake[] }> {
+    return this.devFlowRequest("/api/ariahq/v1/client-intakes", userId);
+  }
+
+  async fetchAriaKnowledgeSources(userId: string): Promise<{ sources: AriaKnowledgeSource[] }> {
+    return this.devFlowRequest("/api/ariahq/v1/knowledge-sources", userId);
+  }
+
+  async fetchAriaSlackSurfaces(userId: string): Promise<{ surfaces: AriaSlackSurface[] }> {
+    return this.devFlowRequest("/api/ariahq/v1/slack-surfaces", userId);
+  }
+
+  async verifyAriaSlackSurface(
+    userId: string,
+    surfaceId: string,
+  ): Promise<{ surfaces: AriaSlackSurface[] }> {
+    return this.devFlowRequest(
+      `/api/ariahq/v1/slack-surfaces/${encodeURIComponent(surfaceId)}/verify`,
+      userId,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   }
 
   async fetchDevFlowOrganization(

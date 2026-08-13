@@ -12,6 +12,7 @@ import "./active-sessions";
 import "./agents";
 import "./approval-requests";
 import "./apps";
+import "./ariahq";
 import "./assets";
 import "./budgets";
 import "./codex-oauth-keep-warm";

@@ -156,7 +156,7 @@ describe("script workflow runtime", () => {
     const { id } = (await created.json()) as { id: string };
 
     const run = await waitForRun(id);
-    expect(run.status).toBe("completed");
+    expect(run.status, run.error ?? "script workflow failed without an error").toBe("completed");
     expect(run.output).toMatchObject({
       runId: id,
       first: { result: 14, exitCode: 0 },
@@ -195,11 +195,12 @@ describe("script workflow runtime", () => {
   });
 
   test("resource ulimits actually apply to the durable run's process tree", async () => {
+    const flag = process.platform === "darwin" ? "-n" : "-v";
     const source = `
       export default async function main() {
-        const proc = Bun.spawnSync(["sh", "-c", "ulimit -v"]);
+        const proc = Bun.spawnSync(["sh", "-c", "ulimit ${flag}"]);
         const out = new TextDecoder().decode(proc.stdout).trim();
-        return { ulimitV: out };
+        return { ulimitValue: out };
       }
     `;
 
@@ -211,10 +212,10 @@ describe("script workflow runtime", () => {
     const { id } = (await created.json()) as { id: string };
 
     const run = await waitForRun(id);
-    expect(run.status).toBe("completed");
-    const ulimitV = (run.output as { ulimitV: string }).ulimitV;
-    expect(ulimitV).not.toBe("unlimited");
-    expect(Number(ulimitV)).toBeGreaterThan(0);
+    expect(run.status, run.error ?? "ulimit probe failed without an error").toBe("completed");
+    const ulimitValue = (run.output as { ulimitValue: string }).ulimitValue;
+    expect(ulimitValue).not.toBe("unlimited");
+    expect(Number(ulimitValue)).toBeGreaterThan(0);
   });
 
   test("POST /api/script-runs requires no bearer beyond normal auth — matches POST /api/scripts/run (any authenticated agent)", async () => {

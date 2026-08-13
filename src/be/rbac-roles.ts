@@ -28,6 +28,9 @@ export const BUILTIN_ROLES = [
     isBuiltin: true,
     grantsAll: false,
     verbs: [
+      "ariahq.engine.manage",
+      "ariahq.knowledge.write",
+      "ariahq.surface.manage",
       "devflow.work-item.write",
       "devflow.gate.approve",
       "devflow.agent-run.start",

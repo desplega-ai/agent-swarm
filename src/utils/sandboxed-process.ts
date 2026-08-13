@@ -6,10 +6,12 @@
  * the child's env — is enforced identically everywhere instead of being
  * re-implemented (and re-forgotten) per call site.
  *
- * Mirrors the ulimit values CLAUDE.md documents for the inline scripts
- * runtime (`ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`) and the
- * `harnessCommand` implementation this was extracted from
- * (src/scripts-runtime/executors/native.ts).
+ * On Linux this mirrors the ulimit values CLAUDE.md documents for the inline
+ * scripts runtime (`ulimit -v 524288 -t 60 -u 32 -f 65536 -n 64`). macOS does
+ * not support a finite RLIMIT_AS through `ulimit -v`, and RLIMIT_NPROC counts
+ * every process owned by the logged-in user rather than the sandbox subtree;
+ * those two limits are therefore omitted on Darwin while CPU, file-size, and
+ * file-descriptor limits remain enforced. Production workers are Linux.
  */
 
 export interface SandboxResourceLimits {
@@ -79,12 +81,19 @@ export function buildSandboxedCommand(
       ? Math.max(limits.virtualMemoryMb, BUN_SANDBOX_VIRTUAL_MEMORY_MB)
       : limits.virtualMemoryMb;
 
-  const ulimits = [
-    `ulimit -v ${Math.floor(virtualMemoryMb * 1024)} 2>/dev/null || true`,
+  const portableUlimits = [
     `ulimit -t ${limits.cpuTimeSec} 2>/dev/null || true`,
-    `ulimit -u ${limits.maxProcs} 2>/dev/null || true`,
     `ulimit -f ${limits.maxFileKb} 2>/dev/null || true`,
     `ulimit -n ${limits.maxFdCount} 2>/dev/null || true`,
+  ];
+  const ulimits = [
+    ...(process.platform === "darwin"
+      ? []
+      : [
+          `ulimit -v ${Math.floor(virtualMemoryMb * 1024)} 2>/dev/null || true`,
+          `ulimit -u ${limits.maxProcs} 2>/dev/null || true`,
+        ]),
+    ...portableUlimits,
   ].join("; ");
 
   const envAssignments = Object.entries(env)

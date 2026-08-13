@@ -11148,6 +11148,4146 @@
         }
       }
     },
+    "/api/ariahq/v1/engine-drafts": {
+      "get": {
+        "summary": "List AriaHQ engine drafts and published versions",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Engine catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "drafts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "brief": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "queued",
+                              "running",
+                              "ready",
+                              "failed"
+                            ]
+                          },
+                          "swarmTaskId": {
+                            "type": "string"
+                          },
+                          "proposedContract": {
+                            "type": "object",
+                            "properties": {
+                              "engineKey": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "objective": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "caseType": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "triggers": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "manual",
+                                    "slack",
+                                    "schedule",
+                                    "webhook",
+                                    "event"
+                                  ]
+                                },
+                                "minItems": 1
+                              },
+                              "stages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent",
+                                        "approval"
+                                      ]
+                                    },
+                                    "objective": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "requiredEvidence": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "tools": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "next": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "approverRoles": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "outputSchema": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "name",
+                                    "kind",
+                                    "objective",
+                                    "requiredEvidence",
+                                    "tools"
+                                  ]
+                                },
+                                "minItems": 1
+                              },
+                              "knowledgePolicy": {
+                                "type": "object",
+                                "properties": {
+                                  "allowedSources": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "requiredEvidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "conflictPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "escalate",
+                                      "abstain"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "allowedSources",
+                                  "requiredEvidence",
+                                  "conflictPolicy"
+                                ]
+                              },
+                              "actions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "description": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "externalWrite": {
+                                      "type": "boolean"
+                                    },
+                                    "authority": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "key",
+                                    "description",
+                                    "externalWrite",
+                                    "authority"
+                                  ]
+                                }
+                              },
+                              "completionCriteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "minItems": 1
+                              },
+                              "openQuestions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "engineKey",
+                              "name",
+                              "objective",
+                              "caseType",
+                              "triggers",
+                              "stages",
+                              "knowledgePolicy",
+                              "actions",
+                              "completionCriteria",
+                              "openQuestions"
+                            ]
+                          },
+                          "errorMessage": {
+                            "type": "string"
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "brief",
+                          "status",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    },
+                    "engines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "draftId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "engineKey": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "published",
+                              "retired"
+                            ]
+                          },
+                          "contract": {
+                            "type": "object",
+                            "properties": {
+                              "engineKey": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$"
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "objective": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "caseType": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "triggers": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "manual",
+                                    "slack",
+                                    "schedule",
+                                    "webhook",
+                                    "event"
+                                  ]
+                                },
+                                "minItems": 1
+                              },
+                              "stages": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent",
+                                        "approval"
+                                      ]
+                                    },
+                                    "objective": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "requiredEvidence": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "tools": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "next": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "approverRoles": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "outputSchema": {
+                                      "type": "object",
+                                      "additionalProperties": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "name",
+                                    "kind",
+                                    "objective",
+                                    "requiredEvidence",
+                                    "tools"
+                                  ]
+                                },
+                                "minItems": 1
+                              },
+                              "knowledgePolicy": {
+                                "type": "object",
+                                "properties": {
+                                  "allowedSources": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "requiredEvidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "conflictPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "escalate",
+                                      "abstain"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "allowedSources",
+                                  "requiredEvidence",
+                                  "conflictPolicy"
+                                ]
+                              },
+                              "actions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "key": {
+                                      "type": "string",
+                                      "pattern": "^[a-z][a-z0-9-]*$"
+                                    },
+                                    "description": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "externalWrite": {
+                                      "type": "boolean"
+                                    },
+                                    "authority": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "key",
+                                    "description",
+                                    "externalWrite",
+                                    "authority"
+                                  ]
+                                }
+                              },
+                              "completionCriteria": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "minItems": 1
+                              },
+                              "openQuestions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              }
+                            },
+                            "required": [
+                              "engineKey",
+                              "name",
+                              "objective",
+                              "caseType",
+                              "triggers",
+                              "stages",
+                              "knowledgePolicy",
+                              "actions",
+                              "completionCriteria",
+                              "openQuestions"
+                            ]
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "publishedByUserId": {
+                            "type": "string"
+                          },
+                          "publishedAt": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "draftId",
+                          "engineKey",
+                          "name",
+                          "version",
+                          "status",
+                          "contract",
+                          "workflowId",
+                          "publishedByUserId",
+                          "publishedAt",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "drafts",
+                    "engines"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Start a governed AriaHQ engine draft",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "brief": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20000
+                  }
+                },
+                "required": [
+                  "name",
+                  "brief"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Draft task started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "draft": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "brief": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "running",
+                            "ready",
+                            "failed"
+                          ]
+                        },
+                        "swarmTaskId": {
+                          "type": "string"
+                        },
+                        "proposedContract": {
+                          "type": "object",
+                          "properties": {
+                            "engineKey": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]*$"
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "caseType": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "triggers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "manual",
+                                  "slack",
+                                  "schedule",
+                                  "webhook",
+                                  "event"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "stages": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent",
+                                      "approval"
+                                    ]
+                                  },
+                                  "objective": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "requiredEvidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "tools": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "next": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "approverRoles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "outputSchema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "kind",
+                                  "objective",
+                                  "requiredEvidence",
+                                  "tools"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "knowledgePolicy": {
+                              "type": "object",
+                              "properties": {
+                                "allowedSources": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "requiredEvidence": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "conflictPolicy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "escalate",
+                                    "abstain"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "allowedSources",
+                                "requiredEvidence",
+                                "conflictPolicy"
+                              ]
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "externalWrite": {
+                                    "type": "boolean"
+                                  },
+                                  "authority": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "description",
+                                  "externalWrite",
+                                  "authority"
+                                ]
+                              }
+                            },
+                            "completionCriteria": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "minItems": 1
+                            },
+                            "openQuestions": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "engineKey",
+                            "name",
+                            "objective",
+                            "caseType",
+                            "triggers",
+                            "stages",
+                            "knowledgePolicy",
+                            "actions",
+                            "completionCriteria",
+                            "openQuestions"
+                          ]
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "createdByUserId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "name",
+                        "brief",
+                        "status",
+                        "createdByUserId",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/engine-drafts/{id}/reconcile": {
+      "post": {
+        "summary": "Reconcile an AriaHQ engine drafting task",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reconciled draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "draft": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "brief": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "queued",
+                            "running",
+                            "ready",
+                            "failed"
+                          ]
+                        },
+                        "swarmTaskId": {
+                          "type": "string"
+                        },
+                        "proposedContract": {
+                          "type": "object",
+                          "properties": {
+                            "engineKey": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]*$"
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "caseType": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "triggers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "manual",
+                                  "slack",
+                                  "schedule",
+                                  "webhook",
+                                  "event"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "stages": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent",
+                                      "approval"
+                                    ]
+                                  },
+                                  "objective": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "requiredEvidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "tools": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "next": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "approverRoles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "outputSchema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "kind",
+                                  "objective",
+                                  "requiredEvidence",
+                                  "tools"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "knowledgePolicy": {
+                              "type": "object",
+                              "properties": {
+                                "allowedSources": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "requiredEvidence": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "conflictPolicy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "escalate",
+                                    "abstain"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "allowedSources",
+                                "requiredEvidence",
+                                "conflictPolicy"
+                              ]
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "externalWrite": {
+                                    "type": "boolean"
+                                  },
+                                  "authority": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "description",
+                                  "externalWrite",
+                                  "authority"
+                                ]
+                              }
+                            },
+                            "completionCriteria": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "minItems": 1
+                            },
+                            "openQuestions": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "engineKey",
+                            "name",
+                            "objective",
+                            "caseType",
+                            "triggers",
+                            "stages",
+                            "knowledgePolicy",
+                            "actions",
+                            "completionCriteria",
+                            "openQuestions"
+                          ]
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "createdByUserId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "name",
+                        "brief",
+                        "status",
+                        "createdByUserId",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/engine-drafts/{id}/publish": {
+      "post": {
+        "summary": "Publish a validated AriaHQ engine contract",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Published engine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "engine": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "draftId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "engineKey": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "published",
+                            "retired"
+                          ]
+                        },
+                        "contract": {
+                          "type": "object",
+                          "properties": {
+                            "engineKey": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9-]*$"
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "objective": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "caseType": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "triggers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "enum": [
+                                  "manual",
+                                  "slack",
+                                  "schedule",
+                                  "webhook",
+                                  "event"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "stages": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent",
+                                      "approval"
+                                    ]
+                                  },
+                                  "objective": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "requiredEvidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "tools": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "next": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "approverRoles": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "outputSchema": {
+                                    "type": "object",
+                                    "additionalProperties": {}
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "name",
+                                  "kind",
+                                  "objective",
+                                  "requiredEvidence",
+                                  "tools"
+                                ]
+                              },
+                              "minItems": 1
+                            },
+                            "knowledgePolicy": {
+                              "type": "object",
+                              "properties": {
+                                "allowedSources": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "requiredEvidence": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "conflictPolicy": {
+                                  "type": "string",
+                                  "enum": [
+                                    "escalate",
+                                    "abstain"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "allowedSources",
+                                "requiredEvidence",
+                                "conflictPolicy"
+                              ]
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "key": {
+                                    "type": "string",
+                                    "pattern": "^[a-z][a-z0-9-]*$"
+                                  },
+                                  "description": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "externalWrite": {
+                                    "type": "boolean"
+                                  },
+                                  "authority": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "key",
+                                  "description",
+                                  "externalWrite",
+                                  "authority"
+                                ]
+                              }
+                            },
+                            "completionCriteria": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "minItems": 1
+                            },
+                            "openQuestions": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          },
+                          "required": [
+                            "engineKey",
+                            "name",
+                            "objective",
+                            "caseType",
+                            "triggers",
+                            "stages",
+                            "knowledgePolicy",
+                            "actions",
+                            "completionCriteria",
+                            "openQuestions"
+                          ]
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "publishedByUserId": {
+                          "type": "string"
+                        },
+                        "publishedAt": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "draftId",
+                        "engineKey",
+                        "name",
+                        "version",
+                        "status",
+                        "contract",
+                        "workflowId",
+                        "publishedByUserId",
+                        "publishedAt",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "engine"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/knowledge/records": {
+      "post": {
+        "summary": "Ingest a versioned AriaHQ knowledge record",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "source_evidence",
+                      "canonical_fact",
+                      "derived_insight"
+                    ]
+                  },
+                  "sourceKind": {
+                    "type": "string",
+                    "enum": [
+                      "slack",
+                      "google_drive",
+                      "call_recording",
+                      "crm",
+                      "github",
+                      "manual",
+                      "ariahq"
+                    ]
+                  },
+                  "sourceRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sourceRevision": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "sourceUrl": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "internal",
+                      "client"
+                    ]
+                  },
+                  "clientKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "verificationStatus": {
+                    "type": "string",
+                    "enum": [
+                      "raw",
+                      "verified",
+                      "conflicted"
+                    ]
+                  },
+                  "effectiveAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {},
+                    "default": {}
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sourceKind",
+                  "sourceRef",
+                  "sourceRevision",
+                  "audience",
+                  "title",
+                  "content",
+                  "verificationStatus",
+                  "effectiveAt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Knowledge record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "record": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "source_evidence",
+                            "canonical_fact",
+                            "derived_insight"
+                          ]
+                        },
+                        "sourceKind": {
+                          "type": "string",
+                          "enum": [
+                            "slack",
+                            "google_drive",
+                            "call_recording",
+                            "crm",
+                            "github",
+                            "manual",
+                            "ariahq"
+                          ]
+                        },
+                        "sourceRef": {
+                          "type": "string"
+                        },
+                        "sourceRevision": {
+                          "type": "string"
+                        },
+                        "sourceUrl": {
+                          "type": "string"
+                        },
+                        "audience": {
+                          "type": "string",
+                          "enum": [
+                            "internal",
+                            "client"
+                          ]
+                        },
+                        "clientKey": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "content": {
+                          "type": "string"
+                        },
+                        "verificationStatus": {
+                          "type": "string",
+                          "enum": [
+                            "raw",
+                            "verified",
+                            "conflicted",
+                            "superseded"
+                          ]
+                        },
+                        "effectiveAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "checksum": {
+                          "type": "string",
+                          "pattern": "^sha256:[0-9a-f]{64}$"
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "kind",
+                        "sourceKind",
+                        "sourceRef",
+                        "sourceRevision",
+                        "audience",
+                        "title",
+                        "content",
+                        "verificationStatus",
+                        "effectiveAt",
+                        "checksum",
+                        "metadata",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "record"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/knowledge/search": {
+      "post": {
+        "summary": "Ask Aria using source-backed organizational evidence",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50
+                  }
+                },
+                "required": [
+                  "question"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Answer task and evidence bundle",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "dispatched",
+                        "abstained"
+                      ]
+                    },
+                    "bundle": {
+                      "type": "object",
+                      "properties": {
+                        "question": {
+                          "type": "string"
+                        },
+                        "audience": {
+                          "type": "string",
+                          "enum": [
+                            "internal",
+                            "client"
+                          ]
+                        },
+                        "clientKey": {
+                          "type": "string"
+                        },
+                        "evidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "recordId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "source_evidence",
+                                  "canonical_fact",
+                                  "derived_insight"
+                                ]
+                              },
+                              "content": {
+                                "type": "string"
+                              },
+                              "verificationStatus": {
+                                "type": "string",
+                                "enum": [
+                                  "raw",
+                                  "verified",
+                                  "conflicted",
+                                  "superseded"
+                                ]
+                              },
+                              "effectiveAt": {
+                                "type": "string"
+                              },
+                              "citation": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "recordId",
+                              "kind",
+                              "content",
+                              "verificationStatus",
+                              "effectiveAt",
+                              "citation"
+                            ]
+                          }
+                        },
+                        "hasConflict": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "question",
+                        "audience",
+                        "evidence",
+                        "hasConflict"
+                      ]
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "bundle"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/knowledge-sources": {
+      "get": {
+        "summary": "List tenant-scoped AriaHQ knowledge sources",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Knowledge sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "key": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]*$"
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sourceKind": {
+                            "type": "string",
+                            "enum": [
+                              "slack",
+                              "google_drive",
+                              "call_recording",
+                              "crm",
+                              "github",
+                              "manual",
+                              "ariahq"
+                            ]
+                          },
+                          "audience": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "client"
+                            ]
+                          },
+                          "clientKey": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "adapter": {
+                            "type": "string",
+                            "enum": [
+                              "openapi",
+                              "webhook"
+                            ]
+                          },
+                          "connectionSlug": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "runAsAgentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "syncConfig": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "cursor": {
+                            "type": "string"
+                          },
+                          "scheduleId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "lastSyncStatus": {
+                            "type": "string",
+                            "enum": [
+                              "running",
+                              "completed",
+                              "failed"
+                            ]
+                          },
+                          "lastSyncAt": {
+                            "type": "string"
+                          },
+                          "lastErrorMessage": {
+                            "type": "string"
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "key",
+                          "name",
+                          "sourceKind",
+                          "audience",
+                          "adapter",
+                          "runAsAgentId",
+                          "syncConfig",
+                          "enabled",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "sources"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Provision a tenant-scoped AriaHQ knowledge source and optional schedule",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                  },
+                  "sourceKind": {
+                    "type": "string",
+                    "enum": [
+                      "slack",
+                      "google_drive",
+                      "call_recording",
+                      "crm",
+                      "github",
+                      "manual",
+                      "ariahq"
+                    ]
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "internal",
+                      "client"
+                    ]
+                  },
+                  "clientKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "adapter": {
+                    "type": "string",
+                    "enum": [
+                      "openapi",
+                      "webhook"
+                    ]
+                  },
+                  "connectionSlug": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "runAsAgentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "syncConfig": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "schedule": {
+                    "type": "object",
+                    "properties": {
+                      "cronExpression": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "intervalMs": {
+                        "type": "integer",
+                        "minimum": 60000
+                      },
+                      "timezone": {
+                        "type": "string",
+                        "minLength": 1,
+                        "default": "UTC"
+                      },
+                      "enabled": {
+                        "type": "boolean",
+                        "default": true
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "sourceKind",
+                  "audience",
+                  "adapter",
+                  "runAsAgentId",
+                  "syncConfig"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Provisioned knowledge source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "organizationId": {
+                          "type": "string"
+                        },
+                        "key": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]*$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sourceKind": {
+                          "type": "string",
+                          "enum": [
+                            "slack",
+                            "google_drive",
+                            "call_recording",
+                            "crm",
+                            "github",
+                            "manual",
+                            "ariahq"
+                          ]
+                        },
+                        "audience": {
+                          "type": "string",
+                          "enum": [
+                            "internal",
+                            "client"
+                          ]
+                        },
+                        "clientKey": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "adapter": {
+                          "type": "string",
+                          "enum": [
+                            "openapi",
+                            "webhook"
+                          ]
+                        },
+                        "connectionSlug": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "runAsAgentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "syncConfig": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "scheduleId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "lastSyncStatus": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "completed",
+                            "failed"
+                          ]
+                        },
+                        "lastSyncAt": {
+                          "type": "string"
+                        },
+                        "lastErrorMessage": {
+                          "type": "string"
+                        },
+                        "createdByUserId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "organizationId",
+                        "key",
+                        "name",
+                        "sourceKind",
+                        "audience",
+                        "adapter",
+                        "runAsAgentId",
+                        "syncConfig",
+                        "enabled",
+                        "createdByUserId",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    },
+                    "schedule": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "key": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255,
+                          "description": "Non-unique asset directory namespace (for example shared/ or personal/<user-id>/drafts/). Runtime write boundaries normalize and validate the canonical form."
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "cronExpression": {
+                          "type": "string"
+                        },
+                        "intervalMs": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        },
+                        "taskTemplate": {
+                          "type": "string"
+                        },
+                        "taskType": {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        "tags": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "default": []
+                        },
+                        "priority": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100,
+                          "default": 50
+                        },
+                        "targetAgentId": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean",
+                          "default": true
+                        },
+                        "lastRunAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "nextRunAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "timezone": {
+                          "type": "string",
+                          "default": "UTC"
+                        },
+                        "consecutiveErrors": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "default": 0
+                        },
+                        "lastErrorAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lastErrorMessage": {
+                          "type": "string"
+                        },
+                        "model": {
+                          "type": "string"
+                        },
+                        "modelTier": {
+                          "type": "string",
+                          "enum": [
+                            "smol",
+                            "regular",
+                            "smart",
+                            "ultra"
+                          ]
+                        },
+                        "scheduleType": {
+                          "type": "string",
+                          "enum": [
+                            "recurring",
+                            "one_time"
+                          ],
+                          "default": "recurring"
+                        },
+                        "targetType": {
+                          "type": "string",
+                          "enum": [
+                            "agent-task",
+                            "workflow",
+                            "script"
+                          ],
+                          "default": "agent-task"
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "scriptName": {
+                          "type": "string"
+                        },
+                        "scriptArgs": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "createdBy": {
+                          "type": "string"
+                        },
+                        "updatedBy": {
+                          "type": "string"
+                        },
+                        "favorite": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "key",
+                        "name",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    },
+                    "webhookSecret": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/knowledge-sources/{id}/webhook": {
+      "post": {
+        "summary": "Push normalized evidence into an authenticated AriaHQ webhook source",
+        "tags": [
+          "AriaHQ"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nextCursor": {
+                    "type": "string"
+                  },
+                  "records": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sourceRef": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sourceRevision": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "sourceUrl": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "content": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "effectiveAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "metadata": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "default": {}
+                        }
+                      },
+                      "required": [
+                        "sourceRef",
+                        "sourceRevision",
+                        "title",
+                        "content",
+                        "effectiveAt"
+                      ]
+                    },
+                    "maxItems": 10000
+                  }
+                },
+                "required": [
+                  "records"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Webhook evidence accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sourceId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "agentId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "running",
+                            "completed",
+                            "failed"
+                          ]
+                        },
+                        "cursorBefore": {
+                          "type": "string"
+                        },
+                        "cursorAfter": {
+                          "type": "string"
+                        },
+                        "recordsSeen": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "recordsCreated": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "recordsReused": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "errorMessage": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "finishedAt": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "lastUpdatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "sourceId",
+                        "agentId",
+                        "status",
+                        "recordsSeen",
+                        "recordsCreated",
+                        "recordsReused",
+                        "startedAt",
+                        "createdAt",
+                        "lastUpdatedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "run"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/slack-surfaces": {
+      "get": {
+        "summary": "List AriaHQ Slack surfaces",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Slack surfaces",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "workspaceId": {
+                            "type": "string"
+                          },
+                          "channelId": {
+                            "type": "string"
+                          },
+                          "audience": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "client"
+                            ]
+                          },
+                          "clientKey": {
+                            "type": "string"
+                          },
+                          "captureMode": {
+                            "type": "string",
+                            "enum": [
+                              "mention_only",
+                              "designated_channel"
+                            ]
+                          },
+                          "pmOwnerId": {
+                            "type": "string"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "verificationStatus": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "verified",
+                              "failed"
+                            ]
+                          },
+                          "verifiedAt": {
+                            "type": "string"
+                          },
+                          "verificationError": {
+                            "type": "string"
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "workspaceId",
+                          "channelId",
+                          "audience",
+                          "captureMode",
+                          "pmOwnerId",
+                          "isActive",
+                          "verificationStatus",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "surfaces"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Configure an AriaHQ Slack surface",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "channelId": {
+                    "type": "string"
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "internal",
+                      "client"
+                    ]
+                  },
+                  "clientKey": {
+                    "type": "string"
+                  },
+                  "captureMode": {
+                    "type": "string",
+                    "enum": [
+                      "mention_only",
+                      "designated_channel"
+                    ]
+                  },
+                  "pmOwnerId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "workspaceId",
+                  "channelId",
+                  "audience",
+                  "captureMode",
+                  "pmOwnerId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Slack surface",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "workspaceId": {
+                            "type": "string"
+                          },
+                          "channelId": {
+                            "type": "string"
+                          },
+                          "audience": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "client"
+                            ]
+                          },
+                          "clientKey": {
+                            "type": "string"
+                          },
+                          "captureMode": {
+                            "type": "string",
+                            "enum": [
+                              "mention_only",
+                              "designated_channel"
+                            ]
+                          },
+                          "pmOwnerId": {
+                            "type": "string"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "verificationStatus": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "verified",
+                              "failed"
+                            ]
+                          },
+                          "verifiedAt": {
+                            "type": "string"
+                          },
+                          "verificationError": {
+                            "type": "string"
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "workspaceId",
+                          "channelId",
+                          "audience",
+                          "captureMode",
+                          "pmOwnerId",
+                          "isActive",
+                          "verificationStatus",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "surfaces"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/slack-surfaces/{id}/verify": {
+      "post": {
+        "summary": "Verify Aria's workspace and channel access for a Slack surface",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verified Slack surface",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "workspaceId": {
+                            "type": "string"
+                          },
+                          "channelId": {
+                            "type": "string"
+                          },
+                          "audience": {
+                            "type": "string",
+                            "enum": [
+                              "internal",
+                              "client"
+                            ]
+                          },
+                          "clientKey": {
+                            "type": "string"
+                          },
+                          "captureMode": {
+                            "type": "string",
+                            "enum": [
+                              "mention_only",
+                              "designated_channel"
+                            ]
+                          },
+                          "pmOwnerId": {
+                            "type": "string"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          },
+                          "verificationStatus": {
+                            "type": "string",
+                            "enum": [
+                              "pending",
+                              "verified",
+                              "failed"
+                            ]
+                          },
+                          "verifiedAt": {
+                            "type": "string"
+                          },
+                          "verificationError": {
+                            "type": "string"
+                          },
+                          "createdByUserId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "workspaceId",
+                          "channelId",
+                          "audience",
+                          "captureMode",
+                          "pmOwnerId",
+                          "isActive",
+                          "verificationStatus",
+                          "createdByUserId",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "surfaces"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ariahq/v1/client-intakes": {
+      "get": {
+        "summary": "List tenant-scoped client intake projections",
+        "tags": [
+          "AriaHQ"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Client intakes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intakes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "organizationId": {
+                            "type": "string"
+                          },
+                          "slackSurfaceId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "workItemId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "messageTs": {
+                            "type": "string"
+                          },
+                          "threadTs": {
+                            "type": "string"
+                          },
+                          "externalUserId": {
+                            "type": "string"
+                          },
+                          "clientStatus": {
+                            "type": "string",
+                            "enum": [
+                              "captured",
+                              "reviewing",
+                              "needs_information",
+                              "accepted",
+                              "in_progress",
+                              "released",
+                              "resolved",
+                              "closed"
+                            ]
+                          },
+                          "publicSummary": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "lastUpdatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "organizationId",
+                          "slackSurfaceId",
+                          "workItemId",
+                          "messageTs",
+                          "threadTs",
+                          "externalUserId",
+                          "clientStatus",
+                          "publicSummary",
+                          "createdAt",
+                          "lastUpdatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "intakes"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_code": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "error_code"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/assets/key-audit": {
       "get": {
         "summary": "Audit asset namespace invariants",

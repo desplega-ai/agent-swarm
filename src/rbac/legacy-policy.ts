@@ -143,6 +143,9 @@ export const LEGACY_RULES = {
 // ── Verb → rule table ────────────────────────────────────────────────────────
 
 export const LEGACY_POLICY = {
+  "ariahq.engine.manage": anyAuthenticated,
+  "ariahq.knowledge.write": anyAuthenticated,
+  "ariahq.surface.manage": anyAuthenticated,
   "devflow.work-item.write": anyAuthenticated,
   "devflow.gate.approve": anyAuthenticated,
   "devflow.agent-run.start": anyAuthenticated,

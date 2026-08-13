@@ -125,14 +125,20 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    id: "devflow",
-    label: "DEVFLOW",
+    id: "ariahq",
+    label: "ARIAHQ",
     items: [
       {
-        title: "Pipeline",
-        path: "/devflow/pipeline",
-        icon: WorkflowIcon,
-        children: [{ title: "Idea Inbox", path: "/devflow/inbox" }],
+        title: "Command Center",
+        path: "/ariahq",
+        icon: BrainIcon,
+        children: [
+          { title: "Engine Studio", path: "/ariahq/engines" },
+          { title: "Ask Aria", path: "/ariahq/knowledge" },
+          { title: "Sources & Surfaces", path: "/ariahq/sources" },
+          { title: "DevFlow", path: "/devflow/pipeline" },
+          { title: "DevFlow Inbox", path: "/devflow/inbox" },
+        ],
       },
     ],
   },

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { createApiRegistryClient } from "../scripts-runtime/api-client";
 import { runScript } from "../scripts-runtime/loader";
 import {
@@ -327,7 +328,7 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
@@ -377,7 +378,7 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();
@@ -410,7 +411,7 @@ describe("runScript", () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
-      const runtimeSrc = new URL("../scripts-runtime", import.meta.url).pathname;
+      const runtimeSrc = fileURLToPath(new URL("../scripts-runtime", import.meta.url));
       await Bun.$`bun build ${runtimeSrc}/eval-harness.ts --target bun --no-splitting --outfile ${tmpdir}/eval-harness.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/stdlib/index.ts --target bun --no-splitting --outfile ${tmpdir}/stdlib.bundle.js`.quiet();
       await Bun.$`bun build ${runtimeSrc}/swarm-sdk.ts --target bun --no-splitting --outfile ${tmpdir}/swarm-sdk.bundle.js`.quiet();

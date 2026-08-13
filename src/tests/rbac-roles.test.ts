@@ -16,6 +16,12 @@ import type { PermissionVerb } from "../rbac";
 const TEST_DB_PATH = "./test-rbac-roles.sqlite";
 const REQUESTER_ROLE_ID = "rbac-role-requester";
 const REQUESTER_VERBS = [
+  "ariahq.engine.manage",
+  "ariahq.knowledge.write",
+  "ariahq.surface.manage",
+  "devflow.agent-run.start",
+  "devflow.gate.approve",
+  "devflow.work-item.write",
   "favorite.write.own",
   "task.action.own",
   "task.cancel.own",

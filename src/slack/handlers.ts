@@ -1,12 +1,18 @@
 import type { App } from "@slack/bolt";
 import type { WebClient } from "@slack/web-api";
+import { createAriaHqRepository } from "../ariahq/repository";
+import { createClientIntakeService } from "../ariahq/services/client-intake";
+import { createKnowledgeService } from "../ariahq/services/knowledge-service";
+import { handleAriaInternalSlackQuestion, handleAriaSlackIngress } from "../ariahq/slack";
 import {
   getAgentById,
   getAgentWorkingOnThread,
+  getDb,
   getLeadAgent,
   getMostRecentTaskInThread,
   getTasksByAgentId,
 } from "../be/db";
+import { createDevFlowRepository } from "../devflow/repository";
 import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
@@ -438,6 +444,38 @@ export function registerMessageHandler(app: App): void {
       return;
     }
 
+    // AriaHQ client surfaces are a hard tenant boundary. Handle them before
+    // internal user authorization and generic swarm routing so client messages
+    // can only create the configured DevFlow intake projection.
+    const workspaceId = (body as { team_id?: string }).team_id;
+    if (workspaceId && cachedBotUserId) {
+      const ariaRepository = createAriaHqRepository(getDb());
+      const clientIngress = handleAriaSlackIngress(
+        {
+          aria: ariaRepository,
+          intake: createClientIntakeService({
+            aria: ariaRepository,
+            devflow: createDevFlowRepository(getDb()),
+          }),
+        },
+        {
+          workspaceId,
+          channelId: msg.channel,
+          messageTs: msg.ts,
+          ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
+          externalUserId: msg.user,
+          text: buildEffectiveText(msg.text, msg.files),
+          botUserId: cachedBotUserId,
+        },
+      );
+      if (clientIngress.recognized) {
+        if (clientIngress.handled && clientIngress.reply) {
+          await say({ text: clientIngress.reply, thread_ts: msg.thread_ts ?? msg.ts });
+        }
+        return;
+      }
+    }
+
     // Check user authorization
     if (!(await isUserAllowed(client, msg.user))) {
       console.log(`[Slack] Ignoring message from unauthorized user ${msg.user}`);
@@ -452,6 +490,37 @@ export function registerMessageHandler(app: App): void {
       sampleEventType: "message",
       sampleContext: msg.text ?? "",
     });
+
+    // Verified internal AriaHQ surfaces turn an @Aria question into a
+    // tenant-scoped, evidence-grounded answer task linked to this Slack thread.
+    // Unmapped users fail closed before any internal evidence is retrieved.
+    if (workspaceId && cachedBotUserId) {
+      const ariaRepository = createAriaHqRepository(getDb());
+      const devflowRepository = createDevFlowRepository(getDb());
+      const internalQuestion = handleAriaInternalSlackQuestion(
+        {
+          aria: ariaRepository,
+          devflow: devflowRepository,
+          knowledge: createKnowledgeService({ repo: ariaRepository }),
+        },
+        {
+          workspaceId,
+          channelId: msg.channel,
+          messageTs: msg.ts,
+          ...(msg.thread_ts ? { threadTs: msg.thread_ts } : {}),
+          externalUserId: msg.user,
+          text: buildEffectiveText(msg.text, msg.files),
+          botUserId: cachedBotUserId,
+          ...(requestedByUserId ? { requestedByUserId } : {}),
+        },
+      );
+      if (internalQuestion.recognized) {
+        if (internalQuestion.reply) {
+          await say({ text: internalQuestion.reply, thread_ts: msg.thread_ts ?? msg.ts });
+        }
+        return;
+      }
+    }
 
     // Emit workflow trigger event for Slack messages
     workflowEventBus.emit("slack.message", {

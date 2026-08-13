@@ -615,7 +615,10 @@ describe("ScriptExecutor", () => {
   });
 
   test("resource ulimits actually apply to the spawned process (not just documented)", async () => {
-    const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
+    // Darwin cannot set RLIMIT_AS through `ulimit -v`; its process limit is
+    // also global to the logged-in user. Probe the portable fd limit there.
+    const flag = process.platform === "darwin" ? "-n" : "-v";
+    const result = await executor.run(input({ runtime: "bash", script: `ulimit ${flag}` }, {}));
     expect(result.status).toBe("success");
     const out = result.output as { stdout: string };
     // "unlimited" means no cap took effect; any other value is a real (finite) ulimit.

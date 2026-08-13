@@ -98,6 +98,13 @@ const ANY_AUTHENTICATED_VERBS: PermissionVerb[] = [
   "task.create.own",
   "favorite.write.own",
   "script.search",
+  "ariahq.engine.manage",
+  "ariahq.knowledge.write",
+  "ariahq.surface.manage",
+  "devflow.work-item.write",
+  "devflow.gate.approve",
+  "devflow.agent-run.start",
+  "devflow.factory.execute",
 ];
 
 const REQUESTER_OWNS_TASK_VERBS: PermissionVerb[] = [

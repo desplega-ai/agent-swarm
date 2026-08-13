@@ -23,6 +23,7 @@ import { extractArgsJsonSchema } from "../scripts/extract-schema";
 import { typecheckScript } from "../scripts/typecheck";
 import type { Seeder, SeederRunOptions, SeedItem } from "../seed/types";
 import appSyncRunSrc from "./catalog/app-sync-run.ts" with { type: "text" };
+import ariaKnowledgeSyncSrc from "./catalog/ariahq-knowledge-sync.ts" with { type: "text" };
 import bootTriageSrc from "./catalog/boot-triage.inline.ts" with { type: "text" };
 // @ts-expect-error Bun text imports synthesize a default string for this helper.
 import catalogReportSrc from "./catalog/catalog-report.inline.ts" with { type: "text" };
@@ -71,6 +72,14 @@ function bundleCatalogReport(source: string): string {
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
+  {
+    name: "ariahq-knowledge-sync",
+    description:
+      "Synchronize a tenant-scoped AriaHQ knowledge source through its bound OpenAPI connection, with durable cursors, normalized evidence, and a journaled outcome.",
+    intent:
+      "Run scheduled Google Drive, HubSpot, call-recording, or other organizational knowledge ingestion from one declarative source contract.",
+    source: asText(ariaKnowledgeSyncSrc),
+  },
   {
     name: "gh-pr-snapshot",
     description:

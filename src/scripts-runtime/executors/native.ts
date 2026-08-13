@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
   buildSandboxedCommand,
   readStreamCapped,
@@ -120,7 +121,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
       ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
-      : new URL("../eval-harness.ts", import.meta.url).pathname;
+      : fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
     const controller = new AbortController();
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;

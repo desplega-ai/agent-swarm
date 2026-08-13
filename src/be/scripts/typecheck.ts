@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { getScriptAppTypes } from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
@@ -131,6 +132,26 @@ export interface SwarmSdk {
   // --- scripts ---
   script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;
   script_run(args: { name?: string; source?: string; args?: unknown; intent?: string; scope?: ScriptScope; fsMode?: ScriptFsMode; idempotencyKey?: string }): Promise<unknown>;
+  // --- AriaHQ knowledge ingestion ---
+  ariahq_source(args:
+    | { action: "begin"; sourceId: string }
+    | {
+        action: "commit";
+        sourceId: string;
+        runId: string;
+        nextCursor?: string;
+        records: Array<{
+          sourceRef: string;
+          sourceRevision: string;
+          sourceUrl?: string;
+          title: string;
+          content: string;
+          effectiveAt: string;
+          metadata?: Record<string, unknown>;
+        }>;
+      }
+    | { action: "fail"; sourceId: string; runId: string; errorMessage: string }
+  ): Promise<unknown>;
   // --- swarm / agent ---
   swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
   agent_info(args?: Record<string, unknown>): Promise<unknown>;
@@ -799,7 +820,7 @@ const RUNTIME_GLOBALS_FILE = "/virtual/runtime-globals.d.ts";
 function scriptTypesBase(): string {
   const dir = process.env.SCRIPT_TYPES_DIR;
   if (dir) return `${dir}/index.ts`;
-  return new URL("../../index.ts", import.meta.url).pathname;
+  return fileURLToPath(new URL("../../index.ts", import.meta.url));
 }
 
 function createCompilerHost(

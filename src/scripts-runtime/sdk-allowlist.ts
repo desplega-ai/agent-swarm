@@ -48,6 +48,9 @@ export const SDK_TOOL_NAME_MAP = {
   script_getRun: "get-script-run",
   script_listRuns: "list-script-runs",
 
+  // ── AriaHQ knowledge sources ──
+  ariahq_source: "ariahq-knowledge-source",
+
   // ── swarm / agent ──
   swarm_get: "get-swarm",
   agent_info: "my-agent-info",

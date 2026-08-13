@@ -18,6 +18,7 @@ import { registerAppQueryTool } from "./tools/app-query";
 import { registerAppRollbackTool } from "./tools/app-rollback";
 import { registerAppSyncTool } from "./tools/app-sync";
 import { registerAppUpsertTool } from "./tools/app-upsert";
+import { registerAriaKnowledgeSourceTool } from "./tools/ariahq-knowledge-source";
 import { registerCancelTaskTool } from "./tools/cancel-task";
 import { registerContextDiffTool } from "./tools/context-diff";
 import { registerContextHistoryTool } from "./tools/context-history";
@@ -329,6 +330,7 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
 
   // Core capability - swarm membership, task flow, progress, user identity, and lead debug tools
   if (hasCapability("core")) {
+    registerAriaKnowledgeSourceTool(server);
     registerJoinSwarmTool(server);
     registerPollTaskTool(server);
     registerGetSwarmTool(server);

@@ -170,6 +170,27 @@ declare module "swarm-sdk" {
       fsMode?: ScriptFsMode;
       idempotencyKey?: string;
     }): Promise<unknown>;
+    // --- AriaHQ knowledge ingestion ---
+    ariahq_source(
+      args:
+        | { action: "begin"; sourceId: string }
+        | {
+            action: "commit";
+            sourceId: string;
+            runId: string;
+            nextCursor?: string;
+            records: Array<{
+              sourceRef: string;
+              sourceRevision: string;
+              sourceUrl?: string;
+              title: string;
+              content: string;
+              effectiveAt: string;
+              metadata?: Record<string, unknown>;
+            }>;
+          }
+        | { action: "fail"; sourceId: string; runId: string; errorMessage: string },
+    ): Promise<unknown>;
     // --- swarm / agent ---
     swarm_get(args?: { includeFull?: boolean }): Promise<unknown>;
     agent_info(args?: Record<string, unknown>): Promise<unknown>;

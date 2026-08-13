@@ -17,6 +17,18 @@
 import * as z from "zod";
 
 export const PERMISSIONS = {
+  "ariahq.engine.manage": {
+    description: "Draft, reconcile, and publish governed AriaHQ engines.",
+    namespace: "ariahq",
+  },
+  "ariahq.knowledge.write": {
+    description: "Ingest versioned records into the AriaHQ Organizational Brain.",
+    namespace: "ariahq",
+  },
+  "ariahq.surface.manage": {
+    description: "Configure tenant-bound AriaHQ Slack surfaces.",
+    namespace: "ariahq",
+  },
   "devflow.work-item.write": {
     description: "Create or update work items in a DevFlow organization.",
     namespace: "devflow",

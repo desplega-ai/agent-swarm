@@ -194,6 +194,9 @@ export const DEFERRED_TOOLS = new Set([
   "get-script-run",
   "list-script-runs",
 
+  // AriaHQ knowledge ingestion (1)
+  "ariahq-knowledge-source",
+
   // External command routes (1)
   "swarm_x",
 

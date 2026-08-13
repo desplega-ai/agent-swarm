@@ -45,6 +45,7 @@ import { handleAgentRegister, handleAgentsRest } from "./agents";
 import { handleApiKeys } from "./api-keys";
 import { handleApprovalRequests } from "./approval-requests";
 import { handleApps } from "./apps";
+import { handleAriaHq } from "./ariahq";
 import { handleAssets } from "./assets";
 import { handleBudgets } from "./budgets";
 import { handleCodexOAuthKeepWarm } from "./codex-oauth-keep-warm";
@@ -332,6 +333,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleIntegrations(req, res, pathSegments),
         () => handlePromptTemplates(req, res, pathSegments, queryParams),
         () => handleDbQuery(req, res, pathSegments, queryParams),
+        () => handleAriaHq(req, res, pathSegments, queryParams),
         () => handleDevFlow(req, res, pathSegments, queryParams),
         () => handleMetrics(req, res, pathSegments, queryParams, myAgentId),
         () => handleModelsCatalog(req, res, pathSegments, queryParams),
