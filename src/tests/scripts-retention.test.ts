@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { createApp, deleteApp } from "../apps/store";
 import { closeDb, getDb, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
@@ -91,6 +92,33 @@ describe("scratch script retention", () => {
       getScript({ name: flaggedWithoutPrefix.name, scope: "agent", scopeId: "agent-1" }),
     ).not.toBeNull();
     expect(getScript({ name: globalScratch.name, scope: "global" })).not.toBeNull();
+  });
+
+  test("a stale scratch script referenced by an app definition survives the sweep", () => {
+    const wired = addScript("scratch-app-wired-a1b2c3d4", true);
+    const unwired = addScript("scratch-app-unwired-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
+      .run(old, wired.id, unwired.id);
+
+    const app = createApp({
+      name: "retention-test-app",
+      definition: {
+        models: {},
+        actions: { run: { kind: "script", scriptId: wired.id } },
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      },
+    });
+
+    try {
+      expect(purgeExpiredScratchScripts(NOW)).toBe(1);
+      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    } finally {
+      deleteApp(app.id);
+    }
   });
 
   test("a repeated successful scratch auto-save refreshes last-used time without a version bump", async () => {
