@@ -55,6 +55,32 @@ function workflowReferencedAgentScriptKeys(): Set<string> {
   return keys;
 }
 
+/**
+ * Script names an enabled `swarm-script` node could resolve at agent scope for a
+ * workflow with no static owner (`createdByAgentId` null — no `X-Agent-ID` at
+ * creation time, or a pre-migration legacy row). `SwarmScriptExecutor` falls back to
+ * `trigger.agentId` at run time for these (src/workflows/executors/swarm-script.ts
+ * `agentIdFromContext`), so the resolving agent isn't knowable statically — this
+ * excludes by NAME alone across every agent scope, which is over-broad (it also
+ * protects a same-named scratch script some *other*, unrelated agent owns) but is
+ * the only sound static signal available; `scope: "global"` nodes are skipped for
+ * the same reason as the owner-keyed variant above.
+ */
+function workflowReferencedScratchNamesForOwnerlessWorkflows(): Set<string> {
+  const names = new Set<string>();
+  for (const workflow of listWorkflows()) {
+    if (workflow.createdByAgentId) continue;
+    for (const node of workflow.definition.nodes) {
+      if (node.type !== "swarm-script") continue;
+      const scriptName = (node.config as { scriptName?: unknown }).scriptName;
+      const scope = (node.config as { scope?: unknown }).scope;
+      if (typeof scriptName !== "string" || scope === "global") continue;
+      names.add(scriptName);
+    }
+  }
+  return names;
+}
+
 /** Delete auto-saved scratch scripts that have not run within the retention window. */
 export function purgeExpiredScratchScripts(now = new Date()): number {
   const cutoff = new Date(
@@ -80,10 +106,12 @@ export function purgeExpiredScratchScripts(now = new Date()): number {
   const referenced = appReferencedScriptIds();
   const apiReferenced = scriptApiReferencedScriptIds();
   const workflowReferenced = workflowReferencedAgentScriptKeys();
+  const ownerlessWorkflowReferencedNames = workflowReferencedScratchNamesForOwnerlessWorkflows();
   const idsToDelete = candidates
     .filter((row) => !referenced.has(row.id))
     .filter((row) => !apiReferenced.has(row.id))
     .filter((row) => !(row.scopeId && workflowReferenced.has(`${row.name}::${row.scopeId}`)))
+    .filter((row) => !ownerlessWorkflowReferencedNames.has(row.name))
     .map((row) => row.id);
   if (idsToDelete.length === 0) return 0;
 

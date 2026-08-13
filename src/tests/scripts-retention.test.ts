@@ -193,6 +193,47 @@ describe("scratch script retention", () => {
     }
   });
 
+  test("a stale scratch script referenced by an ownerless workflow's swarm-script node survives by name alone", () => {
+    const wired = addScript("scratch-wf-ownerless-wired-a1b2c3d4", true);
+    const unwired = addScript("scratch-wf-ownerless-unwired-a1b2c3d4", true);
+    const globalNode = addScript("scratch-wf-ownerless-global-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?)")
+      .run(old, wired.id, unwired.id, globalNode.id);
+
+    // No createdByAgentId: the resolving agent is only known at trigger time
+    // (SwarmScriptExecutor falls back to trigger.agentId), so the sweep can only
+    // match by script name across every agent scope.
+    const workflow = createWorkflow({
+      name: "retention-test-workflow-ownerless",
+      definition: {
+        nodes: [
+          {
+            id: "run-it",
+            type: "swarm-script",
+            config: { scriptName: wired.name, scope: "agent" },
+          },
+          {
+            id: "run-global",
+            type: "swarm-script",
+            config: { scriptName: globalNode.name, scope: "global" },
+          },
+        ],
+        onNodeFailure: "fail",
+      },
+    });
+
+    try {
+      expect(purgeExpiredScratchScripts(NOW)).toBe(2);
+      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    } finally {
+      deleteWorkflow(workflow.id);
+    }
+  });
+
   test("a repeated successful scratch auto-save refreshes last-used time without a version bump", async () => {
     const args = {
       name: "scratch-reused-a1b2c3d4",
