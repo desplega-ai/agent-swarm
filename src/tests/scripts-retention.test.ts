@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createApp, deleteApp } from "../apps/store";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, createWorkflow, deleteWorkflow, getDb, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
-import { getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
+import { createScriptApi, getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
 import { purgeExpiredScratchScripts } from "../be/scripts/retention";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 
@@ -118,6 +118,78 @@ describe("scratch script retention", () => {
       expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
     } finally {
       deleteApp(app.id);
+    }
+  });
+
+  test("a stale scratch script bound to a public API endpoint survives the sweep", () => {
+    const wired = addScript("scratch-api-wired-a1b2c3d4", true);
+    const unwired = addScript("scratch-api-unwired-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
+      .run(old, wired.id, unwired.id);
+
+    createScriptApi({ scriptId: wired.id, agentId: "agent-1", authMode: "none" });
+
+    expect(purgeExpiredScratchScripts(NOW)).toBe(1);
+    expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+    expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+  });
+
+  test("a stale scratch script referenced by an agent-scoped workflow swarm-script node survives the sweep", () => {
+    const wired = addScript("scratch-wf-wired-a1b2c3d4", true);
+    const unwired = addScript("scratch-wf-unwired-a1b2c3d4", true);
+    const wrongOwner = addScript("scratch-wf-wrongowner-a1b2c3d4", true);
+    const globalNode = addScript("scratch-wf-global-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?, ?)")
+      .run(old, wired.id, unwired.id, wrongOwner.id, globalNode.id);
+
+    const workflow = createWorkflow({
+      name: "retention-test-workflow",
+      definition: {
+        nodes: [
+          {
+            id: "run-it",
+            type: "swarm-script",
+            config: { scriptName: wired.name, scope: "agent" },
+          },
+          {
+            id: "run-global",
+            type: "swarm-script",
+            config: { scriptName: globalNode.name, scope: "global" },
+          },
+        ],
+        onNodeFailure: "fail",
+      },
+      createdByAgentId: "agent-1",
+    });
+    // Same script name, wrong workflow owner — must not protect wrongOwner's row.
+    const otherOwnerWorkflow = createWorkflow({
+      name: "retention-test-workflow-other-owner",
+      definition: {
+        nodes: [
+          {
+            id: "run-it",
+            type: "swarm-script",
+            config: { scriptName: wrongOwner.name, scope: "agent" },
+          },
+        ],
+        onNodeFailure: "fail",
+      },
+      createdByAgentId: "agent-2",
+    });
+
+    try {
+      expect(purgeExpiredScratchScripts(NOW)).toBe(3);
+      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(getScript({ name: wrongOwner.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    } finally {
+      deleteWorkflow(workflow.id);
+      deleteWorkflow(otherOwnerWorkflow.id);
     }
   });
 

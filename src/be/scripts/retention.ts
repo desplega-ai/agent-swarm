@@ -1,6 +1,6 @@
 import { collectScriptReferences } from "../../apps/definition";
 import { listAppRecords } from "../../apps/store";
-import { getDb } from "../db";
+import { getDb, listWorkflows } from "../db";
 
 const SCRATCH_RETENTION_DAYS = 14;
 const SCRATCH_GC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -18,14 +18,51 @@ function appReferencedScriptIds(): Set<string> {
   return ids;
 }
 
+/**
+ * Every script id bound to a durable public API endpoint. `script_apis.scriptId`
+ * cascade-deletes with the script (`ON DELETE CASCADE`, src/be/migrations/102_script_apis.sql),
+ * so an unreferenced-looking scratch script backing a live `/api/x/script` endpoint
+ * would otherwise be silently deleted out from under it.
+ */
+function scriptApiReferencedScriptIds(): Set<string> {
+  const rows = getDb()
+    .prepare<{ scriptId: string }, []>("SELECT DISTINCT scriptId FROM script_apis")
+    .all();
+  return new Set(rows.map((row) => row.scriptId));
+}
+
+/**
+ * `(name, agentId)` keys an enabled workflow's `swarm-script` node could resolve at
+ * agent scope. A node's `config.scriptName` resolves by NAME, not id
+ * (src/workflows/executors/swarm-script.ts `resolveScriptSource`), against the
+ * workflow's `createdByAgentId` for `scope: "agent"` or omitted scope — so a
+ * name/scope match against a workflow's owner is the only static signal available;
+ * `scope: "global"` nodes can never resolve an agent-scoped scratch candidate and
+ * are skipped.
+ */
+function workflowReferencedAgentScriptKeys(): Set<string> {
+  const keys = new Set<string>();
+  for (const workflow of listWorkflows()) {
+    if (!workflow.createdByAgentId) continue;
+    for (const node of workflow.definition.nodes) {
+      if (node.type !== "swarm-script") continue;
+      const scriptName = (node.config as { scriptName?: unknown }).scriptName;
+      const scope = (node.config as { scope?: unknown }).scope;
+      if (typeof scriptName !== "string" || scope === "global") continue;
+      keys.add(`${scriptName}::${workflow.createdByAgentId}`);
+    }
+  }
+  return keys;
+}
+
 /** Delete auto-saved scratch scripts that have not run within the retention window. */
 export function purgeExpiredScratchScripts(now = new Date()): number {
   const cutoff = new Date(
     now.getTime() - SCRATCH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
   const candidates = getDb()
-    .prepare<{ id: string }, [string]>(
-      `SELECT id FROM scripts
+    .prepare<{ id: string; name: string; scopeId: string | null }, [string]>(
+      `SELECT id, name, scopeId FROM scripts
        WHERE scope = 'agent'
          AND isScratch = 1
          AND name GLOB 'scratch-*'
@@ -34,12 +71,20 @@ export function purgeExpiredScratchScripts(now = new Date()): number {
     .all(cutoff);
   if (candidates.length === 0) return 0;
 
-  // A scratch script wired into an app (action source or model source) is no
-  // longer "scratch" in effect — deleting it leaves the app's definition
-  // dangling. Same guard the interactive scripts-API delete route enforces
-  // via appScriptReferenceIssues, applied here to the whole sweep at once.
+  // A scratch script still wired into a durable reference — an app action/model
+  // source, a public API endpoint, or a workflow's swarm-script node — is no
+  // longer "scratch" in effect; deleting it leaves that reference dangling. Same
+  // guard the interactive scripts-API delete route enforces for app references via
+  // appScriptReferenceIssues, applied here to the whole sweep at once, plus the two
+  // durable reference kinds that guard doesn't cover either.
   const referenced = appReferencedScriptIds();
-  const idsToDelete = candidates.map((row) => row.id).filter((id) => !referenced.has(id));
+  const apiReferenced = scriptApiReferencedScriptIds();
+  const workflowReferenced = workflowReferencedAgentScriptKeys();
+  const idsToDelete = candidates
+    .filter((row) => !referenced.has(row.id))
+    .filter((row) => !apiReferenced.has(row.id))
+    .filter((row) => !(row.scopeId && workflowReferenced.has(`${row.name}::${row.scopeId}`)))
+    .map((row) => row.id);
   if (idsToDelete.length === 0) return 0;
 
   const placeholders = idsToDelete.map(() => "?").join(",");
