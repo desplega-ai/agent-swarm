@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.131.1] - 2026-08-13
+
+### Added
+- **Swarm Apps now have a practical build guide** (#1162) — new recipes and screenshots explain when to use apps and how to build common app patterns.
+
+### Changed
+- **Model registries track current Anthropic pricing** (#1160) — Sonnet 5 uses its introductory pricing now and transitions to standard pricing on schedule.
+
+### Fixed
+- **Daily reflection audits inspect the complete skill catalog** (#1163) — audit guidance now paginates skill records and includes stable skill identifiers so findings are not silently omitted.
+
 ## [1.131.0] - 2026-08-11
 
 ### Added
