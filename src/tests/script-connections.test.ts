@@ -535,9 +535,10 @@ describe("script connections", () => {
       markMigrationApplied(database, "127_backfill_user_attribution.sql");
       // 128 alters session_costs, which this partial fixture does not create.
       markMigrationApplied(database, "128_session_costs_accuracy.sql");
-      // 129 alters scripts and rebuilds asset_key_history, neither of which this
-      // migration-112-only fixture creates.
+      // 129 and 130 alter scripts (and 129 rebuilds asset_key_history), none of
+      // which this migration-112-only fixture creates.
       markMigrationApplied(database, "129_asset_keys_apps_scripts.sql");
+      markMigrationApplied(database, "130_scratch_script_retention_grace.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
