@@ -8,6 +8,7 @@ import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
 const TEST_DB_PATH = "./test-scripts-retention.sqlite";
 const NOW = new Date("2026-08-13T12:00:00.000Z");
 const signatureJson = JSON.stringify({ args: null, result: null });
+const savedApiKey = process.env.AGENT_SWARM_API_KEY;
 
 async function clearDb(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -34,6 +35,7 @@ function addScript(name: string, isScratch: boolean) {
 
 describe("scratch script retention", () => {
   beforeAll(async () => {
+    process.env.AGENT_SWARM_API_KEY = "scripts-retention-test-key";
     await clearDb();
     initDb(TEST_DB_PATH);
   });
@@ -41,6 +43,8 @@ describe("scratch script retention", () => {
   afterAll(async () => {
     closeDb();
     await clearDb();
+    if (savedApiKey === undefined) delete process.env.AGENT_SWARM_API_KEY;
+    else process.env.AGENT_SWARM_API_KEY = savedApiKey;
   });
 
   beforeEach(() => {
