@@ -7,12 +7,26 @@ const SCRATCH_GC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 let scratchGcTimer: ReturnType<typeof setInterval> | null = null;
 
-/** Every script id wired into an app definition, as an action or model source. */
-function appReferencedScriptIds(): Set<string> {
+/**
+ * Every script id wired into an app definition, as an action or model source.
+ *
+ * `candidateIds` are the GC-candidate scratch scripts this call cares about.
+ * A broken app (invalid stored JSON) decodes with `definition` set to the raw
+ * string itself, not a merge-patch object, so `collectScriptReferences` below
+ * finds nothing for it. Same substring-probe fallback the interactive delete
+ * guard applies via `appScriptReferenceIssues` in src/http/scripts.ts — a
+ * broken app is not consent to break it further.
+ */
+function appReferencedScriptIds(candidateIds: readonly string[]): Set<string> {
   const ids = new Set<string>();
   for (const app of listAppRecords()) {
     for (const scriptId of collectScriptReferences(app.definition).keys()) {
       ids.add(scriptId);
+    }
+    if (app.definitionError === undefined) continue;
+    const serialized = JSON.stringify(app.definition ?? null);
+    for (const id of candidateIds) {
+      if (!ids.has(id) && serialized.includes(id)) ids.add(id);
     }
   }
   return ids;
@@ -103,7 +117,7 @@ export function purgeExpiredScratchScripts(now = new Date()): number {
   // guard the interactive scripts-API delete route enforces for app references via
   // appScriptReferenceIssues, applied here to the whole sweep at once, plus the two
   // durable reference kinds that guard doesn't cover either.
-  const referenced = appReferencedScriptIds();
+  const referenced = appReferencedScriptIds(candidates.map((row) => row.id));
   const apiReferenced = scriptApiReferencedScriptIds();
   const workflowReferenced = workflowReferencedAgentScriptKeys();
   const ownerlessWorkflowReferencedNames = workflowReferencedScratchNamesForOwnerlessWorkflows();

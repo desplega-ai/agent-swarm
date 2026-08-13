@@ -121,6 +121,39 @@ describe("scratch script retention", () => {
     }
   });
 
+  test("a stale scratch script referenced only by a broken app's raw definition string survives the sweep", () => {
+    const wired = addScript("scratch-broken-wired-a1b2c3d4", true);
+    const unwired = addScript("scratch-broken-unwired-a1b2c3d4", true);
+    const old = "2026-07-01T00:00:00.000Z";
+    getDb()
+      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
+      .run(old, wired.id, unwired.id);
+
+    const app = createApp({
+      name: "retention-test-broken-app",
+      definition: {
+        models: {},
+        actions: {},
+        pages: { main: { root: "root", elements: { root: { type: "Container", props: {} } } } },
+        defaultPage: "main",
+      },
+    });
+    // Corrupt the stored JSON so decodeApp() falls into the invalid-JSON
+    // branch: `definition` becomes the raw string itself, and the wired
+    // script's id survives only inside that unparseable text.
+    getDb()
+      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
+      .run(`{"actions": {"run": {"scriptId": "${wired.id}"`, app.id);
+
+    try {
+      expect(purgeExpiredScratchScripts(NOW)).toBe(1);
+      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    } finally {
+      deleteApp(app.id);
+    }
+  });
+
   test("a stale scratch script bound to a public API endpoint survives the sweep", () => {
     const wired = addScript("scratch-api-wired-a1b2c3d4", true);
     const unwired = addScript("scratch-api-unwired-a1b2c3d4", true);
