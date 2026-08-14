@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ScriptRun } from "../types";
 import {
   buildSandboxedCommand,
@@ -40,7 +41,7 @@ export interface ScriptExecutor {
 
 export function getScriptWorkflowHarnessPath(): string {
   const runtimeDir = process.env.SCRIPT_WORKFLOW_RUNTIME_DIR;
-  if (!runtimeDir) return new URL("./harness.ts", import.meta.url).pathname;
+  if (!runtimeDir) return fileURLToPath(new URL("./harness.ts", import.meta.url));
 
   const bundledHarness = `${resolve(runtimeDir)}/harness.bundle.js`;
   if (!existsSync(bundledHarness)) {

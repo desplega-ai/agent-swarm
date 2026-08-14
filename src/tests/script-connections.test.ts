@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
@@ -52,7 +53,7 @@ function removeDbFiles(path: string) {
 }
 
 function migrationsDir() {
-  return new URL("../be/migrations", import.meta.url).pathname;
+  return fileURLToPath(new URL("../be/migrations", import.meta.url));
 }
 
 function migrationSql(file: string) {

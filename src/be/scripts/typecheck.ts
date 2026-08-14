@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { getScriptAppTypes } from "@/apps/script-types";
 import { getScriptApiTypes, getScriptMcpTypes } from "@/be/script-connections";
@@ -799,7 +800,7 @@ const RUNTIME_GLOBALS_FILE = "/virtual/runtime-globals.d.ts";
 function scriptTypesBase(): string {
   const dir = process.env.SCRIPT_TYPES_DIR;
   if (dir) return `${dir}/index.ts`;
-  return new URL("../../index.ts", import.meta.url).pathname;
+  return fileURLToPath(new URL("../../index.ts", import.meta.url));
 }
 
 function createCompilerHost(
