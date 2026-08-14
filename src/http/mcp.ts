@@ -118,6 +118,18 @@ export async function handleMcp(
     }
     const body = JSON.parse(Buffer.concat(chunks).toString());
 
+    if (!sessionId && body.method === "server/discover") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32601, message: "Method not found" },
+          id: body.id ?? null,
+        }),
+      );
+      return true;
+    }
+
     let transport: StreamableHTTPServerTransport;
 
     if (sessionId && transports[sessionId]) {

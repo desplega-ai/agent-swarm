@@ -362,6 +362,23 @@ describe("/mcp-user auth and tool surface", () => {
     expect(unknown.response.status).toBe(401);
   });
 
+  test("owner /mcp returns method not found for sessionless server/discover", async () => {
+    const { response, payload } = await mcpPost(
+      API_KEY,
+      { jsonrpc: "2.0", id: 7, method: "server/discover", params: {} },
+      undefined,
+      "/mcp",
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("mcp-session-id")).toBeNull();
+    expect(payload).toEqual({
+      jsonrpc: "2.0",
+      error: { code: -32601, message: "Method not found" },
+      id: 7,
+    });
+  });
+
   test("owner /mcp path initializes with a known agent and rejects a different X-Agent-ID on the session", async () => {
     const owner = createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
     const other = createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
