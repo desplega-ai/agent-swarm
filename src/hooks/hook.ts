@@ -110,6 +110,42 @@ export function shouldShowRegistrationNudge(opts: {
   return true;
 }
 
+export async function postHookProfileUpdate({
+  url,
+  headers,
+  body,
+  label,
+  fetchImpl = fetch,
+}: {
+  url: string;
+  headers: Record<string, string>;
+  body: Record<string, string>;
+  label: string;
+  fetchImpl?: typeof fetch;
+}): Promise<void> {
+  try {
+    const response = await fetchImpl(url, {
+      method: "PUT",
+      headers: {
+        ...headers,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const responseBody = await response.text();
+      console.error(
+        scrubSecrets(
+          `[hook] ${label} profile sync failed: HTTP ${response.status}${responseBody ? ` — ${responseBody}` : ""}`,
+        ),
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(scrubSecrets(`[hook] ${label} profile sync errored: ${message}`));
+  }
+}
+
 /**
  * Hook response for blocking actions
  * See: https://code.claude.com/docs/en/hooks
@@ -637,23 +673,12 @@ export async function handleHook(): Promise<void> {
     const content = await file.text();
 
     if (!content.trim()) return;
-    if (content.length > MAX_PROFILE_FILE_LENGTH) {
-      warnProfileFileTooLarge(agentId, "claudeMd", content.length, "hook");
-      return;
-    }
-
-    try {
-      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
-        method: "PUT",
-        headers: {
-          ...mcpConfig.headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ claudeMd: content, changeSource: "session_sync" }),
-      });
-    } catch {
-      // Silently fail - don't block shutdown
-    }
+    await postHookProfileUpdate({
+      url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
+      headers: mcpConfig.headers,
+      body: { claudeMd: content, changeSource: "session_sync" },
+      label: "claudeMd",
+    });
   };
 
   // Minimum length for SOUL.md and IDENTITY.md to prevent accidental corruption.
@@ -684,8 +709,6 @@ export async function handleHook(): Promise<void> {
       const content = await soulFile.text();
       if (baselines?.soulMd && contentSha256(content) === baselines.soulMd) {
         // Unchanged during session — skip to preserve Lead's DB edits
-      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
-        warnProfileFileTooLarge(agentId, "soulMd", content.length, "hook");
       } else if (content.trim()) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
@@ -702,8 +725,6 @@ export async function handleHook(): Promise<void> {
       const content = await identityFile.text();
       if (baselines?.identityMd && contentSha256(content) === baselines.identityMd) {
         // Unchanged during session — skip
-      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
-        warnProfileFileTooLarge(agentId, "identityMd", content.length, "hook");
       } else if (content.trim()) {
         if (content.length < IDENTITY_FILE_MIN_LENGTH) {
           console.error(
@@ -720,8 +741,6 @@ export async function handleHook(): Promise<void> {
       const content = await toolsMdFile.text();
       if (baselines?.toolsMd && contentSha256(content) === baselines.toolsMd) {
         // Unchanged during session — skip
-      } else if (content.length > MAX_PROFILE_FILE_LENGTH) {
-        warnProfileFileTooLarge(agentId, "toolsMd", content.length, "hook");
       } else if (content.trim()) {
         updates.toolsMd = content;
       }
@@ -741,18 +760,12 @@ export async function handleHook(): Promise<void> {
 
     if (Object.keys(updates).length === 0) return;
 
-    try {
-      await fetch(`${getBaseUrl()}/api/agents/${agentId}/profile`, {
-        method: "PUT",
-        headers: {
-          ...mcpConfig.headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ...updates, changeSource }),
-      });
-    } catch {
-      // Silently fail
-    }
+    await postHookProfileUpdate({
+      url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
+      headers: mcpConfig.headers,
+      body: { ...updates, changeSource },
+      label: "identity",
+    });
   };
 
   /**

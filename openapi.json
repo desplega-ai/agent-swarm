@@ -9131,24 +9131,20 @@
                     }
                   },
                   "claudeMd": {
-                    "type": "string",
-                    "maxLength": 262144
+                    "type": "string"
                   },
                   "soulMd": {
-                    "type": "string",
-                    "maxLength": 262144
+                    "type": "string"
                   },
                   "identityMd": {
-                    "type": "string",
-                    "maxLength": 262144
+                    "type": "string"
                   },
                   "setupScript": {
                     "type": "string",
                     "maxLength": 262144
                   },
                   "toolsMd": {
-                    "type": "string",
-                    "maxLength": 262144
+                    "type": "string"
                   },
                   "heartbeatMd": {
                     "type": "string",

@@ -97,6 +97,19 @@ describe("buildIdentityPayload (min-length guard)", () => {
     expect(payload.heartbeatMd).toBe("");
   });
 
+  test("forwards oversized gated identity fields so the server ratchet can decide", () => {
+    const oversized = "x".repeat(MAX_PROFILE_FILE_LENGTH + 1);
+    const payload = buildIdentityPayload({
+      soulMd: oversized,
+      identityMd: oversized,
+      toolsMd: oversized,
+    });
+
+    expect(payload.soulMd).toBe(oversized);
+    expect(payload.identityMd).toBe(oversized);
+    expect(payload.toolsMd).toBe(oversized);
+  });
+
   test("logs the agent, field, actual length, and cap when a file is too large", () => {
     const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
     try {

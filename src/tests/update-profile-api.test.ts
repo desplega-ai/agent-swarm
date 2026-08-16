@@ -2,6 +2,12 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { closeDb, createAgent, getAgentById, initDb, updateAgentProfile } from "../be/db";
+import type { Agent } from "../types";
+import {
+  IDENTITY_MD_MAX_CHARS,
+  IdentityFieldBudgetError,
+  SOUL_MD_MAX_CHARS,
+} from "../utils/identity-field-budget";
 
 const TEST_DB_PATH = "./test-update-profile-api.sqlite";
 const TEST_PORT = 13020;
@@ -72,29 +78,22 @@ async function handleRequest(
       return { status: 400, body: { error: "Capabilities must be an array of strings" } };
     }
 
-    // Validate claudeMd size if provided (max 64KB)
-    if (body.claudeMd !== undefined && body.claudeMd.length > 65536) {
-      return { status: 400, body: { error: "claudeMd must be 64KB or less" } };
+    let agent: Agent | null;
+    try {
+      agent = updateAgentProfile(agentId, {
+        role: body.role,
+        description: body.description,
+        capabilities: body.capabilities,
+        claudeMd: body.claudeMd,
+        soulMd: body.soulMd,
+        identityMd: body.identityMd,
+      });
+    } catch (error) {
+      if (error instanceof IdentityFieldBudgetError) {
+        return { status: 400, body: { error: error.message } };
+      }
+      throw error;
     }
-
-    // Validate soulMd size if provided (max 64KB)
-    if (body.soulMd !== undefined && body.soulMd.length > 65536) {
-      return { status: 400, body: { error: "soulMd must be 64KB or less" } };
-    }
-
-    // Validate identityMd size if provided (max 64KB)
-    if (body.identityMd !== undefined && body.identityMd.length > 65536) {
-      return { status: 400, body: { error: "identityMd must be 64KB or less" } };
-    }
-
-    const agent = updateAgentProfile(agentId, {
-      role: body.role,
-      description: body.description,
-      capabilities: body.capabilities,
-      claudeMd: body.claudeMd,
-      soulMd: body.soulMd,
-      identityMd: body.identityMd,
-    });
 
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
@@ -487,9 +486,16 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(agent?.claudeMd).toBe(claudeMdContent);
     });
 
-    test("should return 400 if claudeMd exceeds 64KB", async () => {
-      const largeContent = "a".repeat(65537); // 64KB + 1 byte
-      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+    test("should return the ratchet reason if claudeMd exceeds its session budget", async () => {
+      const agentId = "test-agent-claudemd-over-budget";
+      createAgent({
+        id: agentId,
+        name: "Test Agent ClaudeMd Over Budget",
+        isLead: false,
+        status: "idle",
+      });
+      const largeContent = "a".repeat(20_001);
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ claudeMd: largeContent }),
@@ -497,19 +503,23 @@ describe("PUT /api/agents/:id/profile", () => {
 
       expect(response.status).toBe(400);
       const data = (await response.json()) as { error?: string };
-      expect(data.error).toContain("64KB");
+      expect(data.error).toContain("claudeMd");
+      expect(data.error).toContain("current size 0");
+      expect(data.error).toContain("budget 20000");
+      expect(data.error).toContain("delta +20001");
+      expect(data.error).toContain("already silently dropped at read time");
     });
 
-    test("should allow claudeMd at exactly 64KB", async () => {
-      const agentId = "test-agent-claudemd-64kb";
+    test("should allow claudeMd at exactly its session budget", async () => {
+      const agentId = "test-agent-claudemd-budget";
       createAgent({
         id: agentId,
-        name: "Test Agent ClaudeMd 64KB",
+        name: "Test Agent ClaudeMd Budget",
         isLead: false,
         status: "idle",
       });
 
-      const exactContent = "a".repeat(65536); // Exactly 64KB
+      const exactContent = "a".repeat(20_000);
       const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -518,7 +528,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
       expect(response.status).toBe(200);
       const data = (await response.json()) as { claudeMd?: string };
-      expect(data.claudeMd?.length).toBe(65536);
+      expect(data.claudeMd?.length).toBe(20_000);
     });
 
     test("should allow clearing claudeMd by setting empty string", async () => {
@@ -607,9 +617,16 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(agent?.soulMd).toBe(soulContent);
     });
 
-    test("should return 400 if soulMd exceeds 64KB", async () => {
-      const largeContent = "a".repeat(65537);
-      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+    test("should return 400 if soulMd exceeds its session budget", async () => {
+      const agentId = "test-agent-soulmd-over-budget";
+      createAgent({
+        id: agentId,
+        name: "Test Agent SoulMd Over Budget",
+        isLead: false,
+        status: "idle",
+      });
+      const largeContent = "a".repeat(SOUL_MD_MAX_CHARS + 1);
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ soulMd: largeContent }),
@@ -617,7 +634,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
       expect(response.status).toBe(400);
       const data = (await response.json()) as { error?: string };
-      expect(data.error).toContain("64KB");
+      expect(data.error).toContain(`budget ${SOUL_MD_MAX_CHARS}`);
     });
   });
 
@@ -648,9 +665,16 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(agent?.identityMd).toBe(identityContent);
     });
 
-    test("should return 400 if identityMd exceeds 64KB", async () => {
-      const largeContent = "a".repeat(65537);
-      const response = await fetch(`${baseUrl}/api/agents/test-agent/profile`, {
+    test("should return 400 if identityMd exceeds its session budget", async () => {
+      const agentId = "test-agent-identitymd-over-budget";
+      createAgent({
+        id: agentId,
+        name: "Test Agent IdentityMd Over Budget",
+        isLead: false,
+        status: "idle",
+      });
+      const largeContent = "a".repeat(IDENTITY_MD_MAX_CHARS + 1);
+      const response = await fetch(`${baseUrl}/api/agents/${agentId}/profile`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identityMd: largeContent }),
@@ -658,7 +682,7 @@ describe("PUT /api/agents/:id/profile", () => {
 
       expect(response.status).toBe(400);
       const data = (await response.json()) as { error?: string };
-      expect(data.error).toContain("64KB");
+      expect(data.error).toContain(`budget ${IDENTITY_MD_MAX_CHARS}`);
     });
 
     test("should preserve soulMd and identityMd when updating other fields", async () => {

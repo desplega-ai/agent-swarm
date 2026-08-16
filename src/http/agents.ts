@@ -26,6 +26,7 @@ import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
 import {
+  type Agent,
   AgentAvatarSchema,
   AgentCredStatusSchema,
   AgentLatestModelSchema,
@@ -37,6 +38,7 @@ import {
   ReasoningEffortSchema,
 } from "../types";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { IdentityFieldBudgetError } from "../utils/identity-field-budget";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
 
@@ -227,11 +229,11 @@ const updateAgentProfileRoute = route({
     role: z.string().max(100).optional(),
     description: z.string().optional(),
     capabilities: z.array(z.string()).optional(),
-    claudeMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-    soulMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-    identityMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    claudeMd: z.string().optional(),
+    soulMd: z.string().optional(),
+    identityMd: z.string().optional(),
     setupScript: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
-    toolsMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
+    toolsMd: z.string().optional(),
     heartbeatMd: z.string().max(MAX_PROFILE_FILE_LENGTH).optional(),
     /** `null` resets to the deterministic fallback; omit the key to leave untouched. */
     avatar: AgentAvatarSchema.nullable().optional(),
@@ -545,24 +547,33 @@ export async function handleAgentsRest(
           }
         : undefined;
 
-    const agent = updateAgentProfile(
-      parsed.params.id,
-      {
-        role: body.role,
-        description: body.description,
-        capabilities: body.capabilities,
-        claudeMd: body.claudeMd,
-        soulMd: body.soulMd,
-        identityMd: body.identityMd,
-        setupScript: body.setupScript,
-        toolsMd: body.toolsMd,
-        heartbeatMd: body.heartbeatMd,
-        // Only include the key when the client sent it, so `null` (reset)
-        // is distinguishable from "not provided" (leave untouched).
-        ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
-      },
-      versionMeta,
-    );
+    let agent: Agent | null;
+    try {
+      agent = updateAgentProfile(
+        parsed.params.id,
+        {
+          role: body.role,
+          description: body.description,
+          capabilities: body.capabilities,
+          claudeMd: body.claudeMd,
+          soulMd: body.soulMd,
+          identityMd: body.identityMd,
+          setupScript: body.setupScript,
+          toolsMd: body.toolsMd,
+          heartbeatMd: body.heartbeatMd,
+          // Only include the key when the client sent it, so `null` (reset)
+          // is distinguishable from "not provided" (leave untouched).
+          ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
+        },
+        versionMeta,
+      );
+    } catch (error) {
+      if (error instanceof IdentityFieldBudgetError) {
+        jsonError(res, error.message, 400);
+        return true;
+      }
+      throw error;
+    }
 
     if (!agent) {
       jsonError(res, "Agent not found", 404);

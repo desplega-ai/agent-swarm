@@ -127,6 +127,11 @@ import {
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import {
+  type BudgetedIdentityField,
+  checkIdentityFieldBudget,
+  IdentityFieldBudgetError,
+} from "../utils/identity-field-budget";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
@@ -430,6 +435,13 @@ const VERSIONABLE_FIELDS: VersionableField[] = [
   "claudeMd",
   "setupScript",
   "heartbeatMd",
+];
+
+const BUDGETED_IDENTITY_FIELDS: BudgetedIdentityField[] = [
+  "soulMd",
+  "identityMd",
+  "claudeMd",
+  "toolsMd",
 ];
 
 function ensureAgentProfileColumns(database: Database): void {
@@ -5578,6 +5590,18 @@ export function updateAgentProfile(
       .prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?")
       .get(id);
     if (!current) return null;
+
+    for (const field of BUDGETED_IDENTITY_FIELDS) {
+      const nextValue = updates[field];
+      if (nextValue === undefined) continue;
+
+      const result = checkIdentityFieldBudget({
+        field,
+        currentValue: current[field] ?? "",
+        nextValue,
+      });
+      if (!result.ok) throw new IdentityFieldBudgetError(result.reason);
+    }
 
     // Create context versions for changed fields
     for (const field of VERSIONABLE_FIELDS) {

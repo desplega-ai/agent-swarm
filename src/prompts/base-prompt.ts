@@ -16,7 +16,7 @@ import { resolveTemplateAsync } from "./resolver";
 import "./session-templates";
 
 /** Max characters per individual injected section before truncation */
-const BOOTSTRAP_MAX_CHARS = 20_000;
+export const BOOTSTRAP_MAX_CHARS = 20_000;
 
 /**
  * Max total characters across all injected sections combined.

@@ -1,0 +1,52 @@
+import { BOOTSTRAP_MAX_CHARS } from "../prompts/base-prompt";
+
+export const SOUL_MD_MAX_CHARS = 10_000;
+export const IDENTITY_MD_MAX_CHARS = 10_000;
+
+export const IDENTITY_FIELD_BUDGETS = {
+  soulMd: SOUL_MD_MAX_CHARS,
+  identityMd: IDENTITY_MD_MAX_CHARS,
+  claudeMd: BOOTSTRAP_MAX_CHARS,
+  toolsMd: BOOTSTRAP_MAX_CHARS,
+} as const;
+
+export type BudgetedIdentityField = keyof typeof IDENTITY_FIELD_BUDGETS;
+
+export type IdentityFieldBudgetResult = { ok: true } | { ok: false; reason: string };
+
+export function checkIdentityFieldBudget({
+  field,
+  currentValue,
+  nextValue,
+}: {
+  field: BudgetedIdentityField;
+  currentValue: string;
+  nextValue: string;
+}): IdentityFieldBudgetResult {
+  const budget = IDENTITY_FIELD_BUDGETS[field];
+  if (nextValue.length <= budget || nextValue.length < currentValue.length) {
+    return { ok: true };
+  }
+
+  const delta = nextValue.length - currentValue.length;
+  const readTimeCapGuidance =
+    field === "claudeMd" || field === "toolsMd"
+      ? ` Content past the ${budget}-character cap is already silently dropped at read time, so shrinking that tail loses nothing sessions currently receive.`
+      : "";
+
+  return {
+    ok: false,
+    reason:
+      `Update rejected for ${field}: current size ${currentValue.length} characters, ` +
+      `budget ${budget} characters, delta ${delta >= 0 ? "+" : ""}${delta} characters.` +
+      readTimeCapGuidance +
+      " Move durable content into memories and keep pointers to it in this field.",
+  };
+}
+
+export class IdentityFieldBudgetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IdentityFieldBudgetError";
+  }
+}
