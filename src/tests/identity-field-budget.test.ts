@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getAgentById, getDb, initDb, updateAgentProfile } from "../be/db";
 import { postHookProfileUpdate } from "../hooks/hook";
 import { BOOTSTRAP_MAX_CHARS } from "../prompts/base-prompt";
@@ -85,7 +84,9 @@ describe("updateAgentProfile identity budget enforcement", () => {
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
-      await unlink(TEST_DB_PATH + suffix).catch(() => {});
+      await Bun.file(TEST_DB_PATH + suffix)
+        .delete()
+        .catch(() => {});
     }
     initDb(TEST_DB_PATH);
     createAgent({ id: agentId, name: "Identity Budget Agent", isLead: false, status: "idle" });
@@ -94,7 +95,9 @@ describe("updateAgentProfile identity budget enforcement", () => {
   afterAll(async () => {
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
-      await unlink(TEST_DB_PATH + suffix).catch(() => {});
+      await Bun.file(TEST_DB_PATH + suffix)
+        .delete()
+        .catch(() => {});
     }
   });
 
