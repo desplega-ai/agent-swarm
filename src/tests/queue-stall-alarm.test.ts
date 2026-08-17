@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDb, initDb, updateTaskVcs } from "../be/db";
 import {
   _test,
   checkQueueStall,
@@ -38,6 +38,10 @@ function setCreatedAt(taskId: string, createdAt: string): void {
     createdAt,
     taskId,
   ]);
+  getDb().run(
+    "UPDATE agent_log SET createdAt = ? WHERE taskId = ? AND eventType = 'task_created'",
+    [createdAt, taskId],
+  );
 }
 
 describe("queue stall alarm", () => {
@@ -87,6 +91,11 @@ describe("queue stall alarm", () => {
       "2026-08-17T16:59:00.000Z",
       task.id,
     ]);
+    getDb().run(
+      `INSERT INTO agent_log (id, eventType, taskId, oldValue, newValue, createdAt)
+       VALUES (?, 'task_status_change', ?, 'backlog', 'unassigned', ?)`,
+      [crypto.randomUUID(), task.id, "2026-08-17T16:59:00.000Z"],
+    );
     const notify = mock(async (_message: string) => {});
 
     const snapshot = await checkQueueStall(NOW, notify);
@@ -104,10 +113,10 @@ describe("queue stall alarm", () => {
       dependsOn: [prerequisite.id],
     });
     setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
-    getDb().run("UPDATE agent_tasks SET status = 'completed', lastUpdatedAt = ? WHERE id = ?", [
-      "2026-08-17T16:59:00.000Z",
-      prerequisite.id,
-    ]);
+    getDb().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ?, lastUpdatedAt = ? WHERE id = ?",
+      ["2026-08-17T16:59:00.000Z", "2026-08-17T16:59:00.000Z", prerequisite.id],
+    );
     const notify = mock(async (_message: string) => {});
 
     const snapshot = await checkQueueStall(NOW, notify);
@@ -116,6 +125,48 @@ describe("queue stall alarm", () => {
     expect(snapshot.oldestAgeMs).toBe(60_000);
     expect(isQueueStalled(snapshot)).toBe(false);
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  test("does not reset queue age when VCS metadata updates a claimable task", () => {
+    const task = createTaskExtended("Old task with new VCS metadata");
+    setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
+
+    updateTaskVcs(task.id, {
+      vcsProvider: "github",
+      vcsRepo: "desplega-ai/agent-swarm",
+      vcsNumber: 1177,
+      vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/1177",
+    });
+
+    const snapshot = getQueueStallSnapshot(NOW);
+    expect(snapshot.oldestAgeMs).toBe(60 * 60 * 1000);
+    expect(isQueueStalled(snapshot)).toBe(true);
+  });
+
+  test("does not reset claimable age when VCS metadata updates a completed dependency", () => {
+    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = createTaskExtended("Completed prerequisite", { agentId: worker.id });
+    const blocked = createTaskExtended("Waiting after prerequisite", {
+      agentId: worker.id,
+      dependsOn: [prerequisite.id],
+    });
+    setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
+    getDb().run(
+      "UPDATE agent_tasks SET status = 'completed', finishedAt = ?, lastUpdatedAt = ? WHERE id = ?",
+      ["2026-08-17T16:00:00.000Z", "2026-08-17T16:00:00.000Z", prerequisite.id],
+    );
+
+    updateTaskVcs(prerequisite.id, {
+      vcsProvider: "github",
+      vcsRepo: "desplega-ai/agent-swarm",
+      vcsNumber: 1177,
+      vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/1177",
+    });
+
+    const snapshot = getQueueStallSnapshot(NOW);
+    expect(snapshot.oldestTaskId).toBe(blocked.id);
+    expect(snapshot.oldestAgeMs).toBe(60 * 60 * 1000);
+    expect(isQueueStalled(snapshot)).toBe(true);
   });
 
   test("excludes pending tasks whose dependencies are not complete", () => {

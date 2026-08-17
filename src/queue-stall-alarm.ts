@@ -31,25 +31,47 @@ export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
       { claimableCount: number; oldestTaskId: string | null; oldestClaimableAt: string | null },
       []
     >(
-      `WITH claimable AS (
+      `WITH queued AS (
          SELECT
            t.id,
-           MAX(
-             COALESCE(t.lastUpdatedAt, t.createdAt),
-             COALESCE(
-               (
-                 SELECT MAX(prerequisite.lastUpdatedAt)
-                 FROM json_each(COALESCE(t.dependsOn, '[]')) dep
-                 JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
-               ),
-               t.createdAt
-             )
-           ) AS claimableAt
+           t.dependsOn,
+           COALESCE(
+             (
+               SELECT MAX(entry.createdAt)
+               FROM agent_log entry
+               WHERE entry.taskId = t.id
+                 AND entry.newValue = t.status
+                 AND entry.eventType IN (
+                   'task_created',
+                   'task_status_change',
+                   'task_released',
+                   'task_accepted',
+                   'task_rejected'
+                 )
+             ),
+             t.createdAt
+           ) AS queueEnteredAt
          FROM agent_tasks t
          WHERE t.status IN ('pending', 'unassigned')
-           AND NOT EXISTS (
+       ),
+       claimable AS (
+         SELECT
+           queued.id,
+           MAX(
+             queued.queueEnteredAt,
+             COALESCE(
+               (
+                 SELECT MAX(COALESCE(prerequisite.finishedAt, prerequisite.createdAt))
+                 FROM json_each(COALESCE(queued.dependsOn, '[]')) dep
+                 JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+               ),
+               queued.queueEnteredAt
+             )
+           ) AS claimableAt
+         FROM queued
+         WHERE NOT EXISTS (
              SELECT 1
-             FROM json_each(COALESCE(t.dependsOn, '[]')) dep
+             FROM json_each(COALESCE(queued.dependsOn, '[]')) dep
              LEFT JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
              WHERE prerequisite.id IS NULL OR prerequisite.status != 'completed'
            )
