@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import {
   clearVolatileSecretsForTesting,
   refreshSecretScrubberCache,
@@ -16,11 +15,13 @@ import {
  * The first group exercises that conversion directly. The second asserts the
  * SIGINT/SIGTERM handlers actually use it: those live at module scope in
  * `src/http/index.ts`, which binds a port on import, so the source is read
- * rather than executed — the same approach `entrypoint-api-readiness.test.ts`
- * takes for `docker-entrypoint.sh`.
+ * rather than executed.
  */
 
 const SECRET = "xoxb-9911-shutdown-token-value";
+
+const shutdownSourcePath = `${import.meta.dir}/../http/index.ts`;
+const shutdownSource = await Bun.file(shutdownSourcePath).text();
 
 describe("rejection log egress", () => {
   beforeEach(() => {
@@ -71,11 +72,9 @@ describe("rejection log egress", () => {
 });
 
 describe("shutdown signal handlers", () => {
-  const source = readFileSync(`${import.meta.dir}/../http/index.ts`, "utf8");
-
   for (const signal of ["SIGINT", "SIGTERM"] as const) {
     test(`${signal} routes its rejection through scrubSecrets`, () => {
-      const handler = source.match(
+      const handler = shutdownSource.match(
         new RegExp(`process\\.on\\("${signal}",[\\s\\S]*?\\n  \\}\\);`),
       )?.[0];
 
@@ -88,6 +87,6 @@ describe("shutdown signal handlers", () => {
   }
 
   test("both handlers still call shutdown exactly once", () => {
-    expect(source.match(/shutdown\(\)\.catch\(/g)).toHaveLength(2);
+    expect(shutdownSource.match(/shutdown\(\)\.catch\(/g)).toHaveLength(2);
   });
 });
