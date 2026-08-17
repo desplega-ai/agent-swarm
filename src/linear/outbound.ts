@@ -8,15 +8,44 @@ let subscribed = false;
 
 const LOOP_PREVENTION_WINDOW_MS = 5_000;
 
+/**
+ * `EventEmitter.emit()` calls listeners synchronously and discards whatever
+ * they return, so a rejected async handler is never seen by the emitting side
+ * — it escapes to the process-level `unhandledRejection` handler with no
+ * subsystem context. These wrappers observe the *complete* handler body,
+ * including work that runs before any internal `try` (e.g. `getTrackerSync`)
+ * and the `updateTrackerSync` write that runs after it.
+ *
+ * Each wrapper is created once at module scope so `off()` is passed the exact
+ * reference `on()` registered; building them inside `init` would leave the
+ * listeners attached after teardown.
+ */
+function observed(
+  eventName: string,
+  handler: (data: unknown) => Promise<void>,
+): (data: unknown) => void {
+  return (data: unknown): void => {
+    handler(data).catch((error) => {
+      console.error(`[Linear Outbound] ${eventName} handler failed:`, error);
+    });
+  };
+}
+
+const onTaskCreated = observed("task.created", handleTaskCreated);
+const onTaskCompleted = observed("task.completed", handleTaskCompleted);
+const onTaskFailed = observed("task.failed", handleTaskFailed);
+const onTaskCancelled = observed("task.cancelled", handleTaskCancelled);
+const onTaskProgress = observed("task.progress", handleTaskProgress);
+
 export function initLinearOutboundSync(): void {
   if (subscribed) return;
   subscribed = true;
 
-  workflowEventBus.on("task.created", handleTaskCreated);
-  workflowEventBus.on("task.completed", handleTaskCompleted);
-  workflowEventBus.on("task.failed", handleTaskFailed);
-  workflowEventBus.on("task.cancelled", handleTaskCancelled);
-  workflowEventBus.on("task.progress", handleTaskProgress);
+  workflowEventBus.on("task.created", onTaskCreated);
+  workflowEventBus.on("task.completed", onTaskCompleted);
+  workflowEventBus.on("task.failed", onTaskFailed);
+  workflowEventBus.on("task.cancelled", onTaskCancelled);
+  workflowEventBus.on("task.progress", onTaskProgress);
   console.log("[Linear] Outbound sync subscribed to event bus");
 }
 
@@ -24,11 +53,11 @@ export function teardownLinearOutboundSync(): void {
   if (!subscribed) return;
   subscribed = false;
 
-  workflowEventBus.off("task.created", handleTaskCreated);
-  workflowEventBus.off("task.completed", handleTaskCompleted);
-  workflowEventBus.off("task.failed", handleTaskFailed);
-  workflowEventBus.off("task.cancelled", handleTaskCancelled);
-  workflowEventBus.off("task.progress", handleTaskProgress);
+  workflowEventBus.off("task.created", onTaskCreated);
+  workflowEventBus.off("task.completed", onTaskCompleted);
+  workflowEventBus.off("task.failed", onTaskFailed);
+  workflowEventBus.off("task.cancelled", onTaskCancelled);
+  workflowEventBus.off("task.progress", onTaskProgress);
   console.log("[Linear] Outbound sync unsubscribed from event bus");
 }
 

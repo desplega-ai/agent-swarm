@@ -28,14 +28,41 @@ const OUTPUT_TRUNCATE_CHARS = 4000;
  * as a known v1 limitation; a per-issue debounce / bounded outbound queue
  * could be added in v2 if it becomes a real problem.
  */
+/**
+ * `EventEmitter.emit()` calls listeners synchronously and discards whatever
+ * they return, so a rejected async handler is never seen by the emitting side
+ * — it escapes to the process-level `unhandledRejection` handler with no
+ * subsystem context. These wrappers observe the *complete* handler body,
+ * including work that runs before any internal `try` (e.g. `getTrackerSync`).
+ *
+ * Each wrapper is created once at module scope so `off()` is passed the exact
+ * reference `on()` registered; building them inside `init` would leave the
+ * listeners attached after teardown.
+ */
+function observed(
+  eventName: string,
+  handler: (data: unknown) => Promise<void>,
+): (data: unknown) => void {
+  return (data: unknown): void => {
+    handler(data).catch((error) => {
+      console.error(`[Jira Outbound] ${eventName} handler failed:`, error);
+    });
+  };
+}
+
+const onTaskCreated = observed("task.created", handleTaskCreated);
+const onTaskCompleted = observed("task.completed", handleTaskCompleted);
+const onTaskFailed = observed("task.failed", handleTaskFailed);
+const onTaskCancelled = observed("task.cancelled", handleTaskCancelled);
+
 export function initJiraOutboundSync(): void {
   if (subscribed) return;
   subscribed = true;
 
-  workflowEventBus.on("task.created", handleTaskCreated);
-  workflowEventBus.on("task.completed", handleTaskCompleted);
-  workflowEventBus.on("task.failed", handleTaskFailed);
-  workflowEventBus.on("task.cancelled", handleTaskCancelled);
+  workflowEventBus.on("task.created", onTaskCreated);
+  workflowEventBus.on("task.completed", onTaskCompleted);
+  workflowEventBus.on("task.failed", onTaskFailed);
+  workflowEventBus.on("task.cancelled", onTaskCancelled);
   console.log("[Jira] Outbound sync subscribed to event bus");
 }
 
@@ -43,10 +70,10 @@ export function teardownJiraOutboundSync(): void {
   if (!subscribed) return;
   subscribed = false;
 
-  workflowEventBus.off("task.created", handleTaskCreated);
-  workflowEventBus.off("task.completed", handleTaskCompleted);
-  workflowEventBus.off("task.failed", handleTaskFailed);
-  workflowEventBus.off("task.cancelled", handleTaskCancelled);
+  workflowEventBus.off("task.created", onTaskCreated);
+  workflowEventBus.off("task.completed", onTaskCompleted);
+  workflowEventBus.off("task.failed", onTaskFailed);
+  workflowEventBus.off("task.cancelled", onTaskCancelled);
   console.log("[Jira] Outbound sync unsubscribed from event bus");
 }
 
