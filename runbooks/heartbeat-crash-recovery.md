@@ -4,6 +4,8 @@
 
 Owner code: `src/heartbeat/heartbeat.ts`, `src/tasks/worker-follow-up.ts`, plus the assignment/claim path in `src/http/poll.ts`, `src/tools/task-action.ts`, `src/tools/send-task.ts`, and `src/be/db.ts`.
 
+Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
+
 ---
 
 ## 1. The heartbeat sweep (every ~90s)
@@ -214,3 +216,11 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | `autoAssignPoolTasks` pool-scan hard cap (rows/sweep) | 500 | `HEARTBEAT_POOL_SCAN_CAP` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan page size | 25 | `ELIGIBILITY_SCAN_BATCH_SIZE` |
 | `getUnassignedTaskIdsForAgent` eligibility-scan hard cap (rows/call) | 500 | `ELIGIBILITY_SCAN_CAP` |
+
+---
+
+## Queue-pickup stall alarm (API process)
+
+The queue alarm is deliberately outside the worker runner, swarm scheduler, and heartbeat checklist task. `startQueueStallAlarm` starts directly in the API process after Slack connects, including when `HEARTBEAT_DISABLE` is set. Every five minutes it queries ready `pending`/`unassigned` rows and alerts `SLACK_ALERTS_CHANNEL` when the oldest claimable task has waited at least 30 minutes.
+
+The non-empty queue is the denominator: an empty queue never alarms merely because there were zero pickups. DAG nodes with incomplete dependencies are excluded. The alert includes the claimable count, oldest task ID/age, and the number of `pending|unassigned → in_progress` transitions in the same 30-minute window. Delivery is direct through the API process's Slack client—no agent task is created or claimed. One alert is sent per stall episode, followed by a recovery notice; a failed delivery does not arm the dedup state, so the next tick retries.

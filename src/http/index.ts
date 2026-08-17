@@ -31,6 +31,7 @@ import {
   withRemoteContext,
   withSpanContext,
 } from "../otel";
+import { startQueueStallAlarm, stopQueueStallAlarm } from "../queue-stall-alarm";
 import { clearAuditSink, isRbacEnabled, setAuditSink } from "../rbac";
 import { startScriptRunSupervisor, stopScriptRunSupervisor } from "../script-workflows/supervisor";
 import { getServerSessionsProcessed } from "../server-runtime-counters";
@@ -424,6 +425,9 @@ async function shutdown() {
   // Stop heartbeat triage
   stopHeartbeat();
 
+  // Stop the out-of-band queue alarm before disconnecting its Slack notifier.
+  stopQueueStallAlarm();
+
   // Stop durable script workflow subprocesses
   stopScriptRunSupervisor();
 
@@ -607,6 +611,9 @@ httpServer
 
     // Start Slack bot (if configured)
     await startSlackApp();
+
+    // Independent of workers, scheduler targets, and heartbeat agent tasks.
+    startQueueStallAlarm();
 
     // Initialize GitHub webhook handler (if configured)
     initGitHub();
