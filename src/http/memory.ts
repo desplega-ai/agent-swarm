@@ -725,7 +725,7 @@ export async function handleMemory(
       } catch (err) {
         console.error("[memory] Batch embedding failed:", (err as Error).message);
       }
-    })();
+    })().catch((err) => console.error("[memory] batch embed failed:", err));
 
     indexMemory.respond(res, 202, { queued: true, memoryIds: memories.map((m) => m.id) });
     return true;
@@ -1041,7 +1041,7 @@ export async function handleMemory(
         }
       }
       console.log(`[memory] Re-embedding complete: ${memories.length} memories`);
-    })();
+    })().catch((err) => console.error("[memory] re-embed batch failed:", err));
 
     return true;
   }

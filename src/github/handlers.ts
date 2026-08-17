@@ -280,7 +280,9 @@ export async function handlePullRequest(
     }
 
     if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
+        console.error("[GitHub] failed to add issue reaction:", err),
+      );
     }
 
     return { created: true, taskId: task.id };
@@ -388,7 +390,9 @@ export async function handlePullRequest(
     }
 
     if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
+        console.error("[GitHub] failed to add issue reaction:", err),
+      );
     }
 
     return { created: true, taskId: task.id };
@@ -488,7 +492,9 @@ export async function handlePullRequest(
     }
 
     if (installation?.id) {
-      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+      addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
+        console.error("[GitHub] failed to add issue reaction:", err),
+      );
     }
 
     return { created: true, taskId: task.id };
@@ -577,7 +583,9 @@ export async function handlePullRequest(
 
   // Add 👀 reaction to acknowledge the mention
   if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
+      console.error("[GitHub] failed to add issue reaction:", err),
+    );
   }
 
   return { created: true, taskId: task.id };
@@ -657,7 +665,9 @@ export async function handleIssue(
     }
 
     if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id);
+      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
+        console.error("[GitHub] failed to add issue reaction:", err),
+      );
     }
 
     return { created: true, taskId: task.id };
@@ -753,7 +763,9 @@ export async function handleIssue(
     }
 
     if (installation?.id) {
-      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id);
+      addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
+        console.error("[GitHub] failed to add issue reaction:", err),
+      );
     }
 
     return { created: true, taskId: task.id };
@@ -824,7 +836,9 @@ export async function handleIssue(
 
   // Add 👀 reaction to acknowledge the mention
   if (installation?.id) {
-    addIssueReaction(repository.full_name, issue.number, "eyes", installation.id);
+    addIssueReaction(repository.full_name, issue.number, "eyes", installation.id).catch((err) =>
+      console.error("[GitHub] failed to add issue reaction:", err),
+    );
   }
 
   return { created: true, taskId: task.id };
@@ -932,7 +946,9 @@ export async function handleComment(
 
   // Add 👀 reaction to the comment to acknowledge the mention
   if (installation?.id) {
-    addReaction(repository.full_name, comment.id, "eyes", installation.id);
+    addReaction(repository.full_name, comment.id, "eyes", installation.id).catch((err) =>
+      console.error("[GitHub] failed to add comment reaction:", err),
+    );
   }
 
   return { created: true, taskId: task.id };
@@ -1240,7 +1256,9 @@ export async function handlePullRequestReview(
 
   // Add reaction to acknowledge the review
   if (installation?.id) {
-    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id);
+    addIssueReaction(repository.full_name, pr.number, "eyes", installation.id).catch((err) =>
+      console.error("[GitHub] failed to add issue reaction:", err),
+    );
   }
 
   return { created: true, taskId: task.id };

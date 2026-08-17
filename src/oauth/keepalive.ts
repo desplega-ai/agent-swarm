@@ -115,11 +115,15 @@ export function startOAuthKeepalive(): void {
   // Run once after a short delay (let server finish startup).
   startupKeepaliveTimeout = setTimeout(() => {
     startupKeepaliveTimeout = null;
-    scheduleKeepaliveRun("startup");
+    scheduleKeepaliveRun("startup").catch((err) =>
+      console.error("[OAuth Keepalive] startup run failed:", err),
+    );
   }, STARTUP_KEEPALIVE_DELAY_MS);
 
   keepaliveInterval = setInterval(() => {
-    scheduleKeepaliveRun("interval");
+    scheduleKeepaliveRun("interval").catch((err) =>
+      console.error("[OAuth Keepalive] interval run failed:", err),
+    );
   }, KEEPALIVE_INTERVAL_MS);
 }
 

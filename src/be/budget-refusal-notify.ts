@@ -139,8 +139,12 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
   }
 
   // 2. Workflow event bus emit — every refusal, not just the first per day.
-  try {
-    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+  // Mirrors the emit pattern in db.ts — any failure here (e.g. event bus module
+  // load error) must not break the refusal path. The rejection is caught on the
+  // promise rather than in a `try` block, because the callback runs after the
+  // surrounding frame has already returned.
+  import("../workflows/event-bus")
+    .then(({ workflowEventBus }) => {
       workflowEventBus.emit("task.budget_refused", {
         taskId: ctx.task.id,
         agentId: ctx.agentId,
@@ -153,9 +157,8 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
         userBudgetUsd: ctx.userBudgetUsd,
         resetAt: ctx.resetAt,
       });
-    });
-  } catch {
-    // Mirror the existing emit-pattern in db.ts:1561-1571 — any failure here
-    // (e.g. event bus module load error) must not break the refusal path.
-  }
+    })
+    .catch((err) =>
+      console.error("[budget-refusal-notify] task.budget_refused event not emitted:", err),
+    );
 }

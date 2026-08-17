@@ -33,6 +33,9 @@
         "noUnusedImports": "error",
         "noUnusedVariables": "error"
       },
+      "nursery": {
+        "noFloatingPromises": "error"
+      },
       "style": {
         "noNonNullAssertion": "off"
       },

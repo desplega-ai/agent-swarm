@@ -400,7 +400,9 @@ export const registerStoreProgressTool = (server: McpServer) => {
           } catch {
             // Non-blocking — task completion memory failure should not affect task status
           }
-        })();
+        })().catch((err) =>
+          console.error("[store-progress] task completion memory write failed:", err),
+        );
       }
 
       if (shouldRunTerminalSideEffects) {
@@ -436,7 +438,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               err instanceof Error ? err.message : String(err),
             );
           }
-        })();
+        })().catch((err) => console.error("[store-progress] server rater run failed:", err));
       }
 
       // Create follow-up task for the lead when a worker task finishes.

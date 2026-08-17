@@ -92,7 +92,7 @@ export function HealthCheckStep({ state, addLog, goToNext }: StepProps) {
       }
     };
 
-    poll();
+    poll().catch((err) => addLog(`Health poll failed: ${err}`));
     return () => {
       cancelled = true;
     };

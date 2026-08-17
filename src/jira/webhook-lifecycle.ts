@@ -359,11 +359,11 @@ export function startJiraWebhookKeepalive(): void {
   // Immediate-on-boot check (after a short delay so server finishes startup
   // and OAuth tokens are loaded). Mirrors src/oauth/keepalive.ts pattern.
   setTimeout(() => {
-    runKeepalive();
+    runKeepalive().catch((err) => console.error("[Jira webhook keepalive] run failed:", err));
   }, 10_000);
 
   keepaliveInterval = setInterval(() => {
-    runKeepalive();
+    runKeepalive().catch((err) => console.error("[Jira webhook keepalive] run failed:", err));
   }, TWELVE_HOURS_MS);
 }
 

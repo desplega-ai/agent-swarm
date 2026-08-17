@@ -35,7 +35,7 @@ export function StartStep({ state, addLog, goToNext }: StepProps) {
       }
     };
 
-    run();
+    run().catch((err) => addLog(`Start failed: ${err}`));
   }, [state.outputDir, addLog]);
 
   useEffect(() => {

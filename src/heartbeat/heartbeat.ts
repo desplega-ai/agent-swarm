@@ -1345,14 +1345,18 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
 
   console.log(`[Heartbeat] Starting with ${intervalMs}ms interval`);
 
-  // Run aggressive reboot sweep first (no thresholds), then normal sweep cycle
-  setTimeout(async () => {
-    await runRebootSweep();
-    runHeartbeatSweep();
+  // Run aggressive reboot sweep first (no thresholds), then normal sweep cycle.
+  // Both sweeps are best-effort: `runHeartbeatSweep` resets `isSweeping` in a
+  // `finally` but has no `catch`, so a throw anywhere inside it escapes as an
+  // unhandled rejection unless it is caught here.
+  setTimeout(() => {
+    runRebootSweep()
+      .then(() => runHeartbeatSweep())
+      .catch((err) => console.error("[Heartbeat] boot sweep failed:", err));
   }, 5000);
 
   heartbeatInterval = setInterval(() => {
-    runHeartbeatSweep();
+    runHeartbeatSweep().catch((err) => console.error("[Heartbeat] sweep failed:", err));
   }, intervalMs);
 
   // Also start the checklist interval
@@ -1434,7 +1438,9 @@ export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVA
 
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
-    checkHeartbeatChecklist();
+    checkHeartbeatChecklist().catch((err) =>
+      console.error("[Heartbeat] checklist check failed:", err),
+    );
   }, intervalMs);
 }
 

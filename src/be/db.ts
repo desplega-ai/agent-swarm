@@ -2961,8 +2961,8 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         newValue: "completed",
       });
     } catch {}
-    try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.completed", {
           taskId: id,
           output,
@@ -2970,8 +2970,8 @@ export function completeTask(id: string, output?: string): AgentTask | null {
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
         });
-      });
-    } catch {}
+      })
+      .catch((err) => console.error("[db] task.completed event not emitted:", err));
     try {
       promotePendingSteeringForTask(id, "Task completed before steering was delivered");
     } catch (error) {
@@ -3022,8 +3022,8 @@ export function failTask(id: string, reason: string): AgentTask | null {
         metadata: { reason: scrubbedReason },
       });
     } catch {}
-    try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.failed", {
           taskId: id,
           failureReason: reason,
@@ -3031,8 +3031,8 @@ export function failTask(id: string, reason: string): AgentTask | null {
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
         });
-      });
-    } catch {}
+      })
+      .catch((err) => console.error("[db] task.failed event not emitted:", err));
     try {
       promotePendingSteeringForTask(id, "Task failed before steering was delivered");
     } catch (error) {
@@ -3113,16 +3113,16 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         metadata: reason ? { reason } : undefined,
       });
     } catch {}
-    try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.cancelled", {
           taskId: id,
           agentId: row.agentId,
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
         });
-      });
-    } catch {}
+      })
+      .catch((err) => console.error("[db] task.cancelled event not emitted:", err));
     try {
       promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
     } catch (error) {
@@ -3203,8 +3203,8 @@ export function supersedeTask(
         metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
       });
     } catch {}
-    try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.superseded", {
           taskId: id,
           reason: args.reason,
@@ -3213,8 +3213,8 @@ export function supersedeTask(
           workflowRunId: row.workflowRunId,
           workflowRunStepId: row.workflowRunStepId,
         });
-      });
-    } catch {}
+      })
+      .catch((err) => console.error("[db] task.superseded event not emitted:", err));
 
     try {
       cascadeFailDependents(id, "superseded");
@@ -3443,15 +3443,15 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
         newValue: scrubbedProgress,
       });
     } catch {}
-    try {
-      import("../workflows/event-bus").then(({ workflowEventBus }) => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.progress", {
           taskId: id,
           progress: scrubbedProgress,
           agentId: row.agentId,
         });
-      });
-    } catch {}
+      })
+      .catch((err) => console.error("[db] task.progress event not emitted:", err));
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -5088,8 +5088,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     (task) => task !== null,
   );
 
-  try {
-    import("../workflows/event-bus").then(({ workflowEventBus }) => {
+  import("../workflows/event-bus")
+    .then(({ workflowEventBus }) => {
       workflowEventBus.emit("task.created", {
         taskId: row.id,
         task: row.task,
@@ -5099,8 +5099,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         workflowRunId: row.workflowRunId,
         workflowRunStepId: row.workflowRunStepId,
       });
-    });
-  } catch {}
+    })
+    .catch((err) => console.error("[db] task.created event not emitted:", err));
 
   return rowToAgentTask(row);
 }

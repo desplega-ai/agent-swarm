@@ -55,7 +55,7 @@ export function HarnessCredentialsStep({ goToNext, addLog }: StepProps) {
         setCliError(msg);
         setSubStep("manual_oauth");
       }
-    })();
+    })().catch((err) => addLog(`Harness credential setup failed: ${err}`));
 
     return () => {
       cancelled = true;

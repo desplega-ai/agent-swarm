@@ -61,7 +61,7 @@ export function CoreCredentialsStep({ state, goToNext, addLog }: StepProps) {
       setTimeout(() => setReady(true), 1000);
     };
 
-    generate();
+    generate().catch((err) => addLog(`Credential generation failed: ${err}`));
   }, [state.services, addLog]);
 
   useEffect(() => {

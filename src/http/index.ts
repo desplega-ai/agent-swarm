@@ -485,13 +485,16 @@ async function shutdown() {
 // Only register signal handlers once (avoid duplicates on hot reload)
 if (!globalState.__sigintRegistered) {
   globalState.__sigintRegistered = true;
+  // A rejected shutdown must not become an unhandled rejection: the signal
+  // handler is the last code that runs, so an error here is the only chance to
+  // learn why the process failed to exit cleanly.
   process.on("SIGINT", () => {
     shutdownSignal = "SIGINT";
-    shutdown();
+    shutdown().catch((err) => console.error("[shutdown] SIGINT shutdown failed:", err));
   });
   process.on("SIGTERM", () => {
     shutdownSignal = "SIGTERM";
-    shutdown();
+    shutdown().catch((err) => console.error("[shutdown] SIGTERM shutdown failed:", err));
   });
 }
 

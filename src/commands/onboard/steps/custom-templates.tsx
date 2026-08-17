@@ -40,7 +40,7 @@ export function CustomTemplatesStep({
       }
     };
 
-    load();
+    load().catch((err) => addLog(`Template load failed: ${err}`));
   }, [addLog, goToError]);
 
   if (subStep === "loading") {
