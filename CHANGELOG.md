@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.131.2] - 2026-08-17
+
+### Changed
+- **Worker harness pins track current compatible releases** (#1173) — Claude Code moves to 2.1.233, the Pi harness family to 0.84.2, and the OpenCode CLI and SDK to 1.18.18.
+
+### Fixed
+- **Script runtimes resolve module URLs as filesystem paths** (#1170) — schema extraction, type checking, native execution, and durable script workflows now handle percent-encoded install paths and Windows drive paths correctly.
+
 ## [1.131.1] - 2026-08-13
 
 ### Added
