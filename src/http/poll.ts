@@ -23,6 +23,7 @@ import {
   hasCapacity,
   recordBudgetRefusalNotification,
   startTask,
+  updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
@@ -337,6 +338,7 @@ export async function handlePoll(
 
             // Mark task as in_progress immediately to prevent duplicate polling
             startTask(pendingTask.id);
+            updateAgentStatusFromCapacity(myAgentId);
 
             ensure({
               id: "started",
@@ -499,6 +501,7 @@ export async function handlePoll(
             for (const candidateId of unassignedIds) {
               const claimed = claimTask(candidateId, myAgentId);
               if (claimed) {
+                updateAgentStatusFromCapacity(myAgentId);
                 telemetry.taskEvent("claimed", {
                   taskId: claimed.id,
                   source: claimed.source,

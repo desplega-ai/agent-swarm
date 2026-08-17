@@ -128,6 +128,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("task_assigned");
     expect((body.trigger as { taskId: string }).taskId).toBe(task.id);
+    expect(getAgentById(worker.id)?.status).toBe("busy");
   });
 
   test("pending task trigger includes requester role and notes", async () => {
@@ -271,6 +272,25 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     const nullTriggers = triggers.filter((t) => t === null);
     expect(claimedTriggers).toHaveLength(1);
     expect(nullTriggers).toHaveLength(1);
+  });
+
+  test("pool claim marks the agent busy before the poll transaction returns", async () => {
+    const worker = createAgent({
+      name: "claim-status",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
+    const pooled = createTaskExtended("claim status task", {});
+
+    expect(getAgentById(worker.id)?.status).toBe("idle");
+
+    const { body } = await callPoll(worker.id);
+
+    if ("error" in body) throw new Error("unexpected error response");
+    expect(body.trigger?.type).toBe("task_assigned");
+    expect((body.trigger as { taskId: string }).taskId).toBe(pooled.id);
+    expect(getAgentById(worker.id)?.status).toBe("busy");
   });
 });
 
