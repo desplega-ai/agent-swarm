@@ -11,8 +11,6 @@
  */
 
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { McpHttpClient } from "../src/mcp-client/http-client";
 
@@ -41,7 +39,8 @@ const port = probe.port;
 probe.stop(true);
 
 const baseUrl = `http://127.0.0.1:${port}`;
-const tmpDir = mkdtempSync(join(tmpdir(), "identity-field-budget-e2e-"));
+const tmpDir = `/tmp/identity-field-budget-e2e-${crypto.randomUUID()}`;
+await Bun.$`mkdir -p ${tmpDir}`.quiet();
 const dbPath = join(tmpDir, "db.sqlite");
 const logPath = join(tmpDir, "server.log");
 const logWriter = Bun.file(logPath).writer();
@@ -247,7 +246,7 @@ async function cleanup(): Promise<void> {
   server.kill("SIGTERM");
   await Promise.race([server.exited, Bun.sleep(5_000)]);
   logWriter.end();
-  rmSync(tmpDir, { recursive: true, force: true });
+  await Bun.$`rm -rf ${tmpDir}`.quiet();
 }
 
 let exitCode = 1;

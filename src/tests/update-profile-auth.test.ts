@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getAgentById, getLatestContextVersion, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  deleteAgent,
+  getAgentById,
+  getLatestContextVersion,
+  initDb,
+} from "../be/db";
 import { registerUpdateProfileTool } from "../tools/update-profile";
 import { SOUL_MD_MAX_CHARS } from "../utils/identity-field-budget";
 
@@ -55,7 +61,7 @@ describe("update-profile authorization", () => {
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
-        await unlink(TEST_DB_PATH + suffix);
+        await Bun.file(TEST_DB_PATH + suffix).delete();
       } catch {
         // File doesn't exist
       }
@@ -76,7 +82,7 @@ describe("update-profile authorization", () => {
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
-        await unlink(TEST_DB_PATH + suffix);
+        await Bun.file(TEST_DB_PATH + suffix).delete();
       } catch {
         // ignore
       }
@@ -241,6 +247,28 @@ describe("update-profile authorization", () => {
       expect(log).toContain("+echo audit-test");
     } finally {
       warnSpy.mockRestore();
+    }
+  });
+
+  test("missing self agent does not write supplied profile files", async () => {
+    const originalAgentId = process.env.AGENT_ID;
+    const writeSpy = spyOn(Bun, "write").mockImplementation(async () => 0);
+
+    try {
+      process.env.AGENT_ID = WORKER_ID;
+      expect(deleteAgent(WORKER_ID)).toBe(true);
+
+      const result = await callUpdateProfile(server, WORKER_ID, {
+        soulMd: "must not reach the workspace",
+      });
+
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("Agent not found");
+      expect(writeSpy).not.toHaveBeenCalled();
+    } finally {
+      writeSpy.mockRestore();
+      if (originalAgentId === undefined) delete process.env.AGENT_ID;
+      else process.env.AGENT_ID = originalAgentId;
     }
   });
 });

@@ -275,6 +275,12 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           },
         );
 
+        // Do not perform audit or workspace-file side effects when the target
+        // disappeared before the transactional update could find it.
+        if (!agent) {
+          return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
+        }
+
         if (setupScript !== undefined && previousSetupScript !== undefined) {
           try {
             const diff = await computeSetupScriptDiff(previousSetupScript, setupScript);
@@ -339,10 +345,6 @@ export const registerUpdateProfileTool = (server: McpServer) => {
               /* ignore */
             }
           }
-        }
-
-        if (!agent) {
-          return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         const updatedFields: string[] = [];
