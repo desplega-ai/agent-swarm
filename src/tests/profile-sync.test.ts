@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
   buildIdentityPayload,
+  buildIndependentIdentityPayloads,
   CLAUDE_MD_PATH,
   collectProfilePayloads,
   contentSha256,
@@ -155,7 +156,13 @@ describe("collectProfilePayloads (field gate)", () => {
       "session_sync",
       files,
     );
-    expect(all.map((p) => p.label).sort()).toEqual(["claude", "identity", "setup"]);
+    expect(all.map((p) => p.label).sort()).toEqual([
+      "claude",
+      "identity.identityMd",
+      "identity.soulMd",
+      "identity.toolsMd",
+      "setup",
+    ]);
   });
 
   test("a missing file yields no payload for that group (no empty POST)", async () => {
@@ -426,11 +433,13 @@ describe("collectProfilePayloads (baseline integration)", () => {
     });
 
     const payloads = await collectProfilePayloads(["identity"], "self_edit", files);
-    expect(payloads).toHaveLength(1);
-    // self_edit should include ALL files regardless of baselines
-    expect(payloads[0]?.body.soulMd).toBe(identityContent);
-    expect(payloads[0]?.body.identityMd).toBe(identityContent);
-    expect(payloads[0]?.body.toolsMd).toBe("tools");
+    expect(payloads).toHaveLength(3);
+    // self_edit should include ALL files regardless of baselines, independently.
+    expect(payloads.map((payload) => payload.body)).toEqual([
+      { soulMd: identityContent, changeSource: "self_edit" },
+      { identityMd: identityContent, changeSource: "self_edit" },
+      { toolsMd: "tools", changeSource: "self_edit" },
+    ]);
   });
 
   test("session_sync skips unchanged CLAUDE.md when baseline matches", async () => {
@@ -493,5 +502,29 @@ describe("collectProfilePayloads (baseline integration)", () => {
     );
     // No identity payload (all skipped), no claude or setup (files missing)
     expect(payloads).toEqual([]);
+  });
+});
+
+describe("buildIndependentIdentityPayloads", () => {
+  test("splits fields so one rejected write cannot discard valid siblings", () => {
+    expect(
+      buildIndependentIdentityPayloads(
+        { soulMd: "rejected growth", toolsMd: "valid edit", heartbeatMd: "ungated edit" },
+        "session_sync",
+      ),
+    ).toEqual([
+      {
+        label: "identity.soulMd",
+        body: { soulMd: "rejected growth", changeSource: "session_sync" },
+      },
+      {
+        label: "identity.toolsMd",
+        body: { toolsMd: "valid edit", changeSource: "session_sync" },
+      },
+      {
+        label: "identity.heartbeatMd",
+        body: { heartbeatMd: "ungated edit", changeSource: "session_sync" },
+      },
+    ]);
   });
 });

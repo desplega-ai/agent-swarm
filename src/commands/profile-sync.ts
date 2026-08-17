@@ -2,7 +2,7 @@
  * Harness-agnostic FS → DB profile sync (worker-side, HTTP-only).
  *
  * Persists an agent's self-editable identity / config files back to the API:
- *   - SOUL.md / IDENTITY.md / TOOLS.md / HEARTBEAT.md  (bundled identity POST)
+ *   - SOUL.md / IDENTITY.md / TOOLS.md / HEARTBEAT.md  (independent POSTs)
  *   - ~/.claude/CLAUDE.md                              (claude POST)
  *   - /workspace/start-up.sh (agent-managed section)   (setup POST)
  *
@@ -168,9 +168,23 @@ export function resolveClaudeMdPath(completedProviders: readonly string[]): stri
 }
 
 /** A single profile-update POST body, tagged with a label for logging. */
-interface ProfilePayload {
+export interface ProfilePayload {
   label: string;
-  body: Record<string, unknown>;
+  body: Record<string, string>;
+}
+
+/**
+ * Keep identity-file sync independent: one rejected ratcheting-budget write
+ * must not discard valid edits to other files from the same session.
+ */
+export function buildIndependentIdentityPayloads(
+  updates: Record<string, string>,
+  changeSource: ProfileChangeSource,
+): ProfilePayload[] {
+  return Object.entries(updates).map(([field, value]) => ({
+    label: `identity.${field}`,
+    body: { [field]: value, changeSource },
+  }));
 }
 
 /**
@@ -325,9 +339,7 @@ export async function collectProfilePayloads(
       baselines,
       agentId,
     );
-    if (Object.keys(updates).length > 0) {
-      payloads.push({ label: "identity", body: { ...updates, changeSource } });
-    }
+    payloads.push(...buildIndependentIdentityPayloads(updates, changeSource));
   }
 
   if (fields.includes("claude")) {

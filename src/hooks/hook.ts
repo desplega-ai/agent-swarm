@@ -10,6 +10,7 @@ import {
   type RetrievalRow,
 } from "../be/memory/raters/llm";
 import {
+  buildIndependentIdentityPayloads,
   contentSha256,
   readIdentityBaselines,
   warnProfileFileTooLarge,
@@ -760,12 +761,14 @@ export async function handleHook(): Promise<void> {
 
     if (Object.keys(updates).length === 0) return;
 
-    await postHookProfileUpdate({
-      url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
-      headers: mcpConfig.headers,
-      body: { ...updates, changeSource },
-      label: "identity",
-    });
+    for (const payload of buildIndependentIdentityPayloads(updates, changeSource)) {
+      await postHookProfileUpdate({
+        url: `${getBaseUrl()}/api/agents/${agentId}/profile`,
+        headers: mcpConfig.headers,
+        body: payload.body,
+        label: payload.label,
+      });
+    }
   };
 
   /**
