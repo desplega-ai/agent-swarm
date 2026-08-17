@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, updateAgentName, updateAgentProfile } from "@/be/db";
+import { getAgentById, updateAgentProfile } from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { type Agent, AgentAvatarSchema, AgentStatusSchema, ProviderNameSchema } from "@/types";
@@ -250,21 +250,14 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           }
         }
 
-        // Update name if provided
-        if (name !== undefined) {
-          agent = updateAgentName(targetAgentId, name);
-          if (!agent) {
-            return toolErr("Target agent not found.", {
-              data: { yourAgentId: requestInfo.agentId },
-            });
-          }
-        }
-
-        // Update profile fields if provided. `avatar` is spread in only when
-        // present so `null` (reset) stays distinguishable from "not provided".
+        // Apply name and profile fields in one DB transaction so validation or
+        // update failures cannot leave a partially-applied combined payload.
+        // `avatar` is spread in only when present so `null` (reset) stays
+        // distinguishable from "not provided".
         agent = updateAgentProfile(
           targetAgentId,
           {
+            name,
             description,
             role,
             capabilities,

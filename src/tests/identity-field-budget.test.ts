@@ -41,7 +41,7 @@ describe("checkIdentityFieldBudget", () => {
     ).toEqual({ ok: true });
   });
 
-  test("rejects growth and equal-length rewrites while over budget", () => {
+  test("rejects growth and accepts equal-length rewrites while over budget", () => {
     const growing = checkIdentityFieldBudget({
       field: "claudeMd",
       currentValue: "x".repeat(BOOTSTRAP_MAX_CHARS + 1),
@@ -54,19 +54,29 @@ describe("checkIdentityFieldBudget", () => {
     });
 
     expect(growing.ok).toBeFalse();
-    expect(equal.ok).toBeFalse();
-    if (growing.ok || equal.ok) throw new Error("Expected budget rejections");
+    expect(equal).toEqual({ ok: true });
+    if (growing.ok) throw new Error("Expected budget rejection");
     expect(growing.reason).toContain("claudeMd");
     expect(growing.reason).toContain("current size 20001");
     expect(growing.reason).toContain("budget 20000");
     expect(growing.reason).toContain("delta +1");
-    expect(growing.reason).toContain("already silently dropped at read time");
-    expect(growing.reason).toContain(
-      "shrinking that tail loses nothing sessions currently receive",
+    expect(growing.reason).toBe(
+      "Update rejected for claudeMd: current size 20001 characters, budget 20000 characters, delta +1 characters." +
+        " The tail past the 20000-character cap is dropped from the base prompt and only reaches harnesses with a native CLAUDE.md loader." +
+        " Move durable content into memories and keep pointers to it in this field.",
     );
-    expect(growing.reason).toContain("memories");
-    expect(growing.reason).toContain("pointers");
-    expect(equal.reason).toContain("delta +0");
+
+    const toolsGrowth = checkIdentityFieldBudget({
+      field: "toolsMd",
+      currentValue: "x".repeat(BOOTSTRAP_MAX_CHARS + 1),
+      nextValue: "x".repeat(BOOTSTRAP_MAX_CHARS + 2),
+    });
+    if (toolsGrowth.ok) throw new Error("Expected toolsMd budget rejection");
+    expect(toolsGrowth.reason).toBe(
+      "Update rejected for toolsMd: current size 20001 characters, budget 20000 characters, delta +1 characters." +
+        " Content past the 20000-character cap is already silently dropped at read time, so shrinking that tail loses nothing sessions currently receive." +
+        " Move durable content into memories and keep pointers to it in this field.",
+    );
   });
 });
 
@@ -99,20 +109,19 @@ describe("updateAgentProfile identity budget enforcement", () => {
     expect(result?.heartbeatMd).toBe(heartbeat);
   });
 
-  test("allows an existing oversized value to shrink but rejects equal length and growth", () => {
+  test("allows an existing oversized value to shrink or change at equal length but rejects growth", () => {
     const current = "c".repeat(BOOTSTRAP_MAX_CHARS + 10);
     getDb().prepare("UPDATE agents SET claudeMd = ? WHERE id = ?").run(current, agentId);
 
     const shrunk = "s".repeat(BOOTSTRAP_MAX_CHARS + 9);
     expect(updateAgentProfile(agentId, { claudeMd: shrunk })?.claudeMd).toBe(shrunk);
 
-    expect(() => updateAgentProfile(agentId, { claudeMd: "e".repeat(shrunk.length) })).toThrow(
+    const equalLength = "e".repeat(shrunk.length);
+    expect(updateAgentProfile(agentId, { claudeMd: equalLength })?.claudeMd).toBe(equalLength);
+    expect(() => updateAgentProfile(agentId, { claudeMd: `${equalLength}g` })).toThrow(
       IdentityFieldBudgetError,
     );
-    expect(() => updateAgentProfile(agentId, { claudeMd: `${shrunk}g` })).toThrow(
-      IdentityFieldBudgetError,
-    );
-    expect(getAgentById(agentId)?.claudeMd).toBe(shrunk);
+    expect(getAgentById(agentId)?.claudeMd).toBe(equalLength);
   });
 });
 

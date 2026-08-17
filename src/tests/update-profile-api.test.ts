@@ -507,7 +507,11 @@ describe("PUT /api/agents/:id/profile", () => {
       expect(data.error).toContain("current size 0");
       expect(data.error).toContain("budget 20000");
       expect(data.error).toContain("delta +20001");
-      expect(data.error).toContain("already silently dropped at read time");
+      expect(data.error).toBe(
+        "Update rejected for claudeMd: current size 0 characters, budget 20000 characters, delta +20001 characters." +
+          " The tail past the 20000-character cap is dropped from the base prompt and only reaches harnesses with a native CLAUDE.md loader." +
+          " Move durable content into memories and keep pointers to it in this field.",
+      );
     });
 
     test("should allow claudeMd at exactly its session budget", async () => {

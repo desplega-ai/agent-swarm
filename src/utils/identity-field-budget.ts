@@ -24,23 +24,24 @@ export function checkIdentityFieldBudget({
   nextValue: string;
 }): IdentityFieldBudgetResult {
   const budget = IDENTITY_FIELD_BUDGETS[field];
-  if (nextValue.length <= budget || nextValue.length < currentValue.length) {
+  if (nextValue.length <= budget || nextValue.length <= currentValue.length) {
     return { ok: true };
   }
 
   const delta = nextValue.length - currentValue.length;
-  const readTimeCapGuidance =
-    field === "claudeMd" || field === "toolsMd"
-      ? ` Content past the ${budget}-character cap is already silently dropped at read time, so shrinking that tail loses nothing sessions currently receive.`
-      : "";
+  const remediation =
+    field === "toolsMd"
+      ? ` Content past the ${budget}-character cap is already silently dropped at read time, so shrinking that tail loses nothing sessions currently receive. Move durable content into memories and keep pointers to it in this field.`
+      : field === "claudeMd"
+        ? ` The tail past the ${budget}-character cap is dropped from the base prompt and only reaches harnesses with a native CLAUDE.md loader. Move durable content into memories and keep pointers to it in this field.`
+        : " Move durable content into memories and keep pointers to it in this field.";
 
   return {
     ok: false,
     reason:
       `Update rejected for ${field}: current size ${currentValue.length} characters, ` +
       `budget ${budget} characters, delta ${delta >= 0 ? "+" : ""}${delta} characters.` +
-      readTimeCapGuidance +
-      " Move durable content into memories and keep pointers to it in this field.",
+      remediation,
   };
 }
 

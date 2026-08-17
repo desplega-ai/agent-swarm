@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getAgentById, getLatestContextVersion, initDb } from "../be/db";
 import { registerUpdateProfileTool } from "../tools/update-profile";
+import { SOUL_MD_MAX_CHARS } from "../utils/identity-field-budget";
 
 const TEST_DB_PATH = "./test-update-profile-auth.sqlite";
 
@@ -206,6 +207,21 @@ describe("update-profile authorization", () => {
 
     const agent = getAgentById(WORKER_ID);
     expect(agent?.setupScript).toBe(before);
+  });
+
+  test("rejected combined name and identity update leaves the name unchanged", async () => {
+    const before = getAgentById(WORKER_ID);
+
+    const result = await callUpdateProfile(server, WORKER_ID, {
+      name: "Partially Renamed Worker",
+      soulMd: "x".repeat(SOUL_MD_MAX_CHARS + 1),
+    });
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("Update rejected for soulMd");
+    const after = getAgentById(WORKER_ID);
+    expect(after?.name).toBe(before?.name);
+    expect(after?.soulMd).toBe(before?.soulMd);
   });
 
   test("logs setupScript audit diff for accepted updates", async () => {

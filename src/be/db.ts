@@ -5568,6 +5568,7 @@ export {
 export function updateAgentProfile(
   id: string,
   updates: {
+    name?: string;
     description?: string;
     role?: string;
     capabilities?: string[];
@@ -5601,6 +5602,13 @@ export function updateAgentProfile(
         nextValue,
       });
       if (!result.ok) throw new IdentityFieldBudgetError(result.reason);
+    }
+
+    if (updates.name !== undefined) {
+      const existingAgent = database
+        .prepare<AgentRow, [string, string]>("SELECT * FROM agents WHERE name = ? AND id != ?")
+        .get(updates.name, id);
+      if (existingAgent) throw new Error("Agent name already exists");
     }
 
     // Create context versions for changed fields
@@ -5655,6 +5663,7 @@ export function updateAgentProfile(
           string | null,
           string | null,
           string | null,
+          string | null,
           number,
           string | null,
           string,
@@ -5662,6 +5671,7 @@ export function updateAgentProfile(
         ]
       >(
         `UPDATE agents SET
+          name = COALESCE(?, name),
           description = COALESCE(?, description),
           role = COALESCE(?, role),
           capabilities = COALESCE(?, capabilities),
@@ -5676,6 +5686,7 @@ export function updateAgentProfile(
          WHERE id = ? RETURNING *`,
       )
       .get(
+        updates.name ?? null,
         updates.description ?? null,
         updates.role ?? null,
         updates.capabilities ? JSON.stringify(updates.capabilities) : null,
@@ -5696,23 +5707,7 @@ export function updateAgentProfile(
 }
 
 export function updateAgentName(id: string, newName: string): Agent | null {
-  // Check if another agent already has this name
-  const existingAgent = getDb()
-    .prepare<AgentRow, [string, string]>("SELECT * FROM agents WHERE name = ? AND id != ?")
-    .get(newName, id);
-
-  if (existingAgent) {
-    throw new Error("Agent name already exists");
-  }
-
-  const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentRow, [string, string, string]>(
-      "UPDATE agents SET name = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    )
-    .get(newName, now, id);
-
-  return row ? rowToAgent(row) : null;
+  return updateAgentProfile(id, { name: newName });
 }
 
 // ============================================================================
