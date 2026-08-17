@@ -1,5 +1,6 @@
 import { getTrackerSync, updateTrackerSync } from "../be/db-queries/tracker";
 import { ensureToken } from "../oauth/ensure-token";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { workflowEventBus } from "../workflows/event-bus";
 import { getLinearClient, resetLinearClient } from "./client";
 import { endAgentSession, postAgentSessionAction, taskSessionMap } from "./sync";
@@ -26,7 +27,10 @@ function observed(
 ): (data: unknown) => void {
   return (data: unknown): void => {
     handler(data).catch((error) => {
-      console.error(`[Linear Outbound] ${eventName} handler failed:`, error);
+      console.error(
+        `[Linear Outbound] ${eventName} handler failed:`,
+        scrubSecrets(error instanceof Error ? error.message : String(error)),
+      );
     });
   };
 }

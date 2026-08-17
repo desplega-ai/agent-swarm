@@ -1,4 +1,5 @@
 import { getPublicMcpBaseUrl } from "../utils/constants";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { jiraFetch } from "./client";
 import { getJiraMetadata, updateJiraMetadata } from "./metadata";
 
@@ -359,11 +360,21 @@ export function startJiraWebhookKeepalive(): void {
   // Immediate-on-boot check (after a short delay so server finishes startup
   // and OAuth tokens are loaded). Mirrors src/oauth/keepalive.ts pattern.
   setTimeout(() => {
-    runKeepalive().catch((err) => console.error("[Jira webhook keepalive] run failed:", err));
+    runKeepalive().catch((err) =>
+      console.error(
+        "[Jira webhook keepalive] run failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
   }, 10_000);
 
   keepaliveInterval = setInterval(() => {
-    runKeepalive().catch((err) => console.error("[Jira webhook keepalive] run failed:", err));
+    runKeepalive().catch((err) =>
+      console.error(
+        "[Jira webhook keepalive] run failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
   }, TWELVE_HOURS_MS);
 }
 

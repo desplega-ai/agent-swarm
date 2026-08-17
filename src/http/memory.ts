@@ -21,6 +21,7 @@ import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retriev
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { jsonError, parseQueryParams } from "./utils";
 
@@ -725,7 +726,12 @@ export async function handleMemory(
       } catch (err) {
         console.error("[memory] Batch embedding failed:", (err as Error).message);
       }
-    })().catch((err) => console.error("[memory] batch embed failed:", err));
+    })().catch((err) =>
+      console.error(
+        "[memory] batch embed failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
 
     indexMemory.respond(res, 202, { queued: true, memoryIds: memories.map((m) => m.id) });
     return true;
@@ -1041,7 +1047,12 @@ export async function handleMemory(
         }
       }
       console.log(`[memory] Re-embedding complete: ${memories.length} memories`);
-    })().catch((err) => console.error("[memory] re-embed batch failed:", err));
+    })().catch((err) =>
+      console.error(
+        "[memory] re-embed batch failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
 
     return true;
   }

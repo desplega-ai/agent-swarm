@@ -74,7 +74,7 @@ describe("outbound event-bus listener rejection handling", () => {
     expect(unhandled).toEqual([]);
   });
 
-  test("the reported error carries the underlying rejection reason", async () => {
+  test("the reported error carries the reason as scrubbed text, not the raw object", async () => {
     initJiraOutboundSync();
 
     workflowEventBus.emit("task.failed", null);
@@ -84,7 +84,11 @@ describe("outbound event-bus listener rejection handling", () => {
       (args) => String(args[0]) === "[Jira Outbound] task.failed handler failed:",
     );
     expect(call).toBeDefined();
-    expect(call?.[1]).toBeInstanceOf(Error);
+    // Text, not the Error itself: a raw SDK error would serialise attached
+    // request/response fields that can hold credentials.
+    expect(typeof call?.[1]).toBe("string");
+    // The underlying reason survives; only the object wrapper is dropped.
+    expect(String(call?.[1])).toMatch(/null/);
   });
 
   test("every subscribed event is observed, not just one", async () => {

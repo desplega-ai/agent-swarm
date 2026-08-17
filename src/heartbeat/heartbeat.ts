@@ -1352,11 +1352,21 @@ export function startHeartbeat(intervalMs = defaultIntervalMs()): void {
   setTimeout(() => {
     runRebootSweep()
       .then(() => runHeartbeatSweep())
-      .catch((err) => console.error("[Heartbeat] boot sweep failed:", err));
+      .catch((err) =>
+        console.error(
+          "[Heartbeat] boot sweep failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
   }, 5000);
 
   heartbeatInterval = setInterval(() => {
-    runHeartbeatSweep().catch((err) => console.error("[Heartbeat] sweep failed:", err));
+    runHeartbeatSweep().catch((err) =>
+      console.error(
+        "[Heartbeat] sweep failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
   }, intervalMs);
 
   // Also start the checklist interval
@@ -1439,7 +1449,10 @@ export function startHeartbeatChecklist(intervalMs = HEARTBEAT_CHECKLIST_INTERVA
   // Recurring checklist starts from the second interval onward
   checklistInterval = setInterval(() => {
     checkHeartbeatChecklist().catch((err) =>
-      console.error("[Heartbeat] checklist check failed:", err),
+      console.error(
+        "[Heartbeat] checklist check failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
     );
   }, intervalMs);
 }

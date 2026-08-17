@@ -13,6 +13,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { checkpointStep } from "./checkpoint";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getSuccessors } from "./definition";
@@ -594,7 +595,10 @@ function registerWait(waitId: string, eventName: string): void {
       // is not covered by it — and the emitter cannot observe this promise,
       // since EventEmitter discards whatever a listener returns.
       processBusEvent(eventName, data).catch((err) => {
-        console.error(`[workflows] Wait bus listener failed for event=${eventName}:`, err);
+        console.error(
+          `[workflows] Wait bus listener failed for event=${eventName}:`,
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        );
       });
     };
     listenersByEvent.set(eventName, listener);

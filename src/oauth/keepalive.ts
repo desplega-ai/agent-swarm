@@ -1,4 +1,5 @@
 import { listKeepAliveAuthorizations } from "../be/db-queries/oauth";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { ensureAuthorizationTokenOrThrow } from "./ensure-token";
 
 // Keep refresh tokens warm without constantly rotating strict-rotation
@@ -116,13 +117,19 @@ export function startOAuthKeepalive(): void {
   startupKeepaliveTimeout = setTimeout(() => {
     startupKeepaliveTimeout = null;
     scheduleKeepaliveRun("startup").catch((err) =>
-      console.error("[OAuth Keepalive] startup run failed:", err),
+      console.error(
+        "[OAuth Keepalive] startup run failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
     );
   }, STARTUP_KEEPALIVE_DELAY_MS);
 
   keepaliveInterval = setInterval(() => {
     scheduleKeepaliveRun("interval").catch((err) =>
-      console.error("[OAuth Keepalive] interval run failed:", err),
+      console.error(
+        "[OAuth Keepalive] interval run failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
     );
   }, KEEPALIVE_INTERVAL_MS);
 }

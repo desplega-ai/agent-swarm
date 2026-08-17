@@ -490,11 +490,21 @@ if (!globalState.__sigintRegistered) {
   // learn why the process failed to exit cleanly.
   process.on("SIGINT", () => {
     shutdownSignal = "SIGINT";
-    shutdown().catch((err) => console.error("[shutdown] SIGINT shutdown failed:", err));
+    shutdown().catch((err) =>
+      console.error(
+        "[shutdown] SIGINT shutdown failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
   });
   process.on("SIGTERM", () => {
     shutdownSignal = "SIGTERM";
-    shutdown().catch((err) => console.error("[shutdown] SIGTERM shutdown failed:", err));
+    shutdown().catch((err) =>
+      console.error(
+        "[shutdown] SIGTERM shutdown failed:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
   });
 }
 

@@ -14,6 +14,7 @@
 
 import { resolveTemplate } from "../prompts/resolver";
 import type { AgentTask } from "../types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createTaskExtended,
   getAgentById,
@@ -159,6 +160,9 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
       });
     })
     .catch((err) =>
-      console.error("[budget-refusal-notify] task.budget_refused event not emitted:", err),
+      console.error(
+        "[budget-refusal-notify] task.budget_refused event not emitted:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
     );
 }

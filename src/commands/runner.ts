@@ -3395,7 +3395,12 @@ async function spawnProviderProcess(
   function bufferEvent(evt: BufferedEvent) {
     eventBuffer.push(evt);
     if (eventBuffer.length >= EVENT_BUFFER_MAX) {
-      flushEvents().catch((err) => console.error("[runner] event flush failed:", err));
+      flushEvents().catch((err) =>
+        console.error(
+          "[runner] event flush failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
     }
   }
 
@@ -4087,7 +4092,10 @@ async function checkCompletedProcesses(
 
     if (apiConfig) {
       removeActiveSession(apiConfig, taskId).catch((err) =>
-        console.error("[runner] active-session removal failed:", err),
+        console.error(
+          "[runner] active-session removal failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
       );
     }
 
@@ -5430,7 +5438,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           triggerType: "task_resumed",
           taskDescription: task.task?.slice(0, 200),
           runnerSessionId: resumeRunnerSessionId,
-        }).catch((err) => console.error("[runner] active-session registration failed:", err));
+        }).catch((err) =>
+          console.error(
+            "[runner] active-session registration failed:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
         console.log(
           `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
         );
@@ -5557,7 +5570,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
       vcsCheckTimestamps.set(taskId, now);
       detectVcsForTask(apiUrl, apiKey, taskId, task.workingDir).catch((err) =>
-        console.error("[runner] VCS detection failed:", err),
+        console.error(
+          "[runner] VCS detection failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
       );
     }
 
@@ -5994,7 +6010,12 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           triggerType: trigger.type,
           taskDescription: taskDesc,
           runnerSessionId: taskRunnerSessionId,
-        }).catch((err) => console.error("[runner] active-session registration failed:", err));
+        }).catch((err) =>
+          console.error(
+            "[runner] active-session registration failed:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
 
         console.log(
           `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,

@@ -2971,7 +2971,12 @@ export function completeTask(id: string, output?: string): AgentTask | null {
           workflowRunStepId: row.workflowRunStepId,
         });
       })
-      .catch((err) => console.error("[db] task.completed event not emitted:", err));
+      .catch((err) =>
+        console.error(
+          "[db] task.completed event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
     try {
       promotePendingSteeringForTask(id, "Task completed before steering was delivered");
     } catch (error) {
@@ -3032,7 +3037,12 @@ export function failTask(id: string, reason: string): AgentTask | null {
           workflowRunStepId: row.workflowRunStepId,
         });
       })
-      .catch((err) => console.error("[db] task.failed event not emitted:", err));
+      .catch((err) =>
+        console.error(
+          "[db] task.failed event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
     try {
       promotePendingSteeringForTask(id, "Task failed before steering was delivered");
     } catch (error) {
@@ -3122,7 +3132,12 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
           workflowRunStepId: row.workflowRunStepId,
         });
       })
-      .catch((err) => console.error("[db] task.cancelled event not emitted:", err));
+      .catch((err) =>
+        console.error(
+          "[db] task.cancelled event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
     try {
       promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
     } catch (error) {
@@ -3214,7 +3229,12 @@ export function supersedeTask(
           workflowRunStepId: row.workflowRunStepId,
         });
       })
-      .catch((err) => console.error("[db] task.superseded event not emitted:", err));
+      .catch((err) =>
+        console.error(
+          "[db] task.superseded event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
 
     try {
       cascadeFailDependents(id, "superseded");
@@ -3451,7 +3471,12 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
           agentId: row.agentId,
         });
       })
-      .catch((err) => console.error("[db] task.progress event not emitted:", err));
+      .catch((err) =>
+        console.error(
+          "[db] task.progress event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -5100,7 +5125,12 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         workflowRunStepId: row.workflowRunStepId,
       });
     })
-    .catch((err) => console.error("[db] task.created event not emitted:", err));
+    .catch((err) =>
+      console.error(
+        "[db] task.created event not emitted:",
+        scrubSecrets(err instanceof Error ? err.message : String(err)),
+      ),
+    );
 
   return rowToAgentTask(row);
 }
