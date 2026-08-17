@@ -1,5 +1,6 @@
 import { getDb } from "./be/db";
 import { getSlackApp } from "./slack/app";
+import { scrubSecrets } from "./utils/secret-scrubber";
 
 export const QUEUE_STALL_THRESHOLD_MS = 30 * 60 * 1000;
 export const QUEUE_STALL_CHECK_INTERVAL_MS = 5 * 60 * 1000;
@@ -8,7 +9,7 @@ const QUEUE_STALL_STARTUP_DELAY_MS = 10_000;
 export interface QueueStallSnapshot {
   claimableCount: number;
   oldestTaskId: string | null;
-  oldestCreatedAt: string | null;
+  oldestClaimableAt: string | null;
   oldestAgeMs: number;
   recentPickupCount: number;
 }
@@ -27,11 +28,23 @@ let alarmActive = false;
 export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
   const oldest = getDb()
     .prepare<
-      { claimableCount: number; oldestTaskId: string | null; oldestCreatedAt: string | null },
+      { claimableCount: number; oldestTaskId: string | null; oldestClaimableAt: string | null },
       []
     >(
       `WITH claimable AS (
-         SELECT t.id, t.createdAt
+         SELECT
+           t.id,
+           MAX(
+             COALESCE(t.lastUpdatedAt, t.createdAt),
+             COALESCE(
+               (
+                 SELECT MAX(prerequisite.lastUpdatedAt)
+                 FROM json_each(COALESCE(t.dependsOn, '[]')) dep
+                 JOIN agent_tasks prerequisite ON prerequisite.id = dep.value
+               ),
+               t.createdAt
+             )
+           ) AS claimableAt
          FROM agent_tasks t
          WHERE t.status IN ('pending', 'unassigned')
            AND NOT EXISTS (
@@ -42,12 +55,12 @@ export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
            )
        ),
        oldest AS (
-         SELECT id, createdAt FROM claimable ORDER BY createdAt ASC LIMIT 1
+         SELECT id, claimableAt FROM claimable ORDER BY claimableAt ASC LIMIT 1
        )
        SELECT
          (SELECT COUNT(*) FROM claimable) AS claimableCount,
          (SELECT id FROM oldest) AS oldestTaskId,
-         (SELECT createdAt FROM oldest) AS oldestCreatedAt`,
+         (SELECT claimableAt FROM oldest) AS oldestClaimableAt`,
     )
     .get();
 
@@ -57,20 +70,20 @@ export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
       .prepare<{ count: number }, [string]>(
         `SELECT COUNT(*) AS count
          FROM agent_log
-         WHERE eventType = 'task_status_change'
+         WHERE eventType IN ('task_status_change', 'task_claimed')
            AND oldValue IN ('pending', 'unassigned')
            AND newValue = 'in_progress'
            AND createdAt >= ?`,
       )
       .get(pickupCutoff)?.count ?? 0;
 
-  const oldestCreatedAt = oldest?.oldestCreatedAt ?? null;
+  const oldestClaimableAt = oldest?.oldestClaimableAt ?? null;
   return {
     claimableCount: oldest?.claimableCount ?? 0,
     oldestTaskId: oldest?.oldestTaskId ?? null,
-    oldestCreatedAt,
-    oldestAgeMs: oldestCreatedAt
-      ? Math.max(0, now.getTime() - new Date(oldestCreatedAt).getTime())
+    oldestClaimableAt,
+    oldestAgeMs: oldestClaimableAt
+      ? Math.max(0, now.getTime() - new Date(oldestClaimableAt).getTime())
       : 0,
     recentPickupCount,
   };
@@ -82,6 +95,11 @@ export function isQueueStalled(snapshot: QueueStallSnapshot): boolean {
 
 function formatAge(ageMs: number): string {
   return `${Math.floor(ageMs / 60_000)}m`;
+}
+
+function formatCheckFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return `[Queue Stall Alarm] Check or notification failed: ${scrubSecrets(message)}`;
 }
 
 async function notifySlack(message: string): Promise<void> {
@@ -135,9 +153,7 @@ function scheduleCheck(): void {
   checkInFlight = true;
   checkQueueStall()
     .catch((error) => {
-      console.error(
-        `[Queue Stall Alarm] Check or notification failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      console.error(formatCheckFailure(error));
     })
     .finally(() => {
       checkInFlight = false;
@@ -170,6 +186,7 @@ export function stopQueueStallAlarm(): void {
 }
 
 export const _test = {
+  formatCheckFailure,
   resetState(): void {
     stopQueueStallAlarm();
     alarmActive = false;

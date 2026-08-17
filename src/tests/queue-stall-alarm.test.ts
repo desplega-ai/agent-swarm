@@ -79,6 +79,45 @@ describe("queue stall alarm", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  test("measures queue age from a backlog task becoming claimable", async () => {
+    const task = createTaskExtended("Released backlog task");
+    setCreatedAt(task.id, "2026-08-17T12:00:00.000Z");
+    getDb().run("UPDATE agent_tasks SET status = 'backlog' WHERE id = ?", [task.id]);
+    getDb().run("UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ? WHERE id = ?", [
+      "2026-08-17T16:59:00.000Z",
+      task.id,
+    ]);
+    const notify = mock(async (_message: string) => {});
+
+    const snapshot = await checkQueueStall(NOW, notify);
+
+    expect(snapshot.oldestAgeMs).toBe(60_000);
+    expect(isQueueStalled(snapshot)).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  test("measures queue age from the final dependency completing", async () => {
+    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
+    const blocked = createTaskExtended("Newly unblocked", {
+      agentId: worker.id,
+      dependsOn: [prerequisite.id],
+    });
+    setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
+    getDb().run("UPDATE agent_tasks SET status = 'completed', lastUpdatedAt = ? WHERE id = ?", [
+      "2026-08-17T16:59:00.000Z",
+      prerequisite.id,
+    ]);
+    const notify = mock(async (_message: string) => {});
+
+    const snapshot = await checkQueueStall(NOW, notify);
+
+    expect(snapshot.oldestTaskId).toBe(blocked.id);
+    expect(snapshot.oldestAgeMs).toBe(60_000);
+    expect(isQueueStalled(snapshot)).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
   test("excludes pending tasks whose dependencies are not complete", () => {
     const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
     const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
@@ -94,7 +133,7 @@ describe("queue stall alarm", () => {
     expect(snapshot.oldestTaskId).toBe(prerequisite.id);
   });
 
-  test("reports recent pickup transitions as diagnostic context", () => {
+  test("reports direct and pool pickup transitions as diagnostic context", () => {
     const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
     const task = createTaskExtended("Queued", { agentId: worker.id });
     getDb().run(
@@ -102,8 +141,22 @@ describe("queue stall alarm", () => {
        VALUES (?, 'task_status_change', ?, ?, 'pending', 'in_progress', ?)`,
       [crypto.randomUUID(), task.id, worker.id, "2026-08-17T16:50:00.000Z"],
     );
+    getDb().run(
+      `INSERT INTO agent_log (id, eventType, taskId, agentId, oldValue, newValue, createdAt)
+       VALUES (?, 'task_claimed', ?, ?, 'unassigned', 'in_progress', ?)`,
+      [crypto.randomUUID(), task.id, worker.id, "2026-08-17T16:55:00.000Z"],
+    );
 
-    expect(getQueueStallSnapshot(NOW).recentPickupCount).toBe(1);
+    expect(getQueueStallSnapshot(NOW).recentPickupCount).toBe(2);
+  });
+
+  test("scrubs secrets from notification failures before logging", () => {
+    const token = "ghp_1234567890abcdefABCDEF1234567890ABCD";
+
+    const output = _test.formatCheckFailure(new Error(`Slack rejected token ${token}`));
+
+    expect(output).not.toContain(token);
+    expect(output).toContain("[REDACTED:github_token]");
   });
 
   test("deduplicates an active alarm and sends recovery", async () => {
