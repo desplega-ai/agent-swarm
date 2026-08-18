@@ -100,6 +100,7 @@ export function findProfileDivergences(
     const budget =
       field === "heartbeatMd" ? null : IDENTITY_FIELD_BUDGETS[field as BudgetedIdentityField];
     if (diskValue === undefined || diskValue === null) {
+      if (dbValue.length === 0) continue;
       divergences.push({
         field,
         diskSize: null,

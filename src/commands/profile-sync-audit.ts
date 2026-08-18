@@ -29,6 +29,10 @@ export async function runProfileSyncAudit(
   return { agentId: config.agentId, divergences };
 }
 
+export function profileSyncAuditExitCode(divergences: ProfileDivergence[]): 0 | 2 {
+  return divergences.length > 0 ? 2 : 0;
+}
+
 if (import.meta.main) {
   const agentId = process.env.AGENT_ID;
   const apiUrl = getMcpBaseUrl();
@@ -47,7 +51,7 @@ if (import.meta.main) {
         process.env.HARNESS_PROVIDER === "claude" ? CLAUDE_MD_PATH : WORKSPACE_CLAUDE_MD_PATH,
     });
     console.log(JSON.stringify(result, null, 2));
-    process.exit(result.divergences.length > 0 ? 2 : 0);
+    process.exit(profileSyncAuditExitCode(result.divergences));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(scrubSecrets(`profile-sync-audit failed: ${message}`));

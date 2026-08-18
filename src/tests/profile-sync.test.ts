@@ -20,7 +20,7 @@ import {
   TOOLS_MD_PATH,
   WORKSPACE_CLAUDE_MD_PATH,
 } from "../commands/profile-sync";
-import { runProfileSyncAudit } from "../commands/profile-sync-audit";
+import { profileSyncAuditExitCode, runProfileSyncAudit } from "../commands/profile-sync-audit";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { IDENTITY_FIELD_BUDGETS } from "../utils/identity-field-budget";
 
@@ -102,7 +102,29 @@ describe("profile divergence audit", () => {
     expect(result.divergences.map((entry) => entry.field)).toEqual(["identityMd", "heartbeatMd"]);
   });
 
-  test("reports a missing local file as an explicit divergence", () => {
+  test("treats profile fields absent on disk and empty in the DB as equal", async () => {
+    const readFile: FileReader = async () => undefined;
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ soulMd: "" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+
+    const result = await runProfileSyncAudit(
+      {
+        agentId: "agent-unset",
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+        claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
+      },
+      { fetchImpl, readFile },
+    );
+
+    expect(result.divergences).toEqual([]);
+    expect(profileSyncAuditExitCode(result.divergences)).toBe(0);
+  });
+
+  test("reports a missing local file when the DB value is non-empty", () => {
     const divergences = findProfileDivergences(
       {
         soulMd: undefined,
