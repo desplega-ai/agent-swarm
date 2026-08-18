@@ -158,7 +158,7 @@ export default function OAuthAppDetailPage() {
 
   useEffect(() => {
     if (app && app.id !== decoded) {
-      navigate(`/connections/oauth-apps/${encodeURIComponent(app.id)}`, { replace: true });
+      void navigate(`/connections/oauth-apps/${encodeURIComponent(app.id)}`, { replace: true });
     }
   }, [app, decoded, navigate]);
 
@@ -196,7 +196,7 @@ export default function OAuthAppDetailPage() {
     try {
       await deleteApp.mutateAsync(app.id);
       toast.success("OAuth app deleted");
-      navigate("/connections?tab=oauth-apps");
+      void navigate("/connections?tab=oauth-apps");
     } catch (err) {
       toastMutationError(err);
     }

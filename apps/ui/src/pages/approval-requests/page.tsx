@@ -167,7 +167,7 @@ export default function ApprovalRequestsPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<ApprovalRequest>) => {
-      if (event.data) navigate(`/approval-requests/${event.data.id}`);
+      if (event.data) void navigate(`/approval-requests/${event.data.id}`);
     },
     [navigate],
   );

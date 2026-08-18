@@ -161,7 +161,7 @@ export default function WorkflowsPage() {
     (event: RowClickedEvent<WorkflowSummary>) => {
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest('[data-slot="switch"], button')) return;
-      if (event.data) navigate(`/workflows/${event.data.id}`);
+      if (event.data) void navigate(`/workflows/${event.data.id}`);
     },
     [navigate],
   );
@@ -222,7 +222,7 @@ export default function WorkflowsPage() {
 
   const onRunRowClicked = useCallback(
     (event: RowClickedEvent<WorkflowRun>) => {
-      if (event.data) navigate(`/workflow-runs/${event.data.id}`);
+      if (event.data) void navigate(`/workflow-runs/${event.data.id}`);
     },
     [navigate],
   );

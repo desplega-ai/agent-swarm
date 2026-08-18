@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.132.0] - 2026-08-18
+
+### Added
+- **Agent identity files now have ratcheting prompt-size budgets** (#1174) — SOUL.md and IDENTITY.md may grow to 10,000 characters, while CLAUDE.md and TOOLS.md may grow to 20,000; already-oversized profiles can still shrink, and independent syncs keep one rejected file from discarding valid edits to the others.
+
+### Changed
+- **Worker harnesses track current compatible releases** (#1173) — Claude Code moves to 2.1.233, the Pi harness family to 0.84.2, and OpenCode plus its SDK to 1.18.18.
+
+### Fixed
+- **Claimable task queues now alert operators when pickup stalls** (#1177) — the API process detects tasks waiting at least 30 minutes, posts deduplicated Slack alerts, and sends a recovery notice without depending on a worker to claim an alarm task.
+- **Task pickup immediately synchronizes agent capacity status** (#1178) — pending starts and pool claims no longer leave actively working agents marked idle.
+- **Detached asynchronous work reports rejected promises safely** (#1176) — runners, integrations, heartbeat, workflows, and shutdown paths log scrubbed failures instead of leaking unhandled rejections, while dashboard handlers explicitly mark intentional fire-and-forget work.
+- **Script runtime module paths decode file URLs correctly** (#1170) — schema extraction, type checking, and native execution handle escaped filesystem characters reliably.
+- **Unsupported MCP discovery probes fail without creating sessions** (#1172) — `server/discover` receives a JSON-RPC method-not-found response instead of allocating a leaked transport.
+
 ## [1.131.1] - 2026-08-13
 
 ### Added

@@ -23,6 +23,19 @@ Each agent has four identity files that persist across sessions:
 3. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
 4. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
 
+### Identity Size Budgets
+
+Identity content uses ratcheting growth budgets so persistent instructions do not expand the session prompt without bound:
+
+| Field | Growth budget |
+|------|---------------|
+| `soulMd` / SOUL.md | 10,000 characters |
+| `identityMd` / IDENTITY.md | 10,000 characters |
+| `claudeMd` / CLAUDE.md | 20,000 characters |
+| `toolsMd` / TOOLS.md | 20,000 characters |
+
+Updates at or below the budget are accepted. An existing value that already exceeds its budget can still be replaced with a value of the same size or smaller, but it cannot grow further. Move durable detail into searchable memories and keep concise pointers in identity files. Profile fields in one `update-profile` call are validated and written atomically, while session-end sync submits each identity file independently so a rejected oversized update does not prevent valid edits to other files from being saved.
+
 ### Agent Appearance
 
 An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.

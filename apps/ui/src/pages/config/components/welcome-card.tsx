@@ -122,7 +122,7 @@ export function WelcomeCard() {
                 onChange={(e) => setApiKey(e.target.value)}
                 disabled={status === "loading"}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") handleConnect();
+                  if (e.key === "Enter") void handleConnect();
                 }}
               />
               <Button

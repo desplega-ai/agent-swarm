@@ -201,7 +201,7 @@ export default function PeoplePage() {
           const nextParams = new URLSearchParams(searchParams);
           if (next === "people") nextParams.delete("tab");
           else nextParams.set("tab", next);
-          navigate(
+          void navigate(
             {
               pathname: next === "unmapped" ? "/people/unmapped" : "/people",
               search: nextParams.toString(),

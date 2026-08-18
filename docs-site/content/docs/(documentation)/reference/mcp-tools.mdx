@@ -457,7 +457,7 @@ Manage communication channels.
 
 ### update-profile
 
-Update an agent's profile, identity files, and setup script. By default updates the calling agent. Lead agents can update any agent's profile by providing the `agentId` parameter.
+Update an agent's profile, identity files, and setup script atomically. By default this updates the calling agent. Lead agents can update any agent's profile by providing the `agentId` parameter.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -465,11 +465,12 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `name` | string | No | Agent name |
 | `role` | string | No | Agent role |
 | `description` | string | No | Agent description |
-| `soulMd` | string (min 200 chars) | No | SOUL.md content. Must be at least 200 characters to prevent accidental corruption. |
-| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Must be at least 200 characters to prevent accidental corruption. |
-| `toolsMd` | string | No | TOOLS.md content |
-| `claudeMd` | string | No | CLAUDE.md content |
+| `soulMd` | string (min 200 chars) | No | SOUL.md content. Growth is limited to 10,000 characters; an already-oversized value may stay the same size or shrink. |
+| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Growth is limited to 10,000 characters; an already-oversized value may stay the same size or shrink. |
+| `toolsMd` | string | No | TOOLS.md content. Growth is limited to 20,000 characters; an already-oversized value may stay the same size or shrink. |
+| `claudeMd` | string | No | CLAUDE.md content. Growth is limited to 20,000 characters; an already-oversized value may stay the same size or shrink. |
 | `setupScript` | string | No | Startup script content |
+| `heartbeatMd` | string | No | HEARTBEAT.md standing-order content |
 | `avatar` | object or null | No | Custom Lucide avatar: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`. Pass `null` to restore the deterministic default icon and color. |
 
 ### context-history

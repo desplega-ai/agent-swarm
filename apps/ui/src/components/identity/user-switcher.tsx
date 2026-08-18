@@ -183,7 +183,7 @@ export function UserSwitcher() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              handleCreate();
+              void handleCreate();
             }}
             className="flex flex-col gap-3 py-2"
           >

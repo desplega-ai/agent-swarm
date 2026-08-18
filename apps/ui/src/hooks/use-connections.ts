@@ -50,7 +50,7 @@ export function useConnections() {
       });
       if (connections.length === 0) {
         switchConnection(created.id);
-        navigate("/");
+        void navigate("/");
       }
     }
     setEditTarget(null);

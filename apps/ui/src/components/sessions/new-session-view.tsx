@@ -89,7 +89,7 @@ export function NewSessionView() {
       queryClient.invalidateQueries({ queryKey: ["tasks"] });
       queryClient.invalidateQueries({ queryKey: ["task", created.id] });
       queryClient.invalidateQueries({ queryKey: ["task", created.id, "attachments"] });
-      navigate(`/sessions/${created.id}`);
+      void navigate(`/sessions/${created.id}`);
     },
   });
 

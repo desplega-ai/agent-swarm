@@ -84,7 +84,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
     {
       title: "Update Profile",
       description:
-        "Updates an agent's profile information (name, description, role, capabilities). By default updates the calling agent. Lead agents can update any agent's profile by providing the agentId parameter.",
+        "Updates an agent's profile, identity files, and setup script atomically. By default updates the calling agent. Lead agents can update any agent's profile by providing the agentId parameter.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
@@ -110,7 +110,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions.",
+            "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Growth is limited to 20,000 characters; an already-oversized value may stay the same size or shrink. Move durable detail into memories and keep concise pointers here.",
           ),
         soulMd: z
           .string()
@@ -118,7 +118,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption.",
+            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters. Growth is limited to 10,000 characters; an already-oversized value may stay the same size or shrink. Move durable detail into memories.",
           ),
         identityMd: z
           .string()
@@ -126,7 +126,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption.",
+            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters. Growth is limited to 10,000 characters; an already-oversized value may stay the same size or shrink. Move durable detail into memories.",
           ),
         setupScript: z
           .string()
@@ -140,7 +140,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md.",
+            "Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, and device names. Synced to /workspace/TOOLS.md. Growth is limited to 20,000 characters; an already-oversized value may stay the same size or shrink. Move durable detail into memories and keep concise pointers here.",
           ),
         heartbeatMd: z
           .string()

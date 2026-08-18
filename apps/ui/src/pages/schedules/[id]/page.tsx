@@ -95,7 +95,7 @@ function ScheduleTasks({ scheduleId }: { scheduleId: string }) {
   const onRowClicked = useMemo(
     () =>
       ignoreRowClickFromInteractives<AgentTask>((event) => {
-        if (event.data) navigate(`/tasks/${event.data.id}`);
+        if (event.data) void navigate(`/tasks/${event.data.id}`);
       }),
     [navigate],
   );
