@@ -46,6 +46,9 @@ describe("profile sync rejection session warning", () => {
     expect(banner).toContain("budget: 20000");
     expect(banner).toContain("delta: +895");
     expect(banner).toContain(".pre-boot-<timestamp>.bak");
+    expect(banner.indexOf("live /workspace/TOOLS.md")).toBeLessThan(
+      banner.indexOf("/workspace/TOOLS.md.pre-boot-<timestamp>.bak"),
+    );
     expect(banner).toContain(rejectionEvent.id);
   });
 

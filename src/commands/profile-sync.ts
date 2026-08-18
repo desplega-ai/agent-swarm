@@ -136,21 +136,21 @@ const PROFILE_FIELD_DETAILS: Record<
 > = {
   soulMd: {
     label: `soulMd (${SOUL_MD_PATH})`,
-    recoveryGuidance: `Inspect ${SOUL_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+    recoveryGuidance: `Inspect and shrink the live ${SOUL_MD_PATH} first, moving durable tail content into memory. After a worker restart, use ${SOUL_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy of the rejected content.`,
   },
   identityMd: {
     label: `identityMd (${IDENTITY_MD_PATH})`,
-    recoveryGuidance: `Inspect ${IDENTITY_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+    recoveryGuidance: `Inspect and shrink the live ${IDENTITY_MD_PATH} first, moving durable tail content into memory. After a worker restart, use ${IDENTITY_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy of the rejected content.`,
   },
   claudeMd: {
     label:
       "claudeMd (/workspace/CLAUDE.md for non-Claude harnesses; ~/.claude/CLAUDE.md for Claude)",
     recoveryGuidance:
-      "For a runner-managed workspace file, inspect /workspace/CLAUDE.md.pre-boot-<timestamp>.bak. Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step. Move durable tail content into memory and shrink the field before retrying.",
+      "Inspect and shrink the live CLAUDE.md source first, moving durable tail content into memory. After a worker restart, non-Claude harnesses can use /workspace/CLAUDE.md.pre-boot-<timestamp>.bak as the fallback copy; Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step.",
   },
   toolsMd: {
     label: `toolsMd (${TOOLS_MD_PATH})`,
-    recoveryGuidance: `Inspect ${TOOLS_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+    recoveryGuidance: `Inspect and shrink the live ${TOOLS_MD_PATH} first, moving durable tail content into memory. After a worker restart, use ${TOOLS_MD_PATH}.pre-boot-<timestamp>.bak as the fallback copy of the rejected content.`,
   },
 };
 
