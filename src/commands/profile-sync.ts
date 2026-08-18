@@ -195,24 +195,33 @@ export async function fetchProfileSyncRejectionBanner(
   try {
     const responses = await Promise.all(
       (Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]).map(async (field) => {
-        const query = new URLSearchParams({
-          event: "system.profile_sync_rejected",
-          agentId: config.agentId,
-          dataField: field,
-          limit: "1",
-        });
-        const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
-          headers: {
-            Authorization: `Bearer ${config.apiKey}`,
-            "X-Agent-ID": config.agentId,
-          },
-        });
-        if (!response.ok) return null;
-        const payload = (await response.json()) as { events?: SwarmEvent[] };
-        return payload.events?.[0] ?? null;
+        const fetchLatestEvent = async (event: SwarmEvent["event"]): Promise<SwarmEvent | null> => {
+          const query = new URLSearchParams({
+            event,
+            agentId: config.agentId,
+            dataField: field,
+            limit: "1",
+          });
+          const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
+            headers: {
+              Authorization: `Bearer ${config.apiKey}`,
+              "X-Agent-ID": config.agentId,
+            },
+          });
+          if (!response.ok) return null;
+          const payload = (await response.json()) as { events?: SwarmEvent[] };
+          return payload.events?.[0] ?? null;
+        };
+        const [rejection, reconciliation] = await Promise.all([
+          fetchLatestEvent("system.profile_sync_rejected"),
+          fetchLatestEvent("system.profile_sync_reconciled"),
+        ]);
+        return { rejection, reconciliation };
       }),
     );
-    const latestEvents = responses.filter((event): event is SwarmEvent => event !== null);
+    const latestEvents = responses.flatMap(({ rejection, reconciliation }) =>
+      rejection ? [{ rejection, reconciliation }] : [],
+    );
     if (latestEvents.length === 0) return "";
 
     let profile: Record<string, unknown> | null = null;
@@ -226,7 +235,9 @@ export async function fetchProfileSyncRejectionBanner(
       profile = (await profileResponse.json()) as Record<string, unknown>;
     }
 
-    const unresolved = latestEvents.filter((event) => {
+    const unresolved = latestEvents.flatMap(({ rejection, reconciliation }) => {
+      if (reconciliation && reconciliation.createdAt > rejection.createdAt) return [];
+      const event = rejection;
       const field = event.data?.field;
       const rejectedDbHash = event.data?.dbHash;
       const currentValue = typeof field === "string" ? profile?.[field] : undefined;
@@ -234,7 +245,9 @@ export async function fetchProfileSyncRejectionBanner(
         typeof rejectedDbHash === "string" &&
         typeof currentValue === "string" &&
         contentSha256(currentValue) !== rejectedDbHash
-      );
+      )
+        ? [event]
+        : [];
     });
     const banners = await Promise.all(unresolved.map(renderProfileSyncRejectionBanner));
     return banners.filter((banner): banner is string => banner !== null).join("");

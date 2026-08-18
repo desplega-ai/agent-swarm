@@ -26,6 +26,14 @@ const rejectionEvent: SwarmEvent = {
   },
 };
 
+const reconciliationEvent: SwarmEvent = {
+  ...rejectionEvent,
+  id: "00000000-0000-4000-8000-000000000003",
+  event: "system.profile_sync_reconciled",
+  status: "ok",
+  createdAt: "2026-08-18T16:00:00.000Z",
+};
+
 describe("profile sync rejection session warning", () => {
   test("carries field, disk size, DB size, budget, delta, and recovery path", async () => {
     const banner = await renderProfileSyncRejectionBanner(rejectionEvent);
@@ -98,6 +106,76 @@ describe("profile sync rejection session warning", () => {
     );
 
     expect(banner).toBe("");
+  });
+
+  test("stops warning after a successful no-op reconciliation", async () => {
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const field = url.searchParams.get("dataField");
+      const event = url.searchParams.get("event");
+      const body = url.pathname.endsWith("/me")
+        ? { toolsMd: "db tools" }
+        : {
+            events:
+              field !== "toolsMd"
+                ? []
+                : event === "system.profile_sync_reconciled"
+                  ? [reconciliationEvent]
+                  : [rejectionEvent],
+          };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const banner = await fetchProfileSyncRejectionBanner(
+      {
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+        agentId: "agent-1",
+      },
+      fetchImpl,
+    );
+
+    expect(banner).toBe("");
+  });
+
+  test("keeps warning when the latest reconciliation predates the rejection", async () => {
+    const olderReconciliation = {
+      ...reconciliationEvent,
+      createdAt: "2026-08-18T15:50:00.000Z",
+    };
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const field = url.searchParams.get("dataField");
+      const event = url.searchParams.get("event");
+      const body = url.pathname.endsWith("/me")
+        ? { toolsMd: "db tools" }
+        : {
+            events:
+              field !== "toolsMd"
+                ? []
+                : event === "system.profile_sync_reconciled"
+                  ? [olderReconciliation]
+                  : [rejectionEvent],
+          };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const banner = await fetchProfileSyncRejectionBanner(
+      {
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+        agentId: "agent-1",
+      },
+      fetchImpl,
+    );
+
+    expect(banner).toContain("PERSISTED PROFILE SYNC REJECTION");
   });
 
   test("surfaces the latest unresolved rejection for every affected field", async () => {

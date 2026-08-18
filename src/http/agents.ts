@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { ensure } from "@desplega.ai/business-use";
 import { z } from "zod";
 import {
+  computeContentHash,
   createAgent,
   deleteSwarmConfigByKey,
   getAgentById,
@@ -39,7 +40,11 @@ import {
   ReasoningEffortSchema,
 } from "../types";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
-import { IdentityFieldBudgetError } from "../utils/identity-field-budget";
+import {
+  type BudgetedIdentityField,
+  IDENTITY_FIELD_BUDGETS,
+  IdentityFieldBudgetError,
+} from "../utils/identity-field-budget";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
@@ -623,6 +628,31 @@ export async function handleAgentsRest(
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
+    }
+
+    if (versionMeta?.changeSource === "self_edit" || versionMeta?.changeSource === "session_sync") {
+      try {
+        for (const field of Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]) {
+          if (body[field] === undefined) continue;
+          createEvent({
+            category: "system",
+            event: "system.profile_sync_reconciled",
+            status: "ok",
+            source: "api",
+            agentId: parsed.params.id,
+            data: {
+              field,
+              dbHash: computeContentHash(agent[field] ?? ""),
+              changeSource: versionMeta.changeSource,
+            },
+          });
+        }
+      } catch (eventError) {
+        const message = eventError instanceof Error ? eventError.message : String(eventError);
+        console.error(
+          scrubSecrets(`[profile-sync] Failed to persist reconciliation event: ${message}`),
+        );
+      }
     }
 
     updateAgentProfileRoute.respond(res, 200, agentWithCapacity(agent));

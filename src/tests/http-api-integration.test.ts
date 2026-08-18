@@ -362,6 +362,27 @@ describe("Agents", () => {
       },
     });
 
+    const reconciled = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { soulMd: current, changeSource: "session_sync" },
+      agentId: ids.workerAgent,
+    });
+    expect(reconciled.status).toBe(200);
+    const reconciliationEvents = await get(
+      `/api/events?${new URLSearchParams({
+        event: "system.profile_sync_reconciled",
+        agentId: ids.workerAgent,
+        dataField: "soulMd",
+        limit: "1",
+      })}`,
+      { agentId: ids.workerAgent },
+    );
+    expect(reconciliationEvents.status).toBe(200);
+    expect(reconciliationEvents.body.events[0]).toMatchObject({
+      event: "system.profile_sync_reconciled",
+      status: "ok",
+      data: { field: "soulMd", changeSource: "session_sync" },
+    });
+
     const unrelated = await get(
       `/api/events?${new URLSearchParams({
         event: "system.profile_sync_rejected",
