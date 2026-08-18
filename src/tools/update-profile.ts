@@ -84,7 +84,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
     {
       title: "Update Profile",
       description:
-        "Updates an agent's profile, identity files, and setup script atomically. By default updates the calling agent. Lead agents can update any agent's profile by providing the agentId parameter.",
+        "Updates an agent's profile fields atomically in the database. Workspace identity files and the setup script are written best-effort for self-updates only. Defaults to the calling agent; lead agents can provide agentId to update any agent.",
       annotations: { idempotentHint: true },
 
       inputSchema: z.object({
