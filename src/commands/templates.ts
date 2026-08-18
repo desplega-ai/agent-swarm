@@ -51,6 +51,28 @@ Accept if you have capacity and skills. Reject with a reason if you cannot handl
 });
 
 registerTemplate({
+  eventType: "task.profile_sync_rejection",
+  header: "",
+  defaultBody: `=== PERSISTED PROFILE SYNC REJECTION ===
+A {{timestamp}} sync of {{field_label}} did not reach the database. Disk size: {{disk_size}}; DB size: {{db_size}}; budget: {{budget}}; delta: {{delta}}.
+Audit event: {{event_id}}. {{recovery_guidance}}
+=== END PROFILE SYNC REJECTION ===
+
+`,
+  variables: [
+    { name: "timestamp", description: "UTC timestamp of the rejected sync" },
+    { name: "field_label", description: "Profile field and its harness-specific file path" },
+    { name: "disk_size", description: "Rejected local file size" },
+    { name: "db_size", description: "Stored database field size" },
+    { name: "budget", description: "Configured field budget" },
+    { name: "delta", description: "Signed size delta" },
+    { name: "event_id", description: "Persisted audit event ID" },
+    { name: "recovery_guidance", description: "Accurate field-specific recovery instructions" },
+  ],
+  category: "task_lifecycle",
+});
+
+registerTemplate({
   eventType: "task.trigger.unread_mentions",
   header: "",
   defaultBody: `You have {{mention_count}} mention(s) in chat channels.

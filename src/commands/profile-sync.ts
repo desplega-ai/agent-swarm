@@ -27,8 +27,15 @@
  * but it must be VISIBLE.
  */
 
+import { resolveTemplateAsync } from "../prompts/resolver.ts";
+import type { Agent, SwarmEvent } from "../types.ts";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants.ts";
+import {
+  type BudgetedIdentityField,
+  IDENTITY_FIELD_BUDGETS,
+} from "../utils/identity-field-budget.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
+import "./templates.ts";
 
 export const SOUL_MD_PATH = "/workspace/SOUL.md";
 export const IDENTITY_MD_PATH = "/workspace/IDENTITY.md";
@@ -54,6 +61,194 @@ export type IdentityBaselines = Record<string, string>;
 
 export function contentSha256(content: string): string {
   return new Bun.CryptoHasher("sha256").update(content).digest("hex");
+}
+
+export const PROFILE_MARKDOWN_FIELDS = [
+  "soulMd",
+  "identityMd",
+  "claudeMd",
+  "toolsMd",
+  "heartbeatMd",
+] as const;
+
+export type ProfileMarkdownField = (typeof PROFILE_MARKDOWN_FIELDS)[number];
+export type ProfileMarkdownSnapshot = Partial<
+  Record<ProfileMarkdownField, string | null | undefined>
+>;
+
+export interface ProfileDivergence {
+  field: ProfileMarkdownField;
+  diskSize: number | null;
+  dbSize: number;
+  budget: number | null;
+  delta: number | null;
+  diskHash: string | null;
+  dbHash: string;
+  diskMissing: boolean;
+}
+
+/** Pure disk-vs-DB comparison used by local profile-sync audits. */
+export function findProfileDivergences(
+  disk: ProfileMarkdownSnapshot,
+  db: ProfileMarkdownSnapshot,
+): ProfileDivergence[] {
+  const divergences: ProfileDivergence[] = [];
+
+  for (const field of PROFILE_MARKDOWN_FIELDS) {
+    const diskValue = disk[field];
+    const dbValue = db[field] ?? "";
+    const budget =
+      field === "heartbeatMd" ? null : IDENTITY_FIELD_BUDGETS[field as BudgetedIdentityField];
+    if (diskValue === undefined || diskValue === null) {
+      divergences.push({
+        field,
+        diskSize: null,
+        dbSize: dbValue.length,
+        budget,
+        delta: null,
+        diskHash: null,
+        dbHash: contentSha256(dbValue),
+        diskMissing: true,
+      });
+      continue;
+    }
+    if (diskValue === dbValue) continue;
+
+    divergences.push({
+      field,
+      diskSize: diskValue.length,
+      dbSize: dbValue.length,
+      budget,
+      delta: diskValue.length - dbValue.length,
+      diskHash: contentSha256(diskValue),
+      dbHash: contentSha256(dbValue),
+      diskMissing: false,
+    });
+  }
+
+  return divergences;
+}
+
+const PROFILE_FIELD_DETAILS: Record<
+  BudgetedIdentityField,
+  { label: string; recoveryGuidance: string }
+> = {
+  soulMd: {
+    label: `soulMd (${SOUL_MD_PATH})`,
+    recoveryGuidance: `Inspect ${SOUL_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+  },
+  identityMd: {
+    label: `identityMd (${IDENTITY_MD_PATH})`,
+    recoveryGuidance: `Inspect ${IDENTITY_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+  },
+  claudeMd: {
+    label:
+      "claudeMd (/workspace/CLAUDE.md for non-Claude harnesses; ~/.claude/CLAUDE.md for Claude)",
+    recoveryGuidance:
+      "For a runner-managed workspace file, inspect /workspace/CLAUDE.md.pre-boot-<timestamp>.bak. Claude's native ~/.claude/CLAUDE.md source is not archived by that boot step. Move durable tail content into memory and shrink the field before retrying.",
+  },
+  toolsMd: {
+    label: `toolsMd (${TOOLS_MD_PATH})`,
+    recoveryGuidance: `Inspect ${TOOLS_MD_PATH}.pre-boot-<timestamp>.bak, move durable tail content into memory, and shrink the field before retrying.`,
+  },
+};
+
+/** Render one persisted sync rejection through the prompt-template registry. */
+export async function renderProfileSyncRejectionBanner(event: SwarmEvent): Promise<string | null> {
+  const data = event.data;
+  const field = data?.field;
+  const diskSize = data?.diskSize;
+  const dbSize = data?.dbSize;
+  const budget = data?.budget;
+  const delta = data?.delta;
+  if (
+    typeof field !== "string" ||
+    !(field in PROFILE_FIELD_DETAILS) ||
+    typeof diskSize !== "number" ||
+    typeof dbSize !== "number" ||
+    typeof budget !== "number" ||
+    typeof delta !== "number"
+  ) {
+    return null;
+  }
+
+  const details = PROFILE_FIELD_DETAILS[field as BudgetedIdentityField];
+  const result = await resolveTemplateAsync("task.profile_sync_rejection", {
+    timestamp: event.createdAt,
+    field_label: details.label,
+    disk_size: diskSize,
+    db_size: dbSize,
+    budget,
+    delta: delta >= 0 ? `+${delta}` : String(delta),
+    event_id: event.id,
+    recovery_guidance: details.recoveryGuidance,
+  });
+  return result.skipped ? null : result.text;
+}
+
+/** Fetch every field's latest unresolved rejection before a provider session. */
+export async function fetchProfileSyncRejectionBanner(
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  try {
+    const responses = await Promise.all(
+      (Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]).map(async (field) => {
+        const query = new URLSearchParams({
+          event: "system.profile_sync_rejected",
+          agentId: config.agentId,
+          dataField: field,
+          limit: "1",
+        });
+        const response = await fetchImpl(`${config.apiUrl}/api/events?${query}`, {
+          headers: {
+            Authorization: `Bearer ${config.apiKey}`,
+            "X-Agent-ID": config.agentId,
+          },
+        });
+        if (!response.ok) return null;
+        const payload = (await response.json()) as { events?: SwarmEvent[] };
+        return payload.events?.[0] ?? null;
+      }),
+    );
+    const latestEvents = responses.filter((event): event is SwarmEvent => event !== null);
+    if (latestEvents.length === 0) return "";
+
+    let profile: Record<string, unknown> | null = null;
+    const profileResponse = await fetchImpl(`${config.apiUrl}/me`, {
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "X-Agent-ID": config.agentId,
+      },
+    });
+    if (profileResponse.ok) {
+      profile = (await profileResponse.json()) as Record<string, unknown>;
+    }
+
+    const unresolved = latestEvents.filter((event) => {
+      const field = event.data?.field;
+      const rejectedDbHash = event.data?.dbHash;
+      const currentValue = typeof field === "string" ? profile?.[field] : undefined;
+      return !(
+        typeof rejectedDbHash === "string" &&
+        typeof currentValue === "string" &&
+        contentSha256(currentValue) !== rejectedDbHash
+      );
+    });
+    const banners = await Promise.all(unresolved.map(renderProfileSyncRejectionBanner));
+    return banners.filter((banner): banner is string => banner !== null).join("");
+  } catch {
+    return "";
+  }
+}
+
+export async function prependProfileSyncRejectionBanner(
+  prompt: string,
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ prompt: string; injected: boolean }> {
+  const banner = await fetchProfileSyncRejectionBanner(config, fetchImpl);
+  return banner ? { prompt: banner + prompt, injected: true } : { prompt, injected: false };
 }
 
 export async function writeIdentityBaselines(baselines: IdentityBaselines): Promise<void> {
@@ -304,6 +499,38 @@ async function readFileIfExists(path: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Compare the five local profile markdown files with the authenticated agent's
+ * stored DB values. This must run inside the agent's local environment; a
+ * central script cannot read another worker container's `/workspace` files.
+ */
+export async function auditProfileDivergences(
+  opts: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "claudeMdPath" | "fetchImpl">,
+  readFile: FileReader = readFileIfExists,
+): Promise<ProfileDivergence[]> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const response = await doFetch(`${opts.apiUrl}/me`, {
+    headers: {
+      Authorization: `Bearer ${opts.apiKey}`,
+      "X-Agent-ID": opts.agentId,
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Profile divergence audit failed: HTTP ${response.status}`);
+  }
+
+  const stored = (await response.json()) as Agent;
+  const disk: ProfileMarkdownSnapshot = {
+    soulMd: await readFile(SOUL_MD_PATH),
+    identityMd: await readFile(IDENTITY_MD_PATH),
+    claudeMd: await readFile(opts.claudeMdPath ?? WORKSPACE_CLAUDE_MD_PATH),
+    toolsMd: await readFile(TOOLS_MD_PATH),
+    heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
+  };
+
+  return findProfileDivergences(disk, stored);
 }
 
 /**

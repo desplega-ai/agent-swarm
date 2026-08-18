@@ -266,6 +266,7 @@ export function getEventsFiltered(filters: {
   agentId?: string;
   taskId?: string;
   sessionId?: string;
+  dataField?: string;
   since?: string;
   until?: string;
   limit?: number;
@@ -300,6 +301,10 @@ export function getEventsFiltered(filters: {
   if (filters.sessionId) {
     conditions.push("sessionId = ?");
     params.push(filters.sessionId);
+  }
+  if (filters.dataField) {
+    conditions.push("json_extract(data, '$.field') = ?");
+    params.push(filters.dataField);
   }
   if (filters.since) {
     conditions.push("createdAt >= ?");

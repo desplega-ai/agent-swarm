@@ -68,6 +68,7 @@ import { buildContextPreamble, buildResumeContextPreamble } from "./context-prea
 import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
 import {
   contentSha256,
+  prependProfileSyncRejectionBanner,
   resolveClaudeMdPath,
   syncProfileFilesToServer,
   writeIdentityBaselines,
@@ -5301,6 +5302,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
+        const resumeWithSyncWarning = await prependProfileSyncRejectionBanner(
+          resumePrompt,
+          apiConfig,
+        );
+        resumePrompt = resumeWithSyncWarning.prompt;
+        if (resumeWithSyncWarning.injected) {
+          console.warn(`[${role}] Injected persisted profile sync rejection warning`);
+        }
+
         // Resolve provider-aware resume: prefer own session, then parent.
         const resumeCandidates: ResumeSessionCandidate[] = [
           {
@@ -5757,6 +5767,15 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               } task (parent: ${taskObj.parentTaskId.slice(0, 8)})`,
             );
           }
+        }
+
+        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(
+          triggerPrompt,
+          apiConfig,
+        );
+        triggerPrompt = triggerWithSyncWarning.prompt;
+        if (triggerWithSyncWarning.injected) {
+          console.warn(`[${role}] Injected persisted profile sync rejection warning`);
         }
 
         // Resolve provider-aware resume for child tasks with parentTaskId.

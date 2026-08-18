@@ -5631,7 +5631,13 @@ export function updateAgentProfile(
         currentValue: current[field] ?? "",
         nextValue,
       });
-      if (!result.ok) throw new IdentityFieldBudgetError(result.reason);
+      if (!result.ok) {
+        throw new IdentityFieldBudgetError(
+          result,
+          computeContentHash(current[field] ?? ""),
+          computeContentHash(nextValue),
+        );
+      }
     }
 
     if (updates.name !== undefined) {

@@ -12,7 +12,18 @@ export const IDENTITY_FIELD_BUDGETS = {
 
 export type BudgetedIdentityField = keyof typeof IDENTITY_FIELD_BUDGETS;
 
-export type IdentityFieldBudgetResult = { ok: true } | { ok: false; reason: string };
+export interface IdentityFieldBudgetRejection {
+  field: BudgetedIdentityField;
+  dbSize: number;
+  diskSize: number;
+  budget: number;
+  delta: number;
+  reason: string;
+}
+
+export type IdentityFieldBudgetResult =
+  | { ok: true }
+  | ({ ok: false } & IdentityFieldBudgetRejection);
 
 export function checkIdentityFieldBudget({
   field,
@@ -38,6 +49,11 @@ export function checkIdentityFieldBudget({
 
   return {
     ok: false,
+    field,
+    dbSize: currentValue.length,
+    diskSize: nextValue.length,
+    budget,
+    delta,
     reason:
       `Update rejected for ${field}: current size ${currentValue.length} characters, ` +
       `budget ${budget} characters, delta ${delta >= 0 ? "+" : ""}${delta} characters.` +
@@ -46,8 +62,12 @@ export function checkIdentityFieldBudget({
 }
 
 export class IdentityFieldBudgetError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(
+    readonly rejection: IdentityFieldBudgetRejection,
+    readonly dbHash: string,
+    readonly diskHash: string,
+  ) {
+    super(rejection.reason);
     this.name = "IdentityFieldBudgetError";
   }
 }

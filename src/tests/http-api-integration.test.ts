@@ -11,6 +11,7 @@ import type { Subprocess } from "bun";
 import { Webhook } from "svix";
 import { slackContextKey } from "../tasks/context-key";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
+import { SOUL_MD_MAX_CHARS } from "../utils/identity-field-budget";
 
 const TEST_PORT = Number(
   process.env.HTTP_API_INTEGRATION_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
@@ -313,6 +314,65 @@ describe("Agents", () => {
       body: { heartbeatMd: "a".repeat(MAX_PROFILE_FILE_LENGTH + 1) },
     });
     expect(rejected.status).toBe(400);
+  });
+
+  test("PUT /api/agents/:id/profile — persists structured filesystem sync rejections", async () => {
+    const current = "s".repeat(SOUL_MD_MAX_CHARS);
+    const accepted = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { soulMd: current, changeSource: "session_sync" },
+      agentId: ids.workerAgent,
+    });
+    expect(accepted.status).toBe(200);
+
+    const rejected = await put(`/api/agents/${ids.workerAgent}/profile`, {
+      body: { soulMd: `${current}x`, changeSource: "session_sync" },
+      agentId: ids.workerAgent,
+    });
+    expect(rejected.status).toBe(400);
+    expect(rejected.body.profileSyncRejection).toMatchObject({
+      field: "soulMd",
+      diskSize: SOUL_MD_MAX_CHARS + 1,
+      dbSize: SOUL_MD_MAX_CHARS,
+      budget: SOUL_MD_MAX_CHARS,
+      delta: 1,
+    });
+
+    const query = new URLSearchParams({
+      event: "system.profile_sync_rejected",
+      agentId: ids.workerAgent,
+      dataField: "soulMd",
+      limit: "1",
+    });
+    const events = await get(`/api/events?${query}`, { agentId: ids.workerAgent });
+    expect(events.status).toBe(200);
+    expect(events.body.events).toHaveLength(1);
+    expect(events.body.events[0]).toMatchObject({
+      category: "system",
+      event: "system.profile_sync_rejected",
+      status: "error",
+      source: "api",
+      agentId: ids.workerAgent,
+      data: {
+        field: "soulMd",
+        diskSize: SOUL_MD_MAX_CHARS + 1,
+        dbSize: SOUL_MD_MAX_CHARS,
+        budget: SOUL_MD_MAX_CHARS,
+        delta: 1,
+        changeSource: "session_sync",
+      },
+    });
+
+    const unrelated = await get(
+      `/api/events?${new URLSearchParams({
+        event: "system.profile_sync_rejected",
+        agentId: ids.workerAgent,
+        dataField: "toolsMd",
+        limit: "1",
+      })}`,
+      { agentId: ids.workerAgent },
+    );
+    expect(unrelated.status).toBe(200);
+    expect(unrelated.body.events).toHaveLength(0);
   });
 
   test("PUT /api/agents/:id/profile — non-existent returns 404", async () => {

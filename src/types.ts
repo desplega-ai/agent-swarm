@@ -1338,6 +1338,7 @@ export const EventNameSchema = z.enum([
   "system.boot",
   "system.migration",
   "system.error",
+  "system.profile_sync_rejected",
   // Script catalog events
   "script.global_upsert",
   // Schedule events

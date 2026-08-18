@@ -1264,6 +1264,7 @@
               "system.boot",
               "system.migration",
               "system.error",
+              "system.profile_sync_rejected",
               "script.global_upsert",
               "schedule.deleted"
             ]
@@ -9238,11 +9239,56 @@
             }
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation or identity-field budget error",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "profileSyncRejection": {
+                      "type": "object",
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "enum": [
+                            "soulMd",
+                            "identityMd",
+                            "claudeMd",
+                            "toolsMd"
+                          ]
+                        },
+                        "diskSize": {
+                          "type": "integer"
+                        },
+                        "dbSize": {
+                          "type": "integer"
+                        },
+                        "budget": {
+                          "type": "integer"
+                        },
+                        "delta": {
+                          "type": "integer"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "field",
+                        "diskSize",
+                        "dbSize",
+                        "budget",
+                        "delta",
+                        "reason"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
                 }
               }
             }
@@ -14014,6 +14060,7 @@
                       "system.boot",
                       "system.migration",
                       "system.error",
+                      "system.profile_sync_rejected",
                       "script.global_upsert",
                       "schedule.deleted"
                     ]
@@ -14159,6 +14206,7 @@
                 "system.boot",
                 "system.migration",
                 "system.error",
+                "system.profile_sync_rejected",
                 "script.global_upsert",
                 "schedule.deleted"
               ]
@@ -14218,6 +14266,14 @@
             },
             "required": false,
             "name": "sessionId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "dataField",
             "in": "query"
           },
           {
@@ -14329,6 +14385,7 @@
                             "system.boot",
                             "system.migration",
                             "system.error",
+                            "system.profile_sync_rejected",
                             "script.global_upsert",
                             "schedule.deleted"
                           ]

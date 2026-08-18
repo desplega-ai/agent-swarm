@@ -2422,13 +2422,24 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Validation error */
+                /** @description Validation or identity-field budget error */
                 400: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
+                        "application/json": {
+                            error: string;
+                            profileSyncRejection?: {
+                                /** @enum {string} */
+                                field: "soulMd" | "identityMd" | "claudeMd" | "toolsMd";
+                                diskSize: number;
+                                dbSize: number;
+                                budget: number;
+                                delta: number;
+                                reason: string;
+                            };
+                        };
                     };
                 };
                 /** @description Agent not found */
@@ -4930,12 +4941,13 @@ export interface paths {
             parameters: {
                 query?: {
                     category?: "tool" | "skill" | "session" | "api" | "task" | "workflow" | "system";
-                    event?: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "script.global_upsert" | "schedule.deleted";
+                    event?: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "system.profile_sync_rejected" | "script.global_upsert" | "schedule.deleted";
                     status?: "ok" | "error" | "timeout" | "skipped";
                     source?: "worker" | "api" | "hook" | "scheduler" | "cli";
                     agentId?: string;
                     taskId?: string;
                     sessionId?: string;
+                    dataField?: string;
                     since?: string;
                     until?: string;
                     limit?: number;
@@ -4974,7 +4986,7 @@ export interface paths {
                         /** @enum {string} */
                         category: "tool" | "skill" | "session" | "api" | "task" | "workflow" | "system";
                         /** @enum {string} */
-                        event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "script.global_upsert" | "schedule.deleted";
+                        event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "system.profile_sync_rejected" | "script.global_upsert" | "schedule.deleted";
                         /** @enum {string} */
                         status?: "ok" | "error" | "timeout" | "skipped";
                         /** @enum {string} */
@@ -5046,7 +5058,7 @@ export interface paths {
                             /** @enum {string} */
                             category: "tool" | "skill" | "session" | "api" | "task" | "workflow" | "system";
                             /** @enum {string} */
-                            event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "script.global_upsert" | "schedule.deleted";
+                            event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "system.profile_sync_rejected" | "script.global_upsert" | "schedule.deleted";
                             /** @enum {string} */
                             status?: "ok" | "error" | "timeout" | "skipped";
                             /** @enum {string} */
@@ -19613,7 +19625,7 @@ export interface components {
             /** @enum {string} */
             category: "tool" | "skill" | "session" | "api" | "task" | "workflow" | "system";
             /** @enum {string} */
-            event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "script.global_upsert" | "schedule.deleted";
+            event: "tool.start" | "tool.end" | "skill.invoke" | "skill.complete" | "session.start" | "session.end" | "session.resume" | "session.cost" | "api.request" | "api.error" | "task.poll" | "task.assign" | "task.timeout" | "workflow.step.start" | "workflow.step.end" | "workflow.run.start" | "workflow.run.end" | "system.boot" | "system.migration" | "system.error" | "system.profile_sync_rejected" | "script.global_upsert" | "schedule.deleted";
             /** @enum {string} */
             status: "ok" | "error" | "timeout" | "skipped";
             /** @enum {string} */
