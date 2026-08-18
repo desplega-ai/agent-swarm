@@ -5302,10 +5302,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        const resumeWithSyncWarning = await prependProfileSyncRejectionBanner(
-          resumePrompt,
-          apiConfig,
-        );
+        const resumeWithSyncWarning = await prependProfileSyncRejectionBanner(resumePrompt, {
+          ...apiConfig,
+          claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
+        });
         resumePrompt = resumeWithSyncWarning.prompt;
         if (resumeWithSyncWarning.injected) {
           console.warn(`[${role}] Injected persisted profile sync rejection warning`);
@@ -5769,10 +5769,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
           }
         }
 
-        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(
-          triggerPrompt,
-          apiConfig,
-        );
+        const triggerWithSyncWarning = await prependProfileSyncRejectionBanner(triggerPrompt, {
+          ...apiConfig,
+          claudeMdPath: resolveClaudeMdPath([state.harnessProvider]),
+        });
         triggerPrompt = triggerWithSyncWarning.prompt;
         if (triggerWithSyncWarning.injected) {
           console.warn(`[${role}] Injected persisted profile sync rejection warning`);

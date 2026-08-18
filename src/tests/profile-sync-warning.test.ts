@@ -4,6 +4,8 @@ import {
   fetchProfileSyncRejectionBanner,
   prependProfileSyncRejectionBanner,
   renderProfileSyncRejectionBanner,
+  TOOLS_MD_PATH,
+  WORKSPACE_CLAUDE_MD_PATH,
 } from "../commands/profile-sync";
 import type { SwarmEvent } from "../types";
 
@@ -176,6 +178,42 @@ describe("profile sync rejection session warning", () => {
     );
 
     expect(banner).toContain("PERSISTED PROFILE SYNC REJECTION");
+  });
+
+  test("clears a warning only when boot restored the local file to the DB value", async () => {
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const field = url.searchParams.get("dataField");
+      const event = url.searchParams.get("event");
+      const body = url.pathname.endsWith("/me")
+        ? { toolsMd: "db tools" }
+        : {
+            events:
+              field === "toolsMd" && event === "system.profile_sync_rejected"
+                ? [rejectionEvent]
+                : [],
+          };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    const config = {
+      apiUrl: "https://api.example.test",
+      apiKey: "secret-key",
+      agentId: "agent-1",
+      claudeMdPath: WORKSPACE_CLAUDE_MD_PATH,
+    };
+
+    const restored = await fetchProfileSyncRejectionBanner(config, fetchImpl, async (path) =>
+      path === TOOLS_MD_PATH ? "db tools" : undefined,
+    );
+    const stillDiverged = await fetchProfileSyncRejectionBanner(config, fetchImpl, async (path) =>
+      path === TOOLS_MD_PATH ? "rejected tools" : undefined,
+    );
+
+    expect(restored).toBe("");
+    expect(stillDiverged).toContain("PERSISTED PROFILE SYNC REJECTION");
   });
 
   test("surfaces the latest unresolved rejection for every affected field", async () => {

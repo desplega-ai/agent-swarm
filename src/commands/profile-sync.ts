@@ -189,8 +189,9 @@ export async function renderProfileSyncRejectionBanner(event: SwarmEvent): Promi
 
 /** Fetch every field's latest unresolved rejection before a provider session. */
 export async function fetchProfileSyncRejectionBanner(
-  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "claudeMdPath">,
   fetchImpl: typeof fetch = fetch,
+  readFile: FileReader = readFileIfExists,
 ): Promise<string> {
   try {
     const responses = await Promise.all(
@@ -235,12 +236,25 @@ export async function fetchProfileSyncRejectionBanner(
       profile = (await profileResponse.json()) as Record<string, unknown>;
     }
 
+    let disk: Partial<Record<BudgetedIdentityField, string | undefined>> | null = null;
+    if (config.claudeMdPath) {
+      disk = {
+        soulMd: await readFile(SOUL_MD_PATH),
+        identityMd: await readFile(IDENTITY_MD_PATH),
+        claudeMd: await readFile(config.claudeMdPath),
+        toolsMd: await readFile(TOOLS_MD_PATH),
+      };
+    }
+
     const unresolved = latestEvents.flatMap(({ rejection, reconciliation }) => {
       if (reconciliation && reconciliation.createdAt > rejection.createdAt) return [];
       const event = rejection;
       const field = event.data?.field;
       const rejectedDbHash = event.data?.dbHash;
       const currentValue = typeof field === "string" ? profile?.[field] : undefined;
+      const diskValue =
+        typeof field === "string" ? disk?.[field as BudgetedIdentityField] : undefined;
+      if (typeof currentValue === "string" && diskValue === currentValue) return [];
       return !(
         typeof rejectedDbHash === "string" &&
         typeof currentValue === "string" &&
@@ -258,10 +272,11 @@ export async function fetchProfileSyncRejectionBanner(
 
 export async function prependProfileSyncRejectionBanner(
   prompt: string,
-  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey">,
+  config: Pick<ProfileSyncOptions, "agentId" | "apiUrl" | "apiKey" | "claudeMdPath">,
   fetchImpl: typeof fetch = fetch,
+  readFile: FileReader = readFileIfExists,
 ): Promise<{ prompt: string; injected: boolean }> {
-  const banner = await fetchProfileSyncRejectionBanner(config, fetchImpl);
+  const banner = await fetchProfileSyncRejectionBanner(config, fetchImpl, readFile);
   return banner ? { prompt: banner + prompt, injected: true } : { prompt, injected: false };
 }
 
