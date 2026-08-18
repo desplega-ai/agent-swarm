@@ -5,17 +5,15 @@ import { getMcpBaseUrl } from "../utils/constants.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import {
   auditProfileDivergences,
-  CLAUDE_MD_PATH,
   type FileReader,
   type ProfileDivergence,
-  WORKSPACE_CLAUDE_MD_PATH,
 } from "./profile-sync.ts";
 
 export interface ProfileSyncAuditConfig {
   agentId: string;
   apiUrl: string;
   apiKey: string;
-  claudeMdPath: string;
+  claudeMdPath?: string;
 }
 
 export async function runProfileSyncAudit(
@@ -47,8 +45,6 @@ if (import.meta.main) {
       agentId,
       apiUrl,
       apiKey,
-      claudeMdPath:
-        process.env.HARNESS_PROVIDER === "claude" ? CLAUDE_MD_PATH : WORKSPACE_CLAUDE_MD_PATH,
     });
     console.log(JSON.stringify(result, null, 2));
     process.exit(profileSyncAuditExitCode(result.divergences));

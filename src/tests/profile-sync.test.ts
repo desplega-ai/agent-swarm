@@ -102,6 +102,58 @@ describe("profile divergence audit", () => {
     expect(result.divergences.map((entry) => entry.field)).toEqual(["identityMd", "heartbeatMd"]);
   });
 
+  test("uses the registered effective provider to select the Claude profile path", async () => {
+    const readPaths: string[] = [];
+    const readFile: FileReader = async (path) => {
+      readPaths.push(path);
+      return "same";
+    };
+    const fetchImpl = (async () =>
+      new Response(
+        JSON.stringify({
+          harnessProvider: "codex",
+          soulMd: "same",
+          identityMd: "same",
+          claudeMd: "same",
+          toolsMd: "same",
+          heartbeatMd: "same",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch;
+
+    const result = await runProfileSyncAudit(
+      {
+        agentId: "agent-codex",
+        apiUrl: "https://api.example.test",
+        apiKey: "secret-key",
+      },
+      { fetchImpl, readFile },
+    );
+
+    expect(result.divergences).toEqual([]);
+    expect(readPaths).toContain(WORKSPACE_CLAUDE_MD_PATH);
+    expect(readPaths).not.toContain(CLAUDE_MD_PATH);
+  });
+
+  test("refuses to guess the audit path when no effective provider is registered", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({}), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })) as typeof fetch;
+
+    expect(
+      runProfileSyncAudit(
+        {
+          agentId: "agent-unregistered",
+          apiUrl: "https://api.example.test",
+          apiKey: "secret-key",
+        },
+        { fetchImpl, readFile: async () => undefined },
+      ),
+    ).rejects.toThrow("registered harness provider");
+  });
+
   test("treats profile fields absent on disk and empty in the DB as equal", async () => {
     const readFile: FileReader = async () => undefined;
     const fetchImpl = (async () =>

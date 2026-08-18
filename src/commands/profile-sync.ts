@@ -536,10 +536,22 @@ export async function auditProfileDivergences(
   }
 
   const stored = (await response.json()) as Agent;
+  const claudeMdPath =
+    opts.claudeMdPath ??
+    (stored.harnessProvider
+      ? stored.harnessProvider === "claude"
+        ? CLAUDE_MD_PATH
+        : WORKSPACE_CLAUDE_MD_PATH
+      : null);
+  if (!claudeMdPath) {
+    throw new Error(
+      "Profile divergence audit requires a registered harness provider or an explicit claudeMdPath",
+    );
+  }
   const disk: ProfileMarkdownSnapshot = {
     soulMd: await readFile(SOUL_MD_PATH),
     identityMd: await readFile(IDENTITY_MD_PATH),
-    claudeMd: await readFile(opts.claudeMdPath ?? WORKSPACE_CLAUDE_MD_PATH),
+    claudeMd: await readFile(claudeMdPath),
     toolsMd: await readFile(TOOLS_MD_PATH),
     heartbeatMd: await readFile(HEARTBEAT_MD_PATH),
   };
