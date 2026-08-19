@@ -3,7 +3,7 @@ date: 2026-08-19T00:00:00Z
 topic: "One-shot yolo plan: agent communication style + requester adaptation"
 author: taras
 tags: [plan, one-shot, prompts, requester-profile]
-status: in-progress
+status: complete
 last_updated: 2026-08-19
 last_updated_by: taras
 ---
