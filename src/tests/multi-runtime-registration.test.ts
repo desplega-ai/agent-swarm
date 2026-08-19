@@ -30,6 +30,7 @@ import {
   getRuntimeInstanceById,
   hasReadyLiveRuntime,
 } from "../be/multi-runtime";
+import { retryRuntimeRegistration } from "../commands/credential-wait";
 import { runHeartbeatSweep } from "../heartbeat/heartbeat";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
@@ -1545,6 +1546,86 @@ describe("readiness after a credential wait", () => {
     expect(getAgentById(id)?.status).toBe("busy");
   });
 
+  test("a transient registration failure delays but does not drop the recovery", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    makeRuntimeStale(rt);
+
+    // The runner's recovery: retry the strict registration of the SAME
+    // per-boot identity until it succeeds, and only then report ready.
+    let attempts = 0;
+    await retryRuntimeRegistration(
+      async () => {
+        attempts++;
+        if (attempts < 2) throw new Error("transient network failure");
+        await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+      },
+      { sleep: async () => {}, log: () => {} },
+    );
+    expect(await reportReady(id, rt, true)).toBe(200);
+
+    expect(attempts).toBe(2);
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(true);
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("recovery after several transient failures still ends busy with active work", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    const task = createTaskExtended("held-work", { agentId: id });
+    startTask(task.id);
+    makeRuntimeStale(rt);
+
+    let attempts = 0;
+    await retryRuntimeRegistration(
+      async () => {
+        attempts++;
+        if (attempts < 3) throw new Error("transient network failure");
+        await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+      },
+      { sleep: async () => {}, log: () => {} },
+    );
+    await reportReady(id, rt, true);
+
+    expect(attempts).toBe(3);
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(true);
+    expect(getAgentById(id)?.status).toBe("busy");
+  });
+
+  test("persistent registration failure leaves the runtime unrecovered and undispatchable", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    makeRuntimeStale(rt);
+
+    await expect(
+      retryRuntimeRegistration(
+        async () => {
+          throw new Error("registration endpoint down");
+        },
+        { attempts: 3, sleep: async () => {}, log: () => {} },
+      ),
+    ).rejects.toThrow("registration endpoint down");
+
+    // Nothing was revived: the ready report still targets a stale row and the
+    // dispatch gate still withholds work — polling has not resumed as if
+    // recovery succeeded (the runner exits instead of entering the loop).
+    await reportReady(id, rt, true);
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(false);
+    createTaskExtended("unreachable-work", { offeredTo: id });
+    expect((await pollAgent(id, rt))?.trigger ?? null).toBeNull();
+  });
+
   test("a ready report against a stale row is dropped and revival preserves the waiting state", async () => {
     // Pins the server contract behind the runner's ordering: reporting
     // BEFORE re-registering loses the recovery.
@@ -1853,7 +1934,7 @@ describe("poll refreshes runtime liveness", () => {
 });
 
 /** Invoke MCP poll-task the way a worker process would, via request context. */
-async function pollTask(agentId: string, runtimeInstanceId?: string) {
+async function pollTask(agentId: string, runtimeInstanceId?: string, onNotify?: () => void) {
   const handler = mcpServer.handlers.get("poll-task");
   if (!handler) throw new Error("poll-task not registered");
   const headers: Record<string, string> = { "x-agent-id": agentId };
@@ -1863,7 +1944,11 @@ async function pollTask(agentId: string, runtimeInstanceId?: string) {
     {
       sessionId: "test-session",
       requestInfo: { headers },
-      sendNotification: async () => {},
+      // Fires between dispatch attempts — tests use it to mutate state
+      // mid-long-poll.
+      sendNotification: async () => {
+        onNotify?.();
+      },
     },
   )) as { structuredContent?: { task?: { id?: string } } };
 }
@@ -2137,6 +2222,59 @@ describe("logical capacity is shared across dispatch entrypoints", () => {
     expect(startedTaskId(b)).not.toBeNull();
     expect(startedTaskId(a)).not.toBe(startedTaskId(b));
     expect(getActiveTaskCount(id)).toBe(2);
+  });
+});
+
+describe("MCP poll-task revalidates the runtime at dispatch", () => {
+  test("a runtime retired mid-poll cannot start work that appears later; a live sibling can", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rtA = crypto.randomUUID();
+    const rtB = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtA });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtB });
+
+    // A enters the long poll with nothing to do; while it waits, its runtime
+    // is retired and a pending task appears.
+    let taskId: string | undefined;
+    let mutated = false;
+    const result = await pollTask(id, rtA, () => {
+      if (mutated) return;
+      mutated = true;
+      makeRuntimeStale(rtA);
+      taskId = createTaskExtended("mid-poll-work", { agentId: id }).id;
+    });
+
+    // The retired poller exits without acquiring the task and without
+    // advancing the empty-poll exit counter.
+    expect(startedTaskId(result)).toBeNull();
+    expect(taskId && getTaskById(taskId)?.status).toBe("pending");
+    expect(getAgentById(id)?.emptyPollCount ?? 0).toBe(0);
+
+    // The live sibling picks it up normally.
+    expect(taskId && startedTaskId(await pollTask(id, rtB))).toBe(taskId);
+    expect(getActiveTaskCount(id)).toBe(1);
+  });
+
+  test("a runtime closed mid-poll is not revived by the in-flight call", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+
+    let taskId: string | undefined;
+    let mutated = false;
+    const result = await pollTask(id, rt, () => {
+      if (mutated) return;
+      mutated = true;
+      getDb().prepare("UPDATE runtime_instances SET status = 'offline' WHERE id = ?").run(rt);
+      taskId = createTaskExtended("post-close-work", { agentId: id }).id;
+    });
+
+    expect(startedTaskId(result)).toBeNull();
+    expect(taskId && getTaskById(taskId)?.status).toBe("pending");
+    // Still offline — the dispatch revalidation cannot resurrect it.
+    expect(getRuntimeInstanceById(rt)?.status).toBe("offline");
   });
 });
 

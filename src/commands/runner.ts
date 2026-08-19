@@ -65,7 +65,12 @@ import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
-import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
+import {
+  awaitCredentials,
+  BootMaxWaitExceededError,
+  EX_CONFIG,
+  retryRuntimeRegistration,
+} from "./credential-wait.ts";
 import {
   contentSha256,
   prependProfileSyncRejectionBanner,
@@ -4861,23 +4866,32 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
 
-  /** Push the current live state back to the API so the dashboard reflects it. */
+  /** Register this boot's runtime with the current live state; propagates failure. */
+  const registerCurrentRuntime = async () => {
+    const reg = await registerAgent({
+      apiUrl,
+      apiKey,
+      agentId,
+      name: agentName,
+      role,
+      isLead,
+      capabilities,
+      maxTasks: state.maxConcurrent,
+      harnessProvider: state.harnessProvider,
+      runtimeInstanceId,
+    });
+    lastServerCapsRefreshAt = Date.now();
+    await applyServerCapabilities(reg.serverCapabilities);
+  };
+
+  /**
+   * Best-effort wrapper for the periodic/fire-and-forget callers: the
+   * dashboard tolerates a missed refresh. Recovery paths that must observe
+   * failure use registerCurrentRuntime directly.
+   */
   const reregisterAgent = async () => {
     try {
-      const reg = await registerAgent({
-        apiUrl,
-        apiKey,
-        agentId,
-        name: agentName,
-        role,
-        isLead,
-        capabilities,
-        maxTasks: state.maxConcurrent,
-        harnessProvider: state.harnessProvider,
-        runtimeInstanceId,
-      });
-      lastServerCapsRefreshAt = Date.now();
-      await applyServerCapabilities(reg.serverCapabilities);
+      await registerCurrentRuntime();
     } catch (err) {
       console.warn(`[${role}] [config] Re-register failed (non-fatal): ${err}`);
     }
@@ -4987,8 +5001,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // creating a second one. Ordering matters: a readiness report sent while
     // the row is still stale is dropped (only a live runtime may report), and
     // the revival preserves credential_ready — reporting first would leave
-    // the agent parked on waiting_for_credentials forever.
-    await reregisterAgent();
+    // the agent parked on waiting_for_credentials forever. Best-effort is not
+    // enough here for the same reason: a swallowed transient failure would
+    // still let the report target the stale row, so recovery retries and
+    // treats exhaustion like boot-registration failure.
+    try {
+      await retryRuntimeRegistration(registerCurrentRuntime, {
+        log: (line) => console.warn(`[${role}] ${line}`),
+      });
+    } catch (error) {
+      console.error(`[${role}] Failed to re-register after credential wait: ${error}`);
+      process.exit(1);
+    }
 
     // Migration 055: build the full snapshot (presence + live test) once
     // creds are ready and POST it to the agent row. Status endpoint reads

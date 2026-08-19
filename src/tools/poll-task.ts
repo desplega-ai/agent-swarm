@@ -131,31 +131,62 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const outcome = getDb().transaction((): AgentTask | "at-capacity" | null => {
-          const agentNow = getAgentById(agentId)!;
+        const outcome = getDb().transaction(
+          (): AgentTask | "at-capacity" | "runtime-unavailable" | null => {
+            // The entry gate only proves liveness when the long poll began;
+            // the runtime must be live at the exact moment work is acquired,
+            // so revalidate in the same transaction that can start the task.
+            // Touch refreshes an already-live row and cannot revive one.
+            if (
+              isMultiRuntimeEnabled() &&
+              !(
+                requestInfo.runtimeInstanceId &&
+                touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId)
+              )
+            ) {
+              return "runtime-unavailable";
+            }
 
-          if (agentNow.status !== "busy") {
-            updateAgentStatus(agentId, "idle");
-          }
+            const agentNow = getAgentById(agentId)!;
 
-          const pendingTask = getPendingTaskForAgent(agentId);
-          if (!pendingTask) return null;
+            if (agentNow.status !== "busy") {
+              updateAgentStatus(agentId, "idle");
+            }
 
-          // Logical capacity is decided inside the same transaction as the
-          // start transition: several runtimes of one agent race this
-          // dispatch, and a check outside it would let each of them start a
-          // task past the agent's limit. Same gate as HTTP /api/poll.
-          if (!hasCapacity(agentId)) return "at-capacity";
+            const pendingTask = getPendingTaskForAgent(agentId);
+            if (!pendingTask) return null;
 
-          const maybeTask = startTask(pendingTask.id);
+            // Logical capacity is decided inside the same transaction as the
+            // start transition: several runtimes of one agent race this
+            // dispatch, and a check outside it would let each of them start a
+            // task past the agent's limit. Same gate as HTTP /api/poll.
+            if (!hasCapacity(agentId)) return "at-capacity";
 
-          if (maybeTask) {
-            // Update automatically in case the agent forgets xd
-            updateAgentStatus(agentId, "busy");
-          }
+            const maybeTask = startTask(pendingTask.id);
 
-          return maybeTask;
-        })();
+            if (maybeTask) {
+              // Update automatically in case the agent forgets xd
+              updateAgentStatus(agentId, "busy");
+            }
+
+            return maybeTask;
+          },
+        )();
+
+        if (outcome === "runtime-unavailable") {
+          // The runtime was retired while this call waited: stop immediately
+          // rather than keep polling as it, and skip the exit counter — this
+          // is a refusal, not an empty poll.
+          return toolOk("No task available.", {
+            details: "No task available for this runtime.",
+            data: {
+              yourAgentId: requestInfo.agentId,
+              offeredTasks: [],
+              availableCount: 0,
+              waitedForSeconds: Math.round((Date.now() - now.getTime()) / 1000),
+            },
+          });
+        }
 
         if (outcome === "at-capacity") {
           // A capacity refusal is not an empty poll (refused ≠ empty, D-R3):
