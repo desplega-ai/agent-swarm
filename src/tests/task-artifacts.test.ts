@@ -145,6 +145,10 @@ describe("attachment-first task shipping evidence", () => {
     "https://github.com/org/repo/tree/pull/123",
     "https://github.com/org/repo/issues/1/pull/2",
     "https://notgithub.com/o/r/pull/8",
+    "https://_github.com/o/r/pull/8",
+    "https://github.com/o/r/pull/123abc",
+    "https://github.com/o/r/pull/123/files",
+    "https://github.com/o/r/pull/123.",
     "Reject https://github.com/org/repo/tree/pull/123, then accept github.com/o/r/pull/8",
   ];
 

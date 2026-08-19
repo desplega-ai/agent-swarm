@@ -55,12 +55,29 @@ function githubPullRequestExistsSql(value: string): string {
       FROM github_paths
       WHERE instr(path, '/') > 1
         AND instr(substr(path, instr(path, '/') + 1), '/') > 1
+    ),
+    github_pull_numbers(remainder, position) AS (
+      SELECT remainder, length('pull/') + 1
+      FROM github_segments
+      WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
+        AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+        AND lower(remainder) GLOB 'pull/[0-9]*'
+
+      UNION ALL
+
+      SELECT remainder, position + 1
+      FROM github_pull_numbers
+      WHERE substr(remainder, position, 1) GLOB '[0-9]'
     )
     SELECT 1
-    FROM github_segments
-    WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
-      AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
-      AND lower(remainder) GLOB 'pull/[0-9]*'
+    FROM github_pull_numbers
+    WHERE substr(remainder, position, 1) NOT GLOB '[0-9]'
+      AND (
+        substr(remainder, position, 1) = ''
+        OR unicode(substr(remainder, position, 1)) IN (
+          9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
+        )
+      )
     LIMIT 1
   )`;
 }

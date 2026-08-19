@@ -28,7 +28,7 @@ occurrences(task_id, agent_id, url_tail, remaining, valid_boundary) AS (
     ),
     instr(lower(remaining), 'github.com/') = 1
       OR substr(remaining, instr(lower(remaining), 'github.com/') - 1, 1)
-        NOT GLOB '[A-Za-z0-9.-]'
+        NOT GLOB '[A-Za-z0-9._-]'
   FROM occurrences
   WHERE instr(lower(remaining), 'github.com/') > 0
 ),
@@ -125,6 +125,10 @@ canonical_pull_requests(task_id, agent_id, url) AS (
     substr(token, 1, max(position) - 1)
   FROM digit_scan
   GROUP BY task_id, agent_id, token
+  HAVING substr(token, max(position), 1) = ''
+    OR unicode(substr(token, max(position), 1)) IN (
+      9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
+    )
 )
 INSERT INTO task_attachments (
   id,

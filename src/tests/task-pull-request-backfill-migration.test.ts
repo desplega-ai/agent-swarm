@@ -49,7 +49,9 @@ describe("migration 132 task pull-request attachment backfill", () => {
         secondTaskId,
         "Existing https://github.com/desplega-ai/agent-swarm/pull/42. Reject " +
           "https://github.com/org/repo/tree/pull/123 and " +
-          "https://github.com/org/repo/issues/1/pull/2",
+          "https://github.com/org/repo/issues/1/pull/2 and " +
+          "https://_github.com/org/repo/pull/3 and " +
+          "https://github.com/org/repo/pull/123abc",
         now,
         now,
       );
