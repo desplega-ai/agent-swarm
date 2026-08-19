@@ -22,6 +22,9 @@
         "noStaticElementInteractions": "off",
         "useKeyWithClickEvents": "off",
         "noLabelWithoutControl": "off"
+      },
+      "nursery": {
+        "noFloatingPromises": "warn"
       }
     }
   },
