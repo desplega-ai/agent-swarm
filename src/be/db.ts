@@ -140,6 +140,7 @@ import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
 import { normalizeDate, normalizeDateRequired } from "./date-utils";
+import { createBunSqliteClient, type DbClient } from "./db-client";
 import { runMigrations } from "./migrations/runner";
 import { autoEncryptLegacyOAuthSecrets } from "./oauth-encryption-backfill";
 import { seedDefaultTemplates } from "./seed-prompt-templates";
@@ -424,6 +425,17 @@ export function closeDb(): void {
     db = null;
   }
   sqliteVecAvailable = false;
+}
+
+// Async seam over the shared connection. The client resolves the underlying
+// handle per operation via getDb(), so close/reopen cycles need no reset.
+let dbClientInstance: DbClient | null = null;
+
+export function getDbClient(): DbClient {
+  if (!dbClientInstance) {
+    dbClientInstance = createBunSqliteClient(() => getDb());
+  }
+  return dbClientInstance;
 }
 
 // ============================================================================
