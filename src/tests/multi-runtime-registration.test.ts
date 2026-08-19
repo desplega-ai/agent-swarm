@@ -209,6 +209,14 @@ async function startupCleanupFor(agentId: string) {
   return res.status;
 }
 
+/** Backdate a session's heartbeat, as a dead process's session would be. */
+function makeSessionStale(taskId: string, minutesAgo = 30): void {
+  const when = new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
+  getDb()
+    .prepare("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?")
+    .run(when, taskId);
+}
+
 /** Backdate a runtime's last ping so liveness checks treat it as stale. */
 function makeRuntimeStale(runtimeInstanceId: string, minutesAgo = 30): void {
   const when = new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
@@ -1072,7 +1080,10 @@ describe("sibling runtime session safety", () => {
     const task = createTaskExtended("work", { agentId: id });
     startTask(task.id);
     await startSession(id, task.id, crashed);
+    // The crashed process stopped both its runtime ping and its session
+    // heartbeat.
     makeRuntimeStale(crashed);
+    makeSessionStale(task.id);
 
     const replacement = crypto.randomUUID();
     await register(id, { maxTasks: 1, runtimeInstanceId: replacement });
@@ -1244,5 +1255,28 @@ describe("sweep coverage and rollback inertness", () => {
     // The healthy legacy worker still receives the task.
     expect(getAgentById(id)?.status).not.toBe("offline");
     expect(getTaskById(task.id)?.agentId).toBe(id);
+  });
+});
+
+describe("enabling the flag while workers are running", () => {
+  test("a live session survives cleanup before its runtime has re-registered", async () => {
+    const id = makeAgent(3);
+    // Worker registered while the flag was off, so it has no runtime row, but
+    // its sessions already carry the id it generated at boot.
+    await register(id, { maxTasks: 2 });
+    const runningRuntime = crypto.randomUUID();
+    const task = createTaskExtended("in-flight-work", { agentId: id });
+    startTask(task.id);
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await startSessionFor(id, task.id, runningRuntime);
+
+    // A sibling boots and runs startup cleanup before the original worker's
+    // next re-registration materializes its runtime row.
+    await register(id, { maxTasks: 2, runtimeInstanceId: crypto.randomUUID() });
+    expect(await startupCleanupFor(id)).toBe(200);
+
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("in_progress");
   });
 });

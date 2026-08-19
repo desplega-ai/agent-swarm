@@ -274,13 +274,18 @@ export function agentsWithoutLiveRuntime(): Set<string> {
  *
  * A live sibling's session must survive — deleting it would strand its task
  * with no session row, and the orphan sweep would then requeue work that
- * process is still executing.
+ * process is still executing. A still-heartbeating session is therefore kept
+ * even when no runtime row backs it, which is the state during the window
+ * where the flag was just enabled and running workers have not yet
+ * re-registered.
  */
 export function cleanupRuntimeSessions(agentId: string): number {
+  const cutoff = runtimeLivenessCutoff();
   const result = getDb()
     .prepare(
       `DELETE FROM active_sessions
        WHERE agentId = ?
+         AND lastHeartbeatAt < ?
          AND (
            runtimeInstanceId IS NULL
            OR runtimeInstanceId NOT IN (
@@ -289,7 +294,7 @@ export function cleanupRuntimeSessions(agentId: string): number {
            )
          )`,
     )
-    .run(agentId, agentId, runtimeLivenessCutoff());
+    .run(agentId, cutoff, agentId, cutoff);
   return result.changes;
 }
 
