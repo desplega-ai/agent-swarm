@@ -224,7 +224,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
     const db = new Database(DB_PATH, { create: true });
     try {
       runMigrations(db);
-      db.run("DELETE FROM _migrations WHERE version = 133");
+      db.run("DELETE FROM _migrations WHERE version = 135");
       const now = new Date().toISOString();
       const whitespaceCodePoints = [11, 12, 160];
 
@@ -272,7 +272,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
     const db = new Database(DB_PATH, { create: true });
     try {
       runMigrations(db);
-      db.run("DELETE FROM _migrations WHERE version = 133");
+      db.run("DELETE FROM _migrations WHERE version = 135");
       const fixtures = [
         "https://evil.example/?next=github.com/o/r/pull/8",
         "xhttps://github.com/o/r/pull/1",
