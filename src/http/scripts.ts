@@ -53,7 +53,7 @@ import {
   ScriptVersionRecordSchema,
 } from "../types";
 import { scrubObject, scrubSecrets } from "../utils/secret-scrubber";
-import { route } from "./route-def";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
 const scriptNameSchema = z.string().min(1).max(200);
@@ -244,6 +244,7 @@ const runRoute = route({
   description:
     "Inline source skips typecheck and is auto-saved as a scratch script only on success.",
   tags: ["Scripts"],
+  headers: runtimeInstanceHeader("acquire work through the script SDK"),
   body: runBodySchema,
   responses: {
     200: { description: "Script run completed", schema: scriptRunResponseSchema },
@@ -695,6 +696,13 @@ export async function handleScripts(
     const agent = requireAgent(res, agentId);
     if (!agent) return true;
 
+    // Per-boot identity of the invoking worker process. Carried into the
+    // script runtime as system context so SDK work-acquisition calls present
+    // the same runtime the worker itself would — never script input.
+    const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
+      req.headers["x-runtime-instance-id"],
+    );
+
     let source = parsed.body.source;
     let fsMode = parsed.body.fsMode;
     let namedScript: ScriptRecord | null = null;
@@ -726,6 +734,7 @@ export async function handleScripts(
       args: parsed.body.args,
       fsMode,
       agentId: agent.id,
+      runtimeInstanceId,
       egressSecrets: credentials.egressSecrets,
       failedBindings: credentials.failedBindings,
       apiConnections: getScriptApiConnectionDescriptors({ agentId: agent.id }),

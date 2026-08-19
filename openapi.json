@@ -34077,6 +34077,18 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -35505,6 +35517,18 @@
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
           }
         ],
         "requestBody": {

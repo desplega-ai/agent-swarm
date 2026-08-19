@@ -13770,7 +13770,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -22956,7 +22959,10 @@ export interface operations {
     scripts_run: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                "X-Runtime-Instance-ID"?: string;
+            };
             path?: never;
             cookie?: never;
         };

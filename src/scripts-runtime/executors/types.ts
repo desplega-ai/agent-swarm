@@ -10,6 +10,11 @@ export type SwarmConfigPayload = {
     apiKey: { value: string; isSecret: true };
     agentId: { value: string; isSecret: false };
     mcpBaseUrl: { value: string; isSecret: false };
+    /**
+     * Per-boot runtime identity of the invoking worker process. System
+     * context like the agent identity — scripts never supply or override it.
+     */
+    runtimeInstanceId?: { value: string; isSecret: false };
   };
   user: Record<string, { value: string; isSecret: boolean }>;
   egressSecrets?: EgressSecretEntry[];

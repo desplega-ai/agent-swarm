@@ -172,6 +172,11 @@ export async function proxyScriptsApi(args: {
   if (args.requestInfo.sourceTaskId) {
     headers["X-Source-Task-Id"] = args.requestInfo.sourceTaskId;
   }
+  // Runtime identity is process context from the worker's MCP session — it
+  // rides the proxy like the agent identity, never as tool or script input.
+  if (args.requestInfo.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = args.requestInfo.runtimeInstanceId;
+  }
   const res = await fetch(`${apiBaseUrl()}${args.path}`, {
     method: args.method,
     headers,
