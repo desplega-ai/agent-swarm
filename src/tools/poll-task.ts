@@ -2,11 +2,13 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { addMinutes } from "date-fns";
 import * as z from "zod";
 import {
+  getActiveTaskCount,
   getAgentById,
   getDb,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
+  hasCapacity,
   incrementEmptyPollCount,
   MAX_EMPTY_POLLS,
   resetEmptyPollCount,
@@ -15,6 +17,7 @@ import {
 } from "@/be/db";
 import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import type { AgentTask } from "@/types";
 import { isMultiRuntimeEnabled } from "@/utils/multi-runtime";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
 
@@ -128,7 +131,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const startedTask = getDb().transaction(() => {
+        const outcome = getDb().transaction((): AgentTask | "at-capacity" | null => {
           const agentNow = getAgentById(agentId)!;
 
           if (agentNow.status !== "busy") {
@@ -137,6 +140,12 @@ export const registerPollTaskTool = (server: McpServer) => {
 
           const pendingTask = getPendingTaskForAgent(agentId);
           if (!pendingTask) return null;
+
+          // Logical capacity is decided inside the same transaction as the
+          // start transition: several runtimes of one agent race this
+          // dispatch, and a check outside it would let each of them start a
+          // task past the agent's limit. Same gate as HTTP /api/poll.
+          if (!hasCapacity(agentId)) return "at-capacity";
 
           const maybeTask = startTask(pendingTask.id);
 
@@ -148,6 +157,21 @@ export const registerPollTaskTool = (server: McpServer) => {
           return maybeTask;
         })();
 
+        if (outcome === "at-capacity") {
+          // A capacity refusal is not an empty poll (refused ≠ empty, D-R3):
+          // return without advancing the exit counter.
+          return toolOk("No task available.", {
+            details: `You are at capacity (${getActiveTaskCount(agentId)} active task(s)). Complete a task before polling for more.`,
+            data: {
+              yourAgentId: requestInfo.agentId,
+              offeredTasks: [],
+              availableCount: getUnassignedTasksCount(),
+              waitedForSeconds: Math.round((Date.now() - now.getTime()) / 1000),
+            },
+          });
+        }
+
+        const startedTask = outcome;
         if (startedTask) {
           // Reset empty poll count when task is assigned
           resetEmptyPollCount(agentId);

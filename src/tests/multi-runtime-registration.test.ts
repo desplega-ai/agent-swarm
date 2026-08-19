@@ -1962,6 +1962,46 @@ describe("logical capacity is shared across dispatch entrypoints", () => {
     expect(admitted).toBe(1);
     expect(getActiveTaskCount(id)).toBe(1);
   });
+
+  test("maxTasks=1 admits one pending task across concurrent MCP polls", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rtA = crypto.randomUUID();
+    const rtB = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtA });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtB });
+    // Two already-pending assignments: both runtimes pass the liveness gate,
+    // so only the in-transaction capacity check keeps the second one out.
+    const first = createTaskExtended("pending-one", { agentId: id });
+    const second = createTaskExtended("pending-two", { agentId: id });
+
+    const [a, b] = await Promise.all([pollTask(id, rtA), pollTask(id, rtB)]);
+
+    const started = [startedTaskId(a), startedTaskId(b)].filter(Boolean);
+    expect(started).toHaveLength(1);
+    expect(getActiveTaskCount(id)).toBe(1);
+    // The blocked task stays pending for whenever capacity frees up.
+    const statuses = [getTaskById(first.id)?.status, getTaskById(second.id)?.status].sort();
+    expect(statuses).toEqual(["in_progress", "pending"]);
+  });
+
+  test("maxTasks=2 lets two live runtimes start both pending tasks", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rtA = crypto.randomUUID();
+    const rtB = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtA });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtB });
+    createTaskExtended("pending-one", { agentId: id });
+    createTaskExtended("pending-two", { agentId: id });
+
+    const [a, b] = await Promise.all([pollTask(id, rtA), pollTask(id, rtB)]);
+
+    expect(startedTaskId(a)).not.toBeNull();
+    expect(startedTaskId(b)).not.toBeNull();
+    expect(startedTaskId(a)).not.toBe(startedTaskId(b));
+    expect(getActiveTaskCount(id)).toBe(2);
+  });
 });
 
 describe("MCP task-action claim requires a live runtime", () => {
@@ -2002,6 +2042,65 @@ describe("MCP task-action claim requires a live runtime", () => {
     const id = makeAgent(1);
     const task = createTaskExtended("pool-claim");
     await claim(id, task.id);
+    expect(getTaskById(task.id)?.agentId).toBe(id);
+  });
+});
+
+describe("MCP task-action accept requires a live runtime", () => {
+  async function accept(agentId: string, taskId: string, runtimeInstanceId?: string) {
+    const handler = mcpServer.handlers.get("task-action");
+    if (!handler) throw new Error("task-action not registered");
+    const headers: Record<string, string> = { "x-agent-id": agentId };
+    if (runtimeInstanceId) headers["x-runtime-instance-id"] = runtimeInstanceId;
+    return (await handler(
+      { action: "accept", taskId },
+      {
+        sessionId: "test-session",
+        requestInfo: { headers },
+        sendNotification: async () => {},
+      },
+    )) as { isError?: boolean };
+  }
+
+  test("an expired runtime cannot accept and is not revived", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const dead = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: dead });
+    makeRuntimeStale(dead);
+    expireStaleRuntimeInstances();
+    const task = createTaskExtended("offered-work", { offeredTo: id });
+
+    await accept(id, task.id, dead);
+    expect(getTaskById(task.id)?.status).toBe("offered");
+    expect(getRuntimeInstanceById(dead)).toBeNull();
+  });
+
+  test("missing and foreign runtime identities cannot accept; the owning live one can", async () => {
+    const id = makeAgent(1);
+    const other = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    const foreign = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await register(other, { maxTasks: 1, runtimeInstanceId: foreign });
+    const task = createTaskExtended("offered-work", { offeredTo: id });
+
+    await accept(id, task.id);
+    expect(getTaskById(task.id)?.status).toBe("offered");
+    await accept(id, task.id, foreign);
+    expect(getTaskById(task.id)?.status).toBe("offered");
+
+    await accept(id, task.id, rt);
+    expect(getTaskById(task.id)?.status).toBe("pending");
+    expect(getTaskById(task.id)?.agentId).toBe(id);
+  });
+
+  test("with the flag off, accepting works without runtime identity", async () => {
+    const id = makeAgent(1);
+    const task = createTaskExtended("offered-work", { offeredTo: id });
+    await accept(id, task.id);
+    expect(getTaskById(task.id)?.status).toBe("pending");
     expect(getTaskById(task.id)?.agentId).toBe(id);
   });
 });
