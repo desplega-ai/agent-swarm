@@ -36,6 +36,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
       );
       const firstTaskId = "11111111-1111-4111-8111-111111111111";
       const secondTaskId = "22222222-2222-4222-8222-222222222222";
+      const thirdTaskId = "44444444-4444-4444-8444-444444444444";
       insertTask.run(
         firstTaskId,
         "Ignore https://notgithub.com/wrong/repo/pull/88. Shipped " +
@@ -55,6 +56,12 @@ describe("migration 132 task pull-request attachment backfill", () => {
         now,
         now,
       );
+      insertTask.run(
+        thirdTaskId,
+        "Valid output https://github.com/desplega-ai/agent-swarm/pull/43",
+        now,
+        now,
+      );
       const existingId = "33333333-3333-4333-8333-333333333333";
       db.run(
         `INSERT INTO task_attachments
@@ -65,6 +72,17 @@ describe("migration 132 task pull-request attachment backfill", () => {
           secondTaskId,
           "http://GitHub.com/desplega-ai/agent-swarm/pull/42/files",
           "http://GitHub.com/desplega-ai/agent-swarm/pull/42/files",
+        ],
+      );
+      db.run(
+        `INSERT INTO task_attachments
+           (id, task_id, name, kind, url, provider_id, provider_key, intent)
+         VALUES (?, ?, 'Malformed attachment', 'url', ?, 'url', ?, 'review')`,
+        [
+          "55555555-5555-4555-8555-555555555555",
+          thirdTaskId,
+          "https://github.com/desplega-ai/agent-swarm/pull/43abc",
+          "https://github.com/desplega-ai/agent-swarm/pull/43abc",
         ],
       );
 
@@ -89,7 +107,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
            ORDER BY task_id, url`,
         )
         .all();
-      expect(rows).toHaveLength(3);
+      expect(rows).toHaveLength(5);
       expect(rows.map((row) => ({ ...row, id: undefined }))).toEqual([
         {
           id: undefined,
@@ -118,6 +136,24 @@ describe("migration 132 task pull-request attachment backfill", () => {
           providerKey: "http://GitHub.com/desplega-ai/agent-swarm/pull/42/files",
           intent: "review",
         },
+        {
+          id: undefined,
+          taskId: thirdTaskId,
+          name: "GitHub pull request #43",
+          url: "https://github.com/desplega-ai/agent-swarm/pull/43",
+          providerId: "url",
+          providerKey: "https://github.com/desplega-ai/agent-swarm/pull/43",
+          intent: "task-deliverable",
+        },
+        {
+          id: undefined,
+          taskId: thirdTaskId,
+          name: "Malformed attachment",
+          url: "https://github.com/desplega-ai/agent-swarm/pull/43abc",
+          providerId: "url",
+          providerKey: "https://github.com/desplega-ai/agent-swarm/pull/43abc",
+          intent: "review",
+        },
       ]);
       for (const row of rows) {
         expect(row.id).toMatch(
@@ -131,7 +167,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()
           ?.count,
-      ).toBe(3);
+      ).toBe(5);
     } finally {
       db.close();
     }

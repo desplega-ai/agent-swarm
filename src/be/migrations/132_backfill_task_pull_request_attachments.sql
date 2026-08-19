@@ -166,14 +166,22 @@ WHERE NOT EXISTS (
     FROM task_attachments existing
     WHERE existing.task_id = candidate.task_id
       AND existing.kind = 'url'
-      AND (
-        lower(trim(existing.url)) = substr(lower(candidate.url), 9)
-        OR lower(trim(existing.url)) = lower(candidate.url)
-        OR lower(trim(existing.url)) = 'http://' || substr(lower(candidate.url), 9)
-        OR lower(trim(existing.url)) GLOB substr(lower(candidate.url), 9) || '[^0-9]*'
-        OR lower(trim(existing.url)) GLOB lower(candidate.url) || '[^0-9]*'
-        OR lower(trim(existing.url)) GLOB
-          'http://' || substr(lower(candidate.url), 9) || '[^0-9]*'
+      AND EXISTS (
+        SELECT 1
+        FROM (
+          SELECT substr(lower(candidate.url), 9) AS base_url
+          UNION ALL
+          SELECT lower(candidate.url)
+          UNION ALL
+          SELECT 'http://' || substr(lower(candidate.url), 9)
+        ) forms
+        WHERE lower(trim(existing.url)) = forms.base_url
+          OR (
+            substr(lower(trim(existing.url)), 1, length(forms.base_url)) = forms.base_url
+            AND unicode(substr(lower(trim(existing.url)), length(forms.base_url) + 1, 1)) IN (
+              9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
+            )
+          )
       )
   )
 GROUP BY candidate.task_id, lower(candidate.url);
