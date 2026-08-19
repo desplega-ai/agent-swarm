@@ -177,3 +177,23 @@ gone, and the last close still produced offline.
 Poll liveness: a runtime aged to 55s against the 60s cutoff was refreshed to
 0s by a single authenticated poll and survived the following sweep — so a
 worker inside the long-poll loop stays live without relying on ping timing.
+
+## Addendum — reconciliation on runtime-set changes (same day)
+
+Isolated server on port 13903, `RUNTIME_STALE_THRESHOLD_MIN=1`.
+
+- **Expiry.** One `AGENT_ID` with a ready runtime and a waiting sibling read
+  `idle`. Ageing the ready runtime past the window and running a sweep moved
+  the agent to `waiting_for_credentials` — the surviving runtime cannot execute
+  work, so it is no longer advertised as available.
+- **Registration.** An agent whose only runtime reported waiting sat at
+  `waiting_for_credentials`. A second runtime registering without ever
+  reporting readiness (credential checks disabled) returned it to `idle`
+  immediately, instead of waiting for an unrelated event to recompute it.
+
+The MCP dispatch gate was **not** exercised live: driving `poll-task` needs a
+real harness session with the swarm MCP server attached, which this harness
+does not stage. It is covered by integration tests instead — expired, unknown,
+foreign and missing runtime identities all receive no work, a replacement
+runtime still does, and a concurrent HTTP + MCP poll under `AGENT_MAX_TASKS=1`
+admits exactly one task.

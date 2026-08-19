@@ -332,6 +332,7 @@ export function mergeMcpConfig(
   installedServers: Record<string, Record<string, unknown>> | null,
   taskId: string,
   contextKey?: string,
+  runtimeInstanceId?: string,
 ): { mcpServers: Record<string, unknown> } {
   const config: { mcpServers: Record<string, unknown> } = {
     mcpServers: { ...(baseConfig?.mcpServers ?? {}) },
@@ -359,6 +360,9 @@ export function mergeMcpConfig(
     (server.headers as Record<string, string>)["X-Source-Task-Id"] = taskId;
     if (contextKey) {
       (server.headers as Record<string, string>)["X-Context-Key"] = contextKey;
+    }
+    if (runtimeInstanceId) {
+      (server.headers as Record<string, string>)["X-Runtime-Instance-ID"] = runtimeInstanceId;
     }
   }
 
@@ -434,6 +438,7 @@ export async function createSessionMcpConfig(
       installedServers ?? null,
       taskId,
       contextKey,
+      process.env.SWARM_RUNTIME_INSTANCE_ID,
     );
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
     await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));

@@ -37,6 +37,7 @@ import { handleConfig } from "../http/config";
 import { handleCore } from "../http/core";
 import { handlePoll } from "../http/poll";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { registerPollTaskTool } from "../tools/poll-task";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
 import { setRequestAuth } from "../utils/request-auth-context";
 
@@ -270,6 +271,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   registerSetConfigTool(mcpServer as unknown as Parameters<typeof registerSetConfigTool>[0]);
+  registerPollTaskTool(mcpServer as unknown as Parameters<typeof registerPollTaskTool>[0]);
   server = createTestServer();
   await new Promise<void>((resolve) => {
     server.listen(TEST_PORT, () => resolve());
@@ -1194,7 +1196,8 @@ describe("runtime expiry releases what the runtime held", () => {
     expect(getActiveSessionForTask(crashedTask.id)).toBeNull();
     expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
     expect(getTaskById(liveTask.id)?.status).toBe("in_progress");
-    expect(getAgentById(id)?.status).toBe("idle");
+    // Reconciled from the survivors: live runtime + active work.
+    expect(getAgentById(id)?.status).toBe("busy");
   });
 });
 
@@ -1708,5 +1711,253 @@ describe("poll refreshes runtime liveness", () => {
     await Bun.sleep(10);
     await pollAgent(id2, r1);
     expect(getRuntimeInstanceById(r1)?.lastSeenAt).toBe(before?.lastSeenAt ?? "");
+  });
+});
+
+/** Invoke MCP poll-task the way a worker process would, via request context. */
+async function pollTask(agentId: string, runtimeInstanceId?: string) {
+  const handler = mcpServer.handlers.get("poll-task");
+  if (!handler) throw new Error("poll-task not registered");
+  const headers: Record<string, string> = { "x-agent-id": agentId };
+  if (runtimeInstanceId) headers["x-runtime-instance-id"] = runtimeInstanceId;
+  return (await handler(
+    {},
+    {
+      sessionId: "test-session",
+      requestInfo: { headers },
+      sendNotification: async () => {},
+    },
+  )) as { structuredContent?: { task?: { id?: string } } };
+}
+
+function startedTaskId(result: { structuredContent?: { task?: { id?: string } } }) {
+  return result?.structuredContent?.task?.id ?? null;
+}
+
+describe("expiry reconciles the surviving runtime set", () => {
+  async function readyAndWaiting(id: string) {
+    const ready = crypto.randomUUID();
+    const waiting = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: ready });
+    await register(id, { maxTasks: 1, runtimeInstanceId: waiting });
+    await reportReady(id, ready, true);
+    await reportReady(id, waiting, false);
+    return { ready, waiting };
+  }
+
+  test("expiring the only ready runtime parks the agent", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const { ready } = await readyAndWaiting(id);
+    expect(getAgentById(id)?.status).not.toBe("waiting_for_credentials");
+
+    makeRuntimeStale(ready);
+    expireStaleRuntimeInstances();
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+  });
+
+  test("expiring a waiting runtime leaves a ready sibling available", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const { waiting } = await readyAndWaiting(id);
+
+    makeRuntimeStale(waiting);
+    expireStaleRuntimeInstances();
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("a busy agent stays busy when a waiting runtime expires", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const { waiting } = await readyAndWaiting(id);
+    const task = createTaskExtended("work", { agentId: id });
+    startTask(task.id);
+
+    makeRuntimeStale(waiting);
+    expireStaleRuntimeInstances();
+    expect(getAgentById(id)?.status).toBe("busy");
+  });
+
+  test("expiring the last runtime is still offline", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const { ready, waiting } = await readyAndWaiting(id);
+    makeRuntimeStale(ready);
+    makeRuntimeStale(waiting);
+    expireStaleRuntimeInstances();
+    expect(getAgentById(id)?.status).toBe("offline");
+  });
+
+  test("the sweep does not assign pool work when only a waiting runtime survives", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const { ready } = await readyAndWaiting(id);
+    makeRuntimeStale(ready);
+    const task = createTaskExtended("pool-work");
+
+    await runHeartbeatSweep();
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+    expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
+  });
+});
+
+describe("registration reconciles the agent", () => {
+  test("a new runtime lifts a waiting agent out of waiting", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const waiting = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: waiting });
+    await reportReady(id, waiting, false);
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+
+    // Credential checks disabled on the newcomer: never reports, counts ready.
+    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("registration does not force idle over active work", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const waiting = crypto.randomUUID();
+    await register(id, { maxTasks: 2, runtimeInstanceId: waiting });
+    await reportReady(id, waiting, false);
+    const task = createTaskExtended("work", { agentId: id });
+    startTask(task.id);
+
+    await register(id, { maxTasks: 2, runtimeInstanceId: crypto.randomUUID() });
+    expect(getAgentById(id)?.status).toBe("busy");
+  });
+
+  test("registering another waiting runtime keeps the agent parked", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: a });
+    await register(id, { maxTasks: 1, runtimeInstanceId: b });
+    await reportReady(id, a, false);
+    await reportReady(id, b, false);
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+
+    await register(id, { maxTasks: 1, runtimeInstanceId: b });
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+    expect(runtimeInstancesFor(id)).toHaveLength(2);
+  });
+
+  test("an offline agent comes back when a runtime registers", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await closeRuntime(id, rt);
+    expect(getAgentById(id)?.status).toBe("offline");
+
+    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("with the flag off, registration does not touch status", async () => {
+    const id = makeAgent(2);
+    getDb().prepare("UPDATE agents SET status = 'busy' WHERE id = ?").run(id);
+    await register(id, { maxTasks: 2, runtimeInstanceId: crypto.randomUUID() });
+    expect(getAgentById(id)?.status).toBe("busy");
+  });
+});
+
+describe("MCP poll-task requires a live runtime", () => {
+  test("with the flag off it dispatches as before", async () => {
+    const id = makeAgent(1);
+    const task = createTaskExtended("mcp-work", { agentId: id });
+    expect(startedTaskId(await pollTask(id))).toBe(task.id);
+  });
+
+  test("a valid live runtime can dispatch", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("mcp-work", { agentId: id });
+    expect(startedTaskId(await pollTask(id, rt))).toBe(task.id);
+  });
+
+  test("missing, unknown and foreign runtime identities get no work", async () => {
+    const id = makeAgent(1);
+    const other = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    const foreign = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await register(other, { maxTasks: 1, runtimeInstanceId: foreign });
+    const task = createTaskExtended("mcp-work", { agentId: id });
+
+    expect(startedTaskId(await pollTask(id))).toBeNull();
+    expect(startedTaskId(await pollTask(id, crypto.randomUUID()))).toBeNull();
+    expect(startedTaskId(await pollTask(id, foreign))).toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("pending");
+  });
+
+  test("an expired runtime cannot dispatch and is not revived", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    createTaskExtended("mcp-work", { agentId: id });
+    makeRuntimeStale(rt);
+
+    expect(startedTaskId(await pollTask(id, rt))).toBeNull();
+    expect(countActiveRuntimeInstancesForAgent(id)).toBe(0);
+    expireStaleRuntimeInstances();
+    expect(startedTaskId(await pollTask(id, rt))).toBeNull();
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+  });
+
+  test("a retired process cannot work beside its replacement", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const oldRt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: oldRt });
+    makeRuntimeStale(oldRt);
+    expireStaleRuntimeInstances();
+    const newRt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: newRt });
+    const task = createTaskExtended("mcp-work", { agentId: id });
+
+    expect(startedTaskId(await pollTask(id, oldRt))).toBeNull();
+    expect(startedTaskId(await pollTask(id, newRt))).toBe(task.id);
+  });
+
+  test("a poll-task call refreshes its runtime's liveness", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    // A task makes the call return immediately instead of entering the wait.
+    createTaskExtended("mcp-work", { agentId: id });
+    const before = getRuntimeInstanceById(rt);
+
+    await Bun.sleep(10);
+    await pollTask(id, rt);
+    const after = getRuntimeInstanceById(rt);
+    expect(after && before && after.lastSeenAt > before.lastSeenAt).toBe(true);
+  });
+});
+
+describe("logical capacity is shared across dispatch entrypoints", () => {
+  test("maxTasks=1 admits one task across concurrent HTTP and MCP polls", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const httpRt = crypto.randomUUID();
+    const mcpRt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: httpRt });
+    await register(id, { maxTasks: 1, runtimeInstanceId: mcpRt });
+    // One task per entrypoint's preferred shape, both against the same limit.
+    createTaskExtended("offered-work", { offeredTo: id });
+    createTaskExtended("pending-work", { agentId: id });
+
+    const [httpResult, mcpResult] = await Promise.all([pollAgent(id, httpRt), pollTask(id, mcpRt)]);
+
+    const admitted = (httpResult?.trigger?.type ? 1 : 0) + (startedTaskId(mcpResult) ? 1 : 0);
+    expect(admitted).toBe(1);
+    expect(getActiveTaskCount(id)).toBe(1);
   });
 });

@@ -13,7 +13,9 @@ import {
   startTask,
   updateAgentStatus,
 } from "@/be/db";
+import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
+import { isMultiRuntimeEnabled } from "@/utils/multi-runtime";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 const DEFAULT_POLL_INTERVAL_MS = 2000;
@@ -69,6 +71,28 @@ export const registerPollTaskTool = (server: McpServer) => {
       // that gate poll-task flip this to true at the refusal site instead of
       // touching the bookkeeping path below.
       const wasBudgetRefused: boolean = false;
+
+      // Second dispatch entrypoint alongside HTTP /api/poll, so it needs the
+      // same gate: a process whose runtime is gone must not pick up work
+      // beside its replacement. Touch validates ownership+liveness and
+      // refreshes it; it cannot revive a retired runtime.
+      if (
+        isMultiRuntimeEnabled() &&
+        !(
+          requestInfo.runtimeInstanceId &&
+          touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId)
+        )
+      ) {
+        return toolOk("No task available.", {
+          details: "No task available for this runtime.",
+          data: {
+            yourAgentId: requestInfo.agentId,
+            offeredTasks: [],
+            availableCount: 0,
+            waitedForSeconds: 0,
+          },
+        });
+      }
 
       const agent = getAgentById(agentId);
       if (!agent) {

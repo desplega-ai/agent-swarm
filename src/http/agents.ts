@@ -459,6 +459,9 @@ export async function handleAgentRegister(
             agentId: existingAgent.id,
             reportedSlots: parsed.body.maxTasks ?? 1,
           });
+          // A new live runtime can lift the agent out of waiting without
+          // forcing idle over work another runtime is already doing.
+          reconcileAgentStatusFromRuntimes(existingAgent.id);
         }
         return { agent: getAgentById(agentId), created: false };
       }
@@ -489,6 +492,7 @@ export async function handleAgentRegister(
             agentId: agent.id,
             reportedSlots: parsed.body.maxTasks ?? 1,
           });
+          reconcileAgentStatusFromRuntimes(agent.id);
         }
         return { agent: getAgentById(agent.id), created: true };
       }

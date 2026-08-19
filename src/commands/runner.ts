@@ -4735,6 +4735,10 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // process is a new runtime, but one process presents one identity.
   const runtimeInstanceId = crypto.randomUUID();
 
+  // Session MCP configs are built in provider adapters, which read this to
+  // stamp the runtime identity onto worker tool calls.
+  process.env.SWARM_RUNTIME_INSTANCE_ID = runtimeInstanceId;
+
   // Create API config for ping/close
   const apiConfig: ApiConfig = { apiUrl, apiKey, agentId, runtimeInstanceId };
 

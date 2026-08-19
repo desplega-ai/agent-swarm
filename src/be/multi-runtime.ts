@@ -430,13 +430,13 @@ export function expireStaleRuntimeInstances(): {
       .prepare("DELETE FROM runtime_instances WHERE last_seen_at < ?")
       .run(cutoff).changes;
 
+    // Recompute every affected agent from what survived: losing the only
+    // ready runtime has to park the agent even though a waiting sibling is
+    // still live, or the same sweep would assign work it cannot execute.
     let agentsOffline = 0;
     for (const agentId of new Set(stale.map((r) => r.agent_id))) {
-      if (countActiveRuntimeInstancesForAgent(agentId) > 0) continue;
-      const agent = getAgentById(agentId);
-      if (!agent || agent.status === "offline") continue;
-      updateAgentStatus(agentId, "offline");
-      agentsOffline++;
+      reconcileAgentStatusFromRuntimes(agentId);
+      if (getAgentById(agentId)?.status === "offline") agentsOffline++;
     }
     return { expired: stale.length, agentsOffline, sessionsCleaned, pruned };
   })();
