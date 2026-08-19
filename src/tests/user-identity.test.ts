@@ -5,11 +5,14 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
+  createWorkflow,
+  createWorkflowRun,
   deleteUser,
   getAllUsers,
   getDb,
   getTaskById,
   getUserById,
+  getWorkflowRun,
   initDb,
   updateUser,
 } from "../be/db";
@@ -276,12 +279,44 @@ describe("deleteUser", () => {
       source: "slack",
       requestedByUserId: user.id,
     });
+    getDb().prepare("UPDATE agent_tasks SET created_by = ? WHERE id = ?").run(user.id, task.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBe(user.id);
+    expect(
+      getDb()
+        .prepare<{ created_by: string | null }, [string]>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+        )
+        .get(task.id)?.created_by,
+    ).toBe(user.id);
 
     deleteUser(user.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
+    expect(
+      getDb()
+        .prepare<{ created_by: string | null }, [string]>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+        )
+        .get(task.id)?.created_by,
+    ).toBeNull();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
     expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
+  });
+
+  test("clears retained workflow run attribution before deleting the user", () => {
+    const user = createUser({ name: "Workflow Trigger" });
+    const workflow = createWorkflow({
+      name: `delete-user-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: user.id,
+    });
+
+    expect(deleteUser(user.id)).toBe(true);
+    expect(getUserById(user.id)).toBeNull();
+    expect(getWorkflowRun(run.id)?.createdBy).toBeUndefined();
   });
 });
 

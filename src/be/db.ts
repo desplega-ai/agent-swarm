@@ -13157,13 +13157,67 @@ export function updateUser(
   return row ? rowToUser(row) : null;
 }
 
-export function deleteUser(id: string): boolean {
-  // Clear any task references before deleting
-  getDb()
-    .prepare("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?")
-    .run(id);
-  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
-  return result.changes > 0;
+type UserReferenceRow = {
+  tableName: string;
+  columnName: string;
+};
+
+function quoteSqlIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+export function deleteUser(id: string, replacementUserId?: string): boolean {
+  if (replacementUserId === id) {
+    throw new Error("Replacement user must differ from deleted user");
+  }
+
+  const database = getDb();
+  return database.transaction(() => {
+    const userExists = database
+      .prepare<{ present: number }, [string]>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+      )
+      .get(id)?.present;
+    if (!userExists) return false;
+
+    if (replacementUserId) {
+      const replacementExists = database
+        .prepare<{ present: number }, [string]>(
+          "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+        )
+        .get(replacementUserId)?.present;
+      if (!replacementExists) throw new Error("Replacement user not found");
+    }
+
+    // Preserve rows that carry user attribution but lack ON DELETE semantics.
+    // Schema discovery keeps this correct as new nullable user audit columns are added.
+    const references = database
+      .prepare<UserReferenceRow, []>(
+        `SELECT tables.name AS tableName, foreign_keys."from" AS columnName
+         FROM sqlite_schema AS tables
+         JOIN pragma_foreign_key_list(tables.name) AS foreign_keys
+         JOIN pragma_table_info(tables.name) AS columns
+           ON columns.name = foreign_keys."from"
+         WHERE tables.type = 'table'
+           AND foreign_keys."table" = 'users'
+           AND foreign_keys.on_delete IN ('NO ACTION', 'RESTRICT')
+           AND columns."notnull" = 0`,
+      )
+      .all();
+    const replacement = replacementUserId ?? null;
+    for (const reference of references) {
+      const table = quoteSqlIdentifier(reference.tableName);
+      const column = quoteSqlIdentifier(reference.columnName);
+      database
+        .prepare<unknown, [string | null, string]>(
+          `UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`,
+        )
+        .run(replacement, id);
+    }
+
+    const result = database.prepare("DELETE FROM users WHERE id = ?").run(id);
+    return result.changes > 0;
+  })();
 }
 
 // ============================================================================

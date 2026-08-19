@@ -32,6 +32,7 @@ import {
   deleteKv,
   deleteUser,
   getAllUsers,
+  getDb,
   getUserById,
   listKv,
   updateUser,
@@ -776,60 +777,63 @@ export async function handleUsers(
     }
 
     try {
-      // Move every identity from source → target.
-      for (const ident of sourceBefore.identities) {
-        unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
-        linkIdentity(targetId, ident.kind, ident.externalId, actor);
-      }
-
-      // Merge email aliases — append source.email + source.emailAliases into
-      // target.emailAliases (de-duped). Emit `email_added` per added alias.
-      const targetAliases = new Set(targetBefore.emailAliases ?? []);
-      const targetPrimary = (targetBefore.email ?? "").toLowerCase();
-      const newAliases: string[] = [];
-      const candidates = [
-        ...(sourceBefore.email ? [sourceBefore.email] : []),
-        ...(sourceBefore.emailAliases ?? []),
-      ];
-      for (const candidate of candidates) {
-        const lower = candidate.toLowerCase();
-        if (!lower || lower === targetPrimary) continue;
-        if (
-          ![...targetAliases].some((a) => a.toLowerCase() === lower) &&
-          !newAliases.some((a) => a.toLowerCase() === lower)
-        ) {
-          newAliases.push(candidate);
+      const mergedUser = getDb().transaction(() => {
+        // Move every identity from source → target.
+        for (const ident of sourceBefore.identities) {
+          unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
+          linkIdentity(targetId, ident.kind, ident.externalId, actor);
         }
-      }
-      if (newAliases.length > 0) {
-        const merged = [...(targetBefore.emailAliases ?? []), ...newAliases];
-        updateUser(targetId, { emailAliases: merged });
-        for (const alias of newAliases) {
-          recordIdentityEvent(targetId, "email_added", actor, null, { email: alias });
+
+        // Merge email aliases — append source.email + source.emailAliases into
+        // target.emailAliases (de-duped). Emit `email_added` per added alias.
+        const targetAliases = new Set(targetBefore.emailAliases ?? []);
+        const targetPrimary = (targetBefore.email ?? "").toLowerCase();
+        const newAliases: string[] = [];
+        const candidates = [
+          ...(sourceBefore.email ? [sourceBefore.email] : []),
+          ...(sourceBefore.emailAliases ?? []),
+        ];
+        for (const candidate of candidates) {
+          const lower = candidate.toLowerCase();
+          if (!lower || lower === targetPrimary) continue;
+          if (
+            ![...targetAliases].some((a) => a.toLowerCase() === lower) &&
+            !newAliases.some((a) => a.toLowerCase() === lower)
+          ) {
+            newAliases.push(candidate);
+          }
         }
-      }
+        if (newAliases.length > 0) {
+          const merged = [...(targetBefore.emailAliases ?? []), ...newAliases];
+          updateUser(targetId, { emailAliases: merged });
+          for (const alias of newAliases) {
+            recordIdentityEvent(targetId, "email_added", actor, null, { email: alias });
+          }
+        }
 
-      // Delete source — CASCADE cleans up any leftover external_ids row that
-      // we may have missed (and clears tasks.requestedByUserId pointers).
-      deleteUser(sourceId);
+        // Delete source — CASCADE cleans up any leftover external_ids row that
+        // we may have missed. Retained user references move to the target.
+        deleteUser(sourceId, targetId);
 
-      // Single manual_merge event on target capturing the before/after rows.
-      // The source row is deleted above, so carry a minimal snapshot of the
-      // source user ({id, name, email}) inside the `after` payload under
-      // `source` — this lets the UI render "Merged manually from X → Y".
-      const targetAfter = composeUser(targetId);
-      recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
-        ...targetAfter,
-        source: {
-          id: sourceBefore.id,
-          name: sourceBefore.name,
-          email: sourceBefore.email,
-        },
-      });
+        // Single manual_merge event on target capturing the before/after rows.
+        // The source row is deleted above, so carry a minimal snapshot of the
+        // source user ({id, name, email}) inside the `after` payload under
+        // `source` — this lets the UI render "Merged manually from X → Y".
+        const targetAfter = composeUser(targetId);
+        recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
+          ...targetAfter,
+          source: {
+            id: sourceBefore.id,
+            name: sourceBefore.name,
+            email: sourceBefore.email,
+          },
+        });
 
-      // Re-compose AFTER the event so the response surfaces the merge event in
-      // recentEvents (otherwise the timeline is missing the event we just wrote).
-      mergeUsersRoute.respond(res, 200, { user: composeUser(targetId) });
+        // Re-compose AFTER the event so the response surfaces the merge event in
+        // recentEvents (otherwise the timeline is missing the event we just wrote).
+        return composeUser(targetId);
+      })();
+      mergeUsersRoute.respond(res, 200, { user: mergedUser });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to merge users", 500);
     }
