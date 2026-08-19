@@ -72,7 +72,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
     // 1. Idempotency check — if a wait_state already exists for this step,
     // either return the resolved port (resolution happened during retry/recovery)
     // or return the async marker to keep waiting.
-    const existing = db.getWaitStateByStepId(meta.stepId);
+    const existing = await db.getWaitStateByStepId(meta.stepId);
     if (existing) {
       if (existing.status !== "pending") {
         const nextPort = computeNextPort(existing.mode, existing.status);
@@ -100,7 +100,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
     if (config.mode === "time") {
       const waitId = crypto.randomUUID();
       const wakeUpAt = new Date(Date.now() + config.durationMs).toISOString();
-      db.createWaitState({
+      await db.createWaitState({
         id: waitId,
         workflowRunId: meta.runId,
         workflowRunStepId: meta.stepId,
@@ -130,7 +130,7 @@ export class WaitExecutor extends BaseExecutor<typeof WaitConfigSchema, typeof W
       ? new Date(Date.now() + config.timeoutMs).toISOString()
       : null;
 
-    db.createWaitState({
+    await db.createWaitState({
       id: waitId,
       workflowRunId: meta.runId,
       workflowRunStepId: meta.stepId,

@@ -28,7 +28,7 @@ export const registerSkillGetFileTool = (server: McpServer) => {
 
       let file = null;
       try {
-        file = getSkillFile(args.skillId, args.path);
+        file = await getSkillFile(args.skillId, args.path);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Invalid file path.";
         return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });

@@ -137,7 +137,7 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     // Initialize the bus listener registry (parity with initWorkflows()).
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     // The wait should be in 'waiting' status at this point — it registered
     // its bus subscription during execute. The fan-out's other branch may
@@ -205,7 +205,7 @@ describe("WaitExecutor — built-in bus events (Phase 4 verification)", () => {
     const wf = makeWorkflow("wait-builtin-task-completed-other-run", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");

@@ -197,7 +197,7 @@ function parseRecoveredTaskOutput(output: string | null): unknown {
  * while the server was down.
  */
 async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckApprovalRuns();
+  const stuckRuns = await getStuckApprovalRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {
@@ -211,7 +211,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
 
       // If still pending but expired, auto-reject
       if (approvalStatus === "pending" && stuck.expiresAt) {
-        resolveApprovalRequest(stuck.approvalId, {
+        await resolveApprovalRequest(stuck.approvalId, {
           status: "timeout",
         });
         approvalStatus = "timeout";
@@ -280,7 +280,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
  * for fired event waits).
  */
 async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckWaitRuns();
+  const stuckRuns = await getStuckWaitRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {

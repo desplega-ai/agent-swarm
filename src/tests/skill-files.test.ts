@@ -144,7 +144,7 @@ describe("skill_files storage", () => {
     ).toThrow("SKILL.md");
   });
 
-  test("deleting a skill cascades bundled files", () => {
+  test("deleting a skill cascades bundled files", async () => {
     const skill = createSkill({
       name: "cascade-file-skill",
       description: "Cascade test",
@@ -153,7 +153,7 @@ describe("skill_files storage", () => {
       scope: "agent",
       isComplex: true,
     });
-    upsertSkillFile(skill.id, { path: "references/a.md", content: "a" });
+    await upsertSkillFile(skill.id, { path: "references/a.md", content: "a" });
 
     expect(listSkillFileManifest(skill.id)).toHaveLength(1);
     expect(deleteSkill(skill.id)).toBe(true);

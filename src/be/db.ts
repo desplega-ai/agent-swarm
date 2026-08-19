@@ -10062,55 +10062,58 @@ export async function getMetricBySlug(agentId: string, slug: string): Promise<Me
   return row ? rowToMetric(row) : null;
 }
 
-export function listMetricsByAgent(agentId: string, limit?: number, offset?: number): Metric[];
-export function listMetricsByAgent(
+export async function listMetricsByAgent(
+  agentId: string,
+  limit?: number,
+  offset?: number,
+): Promise<Metric[]>;
+export async function listMetricsByAgent(
   agentId: string,
   limit: number | undefined,
   offset: number | undefined,
   opts: { slim: true },
-): MetricSummary[];
-export function listMetricsByAgent(
+): Promise<MetricSummary[]>;
+export async function listMetricsByAgent(
   agentId: string,
   limit = 100,
   offset = 0,
   opts?: { slim?: boolean },
-): Metric[] | MetricSummary[] {
-  const rows = getDb()
-    .prepare<MetricRow, [string, number, number]>(
-      "SELECT * FROM metrics WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    )
-    .all(agentId, limit, offset);
+): Promise<Metric[] | MetricSummary[]> {
+  const rows = await getDbClient().query<MetricRow>(
+    "SELECT * FROM metrics WHERE agentId = ? ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    [agentId, limit, offset],
+  );
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
-export function listAllMetrics(limit?: number, offset?: number): Metric[];
-export function listAllMetrics(
+export async function listAllMetrics(limit?: number, offset?: number): Promise<Metric[]>;
+export async function listAllMetrics(
   limit: number | undefined,
   offset: number | undefined,
   opts: { slim: true },
-): MetricSummary[];
-export function listAllMetrics(
+): Promise<MetricSummary[]>;
+export async function listAllMetrics(
   limit = 100,
   offset = 0,
   opts?: { slim?: boolean },
-): Metric[] | MetricSummary[] {
-  const rows = getDb()
-    .prepare<MetricRow, [number, number]>(
-      "SELECT * FROM metrics ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
-    )
-    .all(limit, offset);
+): Promise<Metric[] | MetricSummary[]> {
+  const rows = await getDbClient().query<MetricRow>(
+    "SELECT * FROM metrics ORDER BY updatedAt DESC LIMIT ? OFFSET ?",
+    [limit, offset],
+  );
   return opts?.slim ? rows.map(rowToMetricSummary) : rows.map(rowToMetric);
 }
 
-export function countAllMetrics(): number {
-  const row = getDb().prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM metrics").get();
+export async function countAllMetrics(): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>("SELECT COUNT(*) AS count FROM metrics");
   return row?.count ?? 0;
 }
 
-export function countMetricsByAgent(agentId: string): number {
-  const row = getDb()
-    .prepare<{ count: number }, [string]>("SELECT COUNT(*) AS count FROM metrics WHERE agentId = ?")
-    .get(agentId);
+export async function countMetricsByAgent(agentId: string): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM metrics WHERE agentId = ?",
+    [agentId],
+  );
   return row?.count ?? 0;
 }
 
@@ -10152,8 +10155,8 @@ export async function updateMetric(
   return row ? rowToMetric(row) : null;
 }
 
-export function deleteMetric(id: string): boolean {
-  const result = getDb().run("DELETE FROM metrics WHERE id = ?", [id]);
+export async function deleteMetric(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM metrics WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -10177,37 +10180,37 @@ function rowToMetricVersion(row: MetricVersionRow): MetricVersion {
   };
 }
 
-export function createMetricVersion(data: {
+export async function createMetricVersion(data: {
   metricId: string;
   version: number;
   snapshot: MetricSnapshot;
   changedByAgentId?: string;
-}): MetricVersion {
-  const row = getDb()
-    .prepare<MetricVersionRow, [string, number, string, string | null]>(
-      `INSERT INTO metric_versions (metricId, version, snapshot, changedByAgentId)
+}): Promise<MetricVersion> {
+  const row = await getDbClient().get<MetricVersionRow>(
+    `INSERT INTO metric_versions (metricId, version, snapshot, changedByAgentId)
        VALUES (?, ?, ?, ?) RETURNING *`,
-    )
-    .get(data.metricId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null);
+    [data.metricId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
+  );
   if (!row) throw new Error("Failed to create metric version");
   return rowToMetricVersion(row);
 }
 
-export function getMetricVersions(metricId: string): MetricVersion[] {
-  return getDb()
-    .prepare<MetricVersionRow, [string]>(
-      "SELECT * FROM metric_versions WHERE metricId = ? ORDER BY version DESC",
-    )
-    .all(metricId)
-    .map(rowToMetricVersion);
+export async function getMetricVersions(metricId: string): Promise<MetricVersion[]> {
+  const rows = await getDbClient().query<MetricVersionRow>(
+    "SELECT * FROM metric_versions WHERE metricId = ? ORDER BY version DESC",
+    [metricId],
+  );
+  return rows.map(rowToMetricVersion);
 }
 
-export function getMetricVersion(metricId: string, version: number): MetricVersion | null {
-  const row = getDb()
-    .prepare<MetricVersionRow, [string, number]>(
-      "SELECT * FROM metric_versions WHERE metricId = ? AND version = ?",
-    )
-    .get(metricId, version);
+export async function getMetricVersion(
+  metricId: string,
+  version: number,
+): Promise<MetricVersion | null> {
+  const row = await getDbClient().get<MetricVersionRow>(
+    "SELECT * FROM metric_versions WHERE metricId = ? AND version = ?",
+    [metricId, version],
+  );
   return row ? rowToMetricVersion(row) : null;
 }
 
@@ -10271,6 +10274,10 @@ function rowToPromptTemplateHistory(row: PromptTemplateHistoryRow): PromptTempla
 
 /**
  * List prompt templates with optional filters.
+ *
+ * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
+ * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
+ * `initDb`'s body — stays on the raw sync handle.
  */
 export function getPromptTemplates(filters?: {
   eventType?: string;
@@ -10310,16 +10317,21 @@ export function getPromptTemplates(filters?: {
 /**
  * Get a single prompt template by ID.
  */
-export function getPromptTemplateById(id: string): PromptTemplate | null {
-  const row = getDb()
-    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
-    .get(id);
+export async function getPromptTemplateById(id: string): Promise<PromptTemplate | null> {
+  const row = await getDbClient().get<PromptTemplateRow>(
+    "SELECT * FROM prompt_templates WHERE id = ?",
+    [id],
+  );
   return row ? rowToPromptTemplate(row) : null;
 }
 
 /**
  * Upsert a prompt template. Inserts or updates by (eventType, scope, scopeId) unique constraint.
  * Creates a history entry on both insert and update.
+ *
+ * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
+ * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
+ * `initDb`'s body — stays on the raw sync handle.
  */
 export function upsertPromptTemplate(data: {
   eventType: string;
@@ -10447,10 +10459,11 @@ export function upsertPromptTemplate(data: {
  * Delete a prompt template by ID. Guards against deleting default templates.
  * Does NOT delete history rows (intentional for audit trail).
  */
-export function deletePromptTemplate(id: string): boolean {
-  const existing = getDb()
-    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
-    .get(id);
+export async function deletePromptTemplate(id: string): Promise<boolean> {
+  const existing = await getDbClient().get<PromptTemplateRow>(
+    "SELECT * FROM prompt_templates WHERE id = ?",
+    [id],
+  );
 
   if (!existing) return false;
   if (existing.isDefault === 1) {
@@ -10459,13 +10472,17 @@ export function deletePromptTemplate(id: string): boolean {
     );
   }
 
-  const result = getDb().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
+  const result = await getDbClient().run("DELETE FROM prompt_templates WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
 /**
  * Reset a prompt template to its default state.
  * Sets body to defaultBody, isDefault=true, state='enabled', bumps version.
+ *
+ * DEFERRED (boot-path rule): called synchronously from `seedDefaultTemplates`
+ * (src/be/seed-prompt-templates.ts), itself invoked synchronously from
+ * `initDb`'s body — stays on the raw sync handle.
  */
 export function resetPromptTemplateToDefault(id: string, defaultBody: string): PromptTemplate {
   const now = new Date().toISOString();
@@ -10509,13 +10526,14 @@ export function resetPromptTemplateToDefault(id: string, defaultBody: string): P
 /**
  * Get version history for a prompt template, ordered by version DESC.
  */
-export function getPromptTemplateHistory(templateId: string): PromptTemplateHistory[] {
-  return getDb()
-    .prepare<PromptTemplateHistoryRow, [string]>(
-      "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
-    )
-    .all(templateId)
-    .map(rowToPromptTemplateHistory);
+export async function getPromptTemplateHistory(
+  templateId: string,
+): Promise<PromptTemplateHistory[]> {
+  const rows = await getDbClient().query<PromptTemplateHistoryRow>(
+    "SELECT * FROM prompt_template_history WHERE templateId = ? ORDER BY version DESC",
+    [templateId],
+  );
+  return rows.map(rowToPromptTemplateHistory);
 }
 
 /**
@@ -10532,6 +10550,17 @@ export function getPromptTemplateHistory(templateId: string): PromptTemplateHist
  *   - 'enabled': return the template
  *   - 'skip_event': return { skip: true }
  *   - 'default_prompt_fallback': continue to next scope level
+ *
+ * DEFERRED (boot-path rule): injected as `src/prompts/resolver.ts`'s
+ * `dbResolverFn` via `configureDbResolver` (called from `initDb`'s body) and
+ * invoked synchronously, on every render, by that module's still-sync
+ * `resolveTemplate()` / `resolveTemplateViaDb()` / `expandTemplateRefs()` —
+ * a public API used pervasively across GitHub/GitLab/Linear/Jira/Slack/
+ * agentmail handlers, heartbeat, and workflows. Converting this function
+ * would force `resolveTemplate()` itself async, cascading into dozens of
+ * unrelated call sites outside this batch's blast radius. Stays on the raw
+ * sync handle; `resolveTemplateAsync()` already exists as the async path for
+ * callers that need one.
  */
 export function resolvePromptTemplate(
   eventType: string,
@@ -10610,40 +10639,40 @@ export function resolvePromptTemplate(
  * Checkout a prompt template to a specific version from history.
  * Copies body and state from the history entry into the live record, bumps version.
  */
-export function checkoutPromptTemplate(id: string, targetVersion: number): PromptTemplate {
+export async function checkoutPromptTemplate(
+  id: string,
+  targetVersion: number,
+): Promise<PromptTemplate> {
   const now = new Date().toISOString();
 
-  const existing = getDb()
-    .prepare<PromptTemplateRow, [string]>("SELECT * FROM prompt_templates WHERE id = ?")
-    .get(id);
+  const existing = await getDbClient().get<PromptTemplateRow>(
+    "SELECT * FROM prompt_templates WHERE id = ?",
+    [id],
+  );
   if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-  const historyEntry = getDb()
-    .prepare<PromptTemplateHistoryRow, [string, number]>(
-      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
-    )
-    .get(id, targetVersion);
+  const historyEntry = await getDbClient().get<PromptTemplateHistoryRow>(
+    "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
+    [id, targetVersion],
+  );
   if (!historyEntry)
     throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
 
   const newVersion = existing.version + 1;
 
-  const row = getDb()
-    .prepare<PromptTemplateRow, [string, string, number, string, string]>(
-      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
+  const row = await getDbClient().get<PromptTemplateRow>(
+    `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
        WHERE id = ? RETURNING *`,
-    )
-    .get(historyEntry.body, historyEntry.state, newVersion, now, id);
+    [historyEntry.body, historyEntry.state, newVersion, now, id],
+  );
 
   if (!row) throw new Error("Failed to checkout prompt template");
 
   // Create history entry for the checkout
-  getDb()
-    .prepare(
-      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+  await getDbClient().run(
+    `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       crypto.randomUUID(),
       id,
       newVersion,
@@ -10652,7 +10681,8 @@ export function checkoutPromptTemplate(id: string, targetVersion: number): Promp
       null,
       now,
       `Checked out from version ${targetVersion}`,
-    );
+    ],
+  );
 
   return rowToPromptTemplate(row);
 }
@@ -10679,30 +10709,33 @@ function rowToChannelActivityCursor(row: ChannelActivityCursorRow): ChannelActiv
   };
 }
 
-export function getAllChannelActivityCursors(): ChannelActivityCursor[] {
-  return getDb()
-    .prepare<ChannelActivityCursorRow, []>("SELECT * FROM channel_activity_cursors")
-    .all()
-    .map(rowToChannelActivityCursor);
+export async function getAllChannelActivityCursors(): Promise<ChannelActivityCursor[]> {
+  const rows = await getDbClient().query<ChannelActivityCursorRow>(
+    "SELECT * FROM channel_activity_cursors",
+  );
+  return rows.map(rowToChannelActivityCursor);
 }
 
-export function getChannelActivityCursor(channelId: string): ChannelActivityCursor | null {
-  const row = getDb()
-    .prepare<ChannelActivityCursorRow, [string]>(
-      "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
-    )
-    .get(channelId);
+export async function getChannelActivityCursor(
+  channelId: string,
+): Promise<ChannelActivityCursor | null> {
+  const row = await getDbClient().get<ChannelActivityCursorRow>(
+    "SELECT * FROM channel_activity_cursors WHERE channelId = ?",
+    [channelId],
+  );
   return row ? rowToChannelActivityCursor(row) : null;
 }
 
-export function upsertChannelActivityCursor(channelId: string, lastSeenTs: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
+export async function upsertChannelActivityCursor(
+  channelId: string,
+  lastSeenTs: string,
+): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO channel_activity_cursors (channelId, lastSeenTs, updatedAt)
        VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
        ON CONFLICT(channelId) DO UPDATE SET lastSeenTs = excluded.lastSeenTs, updatedAt = excluded.updatedAt`,
-    )
-    .run(channelId, lastSeenTs);
+    [channelId, lastSeenTs],
+  );
 }
 
 // ============================================================================
@@ -10771,7 +10804,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
   };
 }
 
-export function createApprovalRequest(data: {
+export async function createApprovalRequest(data: {
   id: string;
   title: string;
   questions: unknown[];
@@ -10782,36 +10815,17 @@ export function createApprovalRequest(data: {
   timeoutSeconds?: number;
   notificationChannels?: unknown[];
   createdBy?: string;
-}): ApprovalRequest {
+}): Promise<ApprovalRequest> {
   const now = new Date().toISOString();
   const expiresAt = data.timeoutSeconds
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = getDb()
-    .prepare<
-      ApprovalRequestRow,
-      [
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        number | null,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        string,
-      ]
-    >(
-      `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, created_by, createdAt, updatedAt)
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, created_by, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       data.id,
       data.title,
       JSON.stringify(data.questions),
@@ -10825,60 +10839,62 @@ export function createApprovalRequest(data: {
       data.createdBy ?? null,
       now,
       now,
-    );
+    ],
+  );
 
   return rowToApprovalRequest(row!);
 }
 
-export function getApprovalRequestById(id: string): ApprovalRequest | null {
-  const row = getDb()
-    .prepare<ApprovalRequestRow, [string]>("SELECT * FROM approval_requests WHERE id = ?")
-    .get(id);
+export async function getApprovalRequestById(id: string): Promise<ApprovalRequest | null> {
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    "SELECT * FROM approval_requests WHERE id = ?",
+    [id],
+  );
   return row ? rowToApprovalRequest(row) : null;
 }
 
-export function resolveApprovalRequest(
+export async function resolveApprovalRequest(
   id: string,
   data: {
     status: "approved" | "rejected" | "timeout";
     responses?: unknown;
     resolvedBy?: string;
   },
-): ApprovalRequest | null {
+): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<ApprovalRequestRow, [string, string | null, string | null, string, string, string]>(
-      `UPDATE approval_requests
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    `UPDATE approval_requests
        SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    )
-    .get(
+    [
       data.status,
       data.responses ? JSON.stringify(data.responses) : null,
       data.resolvedBy ?? null,
       now,
       now,
       id,
-    );
+    ],
+  );
   return row ? rowToApprovalRequest(row) : null;
 }
 
-export function updateApprovalRequestNotifications(
+export async function updateApprovalRequestNotifications(
   id: string,
   notificationChannels: Array<{ channel: string; target: string; messageTs?: string }>,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  getDb()
-    .prepare("UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?")
-    .run(JSON.stringify(notificationChannels), now, id);
+  await getDbClient().run(
+    "UPDATE approval_requests SET notificationChannels = ?, updatedAt = ? WHERE id = ?",
+    [JSON.stringify(notificationChannels), now, id],
+  );
 }
 
-export function listApprovalRequests(filters?: {
+export async function listApprovalRequests(filters?: {
   status?: string;
   workflowRunId?: string;
   limit?: number;
-}): ApprovalRequest[] {
+}): Promise<ApprovalRequest[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -10895,10 +10911,10 @@ export function listApprovalRequests(filters?: {
   const limit = filters?.limit ?? 100;
   params.push(limit);
 
-  const stmt = getDb().prepare(
+  const rows = await getDbClient().query<ApprovalRequestRow>(
     `SELECT * FROM approval_requests ${where} ORDER BY createdAt DESC LIMIT ?`,
+    params,
   );
-  const rows = stmt.all(...params) as ApprovalRequestRow[];
 
   return rows.map(rowToApprovalRequest);
 }
@@ -10914,10 +10930,9 @@ export interface StuckApprovalRun {
   expiresAt: string | null;
 }
 
-export function getStuckApprovalRuns(): StuckApprovalRun[] {
-  return getDb()
-    .prepare<StuckApprovalRun, []>(
-      `SELECT
+export async function getStuckApprovalRuns(): Promise<StuckApprovalRun[]> {
+  return getDbClient().query<StuckApprovalRun>(
+    `SELECT
         wr.id as runId,
         wrs.id as stepId,
         wrs.nodeId,
@@ -10932,29 +10947,25 @@ export function getStuckApprovalRuns(): StuckApprovalRun[] {
       WHERE wr.status = 'waiting'
         AND (ar.status IN ('approved', 'rejected', 'timeout')
              OR (ar.status = 'pending' AND ar.expiresAt IS NOT NULL AND ar.expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))`,
-    )
-    .all();
+  );
 }
 
-export function getApprovalRequestByStepId(stepId: string): ApprovalRequest | null {
-  const row = getDb()
-    .prepare<ApprovalRequestRow, [string]>(
-      "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
-    )
-    .get(stepId);
+export async function getApprovalRequestByStepId(stepId: string): Promise<ApprovalRequest | null> {
+  const row = await getDbClient().get<ApprovalRequestRow>(
+    "SELECT * FROM approval_requests WHERE workflowRunStepId = ?",
+    [stepId],
+  );
   return row ? rowToApprovalRequest(row) : null;
 }
 
 // TODO: Wire into a periodic cron/sweep to auto-timeout expired approval requests (Phase 2)
-export function getExpiredPendingApprovals(): ApprovalRequest[] {
-  const rows = getDb()
-    .prepare<ApprovalRequestRow, []>(
-      `SELECT * FROM approval_requests
+export async function getExpiredPendingApprovals(): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
        WHERE status = 'pending'
          AND expiresAt IS NOT NULL
          AND expiresAt < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
-    )
-    .all();
+  );
   return rows.map(rowToApprovalRequest);
 }
 
@@ -11029,31 +11040,14 @@ export interface CreateWaitStateInput {
   scope?: "run" | "global";
 }
 
-export function createWaitState(input: CreateWaitStateInput): WaitStateRow {
+export async function createWaitState(input: CreateWaitStateInput): Promise<WaitStateRow> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<
-      WaitStateRowDb,
-      [
-        string,
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        string,
-        string,
-      ]
-    >(
-      `INSERT INTO wait_states
+  const row = await getDbClient().get<WaitStateRowDb>(
+    `INSERT INTO wait_states
          (id, workflowRunId, workflowRunStepId, mode, wakeUpAt, eventName, eventFilter, expiresAt, eventScope, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       input.id,
       input.workflowRunId,
       input.workflowRunStepId,
@@ -11067,14 +11061,15 @@ export function createWaitState(input: CreateWaitStateInput): WaitStateRow {
       input.scope ?? "run",
       now,
       now,
-    );
+    ],
+  );
   return rowToWaitState(row!);
 }
 
-export function getWaitStateById(id: string): WaitStateRow | null {
-  const row = getDb()
-    .prepare<WaitStateRowDb, [string]>("SELECT * FROM wait_states WHERE id = ?")
-    .get(id);
+export async function getWaitStateById(id: string): Promise<WaitStateRow | null> {
+  const row = await getDbClient().get<WaitStateRowDb>("SELECT * FROM wait_states WHERE id = ?", [
+    id,
+  ]);
   return row ? rowToWaitState(row) : null;
 }
 
@@ -11082,10 +11077,11 @@ export function getWaitStateById(id: string): WaitStateRow | null {
  * Idempotency lookup — mirrors `getApprovalRequestByStepId`. A re-execution of
  * the same wait node finds its existing row instead of inserting a duplicate.
  */
-export function getWaitStateByStepId(stepId: string): WaitStateRow | null {
-  const row = getDb()
-    .prepare<WaitStateRowDb, [string]>("SELECT * FROM wait_states WHERE workflowRunStepId = ?")
-    .get(stepId);
+export async function getWaitStateByStepId(stepId: string): Promise<WaitStateRow | null> {
+  const row = await getDbClient().get<WaitStateRowDb>(
+    "SELECT * FROM wait_states WHERE workflowRunStepId = ?",
+    [stepId],
+  );
   return row ? rowToWaitState(row) : null;
 }
 
@@ -11094,10 +11090,9 @@ export function getWaitStateByStepId(stepId: string): WaitStateRow | null {
  *   - mode='time' with `wakeUpAt <= now`, OR
  *   - mode='event' with non-null `expiresAt <= now` (timeout branch).
  */
-export function getDueWaitStates(): WaitStateRow[] {
-  const rows = getDb()
-    .prepare<WaitStateRowDb, []>(
-      `SELECT * FROM wait_states
+export async function getDueWaitStates(): Promise<WaitStateRow[]> {
+  const rows = await getDbClient().query<WaitStateRowDb>(
+    `SELECT * FROM wait_states
        WHERE status = 'pending'
          AND (
            (mode = 'time' AND wakeUpAt IS NOT NULL
@@ -11106,8 +11101,7 @@ export function getDueWaitStates(): WaitStateRow[] {
            (mode = 'event' AND expiresAt IS NOT NULL
               AND expiresAt <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
          )`,
-    )
-    .all();
+  );
   return rows.map(rowToWaitState);
 }
 
@@ -11115,13 +11109,11 @@ export function getDueWaitStates(): WaitStateRow[] {
  * Distinct `eventName` values across pending event-mode waits. Used at boot
  * by the wait-bus subscription system to register one listener per event name.
  */
-export function getPendingEventWaitNames(): string[] {
-  const rows = getDb()
-    .prepare<{ eventName: string }, []>(
-      `SELECT DISTINCT eventName FROM wait_states
+export async function getPendingEventWaitNames(): Promise<string[]> {
+  const rows = await getDbClient().query<{ eventName: string }>(
+    `SELECT DISTINCT eventName FROM wait_states
        WHERE status = 'pending' AND eventName IS NOT NULL`,
-    )
-    .all();
+  );
   return rows.map((r) => r.eventName);
 }
 
@@ -11130,22 +11122,23 @@ export function getPendingEventWaitNames(): string[] {
  * to a single run for run-scoped signals. The Phase 3 listener applies the
  * declarative/JS filter on top of this; the DB query is the cheap pre-filter.
  */
-export function getPendingWaitsByEvent(eventName: string, runId?: string): WaitStateRow[] {
+export async function getPendingWaitsByEvent(
+  eventName: string,
+  runId?: string,
+): Promise<WaitStateRow[]> {
   if (runId !== undefined) {
-    const rows = getDb()
-      .prepare<WaitStateRowDb, [string, string]>(
-        `SELECT * FROM wait_states
+    const rows = await getDbClient().query<WaitStateRowDb>(
+      `SELECT * FROM wait_states
          WHERE status = 'pending' AND mode = 'event' AND eventName = ? AND workflowRunId = ?`,
-      )
-      .all(eventName, runId);
+      [eventName, runId],
+    );
     return rows.map(rowToWaitState);
   }
-  const rows = getDb()
-    .prepare<WaitStateRowDb, [string]>(
-      `SELECT * FROM wait_states
+  const rows = await getDbClient().query<WaitStateRowDb>(
+    `SELECT * FROM wait_states
        WHERE status = 'pending' AND mode = 'event' AND eventName = ?`,
-    )
-    .all(eventName);
+    [eventName],
+  );
   return rows.map(rowToWaitState);
 }
 
@@ -11154,25 +11147,24 @@ export function getPendingWaitsByEvent(eventName: string, runId?: string): WaitS
  * iff the caller won the race (UPDATE matched a pending row). Concurrent
  * callers see `{updated: false}` and should bail without further side effects.
  */
-export function resolveWaitState(
+export async function resolveWaitState(
   id: string,
   data: { status: Exclude<WaitStateStatus, "pending">; firedPayload?: unknown },
-): { updated: boolean; row: WaitStateRow | null } {
+): Promise<{ updated: boolean; row: WaitStateRow | null }> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<WaitStateRowDb, [string, string | null, string, string, string]>(
-      `UPDATE wait_states
+  const row = await getDbClient().get<WaitStateRowDb>(
+    `UPDATE wait_states
        SET status = ?, firedPayload = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    )
-    .get(
+    [
       data.status,
       data.firedPayload !== undefined ? JSON.stringify(data.firedPayload) : null,
       now,
       now,
       id,
-    );
+    ],
+  );
   return { updated: row !== null, row: row ? rowToWaitState(row) : null };
 }
 
@@ -11198,10 +11190,9 @@ export interface StuckWaitRun {
  * Case (b) overlaps with the wait-poller's first tick after boot, but explicit
  * recovery avoids the up-to-5s startup latency window for stuck runs.
  */
-export function getStuckWaitRuns(): StuckWaitRun[] {
-  return getDb()
-    .prepare<StuckWaitRun, []>(
-      `SELECT
+export async function getStuckWaitRuns(): Promise<StuckWaitRun[]> {
+  return getDbClient().query<StuckWaitRun>(
+    `SELECT
         wr.id as runId,
         wrs.id as stepId,
         wrs.nodeId,
@@ -11229,8 +11220,7 @@ export function getStuckWaitRuns(): StuckWaitRun[] {
             )
           )
         )`,
-    )
-    .all();
+  );
 }
 
 // ============================================================================
@@ -11466,6 +11456,11 @@ export interface SkillInsert {
   systemDefault?: boolean;
 }
 
+/**
+ * DEFERRED (transaction rule): called from `skillsSeeder.apply()`
+ * (src/be/seed-skills/index.ts), inside its synchronous
+ * `getDb().transaction()` callback — stays on the raw sync handle.
+ */
 export function createSkill(data: SkillInsert): Skill {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -11509,6 +11504,11 @@ export function createSkill(data: SkillInsert): Skill {
   return rowToSkill(row);
 }
 
+/**
+ * DEFERRED (transaction rule): called from `skillsSeeder.apply()`
+ * (src/be/seed-skills/index.ts), inside its synchronous
+ * `getDb().transaction()` callback — stays on the raw sync handle.
+ */
 export function updateSkill(
   id: string,
   updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
@@ -11622,6 +11622,12 @@ function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
     .run(now, skillId);
 }
 
+/**
+ * DEFERRED (transaction rule): feeds `assertSkillFileLimits`, called from
+ * `upsertSkillFiles` before its synchronous `getDb().transaction()` callback.
+ * Kept on the raw sync handle so that (still-sync) call site doesn't need an
+ * await — stays on the raw sync handle.
+ */
 export function listSkillFileManifest(skillId: string): SkillFileManifestEntry[] {
   return getDb()
     .prepare<SkillFileRow, [string]>(
@@ -11637,6 +11643,11 @@ export function listSkillFileManifest(skillId: string): SkillFileManifestEntry[]
     });
 }
 
+/**
+ * DEFERRED (transaction rule): called from `syncSeededSkillFiles`
+ * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
+ * synchronous `getDb().transaction()` callback — stays on the raw sync handle.
+ */
 export function getSkillFiles(skillId: string): SkillFile[] {
   return getDb()
     .prepare<SkillFileRow, [string]>(
@@ -11649,25 +11660,58 @@ export function getSkillFiles(skillId: string): SkillFile[] {
     .map(rowToSkillFile);
 }
 
-export function getSkillFile(skillId: string, path: string): SkillFile | null {
+export async function getSkillFile(skillId: string, path: string): Promise<SkillFile | null> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const row = getDb()
-    .prepare<SkillFileRow, [string, string]>(
-      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+  const row = await getDbClient().get<SkillFileRow>(
+    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
        FROM skill_files
        WHERE skillId = ? AND path = ?`,
-    )
-    .get(skillId, normalizedPath);
+    [skillId, normalizedPath],
+  );
   return row ? rowToSkillFile(row) : null;
 }
 
-export function upsertSkillFile(skillId: string, input: SkillFileInput): SkillFile {
+/**
+ * Single-file upsert. Duplicates the write `upsertSkillFileUnchecked` does
+ * rather than calling it, because that helper is shared with the deferred
+ * `upsertSkillFiles` (its synchronous `getDb().transaction()` callback can't
+ * absorb an await).
+ */
+export async function upsertSkillFile(skillId: string, input: SkillFileInput): Promise<SkillFile> {
   const payload = normalizeSkillFileInput(input);
   assertSkillFileLimits(skillId, [payload], false);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  return upsertSkillFileUnchecked(skillId, payload, id, now, true);
+  const row = await getDbClient().get<SkillFileRow>(
+    `INSERT INTO skill_files (
+        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(skillId, path) DO UPDATE SET
+        content = excluded.content,
+        mimeType = excluded.mimeType,
+        isBinary = excluded.isBinary,
+        size = excluded.size,
+        lastUpdatedAt = excluded.lastUpdatedAt
+      RETURNING *`,
+    [
+      id,
+      skillId,
+      payload.path,
+      payload.content,
+      payload.mimeType,
+      payload.isBinary ? 1 : 0,
+      payload.size,
+      now,
+      now,
+    ],
+  );
+  if (!row) throw new Error("Failed to upsert skill file");
+  await getDbClient().run(
+    "UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?",
+    [now, skillId],
+  );
+  return rowToSkillFile(row);
 }
 
 function upsertSkillFileUnchecked(
@@ -11707,6 +11751,10 @@ function upsertSkillFileUnchecked(
   return rowToSkillFile(row);
 }
 
+/**
+ * DEFERRED (transaction rule): own body contains `.transaction(` — skipped
+ * entirely, left 100% sync.
+ */
 export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): SkillFile[] {
   if (files.length === 0) return [];
   const normalized = files.map(normalizeSkillFileInput);
@@ -11722,6 +11770,11 @@ export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): Skil
   })();
 }
 
+/**
+ * DEFERRED (transaction rule): called from `syncSeededSkillFiles`
+ * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
+ * synchronous `getDb().transaction()` callback — stays on the raw sync handle.
+ */
 export function deleteSkillFile(skillId: string, path: string): boolean {
   const normalizedPath = normalizeSkillFilePath(path);
   const result = getDb()

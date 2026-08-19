@@ -230,7 +230,7 @@ export async function handlePoll(
     if (!parsed) return true;
     for (const { channelId, ts } of parsed.body.cursorUpdates) {
       if (channelId && ts) {
-        upsertChannelActivityCursor(channelId, ts);
+        await upsertChannelActivityCursor(channelId, ts);
       }
     }
     commitCursorsRoute.respond(res, 200, {
@@ -562,7 +562,7 @@ export async function handlePoll(
       if (agent?.isLead) {
         lastChannelActivityCheckAt = Date.now();
         try {
-          const cursors = getAllChannelActivityCursors();
+          const cursors = await getAllChannelActivityCursors();
           const cursorMap = new Map(cursors.map((c) => [c.channelId, c.lastSeenTs]));
 
           // Parse optional channel allowlist from env
@@ -576,7 +576,7 @@ export async function handlePoll(
 
           // Commit seed cursors immediately (cold-start initialization, no trigger)
           for (const [channelId, ts] of seedCursors) {
-            upsertChannelActivityCursor(channelId, ts);
+            await upsertChannelActivityCursor(channelId, ts);
           }
 
           if (messages.length > 0) {

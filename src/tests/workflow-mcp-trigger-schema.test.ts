@@ -154,7 +154,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
       // File doesn't exist
     }
     initDb(TEST_DB_PATH);
-    initWorkflows();
+    await initWorkflows();
     tools = buildServerWithTools();
     server = createTestServer();
     await new Promise<void>((resolve) => {

@@ -338,7 +338,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     try {
-      const template = checkoutPromptTemplate(parsed.params.id, parsed.body.version);
+      const template = await checkoutPromptTemplate(parsed.params.id, parsed.body.version);
       checkoutRoute.respond(res, 200, { template });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
@@ -356,7 +356,7 @@ export async function handlePromptTemplates(
     const parsed = await resetRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getPromptTemplateById(parsed.params.id);
+    const existing = await getPromptTemplateById(parsed.params.id);
     if (!existing) {
       jsonError(res, `Prompt template ${parsed.params.id} not found`, 404);
       return true;
@@ -383,13 +383,13 @@ export async function handlePromptTemplates(
     const parsed = await getByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const template = getPromptTemplateById(parsed.params.id);
+    const template = await getPromptTemplateById(parsed.params.id);
     if (!template) {
       jsonError(res, "Prompt template not found", 404);
       return true;
     }
 
-    const history = getPromptTemplateHistory(parsed.params.id);
+    const history = await getPromptTemplateHistory(parsed.params.id);
     getByIdRoute.respond(res, 200, { template, history });
     return true;
   }
@@ -400,7 +400,7 @@ export async function handlePromptTemplates(
     if (!parsed) return true;
 
     try {
-      const deleted = deletePromptTemplate(parsed.params.id);
+      const deleted = await deletePromptTemplate(parsed.params.id);
       if (!deleted) {
         jsonError(res, "Prompt template not found", 404);
         return true;

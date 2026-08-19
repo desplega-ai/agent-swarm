@@ -110,7 +110,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
 
     // The subscribeWaitToBus call inside execute already wired the listener.
     // Initialize busRegistry so processBusEvent can resume.
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     // Fire matching signal — must include _runId for run-scope filter.
     workflowEventBus.emit("demo.signal", { ok: true, _runId: runId });
@@ -147,7 +147,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const wf = makeWorkflow("wait-event-scope-run", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
@@ -181,7 +181,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const wf = makeWorkflow("wait-event-scope-global", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
@@ -213,7 +213,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const wf = makeWorkflow("wait-event-string-filter", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
@@ -252,7 +252,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const wf = makeWorkflow("wait-event-timeout", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
@@ -315,7 +315,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const w1A = stepsA.find((s) => s.nodeId === "w1");
     const w1B = stepsB.find((s) => s.nodeId === "w1");
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     // Single emit — both waits should resolve.
     workflowEventBus.emit("fanout.signal", { broadcast: true, sequence: 42 });
@@ -365,7 +365,7 @@ describe("WaitExecutor — event mode end-to-end", () => {
     const wf = makeWorkflow("wait-event-cap", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");

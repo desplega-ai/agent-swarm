@@ -670,7 +670,7 @@ export async function handleSkills(
     }
 
     try {
-      const file = getSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      const file = await getSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
       if (!file) {
         jsonError(res, "Skill file not found", 404);
         return true;
@@ -698,7 +698,7 @@ export async function handleSkills(
     }
 
     try {
-      const file = upsertSkillFile(parsed.params.id, {
+      const file = await upsertSkillFile(parsed.params.id, {
         path: decodeSkillFilePath(pathSegments),
         ...parsed.body,
       });

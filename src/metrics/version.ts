@@ -10,7 +10,7 @@ export async function snapshotMetric(
     throw new Error(`Metric ${metricId} not found — cannot create snapshot`);
   }
 
-  const existingVersions = getMetricVersions(metricId);
+  const existingVersions = await getMetricVersions(metricId);
   const maxVersion = existingVersions.length > 0 ? existingVersions[0]!.version : 0;
   const nextVersion = maxVersion + 1;
 

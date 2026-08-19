@@ -264,7 +264,7 @@ export async function handleApprovalRequests(
     const parsed = await respondRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getApprovalRequestById(parsed.params.id);
+    const existing = await getApprovalRequestById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Approval request not found", 404);
       return true;
@@ -294,7 +294,7 @@ export async function handleApprovalRequests(
       }
     }
 
-    const updated = resolveApprovalRequest(parsed.params.id, {
+    const updated = await resolveApprovalRequest(parsed.params.id, {
       status,
       responses: parsed.body.responses,
       resolvedBy: parsed.body.respondedBy,
@@ -363,7 +363,7 @@ export async function handleApprovalRequests(
     const parsed = await getByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const request = getApprovalRequestById(parsed.params.id);
+    const request = await getApprovalRequestById(parsed.params.id);
     if (!request) {
       jsonError(res, "Approval request not found", 404);
       return true;
@@ -388,7 +388,7 @@ export async function handleApprovalRequests(
       auth?.kind === "user"
         ? auth.userId
         : ((await resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId)) ?? undefined);
-    const request = createApprovalRequest({
+    const request = await createApprovalRequest({
       id,
       title: parsed.body.title,
       questions: parsed.body.questions,
@@ -410,7 +410,7 @@ export async function handleApprovalRequests(
     const parsed = await listRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const requests = listApprovalRequests({
+    const requests = await listApprovalRequests({
       status: parsed.query.status || undefined,
       workflowRunId: parsed.query.workflowRunId || undefined,
       limit: parsed.query.limit || undefined,

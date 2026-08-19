@@ -145,7 +145,7 @@ describe("seeded skills with bundled files", () => {
     if (!original) throw new Error("bundled example missing");
 
     // Simulate a user editing a bundled file through the skills API.
-    upsertSkillFile(artifacts.id, {
+    await upsertSkillFile(artifacts.id, {
       path: original.path,
       content: `${original.content}\n// edited by a user`,
     });
@@ -162,7 +162,7 @@ describe("seeded skills with bundled files", () => {
     expect(after?.content).toContain("// edited by a user");
 
     // Restore so later tests see a pristine skill.
-    upsertSkillFile(artifacts.id, { path: original.path, content: original.content });
+    await upsertSkillFile(artifacts.id, { path: original.path, content: original.content });
   });
 
   test("a userInvocable flip registers as drift and is preserved", async () => {

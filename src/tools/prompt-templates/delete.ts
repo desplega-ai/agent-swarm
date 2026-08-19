@@ -25,14 +25,14 @@ export const registerDeletePromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getPromptTemplateById(id);
+        const existing = await getPromptTemplateById(id);
         if (!existing) {
           return toolErr(`Prompt template "${id}" not found.`, {
             data: { yourAgentId: requestInfo.agentId },
           });
         }
 
-        const deleted = deletePromptTemplate(id);
+        const deleted = await deletePromptTemplate(id);
         if (!deleted) {
           return toolErr(`Failed to delete prompt template "${id}".`, {
             data: { yourAgentId: requestInfo.agentId },

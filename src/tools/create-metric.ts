@@ -20,8 +20,8 @@ function getAppBaseUrl(): string {
   return getAppUrl();
 }
 
-function metricEditCounter(metricId: string): number {
-  const versions = getMetricVersions(metricId);
+async function metricEditCounter(metricId: string): Promise<number> {
+  const versions = await getMetricVersions(metricId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
@@ -116,7 +116,7 @@ export const registerCreateMetricTool = (server: McpServer) => {
         return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id } });
       }
 
-      const version = metricEditCounter(id);
+      const version = await metricEditCounter(id);
       const appUrl = `${getAppBaseUrl()}/usage/metrics`;
       return toolOk(`Metric "${input.title}" saved (slug=${slug}, version=${version}).`, {
         details: `App: ${appUrl}`,

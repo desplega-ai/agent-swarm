@@ -14,7 +14,7 @@ const FAKE_HOME = join(tmpdir(), `skill-sync-test-${process.pid}`);
 describe("syncSkillsToFilesystem", () => {
   let agentId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     initDb(TEST_DB_PATH);
 
     const agent = createAgent({
@@ -58,12 +58,12 @@ describe("syncSkillsToFilesystem", () => {
       isComplex: true,
     });
     installSkill(agentId, dbBackedComplexSkill.id);
-    upsertSkillFile(dbBackedComplexSkill.id, {
+    await upsertSkillFile(dbBackedComplexSkill.id, {
       path: "references/guide.md",
       content: "# Guide\n\nBundled reference.",
       mimeType: "text/markdown",
     });
-    upsertSkillFile(dbBackedComplexSkill.id, {
+    await upsertSkillFile(dbBackedComplexSkill.id, {
       path: "assets/logo.png",
       content: "[binary file - not synced]",
       mimeType: "image/png",
@@ -206,7 +206,7 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(complexDir)).toBe(false);
   });
 
-  test("continues syncing bundled files after one file write fails", () => {
+  test("continues syncing bundled files after one file write fails", async () => {
     const failSkill = createSkill({
       name: "complex-fail-safe",
       description: "Complex skill with one blocked file",
@@ -217,11 +217,11 @@ describe("syncSkillsToFilesystem", () => {
       isComplex: true,
     });
     installSkill(agentId, failSkill.id);
-    upsertSkillFile(failSkill.id, {
+    await upsertSkillFile(failSkill.id, {
       path: "references/blocked.md",
       content: "blocked",
     });
-    upsertSkillFile(failSkill.id, {
+    await upsertSkillFile(failSkill.id, {
       path: "references/ok.md",
       content: "ok",
     });

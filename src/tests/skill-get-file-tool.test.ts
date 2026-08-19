@@ -66,7 +66,7 @@ describe("skill-get-file tool", () => {
       isComplex: true,
     });
     skillId = skill.id;
-    upsertSkillFile(skill.id, {
+    await upsertSkillFile(skill.id, {
       path: "references/guide.md",
       content: "# Guide",
       mimeType: "text/markdown",

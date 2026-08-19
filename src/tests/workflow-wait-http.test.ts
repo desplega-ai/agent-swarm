@@ -101,7 +101,7 @@ describe("Workflow events HTTP signal endpoints", () => {
     const wf = makeWorkflow("wait-http-run-scope", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
@@ -151,7 +151,7 @@ describe("Workflow events HTTP signal endpoints", () => {
     const wf = makeWorkflow("wait-http-global", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
-    initWaitBusSubscriptions(registry);
+    await initWaitBusSubscriptions(registry);
 
     const steps = getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");

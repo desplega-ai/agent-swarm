@@ -76,7 +76,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       }
 
       const id = crypto.randomUUID();
-      const request = createApprovalRequest({
+      const request = await createApprovalRequest({
         id,
         title,
         questions,

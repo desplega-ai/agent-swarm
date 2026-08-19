@@ -94,7 +94,7 @@ describe("WaitExecutor — recovery on startup", () => {
     });
     updateWorkflowRunStep(step.id, { status: "waiting" });
 
-    createWaitState({
+    await createWaitState({
       id: crypto.randomUUID(),
       workflowRunId: run.id,
       workflowRunStepId: step.id,
@@ -153,7 +153,7 @@ describe("WaitExecutor — recovery on startup", () => {
     });
     updateWorkflowRunStep(step.id, { status: "waiting" });
 
-    createWaitState({
+    await createWaitState({
       id: crypto.randomUUID(),
       workflowRunId: run.id,
       workflowRunStepId: step.id,

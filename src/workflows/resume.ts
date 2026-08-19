@@ -441,7 +441,7 @@ export async function resumeWaitState(
   const cappedPayload = capPayload(payload);
 
   // 2. Atomic state transition. Only the first caller proceeds.
-  const result = resolveWaitState(waitId, { status, firedPayload: cappedPayload });
+  const result = await resolveWaitState(waitId, { status, firedPayload: cappedPayload });
   if (!result.updated || !result.row) return;
 
   const waitRow = result.row;
@@ -550,7 +550,7 @@ let busRegistry: ExecutorRegistry | null = null;
  * Subsequent calls update the registry reference (idempotent — listeners
  * already registered are not re-registered).
  */
-export function initWaitBusSubscriptions(registry: ExecutorRegistry): void {
+export async function initWaitBusSubscriptions(registry: ExecutorRegistry): Promise<void> {
   busRegistry = registry;
   // Pre-existing listeners are fine — they pick up the new registry via the
   // module-level `busRegistry` reference.
@@ -558,17 +558,17 @@ export function initWaitBusSubscriptions(registry: ExecutorRegistry): void {
   // arrive at the right wait once the listener is registered.
   // We use a dedicated DB query rather than getPendingWaitsByEvent so we can
   // page through ALL distinct event names in one pass.
-  const pendingNames = collectPendingEventNames();
+  const pendingNames = await collectPendingEventNames();
   for (const name of pendingNames) {
-    const pending = getPendingWaitsByEvent(name);
+    const pending = await getPendingWaitsByEvent(name);
     for (const w of pending) {
       registerWait(w.id, name);
     }
   }
 }
 
-function collectPendingEventNames(): Set<string> {
-  return new Set(getPendingEventWaitNames());
+async function collectPendingEventNames(): Promise<Set<string>> {
+  return new Set(await getPendingEventWaitNames());
 }
 
 /**
@@ -633,7 +633,7 @@ async function processBusEvent(eventName: string, payload: unknown): Promise<voi
   const waitIds = [...set];
   for (const waitId of waitIds) {
     try {
-      const row = getWaitStateById(waitId);
+      const row = await getWaitStateById(waitId);
       if (!row || row.status !== "pending") {
         // Already resolved (race) or vanished — drop the stale subscription.
         set.delete(waitId);

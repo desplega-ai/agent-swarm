@@ -644,7 +644,7 @@ httpServer
     initJira();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
-    initWorkflows();
+    await initWorkflows();
 
     // Reconcile durable script workflow subprocesses
     startScriptRunSupervisor(getMcpBaseUrl());

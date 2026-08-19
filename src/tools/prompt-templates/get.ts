@@ -62,14 +62,14 @@ export const registerGetPromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const template = getPromptTemplateById(id);
+        const template = await getPromptTemplateById(id);
         if (!template) {
           return toolErr(`Prompt template "${id}" not found.`, {
             data: { yourAgentId: requestInfo.agentId },
           });
         }
 
-        const history = getPromptTemplateHistory(id);
+        const history = await getPromptTemplateHistory(id);
         const definition = getTemplateDefinition(template.eventType);
 
         return toolOk(`Found template "${template.eventType}" at version ${template.version}.`, {

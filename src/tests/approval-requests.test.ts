@@ -292,9 +292,9 @@ describe("Approval Requests", () => {
       expect(getApprovalRequestById(crypto.randomUUID())).toBeNull();
     });
 
-    test("returns the correct request", () => {
+    test("returns the correct request", async () => {
       const data = makeApprovalData();
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
       const fetched = getApprovalRequestById(data.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(data.id);
@@ -307,13 +307,13 @@ describe("Approval Requests", () => {
       expect(getApprovalRequestByStepId(crypto.randomUUID())).toBeNull();
     });
 
-    test("returns the request linked to a step", () => {
+    test("returns the request linked to a step", async () => {
       const stepId = crypto.randomUUID();
       const data = makeApprovalData({
         workflowRunId: crypto.randomUUID(),
         workflowRunStepId: stepId,
       });
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
       const fetched = getApprovalRequestByStepId(stepId);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(data.id);
@@ -321,9 +321,9 @@ describe("Approval Requests", () => {
   });
 
   describe("DB: resolveApprovalRequest", () => {
-    test("resolves a pending request to approved", () => {
+    test("resolves a pending request to approved", async () => {
       const data = makeApprovalData();
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
 
       const result = resolveApprovalRequest(data.id, {
         status: "approved",
@@ -338,19 +338,19 @@ describe("Approval Requests", () => {
       expect(result!.resolvedAt).toBeTruthy();
     });
 
-    test("resolves a pending request to rejected", () => {
+    test("resolves a pending request to rejected", async () => {
       const data = makeApprovalData();
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
 
       const result = resolveApprovalRequest(data.id, { status: "rejected" });
       expect(result).not.toBeNull();
       expect(result!.status).toBe("rejected");
     });
 
-    test("returns null when trying to resolve an already-resolved request", () => {
+    test("returns null when trying to resolve an already-resolved request", async () => {
       const data = makeApprovalData();
-      createApprovalRequest(data);
-      resolveApprovalRequest(data.id, { status: "approved" });
+      await createApprovalRequest(data);
+      await resolveApprovalRequest(data.id, { status: "approved" });
 
       // Second resolve should fail (idempotency guard)
       const result = resolveApprovalRequest(data.id, { status: "rejected" });
@@ -369,10 +369,10 @@ describe("Approval Requests", () => {
       expect(results.length).toBeGreaterThan(0);
     });
 
-    test("filters by status", () => {
+    test("filters by status", async () => {
       // Create a fresh pending one
       const data = makeApprovalData();
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
 
       const pending = listApprovalRequests({ status: "pending" });
       expect(pending.length).toBeGreaterThan(0);
@@ -381,10 +381,10 @@ describe("Approval Requests", () => {
       }
     });
 
-    test("filters by workflowRunId", () => {
+    test("filters by workflowRunId", async () => {
       const runId = crypto.randomUUID();
       const data = makeApprovalData({ workflowRunId: runId });
-      createApprovalRequest(data);
+      await createApprovalRequest(data);
 
       const results = listApprovalRequests({ workflowRunId: runId });
       expect(results).toHaveLength(1);
@@ -460,7 +460,7 @@ describe("Approval Requests", () => {
         const resolved = createApprovalRequest(
           makeApprovalData({ title: `Newer resolved request ${index}` }),
         );
-        resolveApprovalRequest(resolved.id, {
+        await resolveApprovalRequest(resolved.id, {
           status: "approved",
           responses: { q1: { approved: true } },
         });
@@ -488,7 +488,7 @@ describe("Approval Requests", () => {
     test("filters by workflowRunId", async () => {
       const runId = crypto.randomUUID();
       // Create one with this runId
-      createApprovalRequest(makeApprovalData({ workflowRunId: runId }));
+      await createApprovalRequest(makeApprovalData({ workflowRunId: runId }));
 
       const res = await fetch(`${baseUrl}/api/approval-requests?workflowRunId=${runId}`);
       expect(res.status).toBe(200);
@@ -596,7 +596,7 @@ describe("Approval Requests", () => {
 
     test("returns 409 for already-resolved request", async () => {
       const created = createApprovalRequest(makeApprovalData());
-      resolveApprovalRequest(created.id, { status: "approved" });
+      await resolveApprovalRequest(created.id, { status: "approved" });
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
         method: "POST",
@@ -732,7 +732,7 @@ describe("Approval Requests", () => {
       const stepId = crypto.randomUUID();
       // Pre-create an approval request for this step
       const existingId = crypto.randomUUID();
-      createApprovalRequest({
+      await createApprovalRequest({
         id: existingId,
         title: "Pre-existing",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
@@ -760,7 +760,7 @@ describe("Approval Requests", () => {
     test("idempotency: returns resolved result for completed request", async () => {
       const stepId = crypto.randomUUID();
       const existingId = crypto.randomUUID();
-      createApprovalRequest({
+      await createApprovalRequest({
         id: existingId,
         title: "Already resolved",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
@@ -768,7 +768,7 @@ describe("Approval Requests", () => {
         workflowRunId: mockMeta.runId,
         workflowRunStepId: stepId,
       });
-      resolveApprovalRequest(existingId, {
+      await resolveApprovalRequest(existingId, {
         status: "approved",
         responses: { q1: { approved: true } },
       });
@@ -795,7 +795,7 @@ describe("Approval Requests", () => {
     test("idempotency: returns rejected result with correct nextPort", async () => {
       const stepId = crypto.randomUUID();
       const existingId = crypto.randomUUID();
-      createApprovalRequest({
+      await createApprovalRequest({
         id: existingId,
         title: "Rejected request",
         questions: [{ id: "q1", type: "approval", label: "Approve?" }],
@@ -803,7 +803,7 @@ describe("Approval Requests", () => {
         workflowRunId: mockMeta.runId,
         workflowRunStepId: stepId,
       });
-      resolveApprovalRequest(existingId, {
+      await resolveApprovalRequest(existingId, {
         status: "rejected",
         responses: { q1: { approved: false } },
       });
@@ -1060,19 +1060,21 @@ describe("Approval Requests", () => {
   });
 
   describe("updateApprovalRequestNotifications", () => {
-    test("stores messageTs back in notification channels", () => {
+    test("stores messageTs back in notification channels", async () => {
       const channels = [
         { channel: "slack", target: "C12345" },
         { channel: "email", target: "user@example.com" },
       ];
-      const approval = createApprovalRequest(makeApprovalData({ notificationChannels: channels }));
+      const approval = await createApprovalRequest(
+        makeApprovalData({ notificationChannels: channels }),
+      );
       expect(approval.notificationChannels).toEqual(channels);
 
       const updatedChannels = [
         { channel: "slack", target: "C12345", messageTs: "1234567890.123456" },
         { channel: "email", target: "user@example.com" },
       ];
-      updateApprovalRequestNotifications(approval.id, updatedChannels);
+      await updateApprovalRequestNotifications(approval.id, updatedChannels);
 
       const fetched = getApprovalRequestById(approval.id);
       expect(fetched).not.toBeNull();

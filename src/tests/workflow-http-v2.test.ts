@@ -115,7 +115,7 @@ describe("Workflow HTTP API v2", () => {
       // ignore
     }
     initDb(TEST_DB_PATH);
-    initWorkflows();
+    await initWorkflows();
 
     server = createTestServer();
     await new Promise<void>((resolve) => {
