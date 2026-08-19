@@ -30,7 +30,8 @@ import {
   getRuntimeInstanceById,
   hasReadyLiveRuntime,
 } from "../be/multi-runtime";
-import { retryRuntimeRegistration } from "../commands/credential-wait";
+import { retryBootStep } from "../commands/credential-wait";
+import { sendCredStatusReport } from "../commands/provider-credentials";
 import { runHeartbeatSweep } from "../heartbeat/heartbeat";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
@@ -1105,7 +1106,25 @@ describe("sibling runtime session safety", () => {
     expect(getRuntimeInstanceById(rB)?.status).toBe("active");
   });
 
-  test("a stale runtime's abandoned session is still cleared on the next startup", async () => {
+  test("startup cleanup preserves an activation-window session it cannot prove dead", async () => {
+    // A flag-off worker keeps executing with no runtime row at all; its
+    // session may be quiet past the runtime cutoff (tool-activity heartbeats
+    // only). A sibling booting right after activation must not kill it.
+    const id = makeAgent(3);
+    const task = createTaskExtended("work", { agentId: id });
+    startTask(task.id);
+    await startSession(id, task.id, crypto.randomUUID());
+    makeSessionStale(task.id, 7);
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    expect(await startupCleanup(id)).toBe(200);
+
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("in_progress");
+  });
+
+  test("a crashed predecessor's work is reclaimed by the classifier, not boot cleanup", async () => {
     const id = makeAgent(3);
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const crashed = crypto.randomUUID();
@@ -1114,15 +1133,24 @@ describe("sibling runtime session safety", () => {
     const task = createTaskExtended("work", { agentId: id });
     startTask(task.id);
     await startSession(id, task.id, crashed);
-    // The crashed process stopped both its runtime ping and its session
-    // heartbeat.
+    // The crashed process stopped its runtime ping, its session heartbeat,
+    // and its task progress.
     makeRuntimeStale(crashed);
-    makeSessionStale(task.id);
+    makeSessionStale(task.id, 30);
+    getDb()
+      .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
+      .run(new Date(Date.now() - 30 * 60000).toISOString(), task.id);
 
     const replacement = crypto.randomUUID();
     await register(id, { maxTasks: 1, runtimeInstanceId: replacement });
+    // Boot cleanup deletes nothing in multi-runtime mode — it has no evidence
+    // stronger than the classifier's.
     expect(await startupCleanup(id)).toBe(200);
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
 
+    // The sweep's classifier reclaims the work and its session.
+    await runHeartbeatSweep();
+    expect(getTaskById(task.id)?.status).not.toBe("in_progress");
     expect(getActiveSessionForTask(task.id)).toBeNull();
   });
 
@@ -1622,7 +1650,7 @@ describe("readiness after a credential wait", () => {
     // The runner's recovery: retry the strict registration of the SAME
     // per-boot identity until it succeeds, and only then report ready.
     let attempts = 0;
-    await retryRuntimeRegistration(
+    await retryBootStep(
       async () => {
         attempts++;
         if (attempts < 2) throw new Error("transient network failure");
@@ -1649,7 +1677,7 @@ describe("readiness after a credential wait", () => {
     makeRuntimeStale(rt);
 
     let attempts = 0;
-    await retryRuntimeRegistration(
+    await retryBootStep(
       async () => {
         attempts++;
         if (attempts < 3) throw new Error("transient network failure");
@@ -1674,7 +1702,7 @@ describe("readiness after a credential wait", () => {
     makeRuntimeStale(rt);
 
     await expect(
-      retryRuntimeRegistration(
+      retryBootStep(
         async () => {
           throw new Error("registration endpoint down");
         },
@@ -1689,6 +1717,51 @@ describe("readiness after a credential wait", () => {
     expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(false);
     createTaskExtended("unreachable-work", { offeredTo: id });
     expect((await pollAgent(id, rt))?.trigger ?? null).toBeNull();
+  });
+
+  test("the boot readiness write retries through a transient failure", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    makeRuntimeStale(rt);
+
+    // The runner's recovery sequence: registration first, then the readiness
+    // write — BOTH retried, because after a stale revival the write is the
+    // only transition out of waiting_for_credentials.
+    await retryBootStep(() => register(id, { maxTasks: 1, runtimeInstanceId: rt }).then(() => {}), {
+      sleep: async () => {},
+      log: () => {},
+    });
+    let attempts = 0;
+    await retryBootStep(
+      async () => {
+        attempts++;
+        if (attempts < 2) throw new Error("transient network failure");
+        await sendCredStatusReport(baseUrl, API_KEY, id, rt, { ready: true, missing: [] });
+      },
+      { sleep: async () => {}, log: () => {} },
+    );
+
+    expect(attempts).toBe(2);
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(true);
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("a rejected readiness write surfaces instead of being swallowed", async () => {
+    // Multi-runtime mode 400s a report without runtime identity; the strict
+    // sender must propagate that instead of reporting success.
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+
+    await expect(
+      sendCredStatusReport(baseUrl, API_KEY, id, undefined, { ready: true, missing: [] }),
+    ).rejects.toThrow("credential-status report failed: 400");
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
   });
 
   test("a ready report against a stale row is dropped and revival preserves the waiting state", async () => {

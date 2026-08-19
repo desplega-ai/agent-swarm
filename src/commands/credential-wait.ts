@@ -210,8 +210,10 @@ export async function awaitCredentials(opts: AwaitCredentialsOptions): Promise<C
   return status;
 }
 
-/** Options for {@link retryRuntimeRegistration}; injectable sleep/log keep tests deterministic. */
-export interface RetryRuntimeRegistrationOptions {
+/** Options for {@link retryBootStep}; injectable sleep/log keep tests deterministic. */
+export interface RetryBootStepOptions {
+  /** Names the step in retry logs and the exhaustion error. */
+  label?: string;
   attempts?: number;
   initialDelayMs?: number;
   maxDelayMs?: number;
@@ -220,18 +222,20 @@ export interface RetryRuntimeRegistrationOptions {
 }
 
 /**
- * Registration recovery after the credential wait. A runtime that went stale
- * mid-wait is only revived by a SUCCESSFUL registration, and the readiness
- * report that follows is dropped unless it lands on the live row — so unlike
- * the runner's best-effort periodic re-registration, this retries with
- * bounded backoff and propagates failure once exhausted. The caller decides
- * what exhaustion means (the runner treats it like boot-registration failure
- * rather than entering the work loop unregistered).
+ * Bounded retry for a recovery-critical boot step after the credential wait.
+ * A runtime that went stale mid-wait is only revived by a SUCCESSFUL
+ * registration, and the readiness report that follows is the only transition
+ * out of `waiting_for_credentials` — so unlike the runner's best-effort
+ * periodic paths, these steps retry with bounded backoff and propagate
+ * failure once exhausted. The caller decides what exhaustion means (the
+ * runner treats it like boot-registration failure rather than entering the
+ * work loop as though recovery succeeded).
  */
-export async function retryRuntimeRegistration(
-  register: () => Promise<void>,
-  opts: RetryRuntimeRegistrationOptions = {},
+export async function retryBootStep(
+  step: () => Promise<void>,
+  opts: RetryBootStepOptions = {},
 ): Promise<void> {
+  const label = opts.label ?? "boot step";
   const attempts = opts.attempts ?? 5;
   const sleep = opts.sleep ?? ((ms: number) => Bun.sleep(ms));
   const log = opts.log ?? ((line: string) => console.warn(line));
@@ -241,13 +245,13 @@ export async function retryRuntimeRegistration(
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      await register();
+      await step();
       return;
     } catch (err) {
       lastError = err;
       if (attempt < attempts) {
         log(
-          `[boot] runtime re-registration failed (attempt ${attempt}/${attempts}, retry in ${delayMs}ms): ${err}`,
+          `[boot] ${label} failed (attempt ${attempt}/${attempts}, retry in ${delayMs}ms): ${err}`,
         );
         await sleep(delayMs);
         delayMs = Math.min(delayMs * 2, maxDelayMs);
@@ -257,5 +261,5 @@ export async function retryRuntimeRegistration(
 
   throw lastError instanceof Error
     ? lastError
-    : new Error(`runtime re-registration failed after ${attempts} attempt(s): ${lastError}`);
+    : new Error(`${label} failed after ${attempts} attempt(s): ${lastError}`);
 }

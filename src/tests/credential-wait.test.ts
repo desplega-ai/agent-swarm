@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   awaitCredentials,
   BootMaxWaitExceededError,
-  retryRuntimeRegistration,
+  retryBootStep,
 } from "../commands/credential-wait";
 
 /**
@@ -285,11 +285,11 @@ describe("awaitCredentials", () => {
   });
 });
 
-describe("retryRuntimeRegistration", () => {
+describe("retryBootStep", () => {
   test("returns after the first success without sleeping", async () => {
     const sleeper = makeSleeper();
     let calls = 0;
-    await retryRuntimeRegistration(
+    await retryBootStep(
       async () => {
         calls++;
       },
@@ -303,7 +303,7 @@ describe("retryRuntimeRegistration", () => {
     const sleeper = makeSleeper();
     const logger = makeLogger();
     let calls = 0;
-    await retryRuntimeRegistration(
+    await retryBootStep(
       async () => {
         calls++;
         if (calls < 3) throw new Error(`transient ${calls}`);
@@ -320,7 +320,7 @@ describe("retryRuntimeRegistration", () => {
     const sleeper = makeSleeper();
     let calls = 0;
     await expect(
-      retryRuntimeRegistration(
+      retryBootStep(
         async () => {
           calls++;
           throw new Error(`down ${calls}`);
@@ -336,7 +336,7 @@ describe("retryRuntimeRegistration", () => {
   test("caps the backoff at maxDelayMs", async () => {
     const sleeper = makeSleeper();
     let calls = 0;
-    await retryRuntimeRegistration(
+    await retryBootStep(
       async () => {
         calls++;
         if (calls < 5) throw new Error("transient");

@@ -69,7 +69,7 @@ import {
   awaitCredentials,
   BootMaxWaitExceededError,
   EX_CONFIG,
-  retryRuntimeRegistration,
+  retryBootStep,
 } from "./credential-wait.ts";
 import {
   contentSha256,
@@ -86,6 +86,7 @@ import {
   isCredCheckDisabled,
   reportCredStatus,
   reportLatestModel,
+  sendCredStatusReport,
 } from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
@@ -5006,7 +5007,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // still let the report target the stale row, so recovery retries and
     // treats exhaustion like boot-registration failure.
     try {
-      await retryRuntimeRegistration(registerCurrentRuntime, {
+      await retryBootStep(registerCurrentRuntime, {
+        label: "runtime re-registration",
         log: (line) => console.warn(`[${role}] ${line}`),
       });
     } catch (error) {
@@ -5018,12 +5020,43 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // creds are ready and POST it to the agent row. Status endpoint reads
     // this instead of running predicates server-side. Always uses the
     // *current* state.harnessProvider in case it flipped during the wait.
+    // The snapshot build stays best-effort — its live test can hiccup, and
+    // that must not lose the readiness transition below.
+    let bootCredSnapshot: Awaited<ReturnType<typeof buildCredStatusReport>> | undefined;
     try {
-      const snapshot = await buildCredStatusReport(state.harnessProvider, process.env, {}, "boot");
-      await reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snapshot);
+      bootCredSnapshot = await buildCredStatusReport(
+        state.harnessProvider,
+        process.env,
+        {},
+        "boot",
+      );
     } catch (err) {
-      // Non-fatal — worker proceeds even if reporting fails.
-      console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
+      console.warn(`[${role}] cred_status boot snapshot failed (non-fatal): ${err}`);
+    }
+
+    // The readiness write is the only transition out of
+    // waiting_for_credentials after a stale-runtime revival (the wait's final
+    // tick targeted the pre-registration row, and revival preserves the old
+    // credential_ready) — so like the registration above, it retries and
+    // treats exhaustion as a failed boot rather than proceeding parked.
+    try {
+      await retryBootStep(
+        () =>
+          sendCredStatusReport(apiUrl, apiKey, agentId, runtimeInstanceId, {
+            // The snapshot's verdict when it built; otherwise the wait's own
+            // conclusion (it only returns once credentials are ready).
+            ready: bootCredSnapshot?.ready ?? true,
+            missing: bootCredSnapshot?.missing ?? [],
+            credStatus: bootCredSnapshot,
+          }),
+        {
+          label: "credential readiness report",
+          log: (line) => console.warn(`[${role}] ${line}`),
+        },
+      );
+    } catch (error) {
+      console.error(`[${role}] Failed to report credential readiness after recovery: ${error}`);
+      process.exit(1);
     }
   }
 

@@ -81,10 +81,15 @@ is never expired):
 Registration is the only path that sets a runtime back to `active`, so a
 delayed ping from a retired or unknown runtime cannot resurrect it.
 
-Session cleanup is runtime-scoped in this mode: a starting worker clears only
-this agent's sessions that no live runtime owns (its own previous boot used a
-different instance id). A live sibling's session survives, so the orphan sweep
-does not requeue a task another process is still executing.
+Startup session cleanup is disabled in this mode: several processes share one
+agent id, and a booting worker has no evidence that distinguishes its crashed
+predecessor's session from a live-but-quiet sibling's (sessions heartbeat on
+tool activity only, and a live worker's runtime may have no row at all during
+the activation window). A crashed boot's task is reclaimed by the stalled-task
+classifier (§2 Case B) once both its session heartbeat and the task go stale;
+the sweep's stale-session cleanup backstops leftover rows. With the flag off,
+boot cleanup keeps its legacy behavior (one process per agent, so every
+session of the agent is a dead predecessor's).
 
 ## 2. The stalled-task classifier (`detectAndRemediateStalledTasks`)
 

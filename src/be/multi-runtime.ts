@@ -349,37 +349,6 @@ export function agentsWithLiveRuntime(): Set<string> {
 }
 
 /**
- * Startup cleanup for one runtime: drop this agent's sessions that no live
- * runtime owns, which is what a restarting process leaves behind (its
- * previous boot used a different instance id).
- *
- * A live sibling's session must survive — deleting it would strand its task
- * with no session row, and the orphan sweep would then requeue work that
- * process is still executing. A still-heartbeating session is therefore kept
- * even when no runtime row backs it, which is the state during the window
- * where the flag was just enabled and running workers have not yet
- * re-registered.
- */
-export function cleanupRuntimeSessions(agentId: string): number {
-  const cutoff = runtimeLivenessCutoff();
-  const result = getDb()
-    .prepare(
-      `DELETE FROM active_sessions
-       WHERE agentId = ?
-         AND lastHeartbeatAt < ?
-         AND (
-           runtimeInstanceId IS NULL
-           OR runtimeInstanceId NOT IN (
-             SELECT id FROM runtime_instances
-             WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?
-           )
-         )`,
-    )
-    .run(agentId, cutoff, agentId, cutoff);
-  return result.changes;
-}
-
-/**
  * Retire runtimes that stopped pinging and take their agents offline when
  * nothing live remains.
  *
