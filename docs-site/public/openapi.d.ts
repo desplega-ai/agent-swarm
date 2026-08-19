@@ -8905,6 +8905,7 @@ export interface paths {
                                 passwordHash?: string;
                                 body?: string;
                                 needsCredentials?: string[];
+                                theme?: string;
                                 /** @default 0 */
                                 viewCount: number;
                                 createdAt: string;
@@ -8948,6 +8949,7 @@ export interface paths {
                         password?: string;
                         body: string;
                         needsCredentials?: string[];
+                        theme?: string;
                     };
                 };
             };
@@ -9061,6 +9063,7 @@ export interface paths {
                         password?: string | null;
                         body?: string;
                         needsCredentials?: string[] | null;
+                        theme?: string | null;
                     };
                 };
             };
@@ -9486,6 +9489,7 @@ export interface paths {
                             /** @enum {string} */
                             authMode: "public" | "authed" | "password";
                             body: string;
+                            theme?: string;
                             /** @enum {number} */
                             version: 1;
                         };
@@ -19836,6 +19840,7 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+            theme?: string;
             /** @default 0 */
             viewCount: number;
             createdAt: string;

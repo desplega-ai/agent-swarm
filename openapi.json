@@ -2116,6 +2116,10 @@
               "type": "string"
             }
           },
+          "theme": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,39}$"
+          },
           "viewCount": {
             "type": "integer",
             "minimum": 0,
@@ -20583,6 +20587,10 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]{0,39}$"
                   }
                 },
                 "required": [
@@ -20798,6 +20806,10 @@
                               "type": "string"
                             }
                           },
+                          "theme": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9-]{0,39}$"
+                          },
                           "viewCount": {
                             "type": "integer",
                             "minimum": 0,
@@ -20996,6 +21008,13 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "theme": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "pattern": "^[a-z][a-z0-9-]{0,39}$"
                   }
                 }
               }
@@ -21489,6 +21508,10 @@
                     },
                     "body": {
                       "type": "string"
+                    },
+                    "theme": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9-]{0,39}$"
                     },
                     "version": {
                       "type": "number",
