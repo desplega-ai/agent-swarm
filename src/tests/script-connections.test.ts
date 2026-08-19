@@ -540,6 +540,8 @@ describe("script connections", () => {
       // which this migration-112-only fixture creates.
       markMigrationApplied(database, "129_asset_keys_apps_scripts.sql");
       markMigrationApplied(database, "130_scratch_script_retention_grace.sql");
+      // 131 indexes session_logs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "131_session_logs_created_at_index.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
