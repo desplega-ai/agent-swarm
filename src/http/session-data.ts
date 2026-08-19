@@ -5,6 +5,7 @@ import {
   createSessionLogs,
   getActivePricingRow,
   getAllSessionCosts,
+  getAttributionByPerson,
   getDashboardCostSummary,
   getSessionCostSummary,
   getSessionCostsByAgentId,
@@ -34,6 +35,9 @@ const SessionCostSummaryTotalsSchema = z.object({
   totalSessions: z.number().int(),
   avgCostPerSession: z.number(),
   attributedCostUsd: z.number(),
+  attributableCostUsd: z.number(),
+  excludedCostUsd: z.number(),
+  excludedTaskCount: z.number().int(),
 });
 
 /** Mirrors `SessionCostDailyRow` in src/be/db.ts. */
@@ -77,6 +81,17 @@ const SessionCostSummarySchema = z.object({
 const DashboardCostSummarySchema = z.object({
   costToday: z.number(),
   costMtd: z.number(),
+});
+
+/** Mirrors `AttributionByPersonRow` in src/be/db.ts. */
+const AttributionByPersonRowSchema = z.object({
+  userId: z.string(),
+  problemsInitiated: z.number().int(),
+  problemsShipped: z.number().int(),
+  agentsReached: z.number().int(),
+  reposReached: z.number().int(),
+  surfacesReached: z.number().int(),
+  firstPassYield: z.null(),
 });
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -200,6 +215,24 @@ const getSessionCostSummaryRoute = route({
   responses: {
     200: { description: "Cost summary", schema: SessionCostSummarySchema },
     400: { description: "Invalid groupBy" },
+  },
+});
+
+const getAttributionByPersonRoute = route({
+  method: "get",
+  path: "/api/attribution/by-person",
+  pattern: ["api", "attribution", "by-person"],
+  summary: "Four-metric per-person attribution (problems initiated/shipped, reach)",
+  tags: ["Session Data"],
+  query: z.object({
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+  }),
+  responses: {
+    200: {
+      description: "Per-person attribution rows",
+      schema: z.object({ rows: z.array(AttributionByPersonRowSchema) }),
+    },
   },
 });
 
@@ -400,6 +433,17 @@ export async function handleSessionData(
   if (getDashboardCosts.match(req.method, pathSegments)) {
     const dashboardCosts = getDashboardCostSummary();
     getDashboardCosts.respond(res, 200, dashboardCosts);
+    return true;
+  }
+
+  if (getAttributionByPersonRoute.match(req.method, pathSegments)) {
+    const parsed = await getAttributionByPersonRoute.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    const rows = getAttributionByPerson({
+      startDate: parsed.query.startDate || undefined,
+      endDate: parsed.query.endDate || undefined,
+    });
+    getAttributionByPersonRoute.respond(res, 200, { rows });
     return true;
   }
 

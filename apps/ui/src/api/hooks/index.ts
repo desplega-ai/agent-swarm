@@ -49,6 +49,7 @@ export { useConfigs, useDeleteConfig, useUpsertConfig } from "./use-config-api";
 export type { SessionCostFilters } from "./use-costs";
 export {
   useAgentUsageSummary,
+  useAttributionByPerson,
   useDashboardCosts,
   useMonthlyUsageStats,
   useSessionCosts,

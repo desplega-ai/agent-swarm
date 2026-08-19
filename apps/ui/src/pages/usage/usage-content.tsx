@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAgents } from "@/api/hooks/use-agents";
-import { useUsageSummary } from "@/api/hooks/use-costs";
+import { useAttributionByPerson, useUsageSummary } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import { PageHeader } from "@/components/ui/page-header";
@@ -77,6 +77,7 @@ export function UsageContent() {
   });
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
+  const { data: attributionRows } = useAttributionByPerson({ startDate });
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -122,6 +123,25 @@ export function UsageContent() {
       avgCost: u.tasks > 0 ? u.costUsd / u.tasks : 0,
     }));
   }, [summary, userMap]);
+
+  // Four metrics, side by side, never summed into one score. Sorted
+  // alphabetically by name — NOT by any metric column, since a default sort
+  // on e.g. raw task count would silently endorse the most trivially gamed
+  // column as "the" ranking.
+  const attributionData = useMemo(() => {
+    if (!attributionRows) return [];
+    return attributionRows
+      .map((r) => ({
+        userId: r.userId,
+        name: userMap.get(r.userId) ?? `${r.userId.slice(0, 8)}...`,
+        problemsInitiated: r.problemsInitiated,
+        problemsShipped: r.problemsShipped,
+        agentsReached: r.agentsReached,
+        reposReached: r.reposReached,
+        surfacesReached: r.surfacesReached,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [attributionRows, userMap]);
 
   if (isLoading) {
     return (
@@ -336,6 +356,74 @@ export function UsageContent() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* By Person — four metrics, side by side, never summed into one score. */}
+      {attributionData.length > 0 && (
+        <div className="rounded-lg border border-border p-4">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">By Person</p>
+          <p className="text-xs text-muted-foreground mb-3">
+            Reported side by side on purpose — do not rank on any single column. Raw task count
+            (Problems Initiated) is the most trivially gamed number here.
+          </p>
+          <div className="overflow-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-muted-foreground border-b border-border">
+                  <th className="text-left py-2 font-medium">Person</th>
+                  <th
+                    className="text-right py-2 font-medium"
+                    title="Root tasks only (no parent). Counting fan-out children would let whoever triggers the biggest decomposition win by accident."
+                  >
+                    Problems Initiated
+                  </th>
+                  <th
+                    className="text-right py-2 font-medium"
+                    title="Root tasks that completed with shippable evidence: a task_attachments row (a merged-PR URL or a published page), falling back to a PR-URL match in the task output. Does not yet detect a closed ticket — no issue-tracker state is stored locally."
+                  >
+                    Problems Shipped
+                  </th>
+                  <th
+                    className="text-right py-2 font-medium"
+                    title="Distinct agents / repos / surfaces engaged across this person's entire task tree, not just root tasks."
+                  >
+                    Reach
+                  </th>
+                  <th
+                    className="text-right py-2 font-medium"
+                    title="Share of root tasks completed without a re-dispatch or a human correction. Not yet computed: distinguishing a correction-driven re-dispatch from normal multi-agent delegation isn't derivable from a single query pass, and a task-count proxy would misclassify the latter as rework."
+                  >
+                    First-Pass Yield
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {attributionData.map((row) => (
+                  <tr key={row.userId} className="border-b border-border/50">
+                    <td className="py-2 font-medium">{row.name}</td>
+                    <td className="py-2 text-right font-mono">{row.problemsInitiated}</td>
+                    <td className="py-2 text-right font-mono">
+                      {row.problemsShipped}
+                      {row.problemsInitiated > 0 && (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          ({((row.problemsShipped / row.problemsInitiated) * 100).toFixed(0)}%)
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 text-right font-mono">
+                      {row.agentsReached} agents · {row.reposReached} repos ·{" "}
+                      {row.surfacesReached} surfaces
+                    </td>
+                    <td className="py-2 text-right font-mono text-muted-foreground italic">
+                      not yet computed
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

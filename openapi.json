@@ -31945,6 +31945,15 @@
                         },
                         "attributedCostUsd": {
                           "type": "number"
+                        },
+                        "attributableCostUsd": {
+                          "type": "number"
+                        },
+                        "excludedCostUsd": {
+                          "type": "number"
+                        },
+                        "excludedTaskCount": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -31956,7 +31965,10 @@
                         "totalDurationMs",
                         "totalSessions",
                         "avgCostPerSession",
-                        "attributedCostUsd"
+                        "attributedCostUsd",
+                        "attributableCostUsd",
+                        "excludedCostUsd",
+                        "excludedTaskCount"
                       ]
                     },
                     "daily": {
@@ -32077,6 +32089,92 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attribution/by-person": {
+      "get": {
+        "summary": "Four-metric per-person attribution (problems initiated/shipped, reach)",
+        "tags": [
+          "Session Data"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "startDate",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "endDate",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Per-person attribution rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rows": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "userId": {
+                            "type": "string"
+                          },
+                          "problemsInitiated": {
+                            "type": "integer"
+                          },
+                          "problemsShipped": {
+                            "type": "integer"
+                          },
+                          "agentsReached": {
+                            "type": "integer"
+                          },
+                          "reposReached": {
+                            "type": "integer"
+                          },
+                          "surfacesReached": {
+                            "type": "integer"
+                          },
+                          "firstPassYield": {
+                            "type": "null"
+                          }
+                        },
+                        "required": [
+                          "userId",
+                          "problemsInitiated",
+                          "problemsShipped",
+                          "agentsReached",
+                          "reposReached",
+                          "surfacesReached",
+                          "firstPassYield"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "rows"
+                  ]
                 }
               }
             }

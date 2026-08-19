@@ -6860,8 +6860,30 @@ export interface SessionCostSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
-  /** Share of `totalCostUsd` whose task carries a human requester. */
+  /**
+   * Cost of tasks with a human requester, over `attributableCostUsd` (not
+   * `totalCostUsd`) — see `attributableCostUsd` for why. Also excludes cost on
+   * a structurally-human-free task that happens to carry a stale/inherited
+   * `requestedByUserId` (measured 2026-08-19: ~5% of the naive-attributed
+   * population), so the two totals stay a consistent partition.
+   */
   attributedCostUsd: number;
+  /**
+   * The corrected coverage denominator: `totalCostUsd` minus the cost of
+   * structurally-human-free tasks (heartbeat/boot-triage, scheduled runs, and
+   * `source='system'` follow-ups whose parent itself had no human requester —
+   * i.e. follow-ups of the swarm's own self-maintenance, not of human work).
+   * These tasks have no human requester *by construction*; stamping one on
+   * them would be a lie, not coverage, so they don't belong in the
+   * denominator at all. `attributedCostUsd / attributableCostUsd` is the
+   * number to show as "coverage" — dividing by `totalCostUsd` instead
+   * silently deflates it with a population that could never have scored.
+   */
+  attributableCostUsd: number;
+  /** Cost of the structurally-human-free population excluded from `attributableCostUsd`. */
+  excludedCostUsd: number;
+  /** Distinct tasks behind `excludedCostUsd` — surfaced so the UI can name the exclusion count, not just wave at a percentage. */
+  excludedTaskCount: number;
 }
 
 export interface SessionCostDailyRow {
@@ -6911,7 +6933,10 @@ export function getSessionCostSummary(opts: {
   // re-attributed after the fact, so the human requester is resolved by joining
   // through the task (same shape as `getDailySpendForUser`). Every column is
   // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
+  // `p` (the parent task) is only needed to classify `source='system'` follow-ups
+  // in HUMAN_FREE_SQL below — most rows never touch it.
+  const from =
+    "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId LEFT JOIN agent_tasks p ON p.id = t.parentTaskId";
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -6936,6 +6961,23 @@ export function getSessionCostSummary(opts: {
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  // Structurally-human-free: the swarm maintaining itself, with no human
+  // requester by construction — heartbeat/boot-triage tasks, scheduled runs,
+  // and `source='system'` follow-ups whose parent itself has no human
+  // requester (a follow-up of self-maintenance, not of human work; a
+  // `source='system'` task whose parent DOES have a requester — e.g. a CI
+  // auto-reply to a human's PR — stays attributable). Every `COALESCE` guards
+  // against SQLite's NULL-propagates-through-OR trap: an unguarded
+  // `t.taskType IN (...)` on a NULL taskType makes the whole boolean NULL,
+  // not FALSE, silently dropping the row from both sides of the partition.
+  // Verified against the live DB 2026-08-19: this predicate reproduces the
+  // Usage-page-adjacent audit's 2,193/5,093-task exclusion count exactly.
+  const HUMAN_FREE_SQL = `(
+        COALESCE(t.taskType, '') IN ('heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.source, '') = 'schedule'
+        OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
+      )`;
+
   // Totals
   type TotalsRow = {
     totalCostUsd: number;
@@ -6946,6 +6988,9 @@ export function getSessionCostSummary(opts: {
     totalDurationMs: number;
     totalSessions: number;
     attributedCostUsd: number;
+    attributableCostUsd: number;
+    excludedCostUsd: number;
+    excludedTaskCount: number;
   };
 
   const totalsRow = getDb()
@@ -6958,8 +7003,13 @@ export function getSessionCostSummary(opts: {
         COALESCE(SUM(sc.cacheWriteTokens), 0) as totalCacheWriteTokens,
         COALESCE(SUM(sc.durationMs), 0) as totalDurationMs,
         COUNT(*) as totalSessions,
-        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL THEN sc.totalCostUsd ELSE 0 END), 0)
-          as attributedCostUsd
+        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL AND NOT ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as attributedCostUsd,
+        COALESCE(SUM(CASE WHEN NOT ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as attributableCostUsd,
+        COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
+        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount
       ${from} ${where}`,
     )
     .get(...params);
@@ -6980,6 +7030,9 @@ export function getSessionCostSummary(opts: {
         totalSessions: 0,
         avgCostPerSession: 0,
         attributedCostUsd: 0,
+        attributableCostUsd: 0,
+        excludedCostUsd: 0,
+        excludedTaskCount: 0,
       };
 
   // Daily breakdown
@@ -7061,6 +7114,149 @@ export function getSessionCostSummary(opts: {
   }
 
   return { totals, daily, byAgent, byUser };
+}
+
+// --- Per-person attribution (four-metric view) ---
+
+export interface AttributionByPersonRow {
+  userId: string;
+  /** Root tasks (`parentTaskId IS NULL`) only — counting fan-out children would let
+   *  whoever triggers the biggest decomposition win by accident. */
+  problemsInitiated: number;
+  /** Roots that completed AND show shippable evidence — see `getAttributionByPerson` doc. */
+  problemsShipped: number;
+  /** Distinct agents engaged across the person's entire task tree (not root-scoped —
+   *  a root that fans out to nine agents is nine agents of reach). */
+  agentsReached: number;
+  reposReached: number;
+  surfacesReached: number;
+  /**
+   * Share of root tasks completed without a re-dispatch or a human correction.
+   * Deliberately `null`: distinguishing a legitimate multi-agent fan-out from a
+   * correction-driven re-dispatch isn't computable from a single query pass
+   * (would need to inspect *why* a child task was created, which isn't a stored
+   * fact), and a task-count-based proxy would misclassify normal delegation as
+   * rework. Render as "not yet computed" — do not invent a stand-in.
+   */
+  firstPassYield: null;
+}
+
+/**
+ * Four metrics per human requester, reported side by side — never summed into
+ * a composite score. Scope is root tasks (`problemsInitiated`/`problemsShipped`)
+ * or the person's entire task tree (`*Reached`); `requestedByUserId IS NULL`
+ * (autonomous work) and structurally-human-free rows with a stale/inherited
+ * requester (see `HUMAN_FREE_SQL` in `getSessionCostSummary`) are excluded —
+ * neither belongs to a person.
+ *
+ * "Problems shipped" detection: prefers a `task_attachments` row (`kind='url'`
+ * matching a GitHub PR URL, or `kind='page'` for a published artifact),
+ * falling back to a PR-URL string match on `output` when no attachment row
+ * exists. This does NOT detect a closed ticket (no Linear/Jira issue-state
+ * table exists locally) — "shipped" undercounts ticket-only outcomes until
+ * the real artifacts join (tracked separately, not in this pass) lands.
+ */
+export function getAttributionByPerson(opts: {
+  startDate?: string;
+  endDate?: string;
+}): AttributionByPersonRow[] {
+  const conditions: string[] = ["t.requestedByUserId IS NOT NULL"];
+  const params: string[] = [];
+  if (opts.startDate) {
+    conditions.push("t.createdAt >= ?");
+    params.push(opts.startDate);
+  }
+  if (opts.endDate) {
+    conditions.push("t.createdAt <= ?");
+    params.push(opts.endDate);
+  }
+  const where = `WHERE ${conditions.join(" AND ")}`;
+
+  // No parent-based `source='system'` clause needed here (unlike
+  // getSessionCostSummary's HUMAN_FREE_SQL): root-task rows have no parent by
+  // definition, and the reach query intentionally counts a person's full task
+  // tree, where a `source='system'` follow-up of THEIR OWN human-attributed
+  // work is legitimate reach, not something to exclude.
+  const humanFreeSql = `(
+        COALESCE(t.taskType, '') IN ('heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.source, '') = 'schedule'
+      )`;
+
+  type RootRow = { userId: string; initiated: number; shipped: number };
+  const rootRows = getDb()
+    .prepare<RootRow, string[]>(
+      `SELECT
+        t.requestedByUserId as userId,
+        COUNT(*) as initiated,
+        SUM(CASE WHEN t.status = 'completed' AND (
+          EXISTS (
+            SELECT 1 FROM task_attachments ta
+            WHERE ta.task_id = t.id AND ta.kind = 'url' AND ta.url LIKE '%github.com/%/pull/%'
+          )
+          OR EXISTS (
+            SELECT 1 FROM task_attachments ta2 WHERE ta2.task_id = t.id AND ta2.kind = 'page'
+          )
+          OR t.output LIKE '%github.com/%/pull/%'
+        ) THEN 1 ELSE 0 END) as shipped
+      FROM agent_tasks t
+      ${where} AND t.parentTaskId IS NULL AND NOT ${humanFreeSql}
+      GROUP BY t.requestedByUserId`,
+    )
+    .all(...params);
+
+  type ReachRow = {
+    userId: string;
+    agentsReached: number;
+    reposReached: number;
+    surfacesReached: number;
+  };
+  const reachRows = getDb()
+    .prepare<ReachRow, string[]>(
+      `SELECT
+        t.requestedByUserId as userId,
+        COUNT(DISTINCT t.agentId) as agentsReached,
+        COUNT(DISTINCT t.vcsRepo) as reposReached,
+        COUNT(DISTINCT t.source) as surfacesReached
+      FROM agent_tasks t
+      ${where} AND NOT ${humanFreeSql}
+      GROUP BY t.requestedByUserId`,
+    )
+    .all(...params);
+
+  const byUser = new Map<string, AttributionByPersonRow>();
+  for (const r of rootRows) {
+    byUser.set(r.userId, {
+      userId: r.userId,
+      problemsInitiated: r.initiated,
+      problemsShipped: r.shipped,
+      agentsReached: 0,
+      reposReached: 0,
+      surfacesReached: 0,
+      firstPassYield: null,
+    });
+  }
+  for (const r of reachRows) {
+    const existing = byUser.get(r.userId);
+    if (existing) {
+      existing.agentsReached = r.agentsReached;
+      existing.reposReached = r.reposReached;
+      existing.surfacesReached = r.surfacesReached;
+    } else {
+      // Reach with no root task in-window (e.g. only fan-out children whose
+      // root predates the window) — still a real person row.
+      byUser.set(r.userId, {
+        userId: r.userId,
+        problemsInitiated: 0,
+        problemsShipped: 0,
+        agentsReached: r.agentsReached,
+        reposReached: r.reposReached,
+        surfacesReached: r.surfacesReached,
+        firstPassYield: null,
+      });
+    }
+  }
+
+  return Array.from(byUser.values());
 }
 
 // --- Dashboard cost summary (P4) ---

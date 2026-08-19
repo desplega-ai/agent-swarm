@@ -3,17 +3,20 @@ import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
+  completeTask,
   createAgent,
   createSessionCost,
   createTaskExtended,
   createUser,
   getAllSessionCosts,
+  getAttributionByPerson,
   getDashboardCostSummary,
   getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
   getSessionCostsFiltered,
   initDb,
+  insertTaskAttachment,
   UNATTRIBUTED_USER_ID,
 } from "../be/db";
 import type { SessionCost } from "../types";
@@ -965,6 +968,60 @@ describe("Session Costs API", () => {
       expect(none.byUser.length).toBe(1);
       expect(none.byUser[0]?.userId).toBe(null);
     });
+
+    test("attributableCostUsd excludes structurally-human-free cost from the coverage denominator", () => {
+      const agent = createAgent({ name: "Denominator Agent", isLead: false, status: "idle" });
+      const user = createUser({ name: "Denominator Requester" });
+      const humanWork = createTaskExtended("Human-requested work", { requestedByUserId: user.id });
+      // Structurally human-free: no human requester belongs on a heartbeat-checklist
+      // task by construction, even though this row carries one (a stale/inherited
+      // id) — it must be excluded from BOTH sides of the coverage ratio.
+      const heartbeat = createTaskExtended("Heartbeat checklist", {
+        taskType: "heartbeat-checklist",
+        requestedByUserId: user.id,
+      });
+      const scheduled = createTaskExtended("Scheduled run", { source: "schedule" });
+
+      createSessionCost({
+        sessionId: "denom-human",
+        taskId: humanWork.id,
+        agentId: agent.id,
+        totalCostUsd: 1.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "denom-heartbeat",
+        taskId: heartbeat.id,
+        agentId: agent.id,
+        totalCostUsd: 2.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "denom-scheduled",
+        taskId: scheduled.id,
+        agentId: agent.id,
+        totalCostUsd: 3.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "day" });
+
+      expect(summary.totals.totalCostUsd).toBeCloseTo(6.0, 5);
+      // Only the human-requested task counts as attributed — the heartbeat
+      // task's stale requester doesn't count, because it's excluded entirely.
+      expect(summary.totals.attributedCostUsd).toBeCloseTo(1.0, 5);
+      // Denominator drops the heartbeat + scheduled cost (2.0 + 3.0), leaving
+      // only the population that could plausibly carry a human requester.
+      expect(summary.totals.attributableCostUsd).toBeCloseTo(1.0, 5);
+      expect(summary.totals.excludedCostUsd).toBeCloseTo(5.0, 5);
+      expect(summary.totals.excludedTaskCount).toBe(2);
+    });
   });
 
   describe("Database: getDashboardCostSummary", () => {
@@ -1069,6 +1126,86 @@ describe("Session Costs API", () => {
       expect(typeof data.costToday).toBe("number");
       expect(typeof data.costMtd).toBe("number");
       expect(data.costMtd).toBeGreaterThanOrEqual(data.costToday);
+    });
+  });
+
+  describe("Database: getAttributionByPerson", () => {
+    test("counts root tasks only, and reach across the full task tree", () => {
+      const agentA = createAgent({ name: "Attribution Agent A", isLead: false, status: "idle" });
+      const agentB = createAgent({ name: "Attribution Agent B", isLead: false, status: "idle" });
+      const user = createUser({ name: "Attribution Requester" });
+
+      const root = createTaskExtended("Root problem", {
+        requestedByUserId: user.id,
+        vcsRepo: "desplega-ai/agent-swarm",
+        agentId: agentA.id,
+      });
+      // Fan-out child of the same root — must NOT inflate problemsInitiated,
+      // but DOES count toward reach (a second agent engaged).
+      createTaskExtended("Fan-out child", {
+        requestedByUserId: user.id,
+        parentTaskId: root.id,
+        agentId: agentB.id,
+        vcsRepo: "desplega-ai/agent-swarm",
+      });
+      // Structurally human-free despite a (stale) requester — excluded from
+      // both problemsInitiated and reach.
+      createTaskExtended("Heartbeat noise", {
+        requestedByUserId: user.id,
+        taskType: "heartbeat-checklist",
+      });
+
+      const rows = getAttributionByPerson({});
+      const mine = rows.find((r) => r.userId === user.id);
+      expect(mine).toBeDefined();
+      expect(mine?.problemsInitiated).toBe(1);
+      expect(mine?.agentsReached).toBe(2);
+      expect(mine?.reposReached).toBe(1);
+      expect(mine?.firstPassYield).toBe(null);
+    });
+
+    test("counts a root as shipped via a task_attachments PR-URL row, and via output fallback", () => {
+      const agent = createAgent({ name: "Shipped Agent", isLead: false, status: "idle" });
+      const user = createUser({ name: "Shipped Requester" });
+
+      const shippedViaAttachment = createTaskExtended("Shipped via attachment", {
+        requestedByUserId: user.id,
+      });
+      insertTaskAttachment({
+        taskId: shippedViaAttachment.id,
+        agentId: agent.id,
+        name: "PR",
+        kind: "url",
+        url: "https://github.com/desplega-ai/agent-swarm/pull/1234",
+      });
+      completeTask(shippedViaAttachment.id);
+
+      const shippedViaOutput = createTaskExtended("Shipped via output fallback", {
+        requestedByUserId: user.id,
+      });
+      completeTask(
+        shippedViaOutput.id,
+        "Opened https://github.com/desplega-ai/agent-swarm/pull/5678",
+      );
+
+      const notShipped = createTaskExtended("Not shipped", { requestedByUserId: user.id });
+      completeTask(notShipped.id, "Just some notes, no PR");
+
+      const rows = getAttributionByPerson({});
+      const mine = rows.find((r) => r.userId === user.id);
+      expect(mine?.problemsInitiated).toBe(3);
+      expect(mine?.problemsShipped).toBe(2);
+    });
+
+    test("respects the date range filter", () => {
+      const user = createUser({ name: "Date Range Requester" });
+      createTaskExtended("In range", { requestedByUserId: user.id });
+
+      const past = getAttributionByPerson({ endDate: "2000-01-01" });
+      expect(past.find((r) => r.userId === user.id)).toBeUndefined();
+
+      const present = getAttributionByPerson({ startDate: "2000-01-01" });
+      expect(present.find((r) => r.userId === user.id)?.problemsInitiated).toBe(1);
     });
   });
 });

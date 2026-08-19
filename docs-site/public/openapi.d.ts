@@ -12301,6 +12301,9 @@ export interface paths {
                                 totalSessions: number;
                                 avgCostPerSession: number;
                                 attributedCostUsd: number;
+                                attributableCostUsd: number;
+                                excludedCostUsd: number;
+                                excludedTaskCount: number;
                             };
                             daily: {
                                 date: string;
@@ -12335,6 +12338,55 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/attribution/by-person": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Four-metric per-person attribution (problems initiated/shipped, reach) */
+        get: {
+            parameters: {
+                query?: {
+                    startDate?: string;
+                    endDate?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Per-person attribution rows */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            rows: {
+                                userId: string;
+                                problemsInitiated: number;
+                                problemsShipped: number;
+                                agentsReached: number;
+                                reposReached: number;
+                                surfacesReached: number;
+                                firstPassYield: null;
+                            }[];
+                        };
                     };
                 };
             };

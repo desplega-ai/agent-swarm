@@ -827,8 +827,37 @@ export interface UsageSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
-  /** Share of `totalCostUsd` whose task carries a human requester. Older API servers omit it. */
+  /**
+   * Cost of tasks with a human requester, over `attributableCostUsd` (not
+   * `totalCostUsd` — that denominator includes structurally-human-free work
+   * that could never have scored). Older API servers omit all three fields.
+   */
   attributedCostUsd?: number;
+  /** Corrected coverage denominator: `totalCostUsd` minus `excludedCostUsd`. */
+  attributableCostUsd?: number;
+  /** Cost of heartbeat/boot-triage/scheduled work and self-maintenance follow-ups. */
+  excludedCostUsd?: number;
+  /** Distinct tasks behind `excludedCostUsd` — name the exclusion, don't just show a percentage. */
+  excludedTaskCount?: number;
+}
+
+/**
+ * One row of `AttributionByPersonResponse`. `firstPassYield` is always `null`
+ * today — see `getAttributionByPerson` in `src/be/db.ts` for why it's not a
+ * computed proxy.
+ */
+export interface AttributionByPersonRow {
+  userId: string;
+  problemsInitiated: number;
+  problemsShipped: number;
+  agentsReached: number;
+  reposReached: number;
+  surfacesReached: number;
+  firstPassYield: null;
+}
+
+export interface AttributionByPersonResponse {
+  rows: AttributionByPersonRow[];
 }
 
 export interface UsageSummaryDailyRow {
