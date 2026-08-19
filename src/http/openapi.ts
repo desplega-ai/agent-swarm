@@ -65,6 +65,7 @@ export function generateOpenApiSpec(opts: OpenApiOptions): string {
     const request: Record<string, unknown> = {};
     if (routeDef.params) request.params = routeDef.params;
     if (routeDef.query) request.query = routeDef.query;
+    if (routeDef.headers) request.headers = routeDef.headers;
     if (routeDef.body) {
       request.body = {
         content: { "application/json": { schema: routeDef.body } },

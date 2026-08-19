@@ -42,6 +42,14 @@ export interface RouteDef<
   tags: string[];
   params?: TParams;
   query?: TQuery;
+  /**
+   * Request headers to publish as OpenAPI parameters, beyond the global
+   * `Authorization`/`X-Agent-ID` security schemes. Declaration-only: handlers
+   * still read headers off `req`, so adding this to a route changes the
+   * generated spec and nothing else. Mark each property `.optional()` unless
+   * the header is unconditionally required.
+   */
+  headers?: z.ZodObject;
   body?: TBody;
   responses: TResponses;
   auth?: {

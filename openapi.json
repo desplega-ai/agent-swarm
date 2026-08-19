@@ -5071,6 +5071,18 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to refresh a runtime's liveness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to refresh a runtime's liveness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
         "responses": {
           "204": {
             "description": "Liveness recorded (or accepted as a no-op)"
@@ -5108,6 +5120,18 @@
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to retire a runtime when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to retire a runtime when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
           }
         ],
         "responses": {
