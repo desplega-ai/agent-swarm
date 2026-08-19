@@ -1573,6 +1573,43 @@ export const ActiveSessionSchema = z
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
 
 // ============================================================================
+// Runtime Instance Types (multi-runtime worker tracking)
+// ============================================================================
+
+/**
+ * Lifecycle of a runtime instance. Zod is the source of truth for the allowed
+ * values — the SQL column has no CHECK constraint (migration 131) so adding a
+ * state doesn't require a table rebuild.
+ */
+export const RuntimeInstanceStatusSchema = z.enum(["active", "offline"]);
+
+/**
+ * One worker process serving a logical agent. The `agents` row (AGENT_ID /
+ * X-Agent-ID) keeps durable identity and the logical maxTasks policy; a
+ * runtime instance carries only process-scoped state: liveness and its own
+ * reported execution capacity. A logical agent may be served by 0..N runtime
+ * instances; rows exist only for multi-runtime registrations
+ * (MULTI_RUNTIME_ENABLED).
+ */
+export const RuntimeInstanceSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    status: RuntimeInstanceStatusSchema,
+    /** Runtime-local concurrent task capacity, self-reported at registration. */
+    reportedSlots: z.number().int(),
+    /** Provider-neutral metadata; unused in the initial slice. */
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+    lastSeenAt: z.iso.datetime(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .openapi("RuntimeInstance");
+
+export type RuntimeInstanceStatus = z.infer<typeof RuntimeInstanceStatusSchema>;
+export type RuntimeInstance = z.infer<typeof RuntimeInstanceSchema>;
+
+// ============================================================================
 // Workflow Engine Types
 // ============================================================================
 

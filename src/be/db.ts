@@ -69,6 +69,8 @@ import type {
   ReasoningEffort,
   RepoGuidelines,
   RoutingAffinity,
+  RuntimeInstance,
+  RuntimeInstanceStatus,
   ScheduledTask,
   ScheduledTaskSummary,
   ScriptRun,
@@ -8737,6 +8739,132 @@ export function reassociateSessionLogs(runnerSessionId: string, realTaskId: stri
     .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
     .run(realTaskId, runnerSessionId, realTaskId);
   return result.changes;
+}
+
+// ============================================================================
+// Runtime Instance Functions (multi-runtime worker tracking)
+// ============================================================================
+
+interface RuntimeInstanceRow {
+  id: string;
+  agent_id: string;
+  status: string;
+  reported_slots: number;
+  metadata: string | null;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  updated_by: string | null;
+}
+
+function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
+  let metadata: Record<string, unknown> | null = null;
+  if (row.metadata) {
+    try {
+      metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+    } catch {
+      metadata = null;
+    }
+  }
+  return {
+    id: row.id,
+    agentId: row.agent_id,
+    status: row.status as RuntimeInstanceStatus,
+    reportedSlots: row.reported_slots,
+    metadata,
+    lastSeenAt: row.last_seen_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Register (or refresh) a runtime instance serving a logical agent. Keyed on
+ * the runtime's self-generated id: a re-registration from the same process
+ * refreshes capacity/liveness in place instead of accumulating rows.
+ * `reportedSlots` is the runtime's own concurrency — in multi-runtime mode it
+ * must never be written into agents.maxTasks (the logical policy).
+ */
+export function upsertRuntimeInstance(instance: {
+  id: string;
+  agentId: string;
+  reportedSlots: number;
+  metadata?: Record<string, unknown> | null;
+}): RuntimeInstance {
+  const metadataJson = instance.metadata ? JSON.stringify(instance.metadata) : null;
+  const row = getDb()
+    .prepare<RuntimeInstanceRow, [string, string, number, string | null]>(
+      `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
+       VALUES (?, ?, 'active', ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         agent_id = excluded.agent_id,
+         status = 'active',
+         reported_slots = excluded.reported_slots,
+         metadata = COALESCE(excluded.metadata, runtime_instances.metadata),
+         last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       RETURNING *`,
+    )
+    .get(instance.id, instance.agentId, instance.reportedSlots, metadataJson);
+  if (!row) throw new Error("Failed to upsert runtime instance");
+  return rowToRuntimeInstance(row);
+}
+
+export function getRuntimeInstanceById(id: string): RuntimeInstance | null {
+  const row = getDb()
+    .prepare<RuntimeInstanceRow, [string]>("SELECT * FROM runtime_instances WHERE id = ?")
+    .get(id);
+  return row ? rowToRuntimeInstance(row) : null;
+}
+
+export function getRuntimeInstancesForAgent(agentId: string): RuntimeInstance[] {
+  return getDb()
+    .prepare<RuntimeInstanceRow, [string]>(
+      "SELECT * FROM runtime_instances WHERE agent_id = ? ORDER BY created_at ASC, id ASC",
+    )
+    .all(agentId)
+    .map(rowToRuntimeInstance);
+}
+
+/**
+ * Refresh a runtime instance's liveness from the worker's ping cadence.
+ * Scoped to the pinging agent so one agent can never touch another agent's
+ * runtime row (X-Agent-ID is the same trust boundary the rest of the API
+ * uses). Returns false when no matching row exists — pings never create or
+ * resurrect instances; registration is the only writer of `active`.
+ */
+export function touchRuntimeInstance(id: string, agentId: string): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE runtime_instances
+       SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND agent_id = ?`,
+    )
+    .run(id, agentId);
+  return result.changes > 0;
+}
+
+/** Mark one runtime instance offline (scoped to its agent, like touch). */
+export function markRuntimeInstanceOffline(id: string, agentId: string): RuntimeInstance | null {
+  const row = getDb()
+    .prepare<RuntimeInstanceRow, [string, string]>(
+      `UPDATE runtime_instances
+       SET status = 'offline', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND agent_id = ? RETURNING *`,
+    )
+    .get(id, agentId);
+  return row ? rowToRuntimeInstance(row) : null;
+}
+
+export function countActiveRuntimeInstancesForAgent(agentId: string): number {
+  const result = getDb()
+    .prepare<{ count: number }, [string]>(
+      "SELECT COUNT(*) as count FROM runtime_instances WHERE agent_id = ? AND status = 'active'",
+    )
+    .get(agentId);
+  return result?.count ?? 0;
 }
 
 // ============================================================================
