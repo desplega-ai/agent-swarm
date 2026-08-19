@@ -546,6 +546,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "132_multi_runtime_instances.sql");
       // 133 alters workflow_runs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "133_workflow_run_trigger_type.sql");
+      // 135 backfills task_attachments, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "135_backfill_task_pull_request_attachments.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

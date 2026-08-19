@@ -16,7 +16,7 @@ async function removeDb(): Promise<void> {
 
 afterEach(removeDb);
 
-describe("migration 132 task pull-request attachment backfill", () => {
+describe("migration 135 task pull-request attachment backfill", () => {
   test("applies fresh, backfills existing outputs, and replays idempotently", async () => {
     await removeDb();
     const db = new Database(DB_PATH, { create: true });
@@ -26,7 +26,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()
           ?.count,
       ).toBe(0);
-      db.run("DELETE FROM _migrations WHERE version = 132");
+      db.run("DELETE FROM _migrations WHERE version = 135");
 
       const now = new Date().toISOString();
       const insertTask = db.prepare(
@@ -163,7 +163,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
       }
       expect(rows.find((row) => row.taskId === secondTaskId)?.id).toBe(existingId);
 
-      db.run("DELETE FROM _migrations WHERE version = 132");
+      db.run("DELETE FROM _migrations WHERE version = 135");
       runMigrations(db);
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()

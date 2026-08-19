@@ -1,4 +1,4 @@
--- Backfill canonical GitHub pull-request attachments from historical task output.
+-- Migration 135: backfill canonical GitHub pull-request attachments from historical task output.
 --
 -- Runtime task completion and VCS detection now write these rows directly. This
 -- migration repairs the legacy history without deleting or rewriting any
