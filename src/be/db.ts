@@ -129,6 +129,7 @@ import {
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import {
   type BudgetedIdentityField,
   checkIdentityFieldBudget,
@@ -2180,13 +2181,26 @@ export function updateTaskVcs(
     vcsUrl: string;
   },
 ): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
-      `UPDATE agent_tasks
-       SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
-       WHERE id = ? RETURNING *`,
-    )
-    .get(vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId);
+  const row = getDb().transaction(() => {
+    const updated = getDb()
+      .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
+        `UPDATE agent_tasks
+         SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
+         WHERE id = ? RETURNING *`,
+      )
+      .get(
+        vcs.vcsProvider,
+        vcs.vcsRepo,
+        vcs.vcsNumber,
+        vcs.vcsUrl,
+        new Date().toISOString(),
+        taskId,
+      );
+    if (updated && vcs.vcsProvider === "github") {
+      recordTaskPullRequestAttachments(taskId, updated.agentId, vcs.vcsUrl);
+    }
+    return updated;
+  })();
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2968,13 +2982,20 @@ export function completeTask(id: string, output?: string): AgentTask | null {
     return null;
   }
 
-  const finishedAt = new Date().toISOString();
-  let row = taskQueries.updateStatus().get("completed", finishedAt, id);
-  if (!row) return null;
+  const row = getDb().transaction(() => {
+    const finishedAt = new Date().toISOString();
+    let completed = taskQueries.updateStatus().get("completed", finishedAt, id);
+    if (!completed) return null;
 
-  if (output) {
-    row = taskQueries.setOutput().get(scrubSecrets(output), id);
-  }
+    if (output) {
+      completed = taskQueries.setOutput().get(scrubSecrets(output), id);
+    }
+    if (completed) {
+      recordTaskPullRequestAttachments(id, completed.agentId, completed.output);
+    }
+    return completed;
+  })();
+  if (!row) return null;
 
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
@@ -3652,6 +3673,51 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
     }
     return attachment;
   })();
+}
+
+/**
+ * Persist PRs detected by server-owned task lifecycle paths. Existing URL
+ * attachments win regardless of display name, so an agent-authored row and an
+ * automatic row never duplicate the same task deliverable.
+ */
+export function recordTaskPullRequestAttachments(
+  taskId: string,
+  agentId: string | null,
+  text: string | null | undefined,
+): TaskAttachment[] {
+  const pullRequests = extractGitHubPullRequestUrls(text);
+  if (pullRequests.length === 0) return [];
+
+  const existingPullRequests = new Set(
+    getDb()
+      .prepare<{ url: string }, [string]>(
+        "SELECT url FROM task_attachments WHERE task_id = ? AND kind = 'url' AND url IS NOT NULL",
+      )
+      .all(taskId)
+      .flatMap((row) => extractGitHubPullRequestUrls(row.url))
+      .map(
+        (pullRequest) =>
+          `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`,
+      ),
+  );
+  const stored: TaskAttachment[] = [];
+  for (const pullRequest of pullRequests) {
+    const dedupeKey = `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`;
+    if (existingPullRequests.has(dedupeKey)) continue;
+    stored.push(
+      insertTaskAttachment({
+        taskId,
+        agentId,
+        name: `GitHub pull request #${pullRequest.number}`,
+        kind: "url",
+        url: pullRequest.url,
+        intent: "task-deliverable",
+        description: "Pull request shipped by this task",
+      }),
+    );
+    existingPullRequests.add(dedupeKey);
+  }
+  return stored;
 }
 
 function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachment {
