@@ -27,6 +27,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
@@ -42,6 +43,7 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { isMultiRuntimeEnabled } from "@/utils/multi-runtime";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 export const TaskActionSchema = z.enum([
@@ -284,6 +286,21 @@ export async function taskActionHandler(
       case "claim": {
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'claim' action." };
+        }
+        // Same dispatch gate as HTTP poll and poll-task: a process whose
+        // runtime is gone must not take work beside its replacement.
+        if (
+          isMultiRuntimeEnabled() &&
+          !(
+            ctx.kind === "owner" &&
+            ctx.runtimeInstanceId &&
+            touchRuntimeInstance(ctx.runtimeInstanceId, agentId)
+          )
+        ) {
+          return {
+            success: false,
+            message: "This runtime is no longer registered. Re-register before claiming work.",
+          };
         }
         // Check capacity before claiming
         if (!hasCapacity(agentId)) {

@@ -39,6 +39,7 @@ import { handlePoll } from "../http/poll";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerPollTaskTool } from "../tools/poll-task";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
+import { registerTaskActionTool } from "../tools/task-action";
 import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-multi-runtime-registration.sqlite";
@@ -272,6 +273,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   registerSetConfigTool(mcpServer as unknown as Parameters<typeof registerSetConfigTool>[0]);
   registerPollTaskTool(mcpServer as unknown as Parameters<typeof registerPollTaskTool>[0]);
+  registerTaskActionTool(mcpServer as unknown as Parameters<typeof registerTaskActionTool>[0]);
   server = createTestServer();
   await new Promise<void>((resolve) => {
     server.listen(TEST_PORT, () => resolve());
@@ -1959,5 +1961,47 @@ describe("logical capacity is shared across dispatch entrypoints", () => {
     const admitted = (httpResult?.trigger?.type ? 1 : 0) + (startedTaskId(mcpResult) ? 1 : 0);
     expect(admitted).toBe(1);
     expect(getActiveTaskCount(id)).toBe(1);
+  });
+});
+
+describe("MCP task-action claim requires a live runtime", () => {
+  async function claim(agentId: string, taskId: string, runtimeInstanceId?: string) {
+    const handler = mcpServer.handlers.get("task-action");
+    if (!handler) throw new Error("task-action not registered");
+    const headers: Record<string, string> = { "x-agent-id": agentId };
+    if (runtimeInstanceId) headers["x-runtime-instance-id"] = runtimeInstanceId;
+    return (await handler(
+      { action: "claim", taskId },
+      {
+        sessionId: "test-session",
+        requestInfo: { headers },
+        sendNotification: async () => {},
+      },
+    )) as { isError?: boolean };
+  }
+
+  test("an expired runtime cannot claim, a live one can", async () => {
+    const id = makeAgent(1);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const dead = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: dead });
+    makeRuntimeStale(dead);
+    expireStaleRuntimeInstances();
+    const task = createTaskExtended("pool-claim");
+
+    await claim(id, task.id, dead);
+    expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
+
+    const live = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: live });
+    await claim(id, task.id, live);
+    expect(getTaskById(task.id)?.agentId).toBe(id);
+  });
+
+  test("with the flag off, claiming works without runtime identity", async () => {
+    const id = makeAgent(1);
+    const task = createTaskExtended("pool-claim");
+    await claim(id, task.id);
+    expect(getTaskById(task.id)?.agentId).toBe(id);
   });
 });
