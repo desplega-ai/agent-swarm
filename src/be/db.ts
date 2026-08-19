@@ -6937,6 +6937,20 @@ export function getSessionCostSummary(opts: {
   // in HUMAN_FREE_SQL below — most rows never touch it.
   const from =
     "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId LEFT JOIN agent_tasks p ON p.id = t.parentTaskId";
+
+  // Structurally-human-free: the swarm maintaining itself, with no human
+  // requester by construction — heartbeat/boot-triage tasks, scheduled runs
+  // without a human creator, and `source='system'` follow-ups whose parent
+  // itself has no human requester. A human-created schedule carries a real
+  // requester and remains attributable. Every `COALESCE` guards against
+  // SQLite's NULL-propagates-through-OR trap.
+  const HUMAN_FREE_SQL = `(
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
+        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
+        OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
+      )`;
+
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -6953,29 +6967,13 @@ export function getSessionCostSummary(opts: {
     params.push(opts.agentId);
   }
   if (opts.userId === UNATTRIBUTED_USER_ID) {
-    conditions.push("t.requestedByUserId IS NULL");
+    conditions.push(`(t.requestedByUserId IS NULL OR ${HUMAN_FREE_SQL})`);
   } else if (opts.userId) {
-    conditions.push("t.requestedByUserId = ?");
+    conditions.push(`(t.requestedByUserId = ? AND NOT ${HUMAN_FREE_SQL})`);
     params.push(opts.userId);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-
-  // Structurally-human-free: the swarm maintaining itself, with no human
-  // requester by construction — heartbeat/boot-triage tasks, scheduled runs,
-  // and `source='system'` follow-ups whose parent itself has no human
-  // requester (a follow-up of self-maintenance, not of human work; a
-  // `source='system'` task whose parent DOES have a requester — e.g. a CI
-  // auto-reply to a human's PR — stays attributable). Every `COALESCE` guards
-  // against SQLite's NULL-propagates-through-OR trap: an unguarded
-  // `t.taskType IN (...)` on a NULL taskType makes the whole boolean NULL,
-  // not FALSE, silently dropping the row from both sides of the partition.
-  const HUMAN_FREE_SQL = `(
-        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
-        OR COALESCE(t.source, '') = 'schedule'
-        OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
-      )`;
 
   // Totals
   type TotalsRow = {
@@ -7091,22 +7089,21 @@ export function getSessionCostSummary(opts: {
       .all(...params);
   }
 
-  // Per-requester breakdown. The `userId IS NULL` bucket is a real row, not a
-  // gap: autonomous spend (heartbeat, boot triage) has no human requester and
-  // must stay visible rather than being folded into a person.
+  // Per-requester breakdown. Structurally-human-free work is assigned to the
+  // autonomous bucket even if a stale requester id survives on the task.
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
     byUser = getDb()
       .prepare<SessionCostByUserRow, string[]>(
         `SELECT
-          t.requestedByUserId as userId,
+          CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(DISTINCT sc.taskId) as tasks,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
         ${from} ${where}
-        GROUP BY t.requestedByUserId
+        GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
         ORDER BY costUsd DESC`,
       )
       .all(...params);
@@ -7194,7 +7191,7 @@ export function getAttributionByPerson(opts: {
   const humanFreeSql = `(
         COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
         OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
-        OR COALESCE(t.source, '') = 'schedule'
+        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
       )`;
 
   type RootRow = { userId: string; initiated: number; shipped: number };
