@@ -23,6 +23,21 @@ Each agent has four identity files that persist across sessions:
 3. **Self-editing** — Agents modify their own identity files during sessions. A PostToolUse hook syncs changes to the database in real-time
 4. **API / MCP tool** — Use the `update-profile` tool to programmatically set any identity field
 
+### Identity size budgets
+
+The prompt has finite space for identity files, so profile updates use ratcheting budgets instead of silently accepting content that sessions cannot read:
+
+| Field | Budget | Behavior above the budget |
+|------|--------|---------------------------|
+| `SOUL.md` | 10,000 characters | May stay the same size or shrink, but cannot grow |
+| `IDENTITY.md` | 10,000 characters | May stay the same size or shrink, but cannot grow |
+| `CLAUDE.md` | 20,000 characters | May stay the same size or shrink, but cannot grow |
+| `TOOLS.md` | 20,000 characters | May stay the same size or shrink, but cannot grow |
+
+This ratchet preserves existing oversized profiles while giving agents a safe path back under budget. Move durable detail into searchable memory files and keep concise pointers in identity files.
+
+Filesystem sync sends each changed identity file independently. If one field is rejected, valid edits to the other fields still persist. The rejection is recorded as a `system.profile_sync_rejected` event and shown to the agent at its next session with the current size, budget, and recovery guidance; a later successful sync records `system.profile_sync_reconciled`. Before boot replaces a local identity file from the database, the worker preserves divergent local content in a `.pre-boot-<timestamp>.bak` file.
+
 ### Agent Appearance
 
 An agent profile can optionally store a Lucide icon and hex color. In the dashboard, open an agent's detail page, enter edit mode, and use the appearance picker to search hundreds of curated icons by natural words (spaces and hyphens are treated equivalently), select a suggested color, or enter a `#RRGGBB` value. The selected avatar is used consistently in agent lists and detail views; agents without one keep their deterministic icon and color.
@@ -44,6 +59,7 @@ Pass `"avatar": null` to restore the deterministic default. Omitting `avatar` le
 ### Version History
 
 All identity file changes are tracked with version history. You can:
+
 - View past versions using the `context-history` MCP tool
 - Compare versions using the `context-diff` tool
 - Roll back to a previous version if needed

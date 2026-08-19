@@ -465,10 +465,10 @@ Update an agent's profile, identity files, and setup script. By default updates 
 | `name` | string | No | Agent name |
 | `role` | string | No | Agent role |
 | `description` | string | No | Agent description |
-| `soulMd` | string (min 200 chars) | No | SOUL.md content. Must be at least 200 characters to prevent accidental corruption. |
-| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Must be at least 200 characters to prevent accidental corruption. |
-| `toolsMd` | string | No | TOOLS.md content |
-| `claudeMd` | string | No | CLAUDE.md content |
+| `soulMd` | string (min 200 chars) | No | SOUL.md content. Above 10,000 characters, updates may keep or reduce the stored size but cannot grow it. |
+| `identityMd` | string (min 200 chars) | No | IDENTITY.md content. Above 10,000 characters, updates may keep or reduce the stored size but cannot grow it. |
+| `toolsMd` | string | No | TOOLS.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
+| `claudeMd` | string | No | CLAUDE.md content. Above 20,000 characters, updates may keep or reduce the stored size but cannot grow it. |
 | `setupScript` | string | No | Startup script content |
 | `avatar` | object or null | No | Custom Lucide avatar: `{ type: "lucide", icon: "<kebab-case-name>", color?: "#RRGGBB" }`. Pass `null` to restore the deterministic default icon and color. |
 
