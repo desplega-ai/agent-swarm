@@ -60,7 +60,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
-        const inboxMsg = getInboxMessageById(inboxMessageId);
+        const inboxMsg = await getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
           return toolErr("Inbox message not found.");
         }
@@ -71,7 +71,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
         slackThreadTs = inboxMsg.slackThreadTs;
 
         // Mark as responded
-        markInboxMessageResponded(inboxMessageId, message);
+        await markInboxMessageResponded(inboxMessageId, message);
       } else if (taskId) {
         const task = getTaskById(taskId);
         if (!task) {

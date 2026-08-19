@@ -98,8 +98,8 @@ afterAll(async () => {
 // ─── Schedule tests ────────────────────────────────────────────────────────────
 
 describe("updateScheduledTask — updated_by column", () => {
-  test("direct db call: sets updated_by when provided", () => {
-    const schedule = createScheduledTask({
+  test("direct db call: sets updated_by when provided", async () => {
+    const schedule = await createScheduledTask({
       name: `audit-sched-direct-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "test",
@@ -108,15 +108,15 @@ describe("updateScheduledTask — updated_by column", () => {
     });
     expect(schedule.updatedBy).toBeUndefined();
 
-    const updated = updateScheduledTask(schedule.id, {
+    const updated = await updateScheduledTask(schedule.id, {
       description: "patched",
       updatedBy: humanUserId,
     });
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", () => {
-    const schedule = createScheduledTask({
+  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", async () => {
+    const schedule = await createScheduledTask({
       name: `audit-sched-noclobber-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "test",
@@ -125,10 +125,10 @@ describe("updateScheduledTask — updated_by column", () => {
     });
 
     // Set an initial updated_by
-    updateScheduledTask(schedule.id, { description: "first edit", updatedBy: humanUserId });
+    await updateScheduledTask(schedule.id, { description: "first edit", updatedBy: humanUserId });
 
     // Automation update without updatedBy — must NOT clear existing value
-    const after = updateScheduledTask(schedule.id, { description: "automation edit" });
+    const after = await updateScheduledTask(schedule.id, { description: "automation edit" });
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -138,7 +138,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-test", version: "1.0.0" });
     registerUpdateScheduleTool(server);
 
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `audit-sched-mcp-${Date.now()}`,
       intervalMs: 60_000,
       taskTemplate: "test",
@@ -155,7 +155,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getScheduledTaskById(schedule.id);
+    const updated = await getScheduledTaskById(schedule.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -163,7 +163,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-test-2", version: "1.0.0" });
     registerUpdateScheduleTool(server);
 
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `audit-sched-nouser-${Date.now()}`,
       intervalMs: 60_000,
       taskTemplate: "test",
@@ -171,7 +171,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
       timezone: "UTC",
     });
     // Pre-stamp
-    updateScheduledTask(schedule.id, { updatedBy: humanUserId });
+    await updateScheduledTask(schedule.id, { updatedBy: humanUserId });
 
     // Task with no human requester
     const automationTask = createTaskExtended("automation task", { agentId });
@@ -185,7 +185,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getScheduledTaskById(schedule.id);
+    const after = await getScheduledTaskById(schedule.id);
     expect(after?.updatedBy).toBe(humanUserId); // must not be cleared
   });
 });
@@ -489,7 +489,7 @@ describe("HTTP create paths — created_by column", () => {
     );
     expect(status).toBe(201);
     expect(json.id).toBeDefined();
-    const created = getScheduledTaskById(json.id as string);
+    const created = await getScheduledTaskById(json.id as string);
     expect(created?.createdBy).toBe(humanUserId);
   });
 
@@ -513,7 +513,7 @@ describe("HTTP create paths — created_by column", () => {
       foreignTask.id,
     );
     expect(status).toBe(201);
-    const created = getScheduledTaskById(json.id as string);
+    const created = await getScheduledTaskById(json.id as string);
     expect(created?.createdBy).toBeUndefined();
   });
 

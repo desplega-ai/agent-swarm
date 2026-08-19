@@ -47,7 +47,7 @@ export async function handleEcosystem(
       return true;
     }
 
-    const services = getServicesByAgentId(myAgentId);
+    const services = await getServicesByAgentId(myAgentId);
 
     // Generate PM2 ecosystem format
     const ecosystem = {

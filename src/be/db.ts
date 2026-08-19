@@ -5654,8 +5654,8 @@ export function getAllChannels(): Channel[] {
     .map(rowToChannel);
 }
 
-export function deleteChannel(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM channels WHERE id = ?").run(id);
+export async function deleteChannel(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM channels WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -5766,14 +5766,14 @@ export async function postMessage(
   return rowToChannelMessage(updatedRow ?? row, agent?.name);
 }
 
-export function getChannelMessages(
+export async function getChannelMessages(
   channelId: string,
   options?: {
     limit?: number;
     since?: string;
     before?: string;
   },
-): ChannelMessage[] {
+): Promise<ChannelMessage[]> {
   let query =
     "SELECT m.*, a.name as agentName FROM channel_messages m LEFT JOIN agents a ON m.agentId = a.id WHERE m.channelId = ?";
   const params: (string | number)[] = [channelId];
@@ -5797,16 +5797,13 @@ export function getChannelMessages(
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
-    .prepare<MessageWithAgentRow, (string | number)[]>(query)
-    .all(...params)
-    .map((row) => rowToChannelMessage(row, row.agentName ?? undefined))
-    .reverse(); // Return in chronological order
+  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined)).reverse(); // Return in chronological order
 }
 
-export function updateReadState(agentId: string, channelId: string): void {
+export async function updateReadState(agentId: string, channelId: string): Promise<void> {
   const now = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO channel_read_state (agentId, channelId, lastReadAt)
      VALUES (?, ?, ?)
      ON CONFLICT(agentId, channelId) DO UPDATE SET lastReadAt = ?`,
@@ -5814,6 +5811,11 @@ export function updateReadState(agentId: string, channelId: string): void {
   );
 }
 
+/**
+ * DEFERRED (transaction rule): called from `getInboxSummary` /
+ * `getMentionsForAgent`, both of which run inside `poll.ts`'s synchronous
+ * `getDb().transaction()` callback — stays on the raw sync handle.
+ */
 export function getLastReadAt(agentId: string, channelId: string): string | null {
   const result = getDb()
     .prepare<{ lastReadAt: string }, [string, string]>(
@@ -5823,7 +5825,10 @@ export function getLastReadAt(agentId: string, channelId: string): string | null
   return result?.lastReadAt ?? null;
 }
 
-export function getUnreadMessages(agentId: string, channelId: string): ChannelMessage[] {
+export async function getUnreadMessages(
+  agentId: string,
+  channelId: string,
+): Promise<ChannelMessage[]> {
   const lastReadAt = getLastReadAt(agentId, channelId);
 
   let query = `SELECT m.*, a.name as agentName FROM channel_messages m
@@ -5840,12 +5845,15 @@ export function getUnreadMessages(agentId: string, channelId: string): ChannelMe
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
-    .prepare<MessageWithAgentRow, string[]>(query)
-    .all(...params)
-    .map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
+  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
+/**
+ * DEFERRED (transaction rule): called from `getInboxSummary`, which runs
+ * inside `poll.ts`'s synchronous `getDb().transaction()` callback — stays on
+ * the raw sync handle.
+ */
 export function getMentionsForAgent(
   agentId: string,
   options?: { unreadOnly?: boolean; channelId?: string },
@@ -5898,6 +5906,10 @@ export interface InboxSummary {
   recentMentions: MentionPreview[]; // Up to 3 recent @mentions
 }
 
+/**
+ * DEFERRED (transaction rule): called directly from `poll.ts`'s synchronous
+ * `getDb().transaction()` callback — must stay on the raw sync handle.
+ */
 export function getInboxSummary(agentId: string): InboxSummary {
   const db = getDb();
   const channels = getAllChannels();
@@ -6001,6 +6013,10 @@ export function getInboxSummary(agentId: string): InboxSummary {
  * Sets processing_since to prevent duplicate polling.
  * Returns channels with unread mentions, or empty array if none/already claimed.
  */
+/**
+ * DEFERRED (transaction rule): called directly from `poll.ts`'s synchronous
+ * `getDb().transaction()` callback — must stay on the raw sync handle.
+ */
 export function claimMentions(agentId: string): { channelId: string; lastReadAt: string | null }[] {
   const now = new Date().toISOString();
   const channels = getAllChannels();
@@ -6059,11 +6075,14 @@ export function claimMentions(agentId: string): { channelId: string; lastReadAt:
  * Release mention processing for specific channels.
  * Clears processing_since to allow future polling.
  */
-export function releaseMentionProcessing(agentId: string, channelIds: string[]): void {
+export async function releaseMentionProcessing(
+  agentId: string,
+  channelIds: string[],
+): Promise<void> {
   if (channelIds.length === 0) return;
 
   const placeholders = channelIds.map(() => "?").join(",");
-  getDb().run(
+  await getDbClient().run(
     `UPDATE channel_read_state SET processing_since = NULL
      WHERE agentId = ? AND channelId IN (${placeholders})`,
     [agentId, ...channelIds],
@@ -6073,10 +6092,10 @@ export function releaseMentionProcessing(agentId: string, channelIds: string[]):
 /**
  * Auto-release stale mention processing (for crashed Claude processes).
  */
-export function releaseStaleMentionProcessing(timeoutMinutes: number = 30): number {
+export async function releaseStaleMentionProcessing(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
 
-  const result = getDb().run(
+  const result = await getDbClient().run(
     `UPDATE channel_read_state SET processing_since = NULL
      WHERE processing_since IS NOT NULL AND processing_since < ?`,
     [cutoffTime],
@@ -6145,20 +6164,18 @@ export interface CreateServiceOptions {
   metadata?: Record<string, unknown>;
 }
 
-export function createService(
+export async function createService(
   agentId: string,
   name: string,
   options: CreateServiceOptions,
-): Service {
+): Promise<Service> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<ServiceRow, (string | number | null)[]>(
-      `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
+  const row = await getDbClient().get<ServiceRow>(
+    `INSERT INTO services (id, agentId, name, port, description, url, healthCheckPath, status, script, cwd, interpreter, args, env, metadata, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, 'starting', ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       agentId,
       name,
@@ -6174,7 +6191,8 @@ export function createService(
       JSON.stringify(options.metadata ?? {}),
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create service");
 
@@ -6190,23 +6208,28 @@ export function createService(
   return rowToService(row);
 }
 
-export function getServiceById(id: string): Service | null {
-  const row = getDb().prepare<ServiceRow, [string]>("SELECT * FROM services WHERE id = ?").get(id);
+export async function getServiceById(id: string): Promise<Service | null> {
+  const row = await getDbClient().get<ServiceRow>("SELECT * FROM services WHERE id = ?", [id]);
   return row ? rowToService(row) : null;
 }
 
-export function getServiceByAgentAndName(agentId: string, name: string): Service | null {
-  const row = getDb()
-    .prepare<ServiceRow, [string, string]>("SELECT * FROM services WHERE agentId = ? AND name = ?")
-    .get(agentId, name);
+export async function getServiceByAgentAndName(
+  agentId: string,
+  name: string,
+): Promise<Service | null> {
+  const row = await getDbClient().get<ServiceRow>(
+    "SELECT * FROM services WHERE agentId = ? AND name = ?",
+    [agentId, name],
+  );
   return row ? rowToService(row) : null;
 }
 
-export function getServicesByAgentId(agentId: string): Service[] {
-  return getDb()
-    .prepare<ServiceRow, [string]>("SELECT * FROM services WHERE agentId = ? ORDER BY name")
-    .all(agentId)
-    .map(rowToService);
+export async function getServicesByAgentId(agentId: string): Promise<Service[]> {
+  const rows = await getDbClient().query<ServiceRow>(
+    "SELECT * FROM services WHERE agentId = ? ORDER BY name",
+    [agentId],
+  );
+  return rows.map(rowToService);
 }
 
 export interface ServiceFilters {
@@ -6215,7 +6238,7 @@ export interface ServiceFilters {
   status?: ServiceStatus;
 }
 
-export function getAllServices(filters?: ServiceFilters): Service[] {
+export async function getAllServices(filters?: ServiceFilters): Promise<Service[]> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -6243,22 +6266,22 @@ export function getAllServices(filters?: ServiceFilters): Service[] {
       WHEN 'stopped' THEN 4
     END, name`;
 
-  return getDb()
-    .prepare<ServiceRow, string[]>(query)
-    .all(...params)
-    .map(rowToService);
+  const rows = await getDbClient().query<ServiceRow>(query, params);
+  return rows.map(rowToService);
 }
 
-export function updateServiceStatus(id: string, status: ServiceStatus): Service | null {
-  const oldService = getServiceById(id);
+export async function updateServiceStatus(
+  id: string,
+  status: ServiceStatus,
+): Promise<Service | null> {
+  const oldService = await getServiceById(id);
   if (!oldService) return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<ServiceRow, [ServiceStatus, string, string]>(
-      `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
-    )
-    .get(status, now, id);
+  const row = await getDbClient().get<ServiceRow>(
+    `UPDATE services SET status = ?, lastUpdatedAt = ? WHERE id = ? RETURNING *`,
+    [status, now, id],
+  );
 
   if (row && oldService.status !== status) {
     try {
@@ -6275,8 +6298,8 @@ export function updateServiceStatus(id: string, status: ServiceStatus): Service 
   return row ? rowToService(row) : null;
 }
 
-export function deleteService(id: string): boolean {
-  const service = getServiceById(id);
+export async function deleteService(id: string): Promise<boolean> {
+  const service = await getServiceById(id);
   if (service) {
     try {
       createLogEntry({
@@ -6288,30 +6311,28 @@ export function deleteService(id: string): boolean {
     } catch {}
   }
 
-  const result = getDb().run("DELETE FROM services WHERE id = ?", [id]);
+  const result = await getDbClient().run("DELETE FROM services WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
 /** Upsert a service - update if exists (by agentId + name), create if not */
-export function upsertService(
+export async function upsertService(
   agentId: string,
   name: string,
   options: CreateServiceOptions,
-): Service {
-  const existing = getServiceByAgentAndName(agentId, name);
+): Promise<Service> {
+  const existing = await getServiceByAgentAndName(agentId, name);
 
   if (existing) {
     // Update existing service
     const now = new Date().toISOString();
-    const row = getDb()
-      .prepare<ServiceRow, (string | number | null)[]>(
-        `UPDATE services SET
+    const row = await getDbClient().get<ServiceRow>(
+      `UPDATE services SET
           port = ?, description = ?, url = ?, healthCheckPath = ?,
           script = ?, cwd = ?, interpreter = ?, args = ?, env = ?,
           metadata = ?, lastUpdatedAt = ?
         WHERE id = ? RETURNING *`,
-      )
-      .get(
+      [
         options.port ?? existing.port,
         options.description ?? existing.description ?? null,
         options.url ?? existing.url ?? null,
@@ -6324,7 +6345,8 @@ export function upsertService(
         JSON.stringify(options.metadata ?? existing.metadata ?? {}),
         now,
         existing.id,
-      );
+      ],
+    );
 
     if (!row) throw new Error("Failed to update service");
     return rowToService(row);
@@ -6334,8 +6356,8 @@ export function upsertService(
   return createService(agentId, name, options);
 }
 
-export function deleteServicesByAgentId(agentId: string): number {
-  const services = getServicesByAgentId(agentId);
+export async function deleteServicesByAgentId(agentId: string): Promise<number> {
+  const services = await getServicesByAgentId(agentId);
   for (const service of services) {
     try {
       createLogEntry({
@@ -6347,7 +6369,7 @@ export function deleteServicesByAgentId(agentId: string): number {
     } catch {}
   }
 
-  const result = getDb().run("DELETE FROM services WHERE agentId = ?", [agentId]);
+  const result = await getDbClient().run("DELETE FROM services WHERE agentId = ?", [agentId]);
   return result.changes;
 }
 
@@ -6441,15 +6463,37 @@ export function createSessionLogs(logs: {
   })();
 }
 
-export function getSessionLogsByTaskId(taskId: string, limit?: number): SessionLog[] {
+export async function getSessionLogsByTaskId(
+  taskId: string,
+  limit?: number,
+): Promise<SessionLog[]> {
   if (typeof limit === "number" && limit > 0) {
-    return sessionLogQueries.getRecentByTaskId().all(taskId, limit).map(rowToSessionLog);
+    const rows = await getDbClient().query<SessionLogRow>(
+      `SELECT * FROM (
+         SELECT * FROM session_logs WHERE taskId = ?
+         ORDER BY iteration DESC, lineNumber DESC
+         LIMIT ?
+       ) ORDER BY iteration ASC, lineNumber ASC`,
+      [taskId, limit],
+    );
+    return rows.map(rowToSessionLog);
   }
-  return sessionLogQueries.getByTaskId().all(taskId).map(rowToSessionLog);
+  const rows = await getDbClient().query<SessionLogRow>(
+    "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
+    [taskId],
+  );
+  return rows.map(rowToSessionLog);
 }
 
-export function getSessionLogsBySession(sessionId: string, iteration: number): SessionLog[] {
-  return sessionLogQueries.getBySessionId().all(sessionId, iteration).map(rowToSessionLog);
+export async function getSessionLogsBySession(
+  sessionId: string,
+  iteration: number,
+): Promise<SessionLog[]> {
+  const rows = await getDbClient().query<SessionLogRow>(
+    "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
+    [sessionId, iteration],
+  );
+  return rows.map(rowToSessionLog);
 }
 
 // ============================================================================
@@ -6519,61 +6563,6 @@ function rowToSessionCost(row: SessionCostRow): SessionCost {
   };
 }
 
-const sessionCostQueries = {
-  insert: () =>
-    getDb().prepare<
-      null,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        number,
-        number,
-        number,
-        number,
-        number,
-        number, // reasoningOutputTokens
-        number, // thinkingTokens
-        number, // durationMs
-        number | null, // numTurns
-        string, // model
-        number, // isError
-        string, // costSource
-        number | null, // harnessCostUsd
-        number | null, // cacheWrite5mTokens
-        number | null, // cacheWrite1hTokens
-        string | null, // modelBreakdown
-      ]
-    >(
-      `INSERT INTO session_costs (
-         id, sessionId, taskId, agentId,
-         totalCostUsd, inputTokens, outputTokens,
-         cacheReadTokens, cacheWriteTokens,
-         reasoningOutputTokens, thinkingTokens,
-         durationMs, numTurns, model, isError,
-         costSource, harnessCostUsd, cacheWrite5mTokens, cacheWrite1hTokens,
-         modelBreakdown, createdAt
-       )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-    ),
-
-  getByTaskId: () =>
-    getDb().prepare<SessionCostRow, [string, number]>(
-      "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    ),
-
-  getByAgentId: () =>
-    getDb().prepare<SessionCostRow, [string, number]>(
-      "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
-    ),
-
-  getAll: () =>
-    getDb().prepare<SessionCostRow, [number]>(
-      "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
-    ),
-};
-
 export interface CreateSessionCostInput {
   sessionId: string;
   taskId?: string;
@@ -6607,14 +6596,23 @@ export interface CreateSessionCostInput {
   modelBreakdown?: SessionCostModelBreakdown[] | null;
 }
 
-export function createSessionCost(input: CreateSessionCostInput): SessionCost {
+export async function createSessionCost(input: CreateSessionCostInput): Promise<SessionCost> {
   const id = crypto.randomUUID();
   const costSource: SessionCostSource = input.costSource ?? "harness";
   const reasoningOutputTokens = input.reasoningOutputTokens ?? 0;
   const thinkingTokens = input.thinkingTokens ?? 0;
-  sessionCostQueries
-    .insert()
-    .run(
+  await getDbClient().run(
+    `INSERT INTO session_costs (
+         id, sessionId, taskId, agentId,
+         totalCostUsd, inputTokens, outputTokens,
+         cacheReadTokens, cacheWriteTokens,
+         reasoningOutputTokens, thinkingTokens,
+         durationMs, numTurns, model, isError,
+         costSource, harnessCostUsd, cacheWrite5mTokens, cacheWrite1hTokens,
+         modelBreakdown, createdAt
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+    [
       id,
       input.sessionId,
       input.taskId ?? null,
@@ -6635,7 +6633,8 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
       input.cacheWrite5mTokens ?? null,
       input.cacheWrite1hTokens ?? null,
       input.modelBreakdown ? JSON.stringify(input.modelBreakdown) : null,
-    );
+    ],
+  );
 
   return {
     id,
@@ -6662,26 +6661,41 @@ export function createSessionCost(input: CreateSessionCostInput): SessionCost {
   };
 }
 
-export function getSessionCostsByTaskId(taskId: string, limit = 500): SessionCost[] {
-  return sessionCostQueries.getByTaskId().all(taskId, limit).map(rowToSessionCost);
+export async function getSessionCostsByTaskId(taskId: string, limit = 500): Promise<SessionCost[]> {
+  const rows = await getDbClient().query<SessionCostRow>(
+    "SELECT * FROM session_costs WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
+    [taskId, limit],
+  );
+  return rows.map(rowToSessionCost);
 }
 
-export function getSessionCostsByAgentId(agentId: string, limit = 100): SessionCost[] {
-  return sessionCostQueries.getByAgentId().all(agentId, limit).map(rowToSessionCost);
+export async function getSessionCostsByAgentId(
+  agentId: string,
+  limit = 100,
+): Promise<SessionCost[]> {
+  const rows = await getDbClient().query<SessionCostRow>(
+    "SELECT * FROM session_costs WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?",
+    [agentId, limit],
+  );
+  return rows.map(rowToSessionCost);
 }
 
-export function getAllSessionCosts(limit = 100): SessionCost[] {
-  return sessionCostQueries.getAll().all(limit).map(rowToSessionCost);
+export async function getAllSessionCosts(limit = 100): Promise<SessionCost[]> {
+  const rows = await getDbClient().query<SessionCostRow>(
+    "SELECT * FROM session_costs ORDER BY createdAt DESC LIMIT ?",
+    [limit],
+  );
+  return rows.map(rowToSessionCost);
 }
 
 // --- Date-filtered session costs (P1) ---
 
-export function getSessionCostsFiltered(opts: {
+export async function getSessionCostsFiltered(opts: {
   agentId?: string;
   startDate?: string;
   endDate?: string;
   limit?: number;
-}): SessionCost[] {
+}): Promise<SessionCost[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -6702,12 +6716,11 @@ export function getSessionCostsFiltered(opts: {
   const limit = opts.limit ?? 100;
   params.push(limit);
 
-  return getDb()
-    .prepare<SessionCostRow, (string | number)[]>(
-      `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
-    )
-    .all(...params)
-    .map(rowToSessionCost);
+  const rows = await getDbClient().query<SessionCostRow>(
+    `SELECT * FROM session_costs ${where} ORDER BY createdAt DESC LIMIT ?`,
+    params,
+  );
+  return rows.map(rowToSessionCost);
 }
 
 // --- Aggregation queries (P0) ---
@@ -6755,19 +6768,19 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
-export function getSessionCostSummary(opts: {
+export async function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
   agentId?: string;
   /** A user id, or `UNATTRIBUTED_USER_ID` for spend with no human requester. */
   userId?: string;
   groupBy?: "day" | "agent" | "both" | "user";
-}): {
+}): Promise<{
   totals: SessionCostSummaryTotals;
   daily: SessionCostDailyRow[];
   byAgent: SessionCostByAgentRow[];
   byUser: SessionCostByUserRow[];
-} {
+}> {
   // `session_costs` deliberately carries no `userId` column — a task can be
   // re-attributed after the fact, so the human requester is resolved by joining
   // through the task (same shape as `getDailySpendForUser`). Every column is
@@ -6809,9 +6822,8 @@ export function getSessionCostSummary(opts: {
     attributedCostUsd: number;
   };
 
-  const totalsRow = getDb()
-    .prepare<TotalsRow, string[]>(
-      `SELECT
+  const totalsRow = await getDbClient().get<TotalsRow>(
+    `SELECT
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
@@ -6822,8 +6834,8 @@ export function getSessionCostSummary(opts: {
         COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL THEN sc.totalCostUsd ELSE 0 END), 0)
           as attributedCostUsd
       ${from} ${where}`,
-    )
-    .get(...params);
+    params,
+  );
 
   const totals: SessionCostSummaryTotals = totalsRow
     ? {
@@ -6847,18 +6859,14 @@ export function getSessionCostSummary(opts: {
   const groupBy = opts.groupBy ?? "both";
   let daily: SessionCostDailyRow[] = [];
   if (groupBy === "day" || groupBy === "both") {
-    daily = getDb()
-      .prepare<
-        {
-          date: string;
-          costUsd: number;
-          inputTokens: number;
-          outputTokens: number;
-          sessions: number;
-        },
-        string[]
-      >(
-        `SELECT
+    daily = await getDbClient().query<{
+      date: string;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      sessions: number;
+    }>(
+      `SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -6867,26 +6875,22 @@ export function getSessionCostSummary(opts: {
         ${from} ${where}
         GROUP BY DATE(sc.createdAt)
         ORDER BY date ASC`,
-      )
-      .all(...params);
+      params,
+    );
   }
 
   // Per-agent breakdown
   let byAgent: SessionCostByAgentRow[] = [];
   if (groupBy === "agent" || groupBy === "both") {
-    byAgent = getDb()
-      .prepare<
-        {
-          agentId: string;
-          costUsd: number;
-          inputTokens: number;
-          outputTokens: number;
-          sessions: number;
-          durationMs: number;
-        },
-        string[]
-      >(
-        `SELECT
+    byAgent = await getDbClient().query<{
+      agentId: string;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      sessions: number;
+      durationMs: number;
+    }>(
+      `SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -6896,8 +6900,8 @@ export function getSessionCostSummary(opts: {
         ${from} ${where}
         GROUP BY sc.agentId
         ORDER BY costUsd DESC`,
-      )
-      .all(...params);
+      params,
+    );
   }
 
   // Per-requester breakdown. The `userId IS NULL` bucket is a real row, not a
@@ -6905,9 +6909,8 @@ export function getSessionCostSummary(opts: {
   // must stay visible rather than being folded into a person.
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
-    byUser = getDb()
-      .prepare<SessionCostByUserRow, string[]>(
-        `SELECT
+    byUser = await getDbClient().query<SessionCostByUserRow>(
+      `SELECT
           t.requestedByUserId as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -6917,8 +6920,8 @@ export function getSessionCostSummary(opts: {
         ${from} ${where}
         GROUP BY t.requestedByUserId
         ORDER BY costUsd DESC`,
-      )
-      .all(...params);
+      params,
+    );
   }
 
   return { totals, daily, byAgent, byUser };
@@ -6931,7 +6934,7 @@ export interface DashboardCostSummary {
   costMtd: number;
 }
 
-export function getDashboardCostSummary(): DashboardCostSummary {
+export async function getDashboardCostSummary(): Promise<DashboardCostSummary> {
   // Phase 13: compute the date boundaries in TS and pass them as ISO 8601
   // strings. `session_costs.createdAt` is a TEXT ISO 8601 column; lexicographic
   // comparison on ISO 8601 sorts correctly, so the comparison works as long
@@ -6950,15 +6953,14 @@ export function getDashboardCostSummary(): DashboardCostSummary {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
   ).toISOString();
   type CostRow = { costToday: number; costMtd: number };
-  const row = getDb()
-    .prepare<CostRow, [string, string]>(
-      `SELECT
+  const row = await getDbClient().get<CostRow>(
+    `SELECT
         COALESCE(SUM(CASE WHEN createdAt >= ? THEN totalCostUsd ELSE 0 END), 0) as costToday,
         COALESCE(SUM(totalCostUsd), 0) as costMtd
       FROM session_costs
       WHERE createdAt >= ?`,
-    )
-    .get(startOfDayUtc, startOfMonthUtc);
+    [startOfDayUtc, startOfMonthUtc],
+  );
 
   return row ?? { costToday: 0, costMtd: 0 };
 }
@@ -7009,20 +7011,18 @@ export interface CreateInboxMessageOptions {
   matchedText?: string;
 }
 
-export function createInboxMessage(
+export async function createInboxMessage(
   agentId: string,
   content: string,
   options?: CreateInboxMessageOptions,
-): InboxMessage {
+): Promise<InboxMessage> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<InboxMessageRow, (string | null)[]>(
-      `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
+  const row = await getDbClient().get<InboxMessageRow>(
+    `INSERT INTO inbox_messages (id, agentId, content, source, status, slackChannelId, slackThreadTs, slackUserId, matchedText, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       agentId,
       content,
@@ -7033,26 +7033,27 @@ export function createInboxMessage(
       options?.matchedText ?? null,
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create inbox message");
   return rowToInboxMessage(row);
 }
 
-export function getInboxMessageById(id: string): InboxMessage | null {
-  const row = getDb()
-    .prepare<InboxMessageRow, [string]>("SELECT * FROM inbox_messages WHERE id = ?")
-    .get(id);
+export async function getInboxMessageById(id: string): Promise<InboxMessage | null> {
+  const row = await getDbClient().get<InboxMessageRow>(
+    "SELECT * FROM inbox_messages WHERE id = ?",
+    [id],
+  );
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
-  return getDb()
-    .prepare<InboxMessageRow, [string]>(
-      "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
-    )
-    .all(agentId)
-    .map(rowToInboxMessage);
+export async function getUnreadInboxMessages(agentId: string): Promise<InboxMessage[]> {
+  const rows = await getDbClient().query<InboxMessageRow>(
+    "SELECT * FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC",
+    [agentId],
+  );
+  return rows.map(rowToInboxMessage);
 }
 
 /**
@@ -7060,16 +7061,19 @@ export function getUnreadInboxMessages(agentId: string): InboxMessage[] {
  * Marks them as 'processing' to prevent duplicate polling.
  * Returns empty array if no unread messages available.
  */
-export function claimInboxMessages(agentId: string, limit: number = 5): InboxMessage[] {
+export async function claimInboxMessages(
+  agentId: string,
+  limit: number = 5,
+): Promise<InboxMessage[]> {
   const now = new Date().toISOString();
+  const client = getDbClient();
 
   // Get IDs of unread messages to claim
-  const unreadIds = getDb()
-    .prepare<{ id: string }, [string, number]>(
-      "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
-    )
-    .all(agentId, limit)
-    .map((row) => row.id);
+  const unreadRows = await client.query<{ id: string }>(
+    "SELECT id FROM inbox_messages WHERE agentId = ? AND status = 'unread' ORDER BY createdAt ASC LIMIT ?",
+    [agentId, limit],
+  );
+  const unreadIds = unreadRows.map((row) => row.id);
 
   if (unreadIds.length === 0) {
     return [];
@@ -7077,43 +7081,45 @@ export function claimInboxMessages(agentId: string, limit: number = 5): InboxMes
 
   // Atomically update status to 'processing' for these specific IDs
   const placeholders = unreadIds.map(() => "?").join(",");
-  const rows = getDb()
-    .prepare<InboxMessageRow, (string | number)[]>(
-      `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
+  const rows = await client.query<InboxMessageRow>(
+    `UPDATE inbox_messages SET status = 'processing', lastUpdatedAt = ?
        WHERE id IN (${placeholders}) AND status = 'unread' RETURNING *`,
-    )
-    .all(now, ...unreadIds);
+    [now, ...unreadIds],
+  );
 
   return rows.map(rowToInboxMessage);
 }
 
-export function markInboxMessageRead(id: string): InboxMessage | null {
+export async function markInboxMessageRead(id: string): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<InboxMessageRow, [string, string]>(
-      "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
-    )
-    .get(now, id);
+  const row = await getDbClient().get<InboxMessageRow>(
+    "UPDATE inbox_messages SET status = 'read', lastUpdatedAt = ? WHERE id = ? RETURNING *",
+    [now, id],
+  );
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function markInboxMessageResponded(id: string, responseText: string): InboxMessage | null {
+export async function markInboxMessageResponded(
+  id: string,
+  responseText: string,
+): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<InboxMessageRow, [string, string, string]>(
-      "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    )
-    .get(responseText, now, id);
+  const row = await getDbClient().get<InboxMessageRow>(
+    "UPDATE inbox_messages SET status = 'responded', responseText = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
+    [responseText, now, id],
+  );
   return row ? rowToInboxMessage(row) : null;
 }
 
-export function markInboxMessageDelegated(id: string, taskId: string): InboxMessage | null {
+export async function markInboxMessageDelegated(
+  id: string,
+  taskId: string,
+): Promise<InboxMessage | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<InboxMessageRow, [string, string, string]>(
-      "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
-    )
-    .get(taskId, now, id);
+  const row = await getDbClient().get<InboxMessageRow>(
+    "UPDATE inbox_messages SET status = 'delegated', delegatedToTaskId = ?, lastUpdatedAt = ? WHERE id = ? AND status IN ('unread', 'processing') RETURNING *",
+    [taskId, now, id],
+  );
   return row ? rowToInboxMessage(row) : null;
 }
 
@@ -7122,11 +7128,11 @@ export function markInboxMessageDelegated(id: string, taskId: string): InboxMess
  * This handles cases where Claude process crashes or fails to respond/delegate.
  * Call this periodically from the runner or add a database trigger.
  */
-export function releaseStaleProcessingInbox(timeoutMinutes: number = 30): number {
+export async function releaseStaleProcessingInbox(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = getDb().run(
+  const result = await getDbClient().run(
     `UPDATE inbox_messages SET status = 'unread', lastUpdatedAt = ?
      WHERE status = 'processing' AND lastUpdatedAt < ?`,
     [now, cutoffTime],
@@ -7173,69 +7179,57 @@ export interface ConcurrentContext {
  * Returns processing inbox messages, recent task delegations by leads,
  * and currently active (in-progress) tasks across the swarm.
  */
-export function getConcurrentContext(): ConcurrentContext {
+export async function getConcurrentContext(): Promise<ConcurrentContext> {
+  const client = getDbClient();
+
   // 1. Inbox messages currently being processed (status = 'processing')
-  const processingInboxMessages = getDb()
-    .prepare<
-      {
-        id: string;
-        content: string;
-        source: string;
-        slackChannelId: string | null;
-        slackThreadTs: string | null;
-        createdAt: string;
-      },
-      []
-    >(
-      "SELECT id, content, source, slackChannelId, slackThreadTs, createdAt FROM inbox_messages WHERE status = 'processing' ORDER BY createdAt DESC",
-    )
-    .all();
+  const processingInboxMessages = await client.query<{
+    id: string;
+    content: string;
+    source: string;
+    slackChannelId: string | null;
+    slackThreadTs: string | null;
+    createdAt: string;
+  }>(
+    "SELECT id, content, source, slackChannelId, slackThreadTs, createdAt FROM inbox_messages WHERE status = 'processing' ORDER BY createdAt DESC",
+  );
 
   // 2. Tasks created in the last 5 minutes by lead agents
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const recentTaskDelegations = getDb()
-    .prepare<
-      {
-        id: string;
-        task: string;
-        agentId: string | null;
-        agentName: string | null;
-        creatorAgentId: string | null;
-        status: string;
-        createdAt: string;
-      },
-      [string]
-    >(
-      `SELECT t.id, t.task, t.agentId, a.name as agentName, t.creatorAgentId, t.status, t.createdAt
+  const recentTaskDelegations = await client.query<{
+    id: string;
+    task: string;
+    agentId: string | null;
+    agentName: string | null;
+    creatorAgentId: string | null;
+    status: string;
+    createdAt: string;
+  }>(
+    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.creatorAgentId, t.status, t.createdAt
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.createdAt > ?
          AND t.creatorAgentId IN (SELECT id FROM agents WHERE isLead = 1)
        ORDER BY t.createdAt DESC`,
-    )
-    .all(fiveMinutesAgo);
+    [fiveMinutesAgo],
+  );
 
   // 3. Currently in-progress tasks across the swarm
-  const activeSwarmTasks = getDb()
-    .prepare<
-      {
-        id: string;
-        task: string;
-        agentId: string | null;
-        agentName: string | null;
-        status: string;
-        createdAt: string;
-        progress: string | null;
-      },
-      []
-    >(
-      `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
+  const activeSwarmTasks = await client.query<{
+    id: string;
+    task: string;
+    agentId: string | null;
+    agentName: string | null;
+    status: string;
+    createdAt: string;
+    progress: string | null;
+  }>(
+    `SELECT t.id, t.task, t.agentId, a.name as agentName, t.status, t.createdAt, t.progress
        FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.status = 'in_progress'
        ORDER BY t.createdAt DESC`,
-    )
-    .all();
+  );
 
   return {
     processingInboxMessages,
@@ -7358,15 +7352,15 @@ function rowToScheduledTaskSummary(row: ScheduledTaskRow): ScheduledTaskSummary 
   };
 }
 
-export function getScheduledTasks(filters?: ScheduledTaskFilters): ScheduledTask[];
+export function getScheduledTasks(filters?: ScheduledTaskFilters): Promise<ScheduledTask[]>;
 export function getScheduledTasks(
   filters: ScheduledTaskFilters | undefined,
   opts: { slim: true },
-): ScheduledTaskSummary[];
-export function getScheduledTasks(
+): Promise<ScheduledTaskSummary[]>;
+export async function getScheduledTasks(
   filters?: ScheduledTaskFilters,
   opts?: { slim?: boolean },
-): ScheduledTask[] | ScheduledTaskSummary[] {
+): Promise<ScheduledTask[] | ScheduledTaskSummary[]> {
   let query = "SELECT * FROM scheduled_tasks WHERE 1=1";
   const params: (string | number)[] = [];
 
@@ -7425,23 +7419,23 @@ export function getScheduledTasks(
 
   query += " ORDER BY lastRunAt IS NULL ASC, lastRunAt DESC, lastUpdatedAt DESC";
 
-  const rows = getDb()
-    .prepare<ScheduledTaskRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<ScheduledTaskRow>(query, params);
   return opts?.slim ? rows.map(rowToScheduledTaskSummary) : rows.map(rowToScheduledTask);
 }
 
-export function getScheduledTaskById(id: string): ScheduledTask | null {
-  const row = getDb()
-    .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE id = ?")
-    .get(id);
+export async function getScheduledTaskById(id: string): Promise<ScheduledTask | null> {
+  const row = await getDbClient().get<ScheduledTaskRow>(
+    "SELECT * FROM scheduled_tasks WHERE id = ?",
+    [id],
+  );
   return row ? rowToScheduledTask(row) : null;
 }
 
-export function getScheduledTaskByName(name: string): ScheduledTask | null {
-  const row = getDb()
-    .prepare<ScheduledTaskRow, [string]>("SELECT * FROM scheduled_tasks WHERE name = ?")
-    .get(name);
+export async function getScheduledTaskByName(name: string): Promise<ScheduledTask | null> {
+  const row = await getDbClient().get<ScheduledTaskRow>(
+    "SELECT * FROM scheduled_tasks WHERE name = ?",
+    [name],
+  );
   return row ? rowToScheduledTask(row) : null;
 }
 
@@ -7470,21 +7464,19 @@ export interface CreateScheduledTaskData {
   createdBy?: string;
 }
 
-export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTask {
+export async function createScheduledTask(data: CreateScheduledTaskData): Promise<ScheduledTask> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<ScheduledTaskRow, (string | number | null)[]>(
-      `INSERT INTO scheduled_tasks (
+  const row = await getDbClient().get<ScheduledTaskRow>(
+    `INSERT INTO scheduled_tasks (
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, timezone, model, modelTier, scheduleType, targetType,
         workflowId, scriptName, scriptArgs, createdAt, lastUpdatedAt,
         created_by, updated_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
       data.name,
@@ -7511,7 +7503,8 @@ export function createScheduledTask(data: CreateScheduledTaskData): ScheduledTas
       now,
       data.createdBy ?? null,
       data.createdBy ?? null,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create scheduled task");
   return rowToScheduledTask(row);
@@ -7546,10 +7539,10 @@ export interface UpdateScheduledTaskData {
   updatedBy?: string;
 }
 
-export function updateScheduledTask(
+export async function updateScheduledTask(
   id: string,
   data: UpdateScheduledTaskData,
-): ScheduledTask | null {
+): Promise<ScheduledTask | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -7664,17 +7657,16 @@ export function updateScheduledTask(
 
   params.push(id);
 
-  const row = getDb()
-    .prepare<ScheduledTaskRow, (string | number | null)[]>(
-      `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<ScheduledTaskRow>(
+    `UPDATE scheduled_tasks SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
 
   return row ? rowToScheduledTask(row) : null;
 }
 
-export function deleteScheduledTask(id: string): boolean {
-  const result = getDb().run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
+export async function deleteScheduledTask(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM scheduled_tasks WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -7682,16 +7674,15 @@ export function deleteScheduledTask(id: string): boolean {
  * Get all enabled scheduled tasks that are due for execution.
  * A task is due when its nextRunAt time is <= now.
  */
-export function getDueScheduledTasks(): ScheduledTask[] {
+export async function getDueScheduledTasks(): Promise<ScheduledTask[]> {
   const now = new Date().toISOString();
-  return getDb()
-    .prepare<ScheduledTaskRow, [string]>(
-      `SELECT * FROM scheduled_tasks
+  const rows = await getDbClient().query<ScheduledTaskRow>(
+    `SELECT * FROM scheduled_tasks
        WHERE enabled = 1 AND nextRunAt IS NOT NULL AND nextRunAt <= ?
        ORDER BY nextRunAt ASC`,
-    )
-    .all(now)
-    .map(rowToScheduledTask);
+    [now],
+  );
+  return rows.map(rowToScheduledTask);
 }
 
 // ============================================================================

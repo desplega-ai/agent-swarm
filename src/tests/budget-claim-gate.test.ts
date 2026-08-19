@@ -104,8 +104,8 @@ function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd
     .run(scope, scopeId, dailyBudgetUsd, now, now);
 }
 
-function insertSpend(agentId: string, totalCostUsd: number): void {
-  createSessionCost({
+async function insertSpend(agentId: string, totalCostUsd: number): Promise<void> {
+  await createSessionCost({
     sessionId: `sess-${crypto.randomUUID()}`,
     agentId,
     totalCostUsd,
@@ -167,7 +167,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("budgets present but spend below ceiling → trigger=task_assigned", async () => {
     const worker = createAgent({ name: "w-below", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 10.0);
-    insertSpend(worker.id, 1.0); // well below 10.0
+    await insertSpend(worker.id, 1.0); // well below 10.0
     const task = createTaskExtended("budgeted task", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
@@ -179,7 +179,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("agent budget blown → trigger=budget_refused with cause='agent'", async () => {
     const worker = createAgent({ name: "w-over", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05); // blows the 0.01 budget
+    await insertSpend(worker.id, 0.05); // blows the 0.01 budget
     createTaskExtended("blocked task", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
@@ -199,7 +199,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("global budget blown → trigger=budget_refused with cause='global'", async () => {
     const worker = createAgent({ name: "w-glob", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("global", "", 0.01);
-    insertSpend(worker.id, 0.1); // blows the global budget
+    await insertSpend(worker.id, 0.1); // blows the global budget
     createTaskExtended("blocked-by-global", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
@@ -215,7 +215,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("budget refusal in pool path: blows the gate without claiming an unassigned task", async () => {
     const worker = createAgent({ name: "w-pool", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.5);
+    await insertSpend(worker.id, 0.5);
     // Unassigned (pool) task — no `agentId`.
     const pooled = createTaskExtended("pool task", {});
     expect(pooled.status).toBe("unassigned");
@@ -234,7 +234,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   test("refused poll does NOT auto-increment server-side empty-poll counter", async () => {
     const worker = createAgent({ name: "w-emptyp", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.5);
+    await insertSpend(worker.id, 0.5);
     createTaskExtended("blocked", { agentId: worker.id });
 
     const before = getAgentById(worker.id)?.emptyPollCount ?? 0;
@@ -313,7 +313,7 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
     const { canClaim } = await import("../be/budget-admission");
     const worker = createAgent({ name: "accept-w", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.5);
+    await insertSpend(worker.id, 0.5);
 
     const result = canClaim(worker.id, new Date());
     expect(result.allowed).toBe(false);

@@ -275,7 +275,7 @@ export async function handleSessionData(
       jsonError(res, "Task not found", 404);
       return true;
     }
-    const logs = getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
+    const logs = await getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
     getSessionLogsByTask.respond(res, 200, { logs });
     return true;
   }
@@ -336,7 +336,7 @@ export async function handleSessionData(
       );
       const { totalCostUsd, costSource } = recomputed;
 
-      const cost = createSessionCost({
+      const cost = await createSessionCost({
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,
@@ -386,7 +386,7 @@ export async function handleSessionData(
   if (getSessionCostSummaryRoute.match(req.method, pathSegments)) {
     const parsed = await getSessionCostSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const summary = getSessionCostSummary({
+    const summary = await getSessionCostSummary({
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
@@ -398,7 +398,7 @@ export async function handleSessionData(
   }
 
   if (getDashboardCosts.match(req.method, pathSegments)) {
-    const dashboardCosts = getDashboardCostSummary();
+    const dashboardCosts = await getDashboardCostSummary();
     getDashboardCosts.respond(res, 200, dashboardCosts);
     return true;
   }
@@ -411,18 +411,18 @@ export async function handleSessionData(
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId, limit);
+      costs = await getSessionCostsByTaskId(taskId, limit);
     } else if (startDate || endDate) {
-      costs = getSessionCostsFiltered({
+      costs = await getSessionCostsFiltered({
         agentId: agentId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         limit,
       });
     } else if (agentId) {
-      costs = getSessionCostsByAgentId(agentId, limit);
+      costs = await getSessionCostsByAgentId(agentId, limit);
     } else {
-      costs = getAllSessionCosts(limit);
+      costs = await getAllSessionCosts(limit);
     }
 
     listSessionCosts.respond(res, 200, { costs });

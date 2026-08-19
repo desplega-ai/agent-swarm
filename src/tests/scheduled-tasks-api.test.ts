@@ -44,7 +44,7 @@ async function handleRequest(
   ) {
     const enabledParam = queryParams.get("enabled");
     const name = queryParams.get("name");
-    const scheduledTasks = getScheduledTasks({
+    const scheduledTasks = await getScheduledTasks({
       enabled: enabledParam !== null ? enabledParam === "true" : undefined,
       name: name || undefined,
     });
@@ -135,7 +135,7 @@ describe("Scheduled Tasks REST API", () => {
 
     test("should return all scheduled tasks", async () => {
       // Create some test schedules
-      createScheduledTask({
+      await createScheduledTask({
         name: "api-test-schedule-1",
         description: "First test schedule",
         intervalMs: 60000,
@@ -146,7 +146,7 @@ describe("Scheduled Tasks REST API", () => {
         enabled: true,
       });
 
-      createScheduledTask({
+      await createScheduledTask({
         name: "api-test-schedule-2",
         description: "Second test schedule",
         cronExpression: "0 9 * * *",
@@ -175,14 +175,14 @@ describe("Scheduled Tasks REST API", () => {
 
     test("should filter scheduled tasks by enabled=true", async () => {
       // Create enabled and disabled schedules
-      createScheduledTask({
+      await createScheduledTask({
         name: "api-filter-enabled-1",
         intervalMs: 60000,
         taskTemplate: "Enabled task",
         enabled: true,
       });
 
-      createScheduledTask({
+      await createScheduledTask({
         name: "api-filter-disabled-1",
         intervalMs: 60000,
         taskTemplate: "Disabled task",
@@ -217,7 +217,7 @@ describe("Scheduled Tasks REST API", () => {
     });
 
     test("should filter scheduled tasks by name (partial match)", async () => {
-      createScheduledTask({
+      await createScheduledTask({
         name: "unique-api-search-xyz",
         intervalMs: 60000,
         taskTemplate: "Unique search task",
@@ -234,14 +234,14 @@ describe("Scheduled Tasks REST API", () => {
     });
 
     test("should combine enabled and name filters", async () => {
-      createScheduledTask({
+      await createScheduledTask({
         name: "combo-filter-active",
         intervalMs: 60000,
         taskTemplate: "Active combo task",
         enabled: true,
       });
 
-      createScheduledTask({
+      await createScheduledTask({
         name: "combo-filter-inactive",
         intervalMs: 60000,
         taskTemplate: "Inactive combo task",
@@ -270,7 +270,7 @@ describe("Scheduled Tasks REST API", () => {
     });
 
     test("should return scheduled task with all fields populated", async () => {
-      createScheduledTask({
+      await createScheduledTask({
         name: "full-fields-test",
         description: "Schedule with all fields",
         cronExpression: "30 14 * * 1-5",
@@ -309,21 +309,21 @@ describe("Scheduled Tasks REST API", () => {
     });
 
     test("should return schedules sorted by last run time", async () => {
-      const older = createScheduledTask({
+      const older = await createScheduledTask({
         name: "older-run-schedule",
         intervalMs: 60000,
         taskTemplate: "Older task",
         enabled: true,
       });
-      updateScheduledTask(older.id, { lastRunAt: "2026-01-01T00:00:00.000Z" });
+      await updateScheduledTask(older.id, { lastRunAt: "2026-01-01T00:00:00.000Z" });
 
-      const newer = createScheduledTask({
+      const newer = await createScheduledTask({
         name: "newer-run-schedule",
         intervalMs: 60000,
         taskTemplate: "Newer task",
         enabled: true,
       });
-      updateScheduledTask(newer.id, { lastRunAt: "2026-01-02T00:00:00.000Z" });
+      await updateScheduledTask(newer.id, { lastRunAt: "2026-01-02T00:00:00.000Z" });
 
       const response = await fetch(`${baseUrl}/api/scheduled-tasks`);
 

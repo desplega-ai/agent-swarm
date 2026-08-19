@@ -146,9 +146,9 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
@@ -189,7 +189,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Check if new name conflicts with existing
       if (newName && newName !== schedule.name) {
-        const existing = getScheduledTaskByName(newName);
+        const existing = await getScheduledTaskByName(newName);
         if (existing) {
           return toolErr(`Schedule with name "${newName}" already exists.`);
         }
@@ -296,7 +296,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
           undefined;
         if (key !== undefined) updateData.key = authorizeAssetKeyWrite(key, updatedBy);
-        const updated = updateScheduledTask(schedule.id, { ...updateData, updatedBy });
+        const updated = await updateScheduledTask(schedule.id, { ...updateData, updatedBy });
 
         if (!updated) {
           return toolErr("Failed to update schedule.");

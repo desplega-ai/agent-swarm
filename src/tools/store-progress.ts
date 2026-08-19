@@ -427,7 +427,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             if (retrievals.length === 0) return;
 
             const retrievedMemoryIds = retrievals.map((r) => r.memoryId);
-            const logs = getSessionLogsByTaskId(taskId);
+            const logs = await getSessionLogsByTaskId(taskId);
             const evidence = logs.map((l) => l.content).join("\n");
 
             await runServerRaters({

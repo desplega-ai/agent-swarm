@@ -150,8 +150,8 @@ afterAll(async () => {
 });
 
 describe("scheduled_tasks DB layer — targetType", () => {
-  test("defaults to targetType='agent-task' and preserves back-compat rows", () => {
-    const schedule = createScheduledTask({
+  test("defaults to targetType='agent-task' and preserves back-compat rows", async () => {
+    const schedule = await createScheduledTask({
       name: `db-default-${crypto.randomUUID()}`,
       taskTemplate: "Do the thing",
       intervalMs: 60_000,
@@ -161,9 +161,9 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.scriptName).toBeUndefined();
   });
 
-  test("persists targetType='workflow' with workflowId, no taskTemplate required", () => {
+  test("persists targetType='workflow' with workflowId, no taskTemplate required", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `db-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -173,13 +173,13 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.workflowId).toBe(wf.id);
     expect(schedule.taskTemplate).toBeUndefined();
 
-    const reloaded = getScheduledTaskById(schedule.id);
+    const reloaded = await getScheduledTaskById(schedule.id);
     expect(reloaded?.targetType).toBe("workflow");
     expect(reloaded?.workflowId).toBe(wf.id);
   });
 
-  test("persists targetType='script' with scriptName + scriptArgs", () => {
-    const schedule = createScheduledTask({
+  test("persists targetType='script' with scriptName + scriptArgs", async () => {
+    const schedule = await createScheduledTask({
       name: `db-script-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -206,15 +206,15 @@ describe("scheduled_tasks DB layer — targetType", () => {
     ).toThrow();
   });
 
-  test("updateScheduledTask can switch targetType and clear the previous target field", () => {
+  test("updateScheduledTask can switch targetType and clear the previous target field", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `db-switch-${crypto.randomUUID()}`,
       taskTemplate: "Original template",
       intervalMs: 60_000,
     });
-    updateScheduledTask(schedule.id, { targetType: "workflow", workflowId: wf.id });
-    const updated = getScheduledTaskById(schedule.id);
+    await updateScheduledTask(schedule.id, { targetType: "workflow", workflowId: wf.id });
+    const updated = await getScheduledTaskById(schedule.id);
     expect(updated?.targetType).toBe("workflow");
     expect(updated?.workflowId).toBe(wf.id);
     // taskTemplate isn't auto-cleared by the DB layer (callers control that);
@@ -226,7 +226,7 @@ describe("scheduled_tasks DB layer — targetType", () => {
 describe("dispatchScheduleTarget — workflow target", () => {
   test("triggers the workflow directly and returns its run ID (no implicit-binding lookup)", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -246,7 +246,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
       { nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] },
       { enabled: false },
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-disabled-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -257,7 +257,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
   });
 
   test("throws when workflowId does not resolve to a real workflow", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-missing-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -274,7 +274,7 @@ describe("dispatchScheduleTarget — script target", () => {
       "schedule-target-type-echo",
       `export default async (args) => ({ received: args });`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -326,7 +326,7 @@ describe("dispatchScheduleTarget — script target", () => {
         return { ok: true };
       };`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-ctx-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -339,7 +339,7 @@ describe("dispatchScheduleTarget — script target", () => {
   }, 15_000);
 
   test("throws a clear error when the script does not exist", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-missing-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -355,7 +355,7 @@ describe("dispatchScheduleTarget — script target", () => {
       "schedule-target-type-throws",
       `export default async () => { throw new Error("boom"); };`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-throws-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -494,7 +494,7 @@ describe("POST /api/schedules — targetType validation", () => {
 
 describe("PUT /api/schedules/{id} — targetType validation", () => {
   test("rejects switching to targetType='workflow' without a workflowId", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `http-put-wf-missing-${crypto.randomUUID()}`,
       taskTemplate: "Original",
       intervalMs: 60_000,
@@ -506,7 +506,7 @@ describe("PUT /api/schedules/{id} — targetType validation", () => {
 
   test("accepts switching to targetType='workflow' with a valid workflowId", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `http-put-wf-ok-${crypto.randomUUID()}`,
       taskTemplate: "Original",
       intervalMs: 60_000,

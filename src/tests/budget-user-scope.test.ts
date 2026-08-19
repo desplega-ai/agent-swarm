@@ -75,7 +75,7 @@ afterEach(() => {
   __resetKillSwitchWarnedForTests();
 });
 
-function insertUserTaskSpend(
+async function insertUserTaskSpend(
   userId: string,
   totalCostUsd: number,
   createdAt = `${TODAY}T12:00:00.000Z`,
@@ -84,7 +84,7 @@ function insertUserTaskSpend(
     requestedByUserId: userId,
     status: "unassigned",
   });
-  const cost = createSessionCost({
+  const cost = await createSessionCost({
     sessionId: `sess-${crypto.randomUUID()}`,
     taskId: task.id,
     agentId: "agent-1",
@@ -219,17 +219,17 @@ async function callPoll(agentId: string): Promise<{
 }
 
 describe("user budget scope", () => {
-  test("getDailySpendForUser sums only costs for that user's tasks on that UTC day", () => {
+  test("getDailySpendForUser sums only costs for that user's tasks on that UTC day", async () => {
     const userA = createUser({ name: "User A" });
     const userB = createUser({ name: "User B" });
 
-    insertUserTaskSpend(userA.id, 1.25);
-    insertUserTaskSpend(userA.id, 2.75);
-    insertUserTaskSpend(userA.id, 99, "2026-04-27T23:59:59.999Z");
-    insertUserTaskSpend(userB.id, 10);
+    await insertUserTaskSpend(userA.id, 1.25);
+    await insertUserTaskSpend(userA.id, 2.75);
+    await insertUserTaskSpend(userA.id, 99, "2026-04-27T23:59:59.999Z");
+    await insertUserTaskSpend(userB.id, 10);
 
     const unownedTask = createTaskExtended("unowned", { status: "unassigned" });
-    createSessionCost({
+    await createSessionCost({
       sessionId: `sess-${crypto.randomUUID()}`,
       taskId: unownedTask.id,
       agentId: "agent-1",
@@ -243,10 +243,10 @@ describe("user budget scope", () => {
     expect(getDailySpendForUser(userB.id, TODAY)).toBe(10);
   });
 
-  test("canClaim refuses with cause='user' when requested user's spend is at the cap", () => {
+  test("canClaim refuses with cause='user' when requested user's spend is at the cap", async () => {
     const user = createUser({ name: "Budgeted User" });
     upsertBudget("user", user.id, 2);
-    insertUserTaskSpend(user.id, 2);
+    await insertUserTaskSpend(user.id, 2);
 
     const result = canClaim("agent-1", NOW, user.id);
 
@@ -259,22 +259,22 @@ describe("user budget scope", () => {
     expect(result.globalSpend).toBeUndefined();
   });
 
-  test("canClaim allows user-scoped tasks when user spend is below the cap", () => {
+  test("canClaim allows user-scoped tasks when user spend is below the cap", async () => {
     const user = createUser({ name: "Budgeted User" });
     upsertBudget("user", user.id, 2);
-    insertUserTaskSpend(user.id, 1.99);
+    await insertUserTaskSpend(user.id, 1.99);
 
     const result = canClaim("agent-1", NOW, user.id);
 
     expect(result.allowed).toBe(true);
   });
 
-  test("agent and global gates keep their existing precedence", () => {
+  test("agent and global gates keep their existing precedence", async () => {
     const user = createUser({ name: "Budgeted User" });
     upsertBudget("global", "", 1);
     upsertBudget("agent", "agent-1", 1);
     upsertBudget("user", user.id, 1);
-    insertUserTaskSpend(user.id, 1);
+    await insertUserTaskSpend(user.id, 1);
 
     const globalResult = canClaim("agent-1", NOW, user.id);
     expect(globalResult.allowed).toBe(false);
@@ -330,7 +330,7 @@ describe("user budget scope", () => {
       const taskId = payload.result.structuredContent.task.id;
       expect(payload.result.structuredContent.task.requestedByUserId).toBe(user.id);
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: `sess-${crypto.randomUUID()}`,
         taskId,
         agentId: worker.id,

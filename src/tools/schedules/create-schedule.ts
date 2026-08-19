@@ -217,7 +217,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       }
 
       // Check for duplicate name
-      const existing = getScheduledTaskByName(name);
+      const existing = await getScheduledTaskByName(name);
       if (existing) {
         return toolErr(`Schedule with name "${name}" already exists.`);
       }
@@ -274,7 +274,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
           undefined;
         const assetKey = key ? authorizeAssetKeyWrite(key, createdBy) : undefined;
 
-        const schedule = createScheduledTask({
+        const schedule = await createScheduledTask({
           key: assetKey,
           name,
           taskTemplate,

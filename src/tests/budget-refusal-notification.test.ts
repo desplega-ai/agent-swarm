@@ -103,8 +103,8 @@ function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd
     .run(scope, scopeId, dailyBudgetUsd, now, now);
 }
 
-function insertSpend(agentId: string, totalCostUsd: number): void {
-  createSessionCost({
+async function insertSpend(agentId: string, totalCostUsd: number): Promise<void> {
+  await createSessionCost({
     sessionId: `sess-${crypto.randomUUID()}`,
     agentId,
     totalCostUsd,
@@ -157,7 +157,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     const lead = createAgent({ name: "lead-1", isLead: true, status: "idle", maxTasks: 5 });
     const worker = createAgent({ name: "worker-1", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05);
+    await insertSpend(worker.id, 0.05);
 
     const parentTask = createTaskExtended("over-budget task", {
       agentId: worker.id,
@@ -193,7 +193,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     createAgent({ name: "lead-2", isLead: true, status: "idle", maxTasks: 5 });
     const worker = createAgent({ name: "worker-2", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.5);
+    await insertSpend(worker.id, 0.5);
 
     const parentTask = createTaskExtended("dedup target", { agentId: worker.id });
 
@@ -213,7 +213,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     createAgent({ name: "lead-3", isLead: true, status: "idle", maxTasks: 5 });
     const worker = createAgent({ name: "worker-3", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05);
+    await insertSpend(worker.id, 0.05);
 
     const parentTask = createTaskExtended("audit-trail task", { agentId: worker.id });
 
@@ -232,7 +232,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     createAgent({ name: "lead-4", isLead: true, status: "idle", maxTasks: 5 });
     const worker = createAgent({ name: "worker-4", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05);
+    await insertSpend(worker.id, 0.05);
 
     const parentTask = createTaskExtended("rollover task", { agentId: worker.id });
 
@@ -266,7 +266,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     createAgent({ name: "lead-5", isLead: true, status: "idle", maxTasks: 5 });
     const worker = createAgent({ name: "worker-5", isLead: false, status: "idle", maxTasks: 1 });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05);
+    await insertSpend(worker.id, 0.05);
 
     const parentTask = createTaskExtended("event-bus task", { agentId: worker.id });
 
@@ -304,7 +304,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       maxTasks: 1,
     });
     insertBudget("agent", worker.id, 0.01);
-    insertSpend(worker.id, 0.05);
+    await insertSpend(worker.id, 0.05);
 
     const parentTask = createTaskExtended("no-lead task", { agentId: worker.id });
 

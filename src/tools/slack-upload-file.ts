@@ -175,7 +175,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
 
       // Determine Slack context from inbox message, task, or direct params
       if (inboxMessageId) {
-        const inboxMsg = getInboxMessageById(inboxMessageId);
+        const inboxMsg = await getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
           return toolErr("Inbox message not found.");
         }

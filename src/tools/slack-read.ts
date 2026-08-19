@@ -90,7 +90,7 @@ export const registerSlackReadTool = (server: McpServer) => {
 
       // Determine Slack context from inbox message or task
       if (inboxMessageId) {
-        const inboxMsg = getInboxMessageById(inboxMessageId);
+        const inboxMsg = await getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
           return toolErr("Inbox message not found.", { data: { messages: [] } });
         }

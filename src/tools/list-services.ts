@@ -59,7 +59,7 @@ export const registerListServicesTool = (server: McpServer) => {
       }
 
       try {
-        let services = getAllServices({
+        let services = await getAllServices({
           agentId,
           name,
           status,

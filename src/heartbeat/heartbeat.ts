@@ -970,10 +970,10 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.reviewingTasks = await releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.mentionProcessing = releaseStaleMentionProcessing(
+  findings.staleCleanup.mentionProcessing = await releaseStaleMentionProcessing(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
+  findings.staleCleanup.inboxProcessing = await releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
   // DES-523 Phase 3: escalate pinned crash-recovery resumes that were never

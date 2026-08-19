@@ -42,7 +42,7 @@ afterAll(() => {
 });
 
 describe("Trigger Claiming - Inbox Messages", () => {
-  test("claimInboxMessages marks messages as processing atomically", () => {
+  test("claimInboxMessages marks messages as processing atomically", async () => {
     const agent = createAgent({
       name: "lead-agent",
       isLead: true,
@@ -51,11 +51,11 @@ describe("Trigger Claiming - Inbox Messages", () => {
     });
 
     // Create 5 inbox messages
-    const msg1 = createInboxMessage(agent.id, "Message 1");
-    const msg2 = createInboxMessage(agent.id, "Message 2");
-    const msg3 = createInboxMessage(agent.id, "Message 3");
-    const msg4 = createInboxMessage(agent.id, "Message 4");
-    const msg5 = createInboxMessage(agent.id, "Message 5");
+    const msg1 = await createInboxMessage(agent.id, "Message 1");
+    const msg2 = await createInboxMessage(agent.id, "Message 2");
+    const msg3 = await createInboxMessage(agent.id, "Message 3");
+    const msg4 = await createInboxMessage(agent.id, "Message 4");
+    const msg5 = await createInboxMessage(agent.id, "Message 5");
 
     // All should be unread
     expect(msg1.status).toBe("unread");
@@ -65,7 +65,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
     expect(msg5.status).toBe("unread");
 
     // Claim messages
-    const claimed = claimInboxMessages(agent.id, 5);
+    const claimed = await claimInboxMessages(agent.id, 5);
 
     // Should claim all 5
     expect(claimed.length).toBe(5);
@@ -76,11 +76,11 @@ describe("Trigger Claiming - Inbox Messages", () => {
     }
 
     // Verify in database
-    const dbMsg1 = getInboxMessageById(msg1.id);
+    const dbMsg1 = await getInboxMessageById(msg1.id);
     expect(dbMsg1?.status).toBe("processing");
   });
 
-  test("concurrent claims do not return duplicate messages", () => {
+  test("concurrent claims do not return duplicate messages", async () => {
     const agent = createAgent({
       name: "concurrent-agent",
       isLead: true,
@@ -89,14 +89,14 @@ describe("Trigger Claiming - Inbox Messages", () => {
     });
 
     // Create 3 messages
-    createInboxMessage(agent.id, "Message A");
-    createInboxMessage(agent.id, "Message B");
-    createInboxMessage(agent.id, "Message C");
+    await createInboxMessage(agent.id, "Message A");
+    await createInboxMessage(agent.id, "Message B");
+    await createInboxMessage(agent.id, "Message C");
 
     // Simulate concurrent polls
-    const claim1 = claimInboxMessages(agent.id, 5);
-    const claim2 = claimInboxMessages(agent.id, 5);
-    const claim3 = claimInboxMessages(agent.id, 5);
+    const claim1 = await claimInboxMessages(agent.id, 5);
+    const claim2 = await claimInboxMessages(agent.id, 5);
+    const claim3 = await claimInboxMessages(agent.id, 5);
 
     // First claim should get all messages
     expect(claim1.length).toBe(3);
@@ -111,7 +111,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
     expect(allIds.length).toBe(uniqueIds.size);
   });
 
-  test("claimInboxMessages respects limit parameter", () => {
+  test("claimInboxMessages respects limit parameter", async () => {
     const agent = createAgent({
       name: "limit-agent",
       isLead: true,
@@ -121,20 +121,20 @@ describe("Trigger Claiming - Inbox Messages", () => {
 
     // Create 10 messages
     for (let i = 0; i < 10; i++) {
-      createInboxMessage(agent.id, `Message ${i}`);
+      await createInboxMessage(agent.id, `Message ${i}`);
     }
 
     // Claim only 3
-    const claimed = claimInboxMessages(agent.id, 3);
+    const claimed = await claimInboxMessages(agent.id, 3);
 
     expect(claimed.length).toBe(3);
 
     // Should have 7 remaining unread
-    const remaining = claimInboxMessages(agent.id, 10);
+    const remaining = await claimInboxMessages(agent.id, 10);
     expect(remaining.length).toBe(7);
   });
 
-  test("markInboxMessageResponded accepts processing status", () => {
+  test("markInboxMessageResponded accepts processing status", async () => {
     const agent = createAgent({
       name: "respond-agent",
       isLead: true,
@@ -142,21 +142,21 @@ describe("Trigger Claiming - Inbox Messages", () => {
       capabilities: [],
     });
 
-    const _msg = createInboxMessage(agent.id, "Test message");
+    const _msg = await createInboxMessage(agent.id, "Test message");
 
     // Claim it (sets to processing)
-    const claimed = claimInboxMessages(agent.id, 1);
+    const claimed = await claimInboxMessages(agent.id, 1);
     expect(claimed[0].status).toBe("processing");
 
     // Mark as responded - should work with processing status
-    const responded = markInboxMessageResponded(claimed[0].id, "Response text");
+    const responded = await markInboxMessageResponded(claimed[0].id, "Response text");
 
     expect(responded).not.toBeNull();
     expect(responded?.status).toBe("responded");
     expect(responded?.responseText).toBe("Response text");
   });
 
-  test("markInboxMessageDelegated accepts processing status", () => {
+  test("markInboxMessageDelegated accepts processing status", async () => {
     const agent = createAgent({
       name: "delegate-agent",
       isLead: true,
@@ -164,17 +164,17 @@ describe("Trigger Claiming - Inbox Messages", () => {
       capabilities: [],
     });
 
-    const _msg = createInboxMessage(agent.id, "Test message");
+    const _msg = await createInboxMessage(agent.id, "Test message");
 
     // Create a task to delegate to
     const task = createTaskExtended("Delegated task", { agentId: agent.id });
 
     // Claim it (sets to processing)
-    const claimed = claimInboxMessages(agent.id, 1);
+    const claimed = await claimInboxMessages(agent.id, 1);
     expect(claimed[0].status).toBe("processing");
 
     // Mark as delegated - should work with processing status
-    const delegated = markInboxMessageDelegated(claimed[0].id, task.id);
+    const delegated = await markInboxMessageDelegated(claimed[0].id, task.id);
 
     expect(delegated).not.toBeNull();
     expect(delegated?.status).toBe("delegated");
@@ -190,8 +190,8 @@ describe("Trigger Claiming - Inbox Messages", () => {
     });
 
     // Create and claim a message
-    createInboxMessage(agent.id, "Stale message");
-    const claimed = claimInboxMessages(agent.id, 1);
+    await createInboxMessage(agent.id, "Stale message");
+    const claimed = await claimInboxMessages(agent.id, 1);
 
     expect(claimed[0].status).toBe("processing");
 
@@ -200,22 +200,22 @@ describe("Trigger Claiming - Inbox Messages", () => {
 
     // Release stale messages with timeout = 0 (any age)
     // Note: This will release ALL processing messages, not just this agent's
-    const releasedCount = releaseStaleProcessingInbox(0);
+    const releasedCount = await releaseStaleProcessingInbox(0);
 
     // Should have released at least 1 message (possibly more from other tests)
     expect(releasedCount).toBeGreaterThanOrEqual(1);
 
     // Message should be back to unread
-    const msg = getInboxMessageById(claimed[0].id);
+    const msg = await getInboxMessageById(claimed[0].id);
     expect(msg?.status).toBe("unread");
 
     // Should be claimable again
-    const reclaimed = claimInboxMessages(agent.id, 1);
+    const reclaimed = await claimInboxMessages(agent.id, 1);
     expect(reclaimed.length).toBe(1);
     expect(reclaimed[0].id).toBe(claimed[0].id);
   });
 
-  test("claimInboxMessages returns empty array when no messages", () => {
+  test("claimInboxMessages returns empty array when no messages", async () => {
     const agent = createAgent({
       name: "empty-agent",
       isLead: true,
@@ -223,11 +223,11 @@ describe("Trigger Claiming - Inbox Messages", () => {
       capabilities: [],
     });
 
-    const claimed = claimInboxMessages(agent.id, 5);
+    const claimed = await claimInboxMessages(agent.id, 5);
     expect(claimed.length).toBe(0);
   });
 
-  test("claimed messages maintain order (oldest first)", () => {
+  test("claimed messages maintain order (oldest first)", async () => {
     const agent = createAgent({
       name: "order-agent",
       isLead: true,
@@ -236,12 +236,12 @@ describe("Trigger Claiming - Inbox Messages", () => {
     });
 
     // Create messages with small delays to ensure different timestamps
-    const _msg1 = createInboxMessage(agent.id, "First");
+    const _msg1 = await createInboxMessage(agent.id, "First");
     // Small delay
-    const _msg2 = createInboxMessage(agent.id, "Second");
-    const _msg3 = createInboxMessage(agent.id, "Third");
+    const _msg2 = await createInboxMessage(agent.id, "Second");
+    const _msg3 = await createInboxMessage(agent.id, "Third");
 
-    const claimed = claimInboxMessages(agent.id, 3);
+    const claimed = await claimInboxMessages(agent.id, 3);
 
     // Should be in creation order (oldest first)
     expect(claimed[0].content).toBe("First");
@@ -249,7 +249,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
     expect(claimed[2].content).toBe("Third");
   });
 
-  test("only unread messages are claimable", () => {
+  test("only unread messages are claimable", async () => {
     const agent = createAgent({
       name: "filter-agent",
       isLead: true,
@@ -257,17 +257,17 @@ describe("Trigger Claiming - Inbox Messages", () => {
       capabilities: [],
     });
 
-    const _msg1 = createInboxMessage(agent.id, "Unread 1");
-    const _msg2 = createInboxMessage(agent.id, "Unread 2");
-    const _msg3 = createInboxMessage(agent.id, "Unread 3");
+    const _msg1 = await createInboxMessage(agent.id, "Unread 1");
+    const _msg2 = await createInboxMessage(agent.id, "Unread 2");
+    const _msg3 = await createInboxMessage(agent.id, "Unread 3");
 
     // Claim and respond to msg2
-    claimInboxMessages(agent.id, 1); // Claims msg1
-    const claim2 = claimInboxMessages(agent.id, 1); // Claims msg2
-    markInboxMessageResponded(claim2[0].id, "Done");
+    await claimInboxMessages(agent.id, 1); // Claims msg1
+    const claim2 = await claimInboxMessages(agent.id, 1); // Claims msg2
+    await markInboxMessageResponded(claim2[0].id, "Done");
 
     // Now try to claim again - should only get msg3
-    const remaining = claimInboxMessages(agent.id, 10);
+    const remaining = await claimInboxMessages(agent.id, 10);
     expect(remaining.length).toBe(1);
     expect(remaining[0].content).toBe("Unread 3");
   });
@@ -518,7 +518,7 @@ describe("Trigger Claiming - Mentions", () => {
     expect(claim2.length).toBe(0);
 
     // Release processing
-    releaseMentionProcessing(agent.id, [channel.id]);
+    await releaseMentionProcessing(agent.id, [channel.id]);
 
     // Now should be claimable again (but no NEW mentions, so count depends on read state)
     // Actually, since we didn't mark as read, the same mentions should still be there
@@ -546,7 +546,7 @@ describe("Trigger Claiming - Mentions", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Release stale (timeout = 0 means any age)
-    const released = releaseStaleMentionProcessing(0);
+    const released = await releaseStaleMentionProcessing(0);
     expect(released).toBeGreaterThanOrEqual(1);
 
     // Should be claimable again
@@ -582,7 +582,7 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Mark as read BEFORE claiming
-    updateReadState(agent.id, channel.id);
+    await updateReadState(agent.id, channel.id);
 
     // Try to claim - should get nothing (already read)
     const claimed = claimMentions(agent.id);
@@ -611,8 +611,8 @@ describe("Trigger Claiming - Mentions", () => {
     expect(poll2.length).toBe(0);
 
     // Agent marks as read and releases
-    updateReadState(agent.id, channel.id);
-    releaseMentionProcessing(agent.id, [channel.id]);
+    await updateReadState(agent.id, channel.id);
+    await releaseMentionProcessing(agent.id, [channel.id]);
 
     // Poll 3: Nothing (no NEW unread mentions)
     const poll3 = claimMentions(agent.id);

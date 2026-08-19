@@ -186,7 +186,7 @@ export async function dispatchScheduleTarget(
  */
 async function recoverMissedSchedules(): Promise<void> {
   const now = new Date();
-  const dueSchedules = getDueScheduledTasks();
+  const dueSchedules = await getDueScheduledTasks();
 
   for (const schedule of dueSchedules) {
     if (!schedule.nextRunAt) continue;
@@ -204,7 +204,7 @@ async function recoverMissedSchedules(): Promise<void> {
 
       // Update schedule state regardless of workflow/task path
       if (schedule.scheduleType === "one_time") {
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: null,
           enabled: false,
@@ -212,7 +212,7 @@ async function recoverMissedSchedules(): Promise<void> {
         });
       } else {
         const nextRun = calculateNextRun(schedule, now);
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: nextRun,
           lastUpdatedAt: now.toISOString(),
@@ -294,7 +294,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     // Update schedule state regardless of workflow/task path
     const now = new Date().toISOString();
     if (schedule.scheduleType === "one_time") {
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: null,
         enabled: false,
@@ -306,7 +306,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
     } else {
       const nextRun = calculateNextRun(schedule, new Date());
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: nextRun,
         lastUpdatedAt: now,
@@ -361,7 +361,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Backing off "${schedule.name}" for ${backoff / 1000}s`);
     }
 
-    updateScheduledTask(schedule.id, updates);
+    await updateScheduledTask(schedule.id, updates);
     telemetry.schedule("error", {
       scheduleType: schedule.scheduleType,
       triggeredWorkflows,
@@ -424,7 +424,7 @@ async function processSchedules(): Promise<void> {
   isProcessing = true;
 
   try {
-    const dueSchedules = getDueScheduledTasks();
+    const dueSchedules = await getDueScheduledTasks();
 
     for (const schedule of dueSchedules) {
       try {
@@ -456,7 +456,7 @@ export function stopScheduler(): void {
  * @param scheduleId The ID of the schedule to run
  */
 export async function runScheduleNow(scheduleId: string): Promise<void> {
-  const schedule = getScheduledTaskById(scheduleId);
+  const schedule = await getScheduledTaskById(scheduleId);
   if (!schedule) {
     throw new Error(`Schedule not found: ${scheduleId}`);
   }
@@ -469,7 +469,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
   // Update schedule state
   const now = new Date().toISOString();
   if (schedule.scheduleType === "one_time") {
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       nextRunAt: null,
       enabled: false,
@@ -480,7 +480,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     );
   } else {
     // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       lastUpdatedAt: now,
     });

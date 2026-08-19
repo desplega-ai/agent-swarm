@@ -65,7 +65,7 @@ describe("Schedule HTTP triage tooling", () => {
   });
 
   test("PATCH /api/schedules/:id clears one field without restating the schedule", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `http-patch-schedule-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "keep me",
@@ -83,25 +83,25 @@ describe("Schedule HTTP triage tooling", () => {
     expect(body.model).toBeUndefined();
     expect(body.intervalMs).toBe(60000);
     expect(body.taskTemplate).toBe("keep me");
-    expect(getScheduledTaskById(schedule.id)?.model).toBeUndefined();
+    expect((await getScheduledTaskById(schedule.id))?.model).toBeUndefined();
   });
 
   test("GET /api/schedules filters by consecutive errors and last run status", async () => {
-    const ok = createScheduledTask({
+    const ok = await createScheduledTask({
       name: `http-schedule-ok-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "healthy",
     });
-    const failing = createScheduledTask({
+    const failing = await createScheduledTask({
       name: `http-schedule-failing-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "failing",
     });
-    updateScheduledTask(ok.id, {
+    await updateScheduledTask(ok.id, {
       lastRunAt: new Date(Date.now() - 120000).toISOString(),
       consecutiveErrors: 0,
     });
-    updateScheduledTask(failing.id, {
+    await updateScheduledTask(failing.id, {
       lastRunAt: new Date(Date.now() - 60000).toISOString(),
       consecutiveErrors: 2,
       lastErrorAt: new Date().toISOString(),

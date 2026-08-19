@@ -149,7 +149,7 @@ export const registerRegisterServiceTool = (server: McpServer) => {
         const safeArgs = validateArgs(args);
 
         // Upsert: create or update if exists
-        const service = upsertService(requestInfo.agentId, serviceName, {
+        const service = await upsertService(requestInfo.agentId, serviceName, {
           script: safeScript,
           port: servicePort,
           description,

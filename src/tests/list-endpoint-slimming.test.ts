@@ -169,30 +169,30 @@ describe("list-endpoint slimming", () => {
     expect(full?.body).toContain("x".repeat(5000));
   });
 
-  test("getScheduledTasks — slim swaps taskTemplate for a bounded preview", () => {
+  test("getScheduledTasks — slim swaps taskTemplate for a bounded preview", async () => {
     const template = "T".repeat(2000);
-    createScheduledTask({
+    await createScheduledTask({
       name: "Slim Schedule",
       taskTemplate: template,
       cronExpression: "0 9 * * 1",
       scheduleType: "recurring",
     });
 
-    const slim = getScheduledTasks(undefined, { slim: true });
+    const slim = await getScheduledTasks(undefined, { slim: true });
     const slimSched = slim.find((s) => s.name === "Slim Schedule");
     expect(slimSched).toBeDefined();
     expect("taskTemplate" in slimSched!).toBe(false);
     expect(slimSched?.taskTemplatePreview.length).toBeLessThan(template.length);
     expect(slimSched?.taskTemplatePreview.startsWith("T")).toBe(true);
 
-    const full = getScheduledTasks().find((s) => s.name === "Slim Schedule");
+    const full = (await getScheduledTasks()).find((s) => s.name === "Slim Schedule");
     expect(full?.taskTemplate).toBe(template);
   });
 
-  test("getAllTasks — slim truncates task text and drops heavy blobs", () => {
+  test("getAllTasks — slim truncates task text and drops heavy blobs", async () => {
     const longText = "Z".repeat(2000);
     const task = createTaskExtended(longText, { agentId: "slim-agent-1" });
-    createSessionCost({
+    await createSessionCost({
       sessionId: "slim-cost-session-1",
       taskId: task.id,
       agentId: "slim-agent-1",
@@ -201,7 +201,7 @@ describe("list-endpoint slimming", () => {
       numTurns: 1,
       model: "test-model",
     });
-    createSessionCost({
+    await createSessionCost({
       sessionId: "slim-cost-session-2",
       taskId: task.id,
       agentId: "slim-agent-1",
@@ -211,7 +211,7 @@ describe("list-endpoint slimming", () => {
       model: "test-model",
     });
 
-    const slim = getAllTasks({}, { slim: true });
+    const slim = await getAllTasks({}, { slim: true });
     const slimTask = slim.find((t) => t.task.startsWith("Z"));
     expect(slimTask).toBeDefined();
     expect(slimTask?.task.length).toBeLessThan(longText.length);
@@ -221,7 +221,7 @@ describe("list-endpoint slimming", () => {
     expect("providerMeta" in slimTask!).toBe(false);
     expect(slimTask?.totalCostUsd).toBeCloseTo(0.0168, 6);
 
-    const full = getAllTasks({}).find((t) => t.task === longText);
+    const full = (await getAllTasks({})).find((t) => t.task === longText);
     expect(full).toBeDefined();
     expect(full?.task).toBe(longText);
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
