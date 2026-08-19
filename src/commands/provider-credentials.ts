@@ -458,6 +458,7 @@ export async function reportCredStatus(
   apiUrl: string,
   apiKey: string,
   agentId: string,
+  runtimeInstanceId: string | undefined,
   credStatus: AgentCredStatus,
 ): Promise<void> {
   try {
@@ -466,6 +467,7 @@ export async function reportCredStatus(
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Agent-ID": agentId,
+        ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

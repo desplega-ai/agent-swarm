@@ -11,6 +11,7 @@
 import type { Agent, RuntimeInstance, RuntimeInstanceStatus, SwarmConfig } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
+  getActiveTaskCount,
   getAgentById,
   getDb,
   getSwarmConfigs,
@@ -124,6 +125,7 @@ interface RuntimeInstanceRow {
   agent_id: string;
   status: string;
   reported_slots: number;
+  credential_ready: number | null;
   metadata: string | null;
   last_seen_at: string;
   created_at: string;
@@ -146,6 +148,7 @@ function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
     agentId: row.agent_id,
     status: row.status as RuntimeInstanceStatus,
     reportedSlots: row.reported_slots,
+    credentialReady: row.credential_ready === null ? null : row.credential_ready === 1,
     metadata,
     lastSeenAt: row.last_seen_at,
     createdAt: row.created_at,
@@ -211,10 +214,10 @@ export function getRuntimeInstanceById(id: string): RuntimeInstance | null {
 /**
  * Refresh a live runtime instance's liveness from the worker's ping cadence.
  *
- * Matches only an `active` row owned by the pinging agent, so a ping can
- * neither resurrect a closed runtime nor reach another agent's row.
- * Registration stays the only writer of `active`. Returns false when nothing
- * matched, which callers use as the signal that the identity is not live.
+ * Matches only a row that is already live and owned by the caller, so worker
+ * traffic can refresh liveness but never resurrect a closed or expired
+ * runtime — registration stays the only path back to `active`. Returns false
+ * when nothing matched, which callers use as "this identity is not live".
  */
 export function touchRuntimeInstance(id: string, agentId: string): boolean {
   const result = getDb()
@@ -222,9 +225,9 @@ export function touchRuntimeInstance(id: string, agentId: string): boolean {
       `UPDATE runtime_instances
        SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND agent_id = ? AND status = 'active'`,
+       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
     )
-    .run(id, agentId);
+    .run(id, agentId, runtimeLivenessCutoff());
   return result.changes > 0;
 }
 
@@ -269,6 +272,63 @@ export function isRuntimeInstanceLive(id: string | undefined, agentId: string): 
     )
     .get(id, agentId, runtimeLivenessCutoff());
   return (row?.c ?? 0) > 0;
+}
+
+/**
+ * Record this runtime's credential readiness. Process-local by design: a
+ * sibling's state is never touched. Only a live runtime may report.
+ */
+export function setRuntimeCredentialReady(id: string, agentId: string, ready: boolean): boolean {
+  const result = getDb()
+    .prepare(
+      `UPDATE runtime_instances
+       SET credential_ready = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    )
+    .run(ready ? 1 : 0, id, agentId, runtimeLivenessCutoff());
+  return result.changes > 0;
+}
+
+/**
+ * Whether any live runtime can currently execute work. A runtime that never
+ * reported (NULL) counts as ready, so workers opting out of credential checks
+ * stay dispatchable.
+ */
+export function hasReadyLiveRuntime(agentId: string): boolean {
+  const row = getDb()
+    .prepare<{ c: number }, [string, string]>(
+      `SELECT COUNT(*) c FROM runtime_instances
+       WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?
+         AND (credential_ready IS NULL OR credential_ready = 1)`,
+    )
+    .get(agentId, runtimeLivenessCutoff());
+  return (row?.c ?? 0) > 0;
+}
+
+/**
+ * Recompute the logical agent's state from its live runtimes.
+ *
+ * Precedence: no live runtime wins (offline), then active work (busy), then
+ * credential availability, then idle. Aggregating here is what stops one
+ * process's report from overwriting a sibling's — a waiting runtime cannot
+ * park an agent a ready sibling is serving, and a ready one cannot pull a
+ * busy agent back to idle.
+ */
+export function reconcileAgentStatusFromRuntimes(agentId: string): void {
+  const agent = getAgentById(agentId);
+  if (!agent) return;
+  if (countActiveRuntimeInstancesForAgent(agentId) === 0) {
+    if (agent.status !== "offline") updateAgentStatus(agentId, "offline");
+    return;
+  }
+  if (!hasReadyLiveRuntime(agentId)) {
+    if (agent.status !== "waiting_for_credentials") {
+      updateAgentStatus(agentId, "waiting_for_credentials");
+    }
+    return;
+  }
+  const next = getActiveTaskCount(agentId) > 0 ? "busy" : "idle";
+  if (agent.status !== next) updateAgentStatus(agentId, next);
 }
 
 /**

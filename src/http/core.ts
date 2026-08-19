@@ -11,8 +11,8 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import {
-  countActiveRuntimeInstancesForAgent,
   markRuntimeInstanceOffline,
+  reconcileAgentStatusFromRuntimes,
   touchRuntimeInstance,
 } from "../be/multi-runtime";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
@@ -620,13 +620,11 @@ export async function handleCore(
       }
 
       if (multiRuntime && runtimeInstanceId) {
-        // One process exiting retires only its own runtime; the agent goes
-        // offline once none remain active. /close stays the sole writer of
-        // the agent's `offline` status.
+        // One process exiting retires only its own runtime; the logical state
+        // is then recomputed from whatever is left — offline when nothing is,
+        // otherwise reflecting the surviving runtimes' readiness and work.
         markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
-        if (countActiveRuntimeInstancesForAgent(agent.id) === 0) {
-          updateAgentStatus(agent.id, "offline");
-        }
+        reconcileAgentStatusFromRuntimes(agent.id);
       } else {
         // Legacy semantics, with or without a runtime header.
         updateAgentStatus(agent.id, "offline");

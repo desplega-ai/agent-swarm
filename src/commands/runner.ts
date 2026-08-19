@@ -4956,6 +4956,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             headers: {
               Authorization: `Bearer ${apiKey}`,
               "X-Agent-ID": agentId,
+              "X-Runtime-Instance-ID": runtimeInstanceId,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ ready: status.ready, missing: status.missing }),
@@ -4978,7 +4979,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     // *current* state.harnessProvider in case it flipped during the wait.
     try {
       const snapshot = await buildCredStatusReport(state.harnessProvider, process.env, {}, "boot");
-      await reportCredStatus(apiUrl, apiKey, agentId, snapshot);
+      await reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snapshot);
     } catch (err) {
       // Non-fatal — worker proceeds even if reporting fails.
       console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
@@ -5583,7 +5584,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (currentHarness !== cachedCredHarnessProvider) {
         cachedCredHarnessProvider = currentHarness;
         buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
           .catch((err) =>
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
           );
@@ -5599,7 +5600,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // account state. One bounded AWS round-trip per tick.
         lastBedrockRefreshAt = Date.now();
         buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
           .catch((err) =>
             console.warn(`[${role}] bedrock enumeration refresh failed (non-fatal): ${err}`),
           );

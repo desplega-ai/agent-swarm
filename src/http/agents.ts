@@ -14,6 +14,7 @@ import {
   resetEmptyPollCount,
   setAgentHarnessProvider,
   updateAgentActivity,
+  updateAgentCredentialMissing,
   updateAgentCredentialState,
   updateAgentCredStatus,
   updateAgentMaxTasks,
@@ -27,6 +28,8 @@ import { createEvent } from "../be/events";
 import {
   getRuntimeInstanceById,
   reconcileAgentMaxTasksPolicy,
+  reconcileAgentStatusFromRuntimes,
+  setRuntimeCredentialReady,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
 import { reasoningCapability } from "../providers/reasoning-effort";
@@ -52,8 +55,13 @@ import {
 } from "../utils/identity-field-budget";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { route } from "./route-def";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
+
+function singleHeaderValue(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -338,12 +346,14 @@ const updateAgentCredentialStatusRoute = route({
   summary: "Worker self-report of credential readiness (Phase 3 boot loop)",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
+  headers: runtimeInstanceHeader("report credential readiness"),
   body: credentialStatusBody,
   responses: {
     200: {
       description: "State updated; returns the agent row.",
       schema: AgentWithCapacitySchema,
     },
+    400: { description: "Missing X-Runtime-Instance-ID in multi-runtime mode" },
     404: { description: "Agent not found" },
   },
 });
@@ -880,14 +890,36 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    const agent =
-      parsed.body.ready !== undefined
-        ? (updateAgentCredentialState(
+    // Credential readiness is process-local. With several runtimes serving one
+    // agent, writing it straight onto the shared row lets the last reporter win
+    // — so the report is stored on its own runtime and the logical state is
+    // recomputed from all live runtimes.
+    const runtimeInstanceId = singleHeaderValue(req, "x-runtime-instance-id");
+    const multiRuntime = isMultiRuntimeEnabled();
+    // Only the readiness write is process-scoped; model/status metadata on this
+    // same endpoint stays agent-level and needs no runtime identity.
+    if (multiRuntime && parsed.body.ready !== undefined && !runtimeInstanceId) {
+      jsonError(res, "X-Runtime-Instance-ID is required when multi-runtime mode is enabled", 400);
+      return true;
+    }
+
+    let agent = existing;
+    if (parsed.body.ready !== undefined) {
+      if (multiRuntime && runtimeInstanceId) {
+        if (setRuntimeCredentialReady(runtimeInstanceId, parsed.params.id, parsed.body.ready)) {
+          updateAgentCredentialMissing(parsed.params.id, parsed.body.missing ?? null);
+          reconcileAgentStatusFromRuntimes(parsed.params.id);
+        }
+        agent = getAgentById(parsed.params.id) ?? existing;
+      } else {
+        agent =
+          updateAgentCredentialState(
             parsed.params.id,
             parsed.body.ready,
             parsed.body.missing ?? null,
-          ) ?? existing)
-        : existing;
+          ) ?? existing;
+      }
+    }
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;

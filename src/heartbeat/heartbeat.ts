@@ -36,7 +36,11 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
-import { agentsWithLiveRuntime, expireStaleRuntimeInstances } from "../be/multi-runtime";
+import {
+  agentsWithLiveRuntime,
+  countActiveRuntimeInstancesForAgent,
+  expireStaleRuntimeInstances,
+} from "../be/multi-runtime";
 import { promotePendingSteeringForTask } from "../be/steering";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -432,7 +436,7 @@ function remediateCrashedWorkerTask(
         `[Heartbeat] Workflow-step task ${task.id.slice(0, 8)} failed — engine will handle retry (${opts.shortLabel})`,
       );
       const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -452,7 +456,7 @@ function remediateCrashedWorkerTask(
         })`,
       );
       const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -471,7 +475,7 @@ function remediateCrashedWorkerTask(
         `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${RESUME_BUDGET_EXHAUSTED_REASON} (${opts.shortLabel})`,
       );
       const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -546,7 +550,7 @@ function remediateCrashedWorkerTask(
   if (opts.cleanupActiveSession) deleteActiveSession(task.id);
 
   const remaining = getActiveTaskCount(task.agentId);
-  if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+  if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
 }
 
 /**
@@ -631,7 +635,7 @@ export async function runRebootSweep(): Promise<void> {
 
       // Fix agent status
       if (getActiveTaskCount(task.agentId) === 0) {
-        updateAgentStatus(task.agentId, "idle");
+        restoreAgentIdleAfterRemediation(task.agentId);
       }
 
       // Don't retry system-generated heartbeat tasks
@@ -978,6 +982,16 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
       );
     }
   }
+}
+
+/**
+ * Return a remediated agent to idle — unless multi-runtime liveness says no
+ * process is serving it. Recovery still runs for the task; the agent just
+ * must not be advertised as available when nothing can poll for it.
+ */
+function restoreAgentIdleAfterRemediation(agentId: string): void {
+  if (isMultiRuntimeEnabled() && countActiveRuntimeInstancesForAgent(agentId) === 0) return;
+  updateAgentStatus(agentId, "idle");
 }
 
 /**

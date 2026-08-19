@@ -154,3 +154,26 @@ that reconnects is given no work.
   workers are rejected at registration and shutdown while it is on.
 - A runtime that dies is noticed at the next sweep after
   `RUNTIME_STALE_THRESHOLD_MIN`, not instantly.
+
+## Addendum — runtime-scoped readiness and liveness (same day)
+
+Re-run against the later head with `RUNTIME_STALE_THRESHOLD_MIN=1`, covering
+the state-isolation fixes. Same isolated setup, port 13902.
+
+Credential readiness, one `AGENT_ID` with runtimes A and B:
+
+| Step | Agent status | Live + ready runtimes |
+|---|---|---|
+| A reports ready, B reports waiting | idle | 1 |
+| A polls and takes offered work | idle | 1 |
+| B becomes ready while work is held | **busy** | 2 |
+| B back to waiting, A closes | **waiting_for_credentials** | 0 |
+| B closes | offline | 0 |
+
+B's waiting report never disabled A, and B's ready report did not pull the
+busy agent back to idle. Readiness fell back to B's state only once A was
+gone, and the last close still produced offline.
+
+Poll liveness: a runtime aged to 55s against the 60s cutoff was refreshed to
+0s by a single authenticated poll and survived the following sweep — so a
+worker inside the long-poll loop stays live without relying on ping timing.

@@ -27,7 +27,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
-import { isRuntimeInstanceLive } from "../be/multi-runtime";
+import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
@@ -276,8 +276,13 @@ export async function handlePoll(
         // A process whose runtime has been retired must not be handed work: it
         // would execute alongside whatever replaced it. Dispatch is gated on a
         // live runtime identity rather than on X-Agent-ID alone, which only
-        // names the logical agent.
-        if (isMultiRuntimeEnabled() && !isRuntimeInstanceLive(runtimeInstanceId, agent.id)) {
+        // names the logical agent. Polling is worker activity, so this also
+        // refreshes liveness — it cannot revive a retired runtime, since the
+        // update only matches one that is still live.
+        if (
+          isMultiRuntimeEnabled() &&
+          !(runtimeInstanceId && touchRuntimeInstance(runtimeInstanceId, agent.id))
+        ) {
           return { trigger: null };
         }
 

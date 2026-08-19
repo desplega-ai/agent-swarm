@@ -29,6 +29,7 @@ const RUNTIME_HEADER_OPERATIONS: Array<[string, string]> = [
   ["/ping", "post"],
   ["/close", "post"],
   ["/api/poll", "get"],
+  ["/api/agents/{id}/credential-status", "put"],
 ];
 
 describe("runtime identity header in OpenAPI", () => {
@@ -68,6 +69,11 @@ describe("runtime identity header in OpenAPI", () => {
         }
       }
     }
-    expect(withHeaders.sort()).toEqual(["GET /api/poll", "POST /close", "POST /ping"]);
+    expect(withHeaders.sort()).toEqual([
+      "GET /api/poll",
+      "POST /close",
+      "POST /ping",
+      "PUT /api/agents/{id}/credential-status",
+    ]);
   });
 });

@@ -31,15 +31,20 @@ flowchart TD
 ## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
 
 With multi-runtime mode enabled, one logical agent may be served by several
-worker processes, each recorded in `runtime_instances`. Every worker sends its
-per-boot `X-Runtime-Instance-ID` on `POST /ping` (the poll loop, ~2s), which
-refreshes that row's `last_seen_at`; `POST /close` retires just that row.
+worker processes, each recorded in `runtime_instances`. Workers send their per-boot `X-Runtime-Instance-ID` on `POST /ping` and on
+`GET /api/poll`; either refreshes that row's `last_seen_at`, so liveness
+tracks actual worker traffic rather than one endpoint's cadence — a worker
+sitting inside the long-poll loop keeps itself fresh. `POST /close` retires
+just that row. Neither can revive a retired or expired runtime: the refresh
+only matches a row that is already live, and registration is the sole path
+back to `active`.
 
 A crashed, OOM-killed, or network-partitioned process never reaches `/close`,
 so status alone would leave it `active` forever and keep its agent falsely
 available. Liveness is therefore the conjunction of `status = 'active'` and a
-`last_seen_at` newer than `RUNTIME_STALE_THRESHOLD_MIN` (default 5 min — 150×
-the ping cadence, so an idle-but-healthy worker is never expired):
+`last_seen_at` newer than `RUNTIME_STALE_THRESHOLD_MIN` (default 5 min, well
+above the worker's poll/ping traffic interval, so an idle-but-healthy worker
+is never expired):
 
 - `countActiveRuntimeInstancesForAgent` counts only live rows, so a surviving
   runtime's `/close` takes the agent offline immediately when its siblings are
@@ -49,6 +54,11 @@ the ping cadence, so an idle-but-healthy worker is never expired):
   agent the same sweep is about to mark offline, stranding it — nothing would
   be left to poll for it. `autoAssignPoolTasks` additionally skips agents that
   have runtime rows but none live.
+- Credential readiness is recorded per runtime, and the logical agent's status
+  is derived from its live runtimes: offline when none are live, otherwise
+  `waiting_for_credentials` only when no live runtime is ready, else the normal
+  busy/idle from active work. Task remediation follows the same rule — it never
+  returns an agent to idle while no runtime is serving it.
 - Expiry retires stale runtimes and, in the same transaction, deletes the
   sessions they owned and marks any agent with no live runtime left `offline`.
   Removing the sessions matters: a crashed process would otherwise leave one

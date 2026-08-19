@@ -1696,6 +1696,8 @@ export const RuntimeInstanceSchema = z
     status: RuntimeInstanceStatusSchema,
     /** Runtime-local concurrent task capacity, self-reported at registration. */
     reportedSlots: z.number().int(),
+    /** Process-local credential readiness; null when never reported. */
+    credentialReady: z.boolean().nullable().optional(),
     /** Provider-neutral metadata; unused in the initial slice. */
     metadata: z.record(z.string(), z.unknown()).nullable(),
     lastSeenAt: z.iso.datetime(),

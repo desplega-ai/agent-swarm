@@ -789,6 +789,19 @@ export function updateAgentCredentialState(
   return row ? rowToAgent(row) : null;
 }
 
+/**
+ * Record which env vars a worker is missing without touching status — the
+ * logical status is derived from runtime readiness in multi-runtime mode.
+ */
+export function updateAgentCredentialMissing(agentId: string, missing: string[] | null): void {
+  const json = missing && missing.length > 0 ? JSON.stringify(missing) : null;
+  getDb()
+    .prepare(
+      "UPDATE agents SET credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .run(json, agentId);
+}
+
 export function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
 ): Agent {

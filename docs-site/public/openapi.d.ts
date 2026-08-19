@@ -2726,7 +2726,10 @@ export interface paths {
         put: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to report credential readiness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2756,6 +2759,15 @@ export interface paths {
                                 available: number;
                             };
                         };
+                    };
+                };
+                /** @description Missing X-Runtime-Instance-ID in multi-runtime mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Agent not found */

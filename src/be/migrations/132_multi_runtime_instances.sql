@@ -21,6 +21,10 @@ CREATE TABLE runtime_instances (
   -- This runtime's own concurrent task capacity, self-reported at
   -- registration. Composes with, but is never an alias for, agents.maxTasks.
   reported_slots INTEGER NOT NULL DEFAULT 1,
+  -- Credential readiness is process-local: one runtime waiting on credentials
+  -- must not disable a ready sibling. NULL means "never reported" (e.g.
+  -- CRED_CHECK_DISABLE), which counts as ready so those workers stay usable.
+  credential_ready INTEGER,
   metadata       TEXT,
   last_seen_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
