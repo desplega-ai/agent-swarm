@@ -6960,11 +6960,12 @@ export function getSessionCostSummary(opts: {
 
   // Structurally-human-free: the swarm maintaining itself, with no human
   // requester by construction — heartbeat/boot-triage tasks, scheduled runs
-  // without a human creator, and `source='system'` follow-ups whose parent
-  // itself has no human requester. That classification propagates through
-  // descendants while they remain unattributed, so autonomous fan-out cannot
-  // leak back into the denominator. An explicitly attributed child is an
-  // independent handoff and stops propagation down that branch.
+  // without a human creator (including workflow roots launched by such a
+  // schedule), and `source='system'` follow-ups whose parent itself has no
+  // human requester. That classification propagates through descendants while
+  // they remain unattributed, so autonomous fan-out cannot leak back into the
+  // denominator. An explicitly attributed child is an independent handoff and
+  // stops propagation down that branch.
   const HUMAN_FREE_TASKS_CTE = `WITH RECURSIVE human_free_tasks(id) AS (
         SELECT task.id
         FROM agent_tasks task
@@ -6972,6 +6973,18 @@ export function getSessionCostSummary(opts: {
         WHERE COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
           OR COALESCE(task.tags, '[]') LIKE '%"heartbeat"%'
           OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
+          OR (
+            task.parentTaskId IS NULL
+            AND COALESCE(task.source, '') = 'workflow'
+            AND task.requestedByUserId IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workflow_runs run
+              WHERE run.id = task.workflowRunId
+                AND run.triggerType = 'schedule'
+                AND run.created_by IS NULL
+            )
+          )
           OR (
             COALESCE(task.source, '') = 'system'
             AND parent.id IS NOT NULL
@@ -9474,6 +9487,7 @@ type WorkflowRunRow = {
   id: string;
   workflowId: string;
   status: string;
+  triggerType: string;
   triggerData: string | null;
   context: string | null;
   error: string | null;
@@ -9501,17 +9515,19 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
 export function createWorkflowRun(data: {
   id: string;
   workflowId: string;
+  triggerType?: "schedule" | "manual" | "event" | "api";
   triggerData?: unknown;
   createdBy?: string;
 }): WorkflowRun {
   const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string, string | null, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string, string | null, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       data.id,
       data.workflowId,
+      data.triggerType ?? "manual",
       now,
       data.triggerData ? JSON.stringify(data.triggerData) : null,
       data.createdBy ?? null,

@@ -84,6 +84,30 @@ Unlike token rates — where a missing rate marks the whole row
 That asymmetry is deliberate (a small request fee shouldn't unprice an entire
 session) and is documented in the cost-and-context-computation guide.
 
+## Attribution reporting contract
+
+Usage reporting keeps total spend separate from the cost population that can
+truthfully carry a human requester:
+
+- `attributableCostUsd` is total cost minus structurally human-free work;
+  coverage is `attributedCostUsd / attributableCostUsd`.
+- `excludedCostUsd` and `excludedTaskCount` retain visibility into the removed
+  population. A stale requester id on structurally human-free work does not put
+  that cost back into either side of the coverage ratio.
+- Human-free seeds are the `heartbeat`, `heartbeat-checklist`, and
+  `boot-triage` task types; legacy JSON tag rows matched by the `heartbeat`
+  tags `LIKE` check; creatorless schedules (including their workflow roots);
+  and requester-less system follow-ups of requester-less parents.
+- The classification propagates through requester-less descendants. An
+  explicitly attributed child is a human handoff and stops propagation down
+  that branch.
+
+The per-person report uses the same requester data model without grouping the
+cost denominator or turning it into a leaderboard. Human-requested root tasks
+determine Problems Initiated and Problems Shipped; their full task trees
+determine Agents, Repos, and Surfaces Reached. Requester-less autonomous roots
+and heartbeat-classified roots are omitted, and the metrics remain separate.
+
 ## Provider pricing caveats
 
 - **Claude Sonnet 5 introductory rate:** Anthropic's pricing page lists

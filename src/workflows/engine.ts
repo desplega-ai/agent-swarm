@@ -79,6 +79,7 @@ export async function startWorkflowExecution(
     createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
+      triggerType: options.triggerType ?? "manual",
       triggerData,
       createdBy: options.requestedByUserId,
     });
@@ -94,6 +95,7 @@ export async function startWorkflowExecution(
   createWorkflowRun({
     id: runId,
     workflowId: workflow.id,
+    triggerType: options.triggerType ?? "manual",
     triggerData,
     createdBy: options.requestedByUserId,
   });

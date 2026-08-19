@@ -95,6 +95,39 @@ The OpenTelemetry counter `agentswarm.cost.drift.usd` records the absolute
 non-zero difference with a `drift_sign` attribute, making it the operational
 watchdog for stale adapter-local pricing or recompute drift.
 
+## Attribution coverage and autonomous work
+
+The usage summary separates total spend from spend that could truthfully be
+assigned to a person. `attributableCostUsd` is `totalCostUsd` minus the cost of
+structurally human-free work. Attribution coverage is therefore
+`attributedCostUsd / attributableCostUsd`, not attributed cost divided by all
+spend. The response also exposes `excludedCostUsd` and `excludedTaskCount` so
+the autonomous population remains visible rather than disappearing from the
+report.
+
+A task is structurally human-free when its stored task type is `heartbeat`,
+`heartbeat-checklist`, or `boot-triage`; when its stored JSON tags contain the
+`heartbeat` tag (including legacy rows found by the tags `LIKE` check); or when
+it is launched by a schedule with no human creator. The schedule rule covers
+both direct scheduled tasks and workflow roots whose run records that
+creatorless schedule in its trigger data. Requester-less `system` follow-ups of
+requester-less parents are also autonomous.
+
+That classification follows the task tree recursively while descendants have
+no human requester. This keeps autonomous fan-out out of the denominator, but
+an explicitly attributed child is treated as a human handoff and stops the
+classification along that branch. Structurally human-free rows are excluded
+from `attributedCostUsd` even if an old or inherited requester id remains on
+the row, keeping the numerator and denominator a consistent partition.
+
+The **By Person** view uses the same requester data model, but it is not a
+grouping of the cost denominator and does not run the coverage CTE. It reports
+work outcomes rather than a cost score: human-requested root tasks supply
+Problems Initiated and Problems Shipped, while each person's full task trees
+supply Agents Reached, Repos Reached, and Surfaces Reached. Requester-less
+autonomous roots and heartbeat-classified roots do not belong to a person. The
+metrics stay side by side and are never summed into a composite ranking.
+
 ## How the pricing table is populated
 
 The `pricing` table starts with a boot seed from the vendored models.dev snapshot at `src/be/modelsdev-cache.json` plus a small set of manual overrides for items models.dev doesn't carry. The committed snapshot is now fallback-only for pricing freshness: it gives a cold-start DB usable rows when models.dev is unavailable, while `src/be/pricing-refresh.ts` owns live price updates.

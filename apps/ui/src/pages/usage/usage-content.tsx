@@ -83,7 +83,10 @@ export function UsageContent() {
   });
   const { data: agents } = useAgents();
   const { data: users } = useUsers();
-  const { data: attributionRows } = useAttributionByPerson({ startDate });
+  const { data: attributionRows } = useAttributionByPerson({
+    startDate,
+    enabled: showAttributionByPerson,
+  });
 
   const agentMap = useMemo(() => {
     const m = new Map<string, string>();

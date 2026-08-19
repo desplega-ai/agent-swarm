@@ -5,9 +5,13 @@ import {
   closeDb,
   completeTask,
   createAgent,
+  createScheduledTask,
   createSessionCost,
   createTaskExtended,
   createUser,
+  createWorkflow,
+  createWorkflowRun,
+  deleteScheduledTask,
   getAllSessionCosts,
   getAttributionByPerson,
   getDashboardCostSummary,
@@ -973,6 +977,7 @@ describe("Session Costs API", () => {
     test("attributableCostUsd excludes structurally-human-free cost from the coverage denominator", () => {
       const agent = createAgent({ name: "Denominator Agent", isLead: false, status: "idle" });
       const user = createUser({ name: "Denominator Requester" });
+      const workflowUser = createUser({ name: "Workflow Schedule Requester" });
       const humanWork = createTaskExtended("Human-requested work", { requestedByUserId: user.id });
       // Structurally human-free: no human requester belongs on a heartbeat-checklist
       // task by construction, even though this row carries one (a stale/inherited
@@ -1004,6 +1009,64 @@ describe("Session Costs API", () => {
         source: "schedule",
         requestedByUserId: user.id,
       });
+      const workflow = createWorkflow({
+        name: `denominator-workflow-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const autonomousWorkflowSchedule = createScheduledTask({
+        name: `denominator-autonomous-workflow-schedule-${crypto.randomUUID()}`,
+        intervalMs: 60_000,
+        targetType: "workflow",
+        workflowId: workflow.id,
+      });
+      const autonomousWorkflowRun = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        triggerType: "schedule",
+        triggerData: { scheduleId: autonomousWorkflowSchedule.id },
+      });
+      const autonomousWorkflowRoot = createTaskExtended("Autonomous scheduled workflow root", {
+        source: "workflow",
+        workflowRunId: autonomousWorkflowRun.id,
+      });
+      const humanWorkflowSchedule = createScheduledTask({
+        name: `denominator-human-workflow-schedule-${crypto.randomUUID()}`,
+        intervalMs: 60_000,
+        targetType: "workflow",
+        workflowId: workflow.id,
+        createdBy: workflowUser.id,
+      });
+      const humanWorkflowRun = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        triggerType: "schedule",
+        triggerData: { scheduleId: humanWorkflowSchedule.id },
+        createdBy: workflowUser.id,
+      });
+      const humanWorkflowRoot = createTaskExtended("Human-created scheduled workflow root", {
+        source: "workflow",
+        workflowRunId: humanWorkflowRun.id,
+        requestedByUserId: workflowUser.id,
+      });
+      const manualWorkflowRun = createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: workflow.id,
+        // Caller-controlled trigger data can mimic the scheduled payload; the
+        // server-owned workflow_runs.triggerType must remain authoritative.
+        triggerData: {
+          triggerType: "schedule",
+          scheduleId: autonomousWorkflowSchedule.id,
+          scheduleName: autonomousWorkflowSchedule.name,
+          scheduleCreatedBy: null,
+          firedAt: new Date().toISOString(),
+        },
+      });
+      const manualWorkflowRoot = createTaskExtended("Requester-less manual workflow root", {
+        source: "workflow",
+        workflowRunId: manualWorkflowRun.id,
+      });
+      // Historical classification must not depend on the live schedule row.
+      expect(deleteScheduledTask(autonomousWorkflowSchedule.id)).toBe(true);
 
       createSessionCost({
         sessionId: "denom-human",
@@ -1077,24 +1140,57 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
+      createSessionCost({
+        sessionId: "denom-autonomous-workflow-root",
+        taskId: autonomousWorkflowRoot.id,
+        agentId: agent.id,
+        totalCostUsd: 10.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "denom-human-workflow-root",
+        taskId: humanWorkflowRoot.id,
+        agentId: agent.id,
+        totalCostUsd: 11.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "denom-manual-workflow-root",
+        taskId: manualWorkflowRoot.id,
+        agentId: agent.id,
+        totalCostUsd: 12.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
 
       const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "both" });
 
-      expect(summary.totals.totalCostUsd).toBeCloseTo(38.0, 5);
+      expect(summary.totals.totalCostUsd).toBeCloseTo(71.0, 5);
       // Direct human work, a human-created schedule, and an explicitly
-      // attributed handoff stay attributed; stale heartbeat requesters and
-      // autonomous schedule descendants do not.
-      expect(summary.totals.attributedCostUsd).toBeCloseTo(16.0, 5);
+      // attributed handoff stay attributed, including a workflow root launched
+      // by a human-created schedule. Stale heartbeat requesters, autonomous
+      // schedule descendants, and creatorless scheduled workflow roots do not.
+      expect(summary.totals.attributedCostUsd).toBeCloseTo(27.0, 5);
       // Denominator drops both heartbeat task types, the tag-only legacy
-      // representation, autonomous scheduled cost, and its grandchild
-      // (2.0 + 4.0 + 5.0 + 3.0 + 8.0), leaving only the population that could
-      // plausibly carry a human requester.
-      expect(summary.totals.attributableCostUsd).toBeCloseTo(16.0, 5);
-      expect(summary.totals.excludedCostUsd).toBeCloseTo(22.0, 5);
-      expect(summary.totals.excludedTaskCount).toBe(5);
+      // representation, autonomous scheduled cost and its grandchild, and the
+      // creatorless scheduled workflow root (2.0 + 4.0 + 5.0 + 3.0 + 8.0 +
+      // 10.0), leaving the human work plus the requester-less manual workflow
+      // run in the population that could carry a human requester.
+      expect(summary.totals.attributableCostUsd).toBeCloseTo(39.0, 5);
+      expect(summary.totals.excludedCostUsd).toBeCloseTo(32.0, 5);
+      expect(summary.totals.excludedTaskCount).toBe(6);
 
       expect(summary.byUser.find((row) => row.userId === user.id)?.costUsd).toBeCloseTo(16.0, 5);
-      expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBeCloseTo(22.0, 5);
+      expect(summary.byUser.find((row) => row.userId === workflowUser.id)?.costUsd).toBeCloseTo(
+        11.0,
+        5,
+      );
+      expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBeCloseTo(44.0, 5);
 
       const mine = getSessionCostSummary({ agentId: agent.id, userId: user.id, groupBy: "user" });
       expect(mine.totals.totalCostUsd).toBeCloseTo(16.0, 5);
@@ -1106,9 +1202,15 @@ describe("Session Costs API", () => {
         userId: UNATTRIBUTED_USER_ID,
         groupBy: "user",
       });
-      expect(autonomous.totals.totalCostUsd).toBeCloseTo(22.0, 5);
+      expect(autonomous.totals.totalCostUsd).toBeCloseTo(44.0, 5);
       expect(autonomous.byUser).toHaveLength(1);
       expect(autonomous.byUser[0]?.userId).toBe(null);
+
+      const attribution = getAttributionByPerson({});
+      const workflowPerson = attribution.find((row) => row.userId === workflowUser.id);
+      // Of the two workflow roots above, only the one launched by the
+      // human-created schedule belongs in the per-person report.
+      expect(workflowPerson?.problemsInitiated).toBe(1);
     });
   });
 
