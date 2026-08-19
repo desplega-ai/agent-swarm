@@ -6956,23 +6956,36 @@ export function getSessionCostSummary(opts: {
   // re-attributed after the fact, so the human requester is resolved by joining
   // through the task (same shape as `getDailySpendForUser`). Every column is
   // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  // `p` (the parent task) is only needed to classify `source='system'` follow-ups
-  // in HUMAN_FREE_SQL below — most rows never touch it.
-  const from =
-    "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId LEFT JOIN agent_tasks p ON p.id = t.parentTaskId";
+  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
 
   // Structurally-human-free: the swarm maintaining itself, with no human
   // requester by construction — heartbeat/boot-triage tasks, scheduled runs
   // without a human creator, and `source='system'` follow-ups whose parent
-  // itself has no human requester. A human-created schedule carries a real
-  // requester and remains attributable. Every `COALESCE` guards against
-  // SQLite's NULL-propagates-through-OR trap.
-  const HUMAN_FREE_SQL = `(
-        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
-        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
-        OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
+  // itself has no human requester. That classification propagates through
+  // descendants while they remain unattributed, so autonomous fan-out cannot
+  // leak back into the denominator. An explicitly attributed child is an
+  // independent handoff and stops propagation down that branch.
+  const HUMAN_FREE_TASKS_CTE = `WITH RECURSIVE human_free_tasks(id) AS (
+        SELECT task.id
+        FROM agent_tasks task
+        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
+        WHERE COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+          OR COALESCE(task.tags, '[]') LIKE '%"heartbeat"%'
+          OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
+          OR (
+            COALESCE(task.source, '') = 'system'
+            AND parent.id IS NOT NULL
+            AND parent.requestedByUserId IS NULL
+          )
+
+        UNION
+
+        SELECT child.id
+        FROM agent_tasks child
+        JOIN human_free_tasks parent ON child.parentTaskId = parent.id
+        WHERE child.requestedByUserId IS NULL
       )`;
+  const HUMAN_FREE_SQL = "EXISTS (SELECT 1 FROM human_free_tasks WHERE id = t.id)";
 
   const conditions: string[] = [];
   const params: string[] = [];
@@ -7015,7 +7028,8 @@ export function getSessionCostSummary(opts: {
 
   const totalsRow = getDb()
     .prepare<TotalsRow, string[]>(
-      `SELECT
+      `${HUMAN_FREE_TASKS_CTE}
+      SELECT
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
@@ -7070,7 +7084,8 @@ export function getSessionCostSummary(opts: {
         },
         string[]
       >(
-        `SELECT
+        `${HUMAN_FREE_TASKS_CTE}
+        SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -7098,7 +7113,8 @@ export function getSessionCostSummary(opts: {
         },
         string[]
       >(
-        `SELECT
+        `${HUMAN_FREE_TASKS_CTE}
+        SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -7118,7 +7134,8 @@ export function getSessionCostSummary(opts: {
   if (groupBy === "user" || groupBy === "both") {
     byUser = getDb()
       .prepare<SessionCostByUserRow, string[]>(
-        `SELECT
+        `${HUMAN_FREE_TASKS_CTE}
+        SELECT
           CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,

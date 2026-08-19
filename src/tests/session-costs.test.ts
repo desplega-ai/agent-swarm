@@ -990,6 +990,16 @@ describe("Session Costs API", () => {
         requestedByUserId: user.id,
       });
       const scheduled = createTaskExtended("Scheduled run", { source: "schedule" });
+      const scheduledChild = createTaskExtended("Autonomous schedule child", {
+        parentTaskId: scheduled.id,
+      });
+      const scheduledGrandchild = createTaskExtended("Autonomous schedule grandchild", {
+        parentTaskId: scheduledChild.id,
+      });
+      const scheduledHumanHandoff = createTaskExtended("Schedule handed to a human", {
+        parentTaskId: scheduled.id,
+        requestedByUserId: user.id,
+      });
       const humanScheduled = createTaskExtended("Human-created scheduled run", {
         source: "schedule",
         requestedByUserId: user.id,
@@ -1049,25 +1059,45 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
+      createSessionCost({
+        sessionId: "denom-scheduled-grandchild",
+        taskId: scheduledGrandchild.id,
+        agentId: agent.id,
+        totalCostUsd: 8.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "denom-scheduled-human-handoff",
+        taskId: scheduledHumanHandoff.id,
+        agentId: agent.id,
+        totalCostUsd: 9.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
 
       const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "both" });
 
-      expect(summary.totals.totalCostUsd).toBeCloseTo(21.0, 5);
-      // Direct human work and a human-created schedule stay attributed; stale
-      // heartbeat requesters do not.
-      expect(summary.totals.attributedCostUsd).toBeCloseTo(7.0, 5);
+      expect(summary.totals.totalCostUsd).toBeCloseTo(38.0, 5);
+      // Direct human work, a human-created schedule, and an explicitly
+      // attributed handoff stay attributed; stale heartbeat requesters and
+      // autonomous schedule descendants do not.
+      expect(summary.totals.attributedCostUsd).toBeCloseTo(16.0, 5);
       // Denominator drops both heartbeat task types, the tag-only legacy
-      // representation, and scheduled cost (2.0 + 4.0 + 5.0 + 3.0), leaving
-      // only the population that could plausibly carry a human requester.
-      expect(summary.totals.attributableCostUsd).toBeCloseTo(7.0, 5);
-      expect(summary.totals.excludedCostUsd).toBeCloseTo(14.0, 5);
-      expect(summary.totals.excludedTaskCount).toBe(4);
+      // representation, autonomous scheduled cost, and its grandchild
+      // (2.0 + 4.0 + 5.0 + 3.0 + 8.0), leaving only the population that could
+      // plausibly carry a human requester.
+      expect(summary.totals.attributableCostUsd).toBeCloseTo(16.0, 5);
+      expect(summary.totals.excludedCostUsd).toBeCloseTo(22.0, 5);
+      expect(summary.totals.excludedTaskCount).toBe(5);
 
-      expect(summary.byUser.find((row) => row.userId === user.id)?.costUsd).toBeCloseTo(7.0, 5);
-      expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBeCloseTo(14.0, 5);
+      expect(summary.byUser.find((row) => row.userId === user.id)?.costUsd).toBeCloseTo(16.0, 5);
+      expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBeCloseTo(22.0, 5);
 
       const mine = getSessionCostSummary({ agentId: agent.id, userId: user.id, groupBy: "user" });
-      expect(mine.totals.totalCostUsd).toBeCloseTo(7.0, 5);
+      expect(mine.totals.totalCostUsd).toBeCloseTo(16.0, 5);
       expect(mine.byUser).toHaveLength(1);
       expect(mine.byUser[0]?.userId).toBe(user.id);
 
@@ -1076,7 +1106,7 @@ describe("Session Costs API", () => {
         userId: UNATTRIBUTED_USER_ID,
         groupBy: "user",
       });
-      expect(autonomous.totals.totalCostUsd).toBeCloseTo(14.0, 5);
+      expect(autonomous.totals.totalCostUsd).toBeCloseTo(22.0, 5);
       expect(autonomous.byUser).toHaveLength(1);
       expect(autonomous.byUser[0]?.userId).toBe(null);
     });
