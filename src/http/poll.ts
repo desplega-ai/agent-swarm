@@ -35,9 +35,11 @@ import {
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
   TaskAttachmentSchema,
+  UserCommsPrefsSchema,
   UserSchema,
 } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { getUserCommsPrefs } from "../utils/requester-comms";
 import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -96,12 +98,16 @@ const PollRequestedBySchema = UserSchema.pick({
   email: true,
   role: true,
   notes: true,
+}).extend({
+  // Structured communication preferences from `users.metadata.comms`.
+  comms: UserCommsPrefsSchema.optional(),
 });
 
 const PollTaskOfferedTriggerSchema = z.object({
   type: z.literal("task_offered"),
   taskId: z.string(),
   task: AgentTaskSchema,
+  requestedBy: PollRequestedBySchema.optional(),
 });
 
 const PollTaskAssignedTriggerSchema = z.object({
@@ -173,6 +179,33 @@ let lastChannelActivityCheckAt = 0;
 
 function getRequesterNotes(notes: string | undefined): string | undefined {
   return typeof notes === "string" && notes.trim().length > 0 ? notes : undefined;
+}
+
+/**
+ * Resolve the requester projection for a task trigger. If the task carries a
+ * machine-recorded external id (today: the Slack user field) but no
+ * requestedByUserId, render the explicit UNKNOWN sentinel instead of silently
+ * omitting the section: never a substituted human (Rule 33 /
+ * provenance-or-silence).
+ */
+function buildTriggerRequestedBy(task: {
+  requestedByUserId?: string | null;
+  slackUserId?: string | null;
+}): z.infer<typeof PollRequestedBySchema> | undefined {
+  const user = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
+  if (user) {
+    return {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      notes: getRequesterNotes(user.notes),
+      comms: getUserCommsPrefs(user),
+    };
+  }
+  if (task.slackUserId) {
+    return { name: renderIdentity(resolveIdentity("slack", task.slackUserId)) };
+  }
+  return undefined;
 }
 
 /**
@@ -297,11 +330,13 @@ export async function handlePoll(
         if (firstOfferedTask) {
           const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
+            const offeredRequestedBy = buildTriggerRequestedBy(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
                 taskId: claimedTask.id,
                 task: claimedTask,
+                ...(offeredRequestedBy && { requestedBy: offeredRequestedBy }),
               },
             };
           }
@@ -385,19 +420,9 @@ export async function handlePoll(
               agentId: myAgentId,
             });
 
-            // Resolve requesting user if available. If the task carries a
-            // machine-recorded external id (today: the Slack user field) but
-            // no requestedByUserId, render the explicit UNKNOWN sentinel
-            // instead of silently omitting the section — never a substituted
-            // human (Rule 33 / provenance-or-silence).
-            const requestedByUser = pendingTask.requestedByUserId
-              ? getUserById(pendingTask.requestedByUserId)
-              : undefined;
-            const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
-            const requestedByUnknownName =
-              !requestedByUser && pendingTask.slackUserId
-                ? renderIdentity(resolveIdentity("slack", pendingTask.slackUserId))
-                : undefined;
+            // Resolve requesting user if available (UNKNOWN sentinel handling
+            // lives in buildTriggerRequestedBy).
+            const assignedRequestedBy = buildTriggerRequestedBy(pendingTask);
 
             return {
               trigger: {
@@ -408,17 +433,7 @@ export async function handlePoll(
                   status: "in_progress",
                   attachments: attachmentsForTrigger(pendingTask.id),
                 },
-                ...(requestedByUser && {
-                  requestedBy: {
-                    name: requestedByUser.name,
-                    email: requestedByUser.email,
-                    role: requestedByUser.role,
-                    notes: requestedByNotes,
-                  },
-                }),
-                ...(requestedByUnknownName && {
-                  requestedBy: { name: requestedByUnknownName },
-                }),
+                ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
               },
             };
           }
@@ -530,11 +545,13 @@ export async function handlePoll(
                   source: claimed.source,
                   agentId: myAgentId,
                 });
+                const claimedRequestedBy = buildTriggerRequestedBy(claimed);
                 return {
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
                     task: { ...claimed, attachments: attachmentsForTrigger(claimed.id) },
+                    ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
                   },
                 };
               }

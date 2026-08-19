@@ -852,6 +852,21 @@ export const UserSchema = z
 export type User = z.infer<typeof UserSchema>;
 
 /**
+ * Structured communication preferences read from `users.metadata.comms`.
+ * All fields are free-form strings — there is no write path or validation
+ * layer yet; values render verbatim into the requester profile prompt.
+ */
+export const UserCommsPrefsSchema = z
+  .object({
+    tone: z.string().optional(),
+    language: z.string().optional(),
+    verbosity: z.string().optional(),
+  })
+  .openapi("UserCommsPrefs");
+
+export type UserCommsPrefs = z.infer<typeof UserCommsPrefsSchema>;
+
+/**
  * Identity event types — mirrored in lockstep with the CHECK constraint on
  * `user_identity_events.eventType` in migration 064. Drift breaks helper
  * INSERTs at runtime; update both sides together.

@@ -15,6 +15,7 @@ import {
   toolOk,
 } from "@/tools/utils";
 import { AgentTaskStatusSchema } from "@/types";
+import { getUserCommsPrefs } from "@/utils/requester-comms";
 
 export const getTaskDetailsInputSchema = z.object({
   taskId: z.uuid().describe("The ID of the task to get details for."),
@@ -157,9 +158,23 @@ export const getTaskDetailsOutputSchema = swarmToolOutputSchema({
   yourAgentId: z.string().optional(),
   task: looseAgentTaskOutputSchema.optional(),
   requestedBy: z
-    .looseObject({ name: z.string().optional(), email: z.string().optional() })
+    .looseObject({
+      name: z.string().optional(),
+      email: z.string().optional(),
+      role: z.string().optional(),
+      notes: z.string().optional(),
+      comms: z
+        .looseObject({
+          tone: z.string().optional(),
+          language: z.string().optional(),
+          verbosity: z.string().optional(),
+        })
+        .optional(),
+    })
     .optional()
-    .describe("Resolved user who requested this task"),
+    .describe(
+      "Resolved user who requested this task, with role/notes and structured communication preferences (users.metadata.comms) when set",
+    ),
   logs: z.array(looseAgentLogSchema).optional(),
   attachments: z
     .array(looseTaskAttachmentSchema)
@@ -191,7 +206,13 @@ export async function getTaskDetailsHandler(
   // Resolve requesting user details if available
   const requestedByUser = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
   const requestedBy = requestedByUser
-    ? { name: requestedByUser.name, email: requestedByUser.email }
+    ? {
+        name: requestedByUser.name,
+        email: requestedByUser.email,
+        role: requestedByUser.role,
+        notes: requestedByUser.notes,
+        comms: getUserCommsPrefs(requestedByUser),
+      }
     : undefined;
 
   const data = {

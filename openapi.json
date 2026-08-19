@@ -2337,6 +2337,20 @@
           "changeReason"
         ]
       },
+      "UserCommsPrefs": {
+        "type": "object",
+        "properties": {
+          "tone": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "verbosity": {
+            "type": "string"
+          }
+        }
+      },
       "BudgetRefusedTrigger": {
         "type": "object",
         "properties": {
@@ -22575,6 +22589,30 @@
                             },
                             "task": {
                               "$ref": "#/components/schemas/AgentTask"
+                            },
+                            "requestedBy": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "email": {
+                                  "type": "string"
+                                },
+                                "role": {
+                                  "type": "string"
+                                },
+                                "notes": {
+                                  "type": "string"
+                                },
+                                "comms": {
+                                  "$ref": "#/components/schemas/UserCommsPrefs"
+                                }
+                              },
+                              "required": [
+                                "name"
+                              ]
                             }
                           },
                           "required": [
@@ -22651,6 +22689,9 @@
                                 },
                                 "notes": {
                                   "type": "string"
+                                },
+                                "comms": {
+                                  "$ref": "#/components/schemas/UserCommsPrefs"
                                 }
                               },
                               "required": [

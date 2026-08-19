@@ -10228,6 +10228,13 @@ export interface paths {
                                 type: "task_offered";
                                 taskId: string;
                                 task: components["schemas"]["AgentTask"];
+                                requestedBy?: {
+                                    name: string;
+                                    email?: string;
+                                    role?: string;
+                                    notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
+                                };
                             } | {
                                 /** @enum {string} */
                                 type: "task_assigned";
@@ -10246,6 +10253,7 @@ export interface paths {
                                     email?: string;
                                     role?: string;
                                     notes?: string;
+                                    comms?: components["schemas"]["UserCommsPrefs"];
                                 };
                             } | components["schemas"]["BudgetRefusedTrigger"] | {
                                 /** @enum {string} */
@@ -20022,6 +20030,11 @@ export interface components {
             changedBy: string | null;
             changedAt: string;
             changeReason: string | null;
+        };
+        UserCommsPrefs: {
+            tone?: string;
+            language?: string;
+            verbosity?: string;
         };
         BudgetRefusedTrigger: {
             /** @enum {string} */

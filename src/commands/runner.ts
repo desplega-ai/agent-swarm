@@ -2584,7 +2584,14 @@ interface Trigger {
     text?: string;
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
-  requestedBy?: { name: string; email?: string; role?: string; notes?: string };
+  requestedBy?: {
+    name: string;
+    email?: string;
+    role?: string;
+    notes?: string;
+    /** Structured communication preferences from `users.metadata.comms`. */
+    comms?: { tone?: string; language?: string; verbosity?: string };
+  };
   // Phase 4 — budget_refused fields. The server emits this envelope from
   // /api/poll and MCP task-action accept when an admission gate refuses to
   // let the agent claim a task. Worker reads cause + reset/spend/budget for
@@ -2614,15 +2621,24 @@ type RequesterProfile = NonNullable<Trigger["requestedBy"]>;
 export async function buildRequesterProfilePrompt(
   requestedBy: RequesterProfile | undefined,
 ): Promise<string> {
-  if (!requestedBy?.role && !requestedBy?.notes) return "";
+  const comms = requestedBy?.comms;
+  const commsParts = [
+    comms?.tone ? `tone: ${comms.tone}` : undefined,
+    comms?.language ? `language: ${comms.language}` : undefined,
+    comms?.verbosity ? `verbosity: ${comms.verbosity}` : undefined,
+  ].filter((part): part is string => Boolean(part));
+  if (!requestedBy?.role && !requestedBy?.notes && commsParts.length === 0) return "";
 
-  const notes = requestedBy.notes?.trim();
+  const commsSection =
+    commsParts.length > 0 ? `\nTheir communication preferences: ${commsParts.join(", ")}.` : "";
+  const notes = requestedBy?.notes?.trim();
   const notesSection = notes
     ? `\nTheir stated notes for how you should respond and act:\n${notes}`
     : "";
   const result = await resolveTemplateAsync("task.requester.profile", {
-    requester_name: requestedBy.name,
-    requester_role_suffix: requestedBy.role ? ` (${requestedBy.role})` : "",
+    requester_name: requestedBy?.name ?? "",
+    requester_role_suffix: requestedBy?.role ? ` (${requestedBy.role})` : "",
+    requester_comms_section: commsSection,
     requester_notes_section: notesSection,
   });
 
