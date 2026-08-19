@@ -271,13 +271,18 @@ export function isRuntimeInstanceLive(id: string | undefined, agentId: string): 
   return (row?.c ?? 0) > 0;
 }
 
-/** Agents that currently have no live runtime, among those with any row. */
-export function agentsWithoutLiveRuntime(): Set<string> {
+/**
+ * Agents with at least one runtime still reporting. While multi-runtime mode
+ * is on this is the eligibility set for dispatch: an agent with no live
+ * runtime — whether its runtimes died or it has not re-registered since the
+ * flag was enabled — cannot poll for work, so assigning to it would strand
+ * the task.
+ */
+export function agentsWithLiveRuntime(): Set<string> {
   const rows = getDb()
     .prepare<{ agent_id: string }, [string]>(
-      `SELECT agent_id FROM runtime_instances
-       GROUP BY agent_id
-       HAVING SUM(CASE WHEN status = 'active' AND last_seen_at >= ? THEN 1 ELSE 0 END) = 0`,
+      `SELECT DISTINCT agent_id FROM runtime_instances
+       WHERE status = 'active' AND last_seen_at >= ?`,
     )
     .all(runtimeLivenessCutoff());
   return new Set(rows.map((r) => r.agent_id));

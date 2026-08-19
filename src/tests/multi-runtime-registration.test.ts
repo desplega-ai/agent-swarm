@@ -277,6 +277,10 @@ afterAll(async () => {
 beforeEach(() => {
   delete process.env.MULTI_RUNTIME_ENABLED;
   getDb().prepare("DELETE FROM runtime_instances").run();
+  getDb().prepare("DELETE FROM active_sessions").run();
+  // Pool sweeps cap how many tasks they assign per tick, so leftovers from an
+  // earlier test would starve the one under test.
+  getDb().prepare("DELETE FROM agent_tasks").run();
   getDb().prepare("DELETE FROM agents").run();
   getDb().prepare("DELETE FROM swarm_config").run();
   // set-config is lead-gated; the MCP mirror tests call it as this lead.
@@ -1340,5 +1344,35 @@ describe("capacity attribution for offers", () => {
     expect(getActiveTaskCount(worker)).toBe(1);
     expect(getActiveTaskCount(lead)).toBe(0);
     expect(hasCapacity(lead)).toBe(true);
+  });
+});
+
+describe("pool eligibility during activation", () => {
+  test("an agent that has not re-registered since the flag was enabled is not assigned work", async () => {
+    const id = makeAgent(2);
+    // Registered while the flag was off, so it has no runtime row yet.
+    await register(id, { maxTasks: 1 });
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const task = createTaskExtended("pool-work");
+
+    await runHeartbeatSweep();
+
+    // Its polls return nothing until it re-registers, so assigning would
+    // strand the task on it.
+    expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+  });
+
+  test("once it re-registers with a runtime, it becomes eligible again", async () => {
+    const id = makeAgent(2);
+    await register(id, { maxTasks: 1 });
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    const task = createTaskExtended("pool-work");
+
+    await runHeartbeatSweep();
+    expect(getTaskById(task.id)?.agentId).toBe(id);
   });
 });

@@ -36,7 +36,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
-import { agentsWithoutLiveRuntime, expireStaleRuntimeInstances } from "../be/multi-runtime";
+import { agentsWithLiveRuntime, expireStaleRuntimeInstances } from "../be/multi-runtime";
 import { promotePendingSteeringForTask } from "../be/steering";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -772,12 +772,17 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     // A multi-runtime agent whose runtimes have all died still reads as idle
     // until its rows expire; assigning to it would strand the task, since
     // nothing is left to poll for it.
-    // Only meaningful in multi-runtime mode: after a rollback, legacy workers
-    // stop refreshing their retained rows, and filtering on them would park
-    // pool tasks against perfectly healthy agents.
-    const withoutRuntime = isMultiRuntimeEnabled() ? agentsWithoutLiveRuntime() : new Set<string>();
+    // While the mode is on, only an agent with a live runtime can poll, so
+    // anything else — dead runtimes, or a worker that has not re-registered
+    // since the flag was enabled — would have the task stranded on it. With
+    // the flag off this is inert: legacy workers stop refreshing their
+    // retained rows, and filtering on them would park tasks on healthy agents.
+    const multiRuntime = isMultiRuntimeEnabled();
+    const withLiveRuntime = multiRuntime ? agentsWithLiveRuntime() : null;
     const idleWorkers = getIdleWorkersWithCapacity().filter(
-      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS && !withoutRuntime.has(w.id),
+      (w) =>
+        (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS &&
+        (withLiveRuntime === null || withLiveRuntime.has(w.id)),
     );
     if (idleWorkers.length === 0) return;
 
