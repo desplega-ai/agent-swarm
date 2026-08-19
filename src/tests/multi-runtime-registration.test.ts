@@ -1168,8 +1168,8 @@ describe("rollback to legacy mode", () => {
   });
 });
 
-describe("runtime expiry releases what the runtime held", () => {
-  test("an expired runtime's session is removed while a sibling's is kept", async () => {
+describe("runtime expiry retires the runtime, the classifier reclaims its work", () => {
+  test("a crashed runtime's task is recovered by stall remediation while a sibling's survives", async () => {
     const id = makeAgent(3);
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const crashed = crypto.randomUUID();
@@ -1191,18 +1191,26 @@ describe("runtime expiry releases what the runtime held", () => {
     expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
 
     // A genuinely crashed process stops both its runtime ping and its
-    // session heartbeat.
+    // session heartbeat — and its task stops progressing.
     makeRuntimeStale(crashed);
-    makeSessionStale(crashedTask.id);
-    const result = expireStaleRuntimeInstances();
-    expect(result.sessionsCleaned).toBe(1);
+    makeSessionStale(crashedTask.id, 30);
+    getDb()
+      .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
+      .run(new Date(Date.now() - 30 * 60000).toISOString(), crashedTask.id);
 
-    // Only the dead runtime's session goes; its task is now visible to the
-    // normal orphan/stall recovery paths.
+    // Expiry only retires the runtime — the session is evidence the stall
+    // classifier owns, and it removes it when it remediates in the same sweep.
+    const result = expireStaleRuntimeInstances();
+    expect(result.expired).toBe(1);
+    expect(getActiveSessionForTask(crashedTask.id)).not.toBeNull();
+
+    await runHeartbeatSweep();
+
+    expect(getTaskById(crashedTask.id)?.status).not.toBe("in_progress");
     expect(getActiveSessionForTask(crashedTask.id)).toBeNull();
+    // The sibling's work is untouched throughout.
     expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
     expect(getTaskById(liveTask.id)?.status).toBe("in_progress");
-    // Reconciled from the survivors: live runtime + active work.
     expect(getAgentById(id)?.status).toBe("busy");
   });
 });
@@ -1238,7 +1246,60 @@ describe("flag re-enable cycle preserves live sessions", () => {
     expect(getAgentById(id)?.status).toBe("offline");
   });
 
-  test("a genuinely dead worker is still cleaned across the same cycle", async () => {
+  test("a quiet-but-healthy session survives the cycle even past the runtime cutoff", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("quiet-work", { agentId: id });
+    startTask(task.id);
+    await startSessionFor(id, task.id, rt);
+
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+    // Sessions heartbeat on tool activity only: a long model call or shell
+    // command can be quiet past the runtime cutoff while the worker is fine.
+    makeSessionStale(task.id, 7);
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await runHeartbeatSweep();
+
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("in_progress");
+    // No resume/supersede sibling was minted for the in-flight task.
+    expect(getDb().prepare<{ c: number }, []>("SELECT COUNT(*) c FROM agent_tasks").get()?.c).toBe(
+      1,
+    );
+  });
+
+  test("a stale session heartbeat alone does not fail a task that is still progressing", async () => {
+    // Guards against collapsing the classifier into "heartbeat older than N":
+    // Case B requires the TASK to be stale too before remediation.
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("progressing-work", { agentId: id });
+    startTask(task.id);
+    await startSessionFor(id, task.id, rt);
+
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+    makeSessionStale(task.id, 20);
+    // The task itself progressed recently (store-progress traffic).
+    getDb()
+      .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
+      .run(new Date(Date.now() - 10 * 60000).toISOString(), task.id);
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await runHeartbeatSweep();
+
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
+    expect(getTaskById(task.id)?.status).toBe("in_progress");
+  });
+
+  test("a genuinely dead worker is still recovered across the same cycle", async () => {
     const id = makeAgent(3);
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const rt = crypto.randomUUID();
@@ -1249,13 +1310,17 @@ describe("flag re-enable cycle preserves live sessions", () => {
 
     delete process.env.MULTI_RUNTIME_ENABLED;
     makeRuntimeStale(rt);
-    // The process died: its session heartbeat went stale too.
-    makeSessionStale(task.id);
+    // The process died: session heartbeat AND task progress both went stale.
+    makeSessionStale(task.id, 30);
+    getDb()
+      .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
+      .run(new Date(Date.now() - 30 * 60000).toISOString(), task.id);
 
     process.env.MULTI_RUNTIME_ENABLED = "true";
-    const result = expireStaleRuntimeInstances();
+    await runHeartbeatSweep();
 
-    expect(result.sessionsCleaned).toBe(1);
+    // The classifier (not runtime expiry) reclaimed the work and its session.
+    expect(getTaskById(task.id)?.status).not.toBe("in_progress");
     expect(getActiveSessionForTask(task.id)).toBeNull();
     expect(getRuntimeInstanceById(rt)).toBeNull();
   });

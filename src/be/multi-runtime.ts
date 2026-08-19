@@ -380,8 +380,8 @@ export function cleanupRuntimeSessions(agentId: string): number {
 }
 
 /**
- * Retire runtimes that stopped pinging, release what they held, and take
- * their agents offline when nothing live remains.
+ * Retire runtimes that stopped pinging and take their agents offline when
+ * nothing live remains.
  *
  * Inert unless multi-runtime mode is on: after a rollback, workers stop
  * refreshing their rows, and expiring them would offline agents that are
@@ -389,46 +389,38 @@ export function cleanupRuntimeSessions(agentId: string): number {
  *
  * Deleting the retired rows rather than keeping them is deliberate. Runtime
  * identity is per boot, so retaining them would grow the table once per boot
- * per agent forever; nothing reads a runtime after it stops being live. The
- * sessions a retired runtime owned are removed in the same transaction — but
- * only those whose own heartbeat has also gone stale. A crashed process stops
- * both signals, so its session cannot pose as alive and its task reaches the
- * normal orphan/stall recovery paths; a frozen runtime row alone (the flag
- * was off, so nothing refreshed it) is not evidence its still-heartbeating
- * session is dead.
+ * per agent forever; nothing reads a runtime after it stops being live.
+ *
+ * Expiry deliberately does NOT touch active_sessions. Runtime liveness and
+ * in-flight work liveness answer different questions: a stale runtime row is
+ * enough to stop NEW dispatch, but sessions are heartbeated by tool activity
+ * only — a healthy worker inside a long model call or shell command can be
+ * quiet past this cutoff — so it is not evidence the CURRENT work is dead.
+ * Crash classification stays owned by the heartbeat's stalled-task
+ * remediation, which requires both a stale session heartbeat and a stale
+ * task before reclaiming (and cleans the session when it does); the sweep's
+ * 30-minute stale-session cleanup backstops any leftover row.
  */
 export function expireStaleRuntimeInstances(): {
   expired: number;
   agentsOffline: number;
-  sessionsCleaned: number;
   pruned: number;
 } {
   if (!isMultiRuntimeEnabled()) {
-    return { expired: 0, agentsOffline: 0, sessionsCleaned: 0, pruned: 0 };
+    return { expired: 0, agentsOffline: 0, pruned: 0 };
   }
 
   return getDb().transaction(() => {
     const cutoff = runtimeLivenessCutoff();
-    // Still-active rows past the window are the crashed processes: they never
-    // reached /close, so retiring them is what releases their work.
+    // Still-active rows past the window never reached /close; retiring them
+    // removes the process from new-work eligibility. Whether its in-flight
+    // work is dead is decided separately (see doc comment above).
     const stale = getDb()
       .prepare<{ id: string; agent_id: string }, [string]>(
         `SELECT id, agent_id FROM runtime_instances
          WHERE status = 'active' AND last_seen_at < ?`,
       )
       .all(cutoff);
-
-    let sessionsCleaned = 0;
-    if (stale.length > 0) {
-      // Same session-staleness cutoff as cleanupRuntimeSessions. Runtime rows
-      // freeze while the flag is off, so re-enabling it past the window would
-      // otherwise read every healthy worker as crashed and hand its in-flight
-      // task to stalled-task recovery beside the process still executing it.
-      const deleteSessions = getDb().prepare(
-        "DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND lastHeartbeatAt < ?",
-      );
-      for (const { id } of stale) sessionsCleaned += deleteSessions.run(id, cutoff).changes;
-    }
 
     // Prune every row past the window, closed ones included. Runtime identity
     // is per boot, so keeping them would add a row per boot per agent forever
@@ -445,6 +437,6 @@ export function expireStaleRuntimeInstances(): {
       reconcileAgentStatusFromRuntimes(agentId);
       if (getAgentById(agentId)?.status === "offline") agentsOffline++;
     }
-    return { expired: stale.length, agentsOffline, sessionsCleaned, pruned };
+    return { expired: stale.length, agentsOffline, pruned };
   })();
 }
