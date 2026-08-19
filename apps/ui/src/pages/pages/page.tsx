@@ -212,7 +212,7 @@ export default function PagesListingPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<PageListItem>) => {
-      if (event.data) navigate(`/pages/${event.data.id}`);
+      if (event.data) void navigate(`/pages/${event.data.id}`);
     },
     [navigate],
   );

@@ -23640,7 +23640,9 @@
                     }
                   },
                   "priority": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
                   },
                   "targetAgentId": {
                     "type": "string"
@@ -24833,7 +24835,9 @@
                     }
                   },
                   "priority": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
                   },
                   "targetAgentId": {
                     "type": [
@@ -25161,7 +25165,9 @@
                     }
                   },
                   "priority": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
                   },
                   "targetAgentId": {
                     "type": [
@@ -37583,7 +37589,9 @@
                     }
                   },
                   "priority": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
                   },
                   "dependsOn": {
                     "type": "array",

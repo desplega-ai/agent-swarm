@@ -162,7 +162,7 @@ export default function WorkflowDetailPage() {
 
   const onRunRowClicked = useCallback(
     (event: RowClickedEvent<WorkflowRun>) => {
-      if (event.data) navigate(`/workflow-runs/${event.data.id}`);
+      if (event.data) void navigate(`/workflow-runs/${event.data.id}`);
     },
     [navigate],
   );

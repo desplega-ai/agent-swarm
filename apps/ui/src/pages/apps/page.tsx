@@ -59,7 +59,7 @@ export default function AppsListingPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AppListItem>) => {
-      if (event.data) navigate(`/apps/${event.data.id}`);
+      if (event.data) void navigate(`/apps/${event.data.id}`);
     },
     [navigate],
   );

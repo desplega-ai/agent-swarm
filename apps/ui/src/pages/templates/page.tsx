@@ -85,7 +85,7 @@ export default function TemplatesPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<PromptTemplate>) => {
-      if (event.data?.id) navigate(`/templates/${event.data.id}`);
+      if (event.data?.id) void navigate(`/templates/${event.data.id}`);
     },
     [navigate],
   );

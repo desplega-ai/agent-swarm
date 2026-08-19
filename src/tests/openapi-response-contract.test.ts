@@ -87,6 +87,30 @@ describe("route handle respond()", () => {
     expect(out.status).toBe(200);
     expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
   });
+
+  test("fail-open: gate armed outside tests logs the violation and still sends", () => {
+    // Step-6 regression: with the gate armed (VALIDATE_HTTP_RESPONSES=true)
+    // but NODE_ENV != test, a schema violation must not throw — it logs to
+    // stderr and the response still goes out (2026-08-18 incident shape).
+    const probe = `
+      import { z } from "zod";
+      import { route } from "${import.meta.dir}/../http/route-def";
+      const r = route({
+        method: "get", path: "/probe", pattern: ["probe"], summary: "p", tags: ["t"],
+        responses: { 200: { description: "ok", schema: z.object({ n: z.number() }) } },
+      });
+      let status = 0, body = "";
+      r.respond({ writeHead(s) { status = s; return this; }, end(b) { body = b; return this; } }, 200, { n: "not-a-number" });
+      console.log(JSON.stringify({ status, body }));
+    `;
+    const env = { ...process.env, NODE_ENV: "production", VALIDATE_HTTP_RESPONSES: "true" };
+    const proc = Bun.spawnSync(["bun", "-e", probe], { env });
+    expect(proc.exitCode).toBe(0);
+    const out = JSON.parse(proc.stdout.toString().trim());
+    expect(out.status).toBe(200);
+    expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
+    expect(proc.stderr.toString()).toContain("Response schema violation");
+  });
 });
 
 // ─── coverage-gate audit (per-status regression) ─────────────────────────────

@@ -239,7 +239,7 @@ beforeEach(() => {
 
 // ─── Migration 131 ──────────────────────────────────────────────────────────
 
-describe("migration 131_runtime_instances", () => {
+describe("migration 132_multi_runtime_instances", () => {
   test("runtime_instances table exists with the expected columns", () => {
     const cols = getDb()
       .prepare<{ name: string }, []>("PRAGMA table_info(runtime_instances)")
@@ -259,6 +259,14 @@ describe("migration 131_runtime_instances", () => {
     ]) {
       expect(cols).toContain(col);
     }
+  });
+
+  test("active_sessions carries runtime ownership", () => {
+    const cols = getDb()
+      .prepare<{ name: string }, []>("PRAGMA table_info(active_sessions)")
+      .all()
+      .map((r) => r.name);
+    expect(cols).toContain("runtimeInstanceId");
   });
 });
 

@@ -303,7 +303,7 @@ function MobileSessionPicker({
       <Select
         value={activeRootTaskId ?? ""}
         onValueChange={(value) => {
-          if (value) navigate(`/sessions/${value}`);
+          if (value) void navigate(`/sessions/${value}`);
         }}
         disabled={isLoading || items.length === 0}
       >
