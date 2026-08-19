@@ -869,19 +869,14 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
 }
 
 /**
- * Agent-scoped swarm_config key holding the authoritative logical maxTasks
- * policy in multi-runtime mode. `agents.maxTasks` stays the enforcement
- * mirror that hasCapacity()/getRemainingCapacity() read; the config row is
- * what operators edit (PUT /api/config, set-config). Same column-vs-config
- * split as HARNESS_PROVIDER (see PATCH /api/agents/{id}/runtime).
+ * Agent-scoped swarm_config key holding the logical maxTasks policy in
+ * multi-runtime mode. Operators edit this row; `agents.maxTasks` stays the
+ * enforcement mirror that hasCapacity()/getRemainingCapacity() read. Same
+ * column-vs-config split as HARNESS_PROVIDER.
  */
 export const AGENT_MAX_TASKS_CONFIG_KEY = "AGENT_MAX_TASKS";
 
-/**
- * Bounds mirror AgentSchema.maxTasks (src/types.ts) and the AGENT_MAX_TASKS
- * validator (swarm-config-guard.ts) — a mirrored write outside them would
- * make the agents row schema-invalid.
- */
+/** Bounds match AgentSchema.maxTasks, so a mirrored write stays schema-valid. */
 function parseAgentMaxTasksValue(raw: string): number | null {
   const str = raw.trim();
   if (!/^\d+$/.test(str)) return null;
@@ -897,20 +892,15 @@ export function getAgentMaxTasksConfig(agentId: string): SwarmConfig | null {
 }
 
 /**
- * Multi-runtime registration hook: make the AGENT_MAX_TASKS config row and
- * its agents.maxTasks mirror agree without ever consuming the
- * runtime-reported concurrency.
+ * Reconcile the AGENT_MAX_TASKS policy row with its agents.maxTasks mirror,
+ * never consuming the runtime-reported concurrency.
  *
- * - No config row yet (first registration after enablement): seed it from the
- *   currently persisted agents.maxTasks — the value the system is already
- *   enforcing. Never from the registering runtime, its env, or a template.
- * - Config row exists: it is authoritative; repair the mirror if it drifted
- *   (e.g. the row was written before the agent existed, or a legacy-mode
- *   registration overwrote the column while the flag was off).
+ * With no row yet, seed from the persisted agents.maxTasks — the value the
+ * swarm is already enforcing — so enabling multi-runtime mode cannot change
+ * behaviour. An existing row is authoritative and repairs the mirror instead.
  *
- * Must run inside the registration transaction so two runtimes registering
- * concurrently serialize: the first seeds, the second sees the row and leaves
- * it untouched.
+ * Runs inside the registration transaction so concurrent runtimes serialize:
+ * the first seeds, the rest observe.
  */
 export function reconcileAgentMaxTasksPolicy(agentId: string): void {
   const agent = getAgentById(agentId);
@@ -934,11 +924,10 @@ export function reconcileAgentMaxTasksPolicy(agentId: string): void {
 }
 
 /**
- * Upsert wrapper for config writes: when the row is an agent-scoped
- * AGENT_MAX_TASKS policy, the agents.maxTasks enforcement mirror updates in
- * the same transaction so policy and enforcement cannot diverge — including
- * when no runtime is currently connected. Every other row passes straight
- * through to upsertSwarmConfig.
+ * Config upsert that keeps the agents.maxTasks enforcement mirror in step
+ * with an agent-scoped AGENT_MAX_TASKS write, in one transaction, so policy
+ * and enforcement cannot diverge — including with no runtime connected.
+ * Every other key passes straight through.
  */
 export function upsertSwarmConfigWithPolicyMirror(
   data: Parameters<typeof upsertSwarmConfig>[0],
@@ -8868,35 +8857,37 @@ function rowToRuntimeInstance(row: RuntimeInstanceRow): RuntimeInstance {
 }
 
 /**
- * Register (or refresh) a runtime instance serving a logical agent. Keyed on
- * the runtime's self-generated id: a re-registration from the same process
- * refreshes capacity/liveness in place instead of accumulating rows.
- * `reportedSlots` is the runtime's own concurrency — in multi-runtime mode it
- * must never be written into agents.maxTasks (the logical policy).
+ * Register (or refresh) a runtime instance serving a logical agent. A
+ * re-registration from the same process refreshes its row in place rather
+ * than accumulating rows.
+ *
+ * The `DO UPDATE ... WHERE` guard makes runtime ownership permanent: an id
+ * already held by one agent can never be reassigned to another, so a
+ * duplicate id cannot move a live runtime between agents. Returns null in
+ * that case (no row written).
  */
 export function upsertRuntimeInstance(instance: {
   id: string;
   agentId: string;
   reportedSlots: number;
   metadata?: Record<string, unknown> | null;
-}): RuntimeInstance {
+}): RuntimeInstance | null {
   const metadataJson = instance.metadata ? JSON.stringify(instance.metadata) : null;
   const row = getDb()
     .prepare<RuntimeInstanceRow, [string, string, number, string | null]>(
       `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
        VALUES (?, ?, 'active', ?, ?)
        ON CONFLICT(id) DO UPDATE SET
-         agent_id = excluded.agent_id,
          status = 'active',
          reported_slots = excluded.reported_slots,
          metadata = COALESCE(excluded.metadata, runtime_instances.metadata),
          last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE runtime_instances.agent_id = excluded.agent_id
        RETURNING *`,
     )
     .get(instance.id, instance.agentId, instance.reportedSlots, metadataJson);
-  if (!row) throw new Error("Failed to upsert runtime instance");
-  return rowToRuntimeInstance(row);
+  return row ? rowToRuntimeInstance(row) : null;
 }
 
 export function getRuntimeInstanceById(id: string): RuntimeInstance | null {
@@ -8916,11 +8907,12 @@ export function getRuntimeInstancesForAgent(agentId: string): RuntimeInstance[] 
 }
 
 /**
- * Refresh a runtime instance's liveness from the worker's ping cadence.
- * Scoped to the pinging agent so one agent can never touch another agent's
- * runtime row (X-Agent-ID is the same trust boundary the rest of the API
- * uses). Returns false when no matching row exists — pings never create or
- * resurrect instances; registration is the only writer of `active`.
+ * Refresh a live runtime instance's liveness from the worker's ping cadence.
+ *
+ * Matches only an `active` row owned by the pinging agent, so a ping can
+ * neither resurrect a closed runtime nor reach another agent's row.
+ * Registration stays the only writer of `active`. Returns false when nothing
+ * matched, which callers use as the signal that the identity is not live.
  */
 export function touchRuntimeInstance(id: string, agentId: string): boolean {
   const result = getDb()
@@ -8928,7 +8920,7 @@ export function touchRuntimeInstance(id: string, agentId: string): boolean {
       `UPDATE runtime_instances
        SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND agent_id = ?`,
+       WHERE id = ? AND agent_id = ? AND status = 'active'`,
     )
     .run(id, agentId);
   return result.changes > 0;

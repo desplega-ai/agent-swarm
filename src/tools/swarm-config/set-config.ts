@@ -110,8 +110,6 @@ export const registerSetConfigTool = (server: McpServer) => {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
 
-        // Policy-mirror variant: an agent-scoped AGENT_MAX_TASKS write also
-        // updates the agents.maxTasks enforcement mirror atomically.
         const config = upsertSwarmConfigWithPolicyMirror({
           scope,
           scopeId: scope === "global" ? null : scopeId,

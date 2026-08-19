@@ -490,7 +490,6 @@ export async function handleCore(
     }
 
     const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
-    // Read once per request so one mode applies consistently, as in /close.
     const multiRuntime = isMultiRuntimeEnabled();
 
     const tx = getDb().transaction(() => {
@@ -502,14 +501,16 @@ export async function handleCore(
         return false;
       }
 
-      // An anonymous ping while the mode is on is a no-op rather than a 400:
-      // ping is non-destructive and rejecting it would break old workers on
-      // rollout. It must stay a true no-op, though — the status ladder below
-      // resolves `offline` to `idle`, so letting it run would let a
-      // pre-enablement worker revive a logical agent whose last identified
-      // runtime already closed.
-      if (multiRuntime && !runtimeInstanceId) {
-        return true;
+      if (multiRuntime) {
+        // Prove the identity before touching the agent: the status ladder
+        // below resolves `offline` to `idle`, so an anonymous, unknown, or
+        // already-closed runtime could otherwise revive an agent whose
+        // runtimes have all exited. Failing that check is a no-op rather
+        // than an error — ping is non-destructive, and rejecting it would
+        // break workers that predate the flag.
+        if (!runtimeInstanceId || !touchRuntimeInstance(runtimeInstanceId, agent.id)) {
+          return true;
+        }
       }
 
       let status: AgentStatus = "idle";
@@ -524,15 +525,6 @@ export async function handleCore(
       }
 
       updateAgentStatus(agent.id, status);
-
-      // Multi-runtime liveness: the runner sends its per-boot instance id on
-      // the same ping cadence, so last_seen_at tracks actual runtime liveness
-      // rather than registration freshness. Refreshes only that one row
-      // (agent-scoped); never creates or resurrects an instance. Inert when
-      // the flag is off.
-      if (multiRuntime && runtimeInstanceId) {
-        touchRuntimeInstance(runtimeInstanceId, agent.id);
-      }
 
       return true;
     });
@@ -554,15 +546,11 @@ export async function handleCore(
     }
 
     const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
-    // Read once per request so one mode applies consistently, mirroring
-    // registration.
     const multiRuntime = isMultiRuntimeEnabled();
 
-    // Close is destructive, so it fails closed — the same identity
-    // requirement registration enforces. An id-less close while the mode is
-    // on could come from a pre-enablement worker whose logical agent is also
-    // served by a live runtime; falling back to the legacy agent-wide close
-    // would take that runtime's agent offline. Rejected before any mutation.
+    // Unlike ping, close is destructive, so it fails closed: an anonymous
+    // close would fall through to the legacy agent-wide close and take down
+    // an agent a sibling runtime is still serving.
     if (multiRuntime && !runtimeInstanceId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(
@@ -583,17 +571,15 @@ export async function handleCore(
       }
 
       if (multiRuntime && runtimeInstanceId) {
-        // Multi-runtime close: one process exiting takes down only its own
-        // runtime instance. The logical agent goes offline only when no
-        // active runtime remains — a sibling runtime keeps the agent
-        // available for dispatch. /close stays the sole writer of `offline`.
+        // One process exiting retires only its own runtime; the agent goes
+        // offline once none remain active. /close stays the sole writer of
+        // the agent's `offline` status.
         markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
         if (countActiveRuntimeInstancesForAgent(agent.id) === 0) {
           updateAgentStatus(agent.id, "offline");
         }
       } else {
-        // Legacy close (flag off): today's behavior, byte for byte, whether
-        // or not the worker sent a runtime header.
+        // Legacy semantics, with or without a runtime header.
         updateAgentStatus(agent.id, "offline");
       }
 

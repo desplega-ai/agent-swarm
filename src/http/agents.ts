@@ -10,6 +10,7 @@ import {
   getAllAgents,
   getAllAgentsWithTasks,
   getDb,
+  getRuntimeInstanceById,
   getSwarmConfigs,
   reconcileAgentMaxTasksPolicy,
   resetEmptyPollCount,
@@ -116,14 +117,10 @@ const registerAgent = route({
      */
     harness_provider: ProviderNameSchema.optional(),
     /**
-     * Per-process runtime identity, generated fresh by the worker on every
-     * boot. `X-Agent-ID` stays the logical agent; this field distinguishes
-     * multiple worker processes serving the same logical agent. Ignored when
-     * MULTI_RUNTIME_ENABLED is off (legacy deployments see no change);
-     * REQUIRED (400 otherwise) when it is on — multi-runtime mode must not
-     * operate with anonymous runtime processes. Schema-optional so old
-     * workers keep parsing under the default-off flag; the handler enforces
-     * the mode-dependent requirement.
+     * Per-process runtime identity; `X-Agent-ID` remains the logical agent.
+     * Ignored when MULTI_RUNTIME_ENABLED is off, required when it is on —
+     * schema-optional so older workers still parse, with the handler
+     * enforcing the mode-dependent requirement.
      */
     runtimeInstanceId: z.string().min(1).optional(),
   }),
@@ -392,15 +389,22 @@ export async function handleAgentRegister(
     if (!parsed) return true;
 
     const agentId = myAgentId || crypto.randomUUID();
-    // Read once per request: registration must apply one mode consistently
-    // even if a config reload flips the flag mid-transaction.
+    // Read once so one mode applies consistently even if a config reload
+    // flips the flag mid-request.
     const multiRuntime = isMultiRuntimeEnabled();
 
-    // Multi-runtime mode must not operate with anonymous runtime processes:
-    // an unidentified registration could neither be tracked for liveness nor
-    // closed individually. Enforced here (not in the zod schema) so the field
-    // stays optional for legacy deployments under the default-off flag.
-    if (multiRuntime && !parsed.body.runtimeInstanceId) {
+    if (multiRuntime && parsed.body.runtimeInstanceId) {
+      // Runtime ownership is permanent: a runtime id already serving another
+      // agent must not be moved. `upsertRuntimeInstance` enforces this in SQL
+      // too; rejecting here keeps the failure legible and pre-mutation.
+      const existingRuntime = getRuntimeInstanceById(parsed.body.runtimeInstanceId);
+      if (existingRuntime && existingRuntime.agentId !== agentId) {
+        jsonError(res, "runtimeInstanceId is already registered to another agent", 400);
+        return true;
+      }
+    } else if (multiRuntime) {
+      // Enforced here rather than in the schema so the field stays optional
+      // for workers running against a server with the flag off.
       jsonError(res, "runtimeInstanceId is required when multi-runtime mode is enabled", 400);
       return true;
     }
@@ -412,20 +416,14 @@ export async function handleAgentRegister(
           updateAgentStatus(existingAgent.id, "idle");
         }
         if (multiRuntime) {
-          // Multi-runtime mode: body.maxTasks is the RUNTIME's own capacity
-          // (recorded on the runtime instance below) and must not redefine
-          // the logical policy — two runtimes serving one agent would race
-          // to overwrite it. The agent-scoped AGENT_MAX_TASKS config row is
-          // authoritative; seed it from the persisted column on first
-          // contact, or repair the column from it.
+          // body.maxTasks is this runtime's own capacity, recorded below; it
+          // must not redefine the logical policy, or two runtimes serving one
+          // agent would race to overwrite it.
           reconcileAgentMaxTasksPolicy(existingAgent.id);
         } else if (
           parsed.body.maxTasks !== undefined &&
           parsed.body.maxTasks !== existingAgent.maxTasks
         ) {
-          // Legacy single-runtime mode: worker-reported concurrency writes
-          // through to agents.maxTasks, exactly as before multi-runtime
-          // support existed.
           updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
@@ -461,19 +459,18 @@ export async function handleAgentRegister(
         description: parsed.body.description,
         role: parsed.body.role,
         capabilities: parsed.body.capabilities ?? [],
-        // Multi-runtime mode: a brand-new agent starts at the schema default
-        // instead of the reporting runtime's capacity, so the initial logical
-        // policy doesn't depend on which runtime happened to register first.
-        // Operators raise it via the AGENT_MAX_TASKS config row.
+        // A new agent starts at the default rather than the reporting
+        // runtime's capacity, so the initial policy doesn't depend on which
+        // runtime happened to register first. Operators raise it via
+        // AGENT_MAX_TASKS.
         maxTasks: multiRuntime ? 1 : (parsed.body.maxTasks ?? 1),
         provider: parsed.body.provider,
         harnessProvider: parsed.body.harness_provider ?? null,
       });
 
       if (multiRuntime) {
-        // Seeds AGENT_MAX_TASKS from the just-persisted column — or, when an
-        // operator wrote the config row before the agent existed, applies it
-        // to the column. Re-fetch: the mirror may have just changed.
+        // Re-fetch below: this may adopt a policy row an operator wrote
+        // before the agent existed.
         reconcileAgentMaxTasksPolicy(agent.id);
         if (parsed.body.runtimeInstanceId) {
           upsertRuntimeInstance({

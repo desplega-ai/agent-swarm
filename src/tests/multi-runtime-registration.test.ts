@@ -1,30 +1,6 @@
 /**
- * Multi-runtime registration: separation of the logical agent's maxTasks
- * policy from per-process runtime capacity.
- *
- * Coverage (compatibility contract):
- *   1. Legacy mode (MULTI_RUNTIME_ENABLED off) — registration write-through to
- *      agents.maxTasks is byte-for-byte today's behavior; zero runtime rows.
- *   2. Multi-runtime registration never redefines the logical policy.
- *   3. Two runtimes cannot overwrite an operator-owned policy.
- *   4. Deterministic enablement: AGENT_MAX_TASKS seeds once, from the
- *      persisted agents.maxTasks.
- *   5. An existing authoritative config row is never overwritten.
- *   6. Operator updates mirror into agents.maxTasks with no runtime connected
- *      (HTTP PUT /api/config and the MCP set-config tool).
- *   7. Turning the flag off restores legacy behavior with no data migration.
- *   8. Runtime capacity is per instance.
- *   9. Runtime identity: instances stay distinguishable, and registration
- *      REQUIRES a runtimeInstanceId while the flag is on (400 otherwise).
- *  10. The static one-runtime-per-agent path is unchanged.
- *  11. Runtime-aware close: one runtime closing marks only its own instance
- *      offline; the agent goes offline only when no active runtime remains.
- *      While the mode is on, close FAILS CLOSED (400) without a runtime id —
- *      the same identity requirement as registration — so a pre-enablement
- *      worker's close can never take a multi-runtime agent offline. Legacy
- *      close (flag off) is untouched, with or without the header.
- *  12. Runtime liveness: the worker ping refreshes only the pinging
- *      instance's last_seen_at; inert without the header or with the flag off.
+ * Multi-runtime registration and lifecycle, exercised through the real HTTP
+ * handlers on both sides of MULTI_RUNTIME_ENABLED.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -233,8 +209,6 @@ describe("migration 131_runtime_instances", () => {
   });
 });
 
-// ─── 1 + 10: legacy mode is byte-for-byte today's behavior ──────────────────
-
 describe("legacy mode (flag off)", () => {
   test("registration creates the agent with the reported maxTasks", async () => {
     const id = crypto.randomUUID();
@@ -257,12 +231,9 @@ describe("legacy mode (flag off)", () => {
     await register(id, { maxTasks: 4, runtimeInstanceId: crypto.randomUUID() });
     expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
     expect(getAgentMaxTasksConfig(id)).toBeNull();
-    // Write-through still applied.
     expect(getAgentById(id)?.maxTasks).toBe(4);
   });
 });
-
-// ─── 2: multi-runtime registration does not redefine the logical policy ─────
 
 describe("multi-runtime mode: registration vs logical policy", () => {
   test("two runtimes with different capacities never touch the persisted policy", async () => {
@@ -289,12 +260,9 @@ describe("multi-runtime mode: registration vs logical policy", () => {
     expect(agent.maxTasks).toBe(1);
     expect(getAgentById(id)?.maxTasks).toBe(1);
     expect(getAgentMaxTasksConfig(id)?.value).toBe("1");
-    // The capacity report still lands on the runtime instance.
     expect(getRuntimeInstanceById(rt)?.reportedSlots).toBe(7);
   });
 });
-
-// ─── 3: two runtimes do not race the operator-owned value ───────────────────
 
 describe("multi-runtime mode: operator value survives runtime registrations", () => {
   test("registrations after an operator update leave the policy untouched", async () => {
@@ -308,13 +276,10 @@ describe("multi-runtime mode: operator value survives runtime registrations", ()
 
     expect(getAgentById(id)?.maxTasks).toBe(4);
     expect(getAgentMaxTasksConfig(id)?.value).toBe("4");
-    // Exactly one authoritative row.
     const rows = getSwarmConfigs({ scope: "agent", scopeId: id, key: AGENT_MAX_TASKS_CONFIG_KEY });
     expect(rows).toHaveLength(1);
   });
 });
-
-// ─── 4: deterministic enablement seeds exactly once ─────────────────────────
 
 describe("multi-runtime mode: enablement seeding", () => {
   test("first registration seeds AGENT_MAX_TASKS from the persisted agents.maxTasks", async () => {
@@ -326,15 +291,12 @@ describe("multi-runtime mode: enablement seeding", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.value).toBe("3");
 
-    // Second registration: still exactly one row, same value.
     await register(id, { maxTasks: 12, runtimeInstanceId: crypto.randomUUID() });
     rows = getSwarmConfigs({ scope: "agent", scopeId: id, key: AGENT_MAX_TASKS_CONFIG_KEY });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.value).toBe("3");
   });
 });
-
-// ─── 5: an existing authoritative row is never overwritten ──────────────────
 
 describe("multi-runtime mode: existing config preserved", () => {
   test("registration keeps the pre-existing row and repairs the mirror from it", async () => {
@@ -350,8 +312,7 @@ describe("multi-runtime mode: existing config preserved", () => {
     await register(id, { maxTasks: 5, runtimeInstanceId: crypto.randomUUID() });
 
     expect(getAgentMaxTasksConfig(id)?.value).toBe("9");
-    // The config row is authoritative: the column converges to it, not to the
-    // runtime's report.
+    // The column converges to the config row, not the runtime's report.
     expect(getAgentById(id)?.maxTasks).toBe(9);
   });
 
@@ -371,8 +332,6 @@ describe("multi-runtime mode: existing config preserved", () => {
     expect(getAgentById(id)?.maxTasks).toBe(6);
   });
 });
-
-// ─── 6: operator update mirrors with no runtime connected ───────────────────
 
 describe("operator updates mirror into agents.maxTasks", () => {
   test("PUT /api/config updates the enforcement mirror atomically", async () => {
@@ -421,8 +380,6 @@ describe("operator updates mirror into agents.maxTasks", () => {
   });
 });
 
-// ─── 7: disabling restores legacy behavior without data migration ───────────
-
 describe("disable / legacy restoration", () => {
   test("after the flag is turned off, write-through resumes and the config row is left alone", async () => {
     const id = makeAgent(3);
@@ -434,14 +391,11 @@ describe("disable / legacy restoration", () => {
     delete process.env.MULTI_RUNTIME_ENABLED;
     const { status } = await register(id, { maxTasks: 8 });
     expect(status).toBe(200);
-    // Legacy write-through, exactly as before enablement.
     expect(getAgentById(id)?.maxTasks).toBe(8);
-    // The seeded row persists but is inert for registration while off.
+    // The seeded row persists but no longer gates registration.
     expect(getAgentMaxTasksConfig(id)?.value).toBe("3");
   });
 });
-
-// ─── 8 + 9: per-instance capacity and distinguishable identity ──────────────
 
 describe("runtime instances", () => {
   test("two instances serving one agent keep independent capacities", async () => {
@@ -476,12 +430,42 @@ describe("runtime instances", () => {
     expect(instances[0]?.reportedSlots).toBe(4);
   });
 
+  test("re-registering a closed runtime makes it active again", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 2, runtimeInstanceId: rt });
+    await closeRuntime(id, rt);
+    expect(getRuntimeInstanceById(rt)?.status).toBe("offline");
+
+    // Registration is the only path that may restore `active`.
+    await register(id, { maxTasks: 3, runtimeInstanceId: rt });
+    expect(getRuntimeInstanceById(rt)?.status).toBe("active");
+    expect(getRuntimeInstanceById(rt)?.reportedSlots).toBe(3);
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("a runtime id belonging to another agent is rejected and never reassigned", async () => {
+    const owner = makeAgent(3);
+    const other = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(owner, { maxTasks: 2, runtimeInstanceId: rt });
+
+    const { status } = await register(other, { maxTasks: 9, runtimeInstanceId: rt });
+    expect(status).toBe(400);
+
+    const instance = getRuntimeInstanceById(rt);
+    expect(instance?.agentId).toBe(owner);
+    expect(instance?.reportedSlots).toBe(2);
+    expect(getRuntimeInstancesForAgent(other)).toHaveLength(0);
+  });
+
   test("registration without a runtimeInstanceId is rejected with 400 when the flag is on", async () => {
     const id = makeAgent(3);
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const { status } = await register(id, { maxTasks: 5 });
     expect(status).toBe(400);
-    // Rejected before the transaction: nothing was mutated.
     expect(getAgentById(id)?.maxTasks).toBe(3);
     expect(getAgentMaxTasksConfig(id)).toBeNull();
     expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
@@ -511,9 +495,7 @@ describe("runtime-aware close", () => {
     expect(await closeRuntime(id, rA)).toBe(204);
 
     expect(getRuntimeInstanceById(rA)?.status).toBe("offline");
-    // The logical agent stays available for dispatch while B serves it.
     expect(getAgentById(id)?.status).toBe("idle");
-    // The sibling row was not mutated in any way.
     const bAfter = getRuntimeInstanceById(rB);
     expect(bAfter?.status).toBe("active");
     expect(bAfter?.reportedSlots).toBe(2);
@@ -537,7 +519,7 @@ describe("runtime-aware close", () => {
     expect(getAgentById(id)?.status).toBe("offline");
   });
 
-  test("legacy close (flag off) marks the agent offline exactly as today", async () => {
+  test("legacy close (flag off) preserves legacy semantics", async () => {
     const id = makeAgent(3);
     expect(await closeRuntime(id)).toBe(204);
     expect(getAgentById(id)?.status).toBe("offline");
@@ -551,7 +533,7 @@ describe("runtime-aware close", () => {
 
     delete process.env.MULTI_RUNTIME_ENABLED;
     expect(await closeRuntime(id, rA)).toBe(204);
-    // Legacy semantics: agent offline; runtime rows are inert while off.
+    // Runtime rows stay inert while the flag is off.
     expect(getAgentById(id)?.status).toBe("offline");
     expect(getRuntimeInstanceById(rA)?.status).toBe("active");
   });
@@ -563,8 +545,7 @@ describe("runtime-aware close", () => {
     await register(id, { maxTasks: 1, runtimeInstanceId: rA });
     const before = getRuntimeInstanceById(rA);
 
-    // Close is destructive: unlike ping, an anonymous close must not fall
-    // back to the legacy agent-wide close while the mode is on.
+    // Unlike ping, an anonymous close must not fall back to legacy semantics.
     expect(await closeRuntime(id)).toBe(400);
     expect(getAgentById(id)?.status).toBe("idle");
     const after = getRuntimeInstanceById(rA);
@@ -579,7 +560,6 @@ describe("runtime-aware close", () => {
     const { status: registerStatus } = await register(id, { maxTasks: 5 });
     expect(registerStatus).toBe(400);
     expect(await closeRuntime(id)).toBe(400);
-    // Neither anonymous request mutated anything.
     expect(getAgentById(id)?.status).toBe("idle");
     expect(getAgentById(id)?.maxTasks).toBe(3);
     expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
@@ -587,19 +567,16 @@ describe("runtime-aware close", () => {
 
   test("transition: a pre-enablement worker's id-less close cannot take the agent offline", async () => {
     const id = makeAgent(3);
-    // Old worker registers while the flag is off — no runtime identity.
     const { status: legacyStatus } = await register(id, { maxTasks: 2 });
     expect(legacyStatus).toBe(200);
     expect(getAgentById(id)?.maxTasks).toBe(2);
 
-    // Operator enables multi-runtime; a new worker registers with identity.
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const rY = crypto.randomUUID();
     await register(id, { maxTasks: 2, runtimeInstanceId: rY });
     expect(getRuntimeInstanceById(rY)?.status).toBe("active");
 
-    // The old worker shuts down with an id-less close: rejected, and the
-    // live runtime keeps the logical agent available.
+    // The old worker's shutdown must not retire the agent Y still serves.
     expect(await closeRuntime(id)).toBe(400);
     expect(getRuntimeInstanceById(rY)?.status).toBe("active");
     expect(getAgentById(id)?.status).toBe("idle");
@@ -614,8 +591,7 @@ describe("runtime-aware close", () => {
     await register(id1, { maxTasks: 1, runtimeInstanceId: r1 });
     await register(id2, { maxTasks: 1, runtimeInstanceId: r2 });
 
-    // Agent 2 presents agent 1's runtime id: the foreign row is untouched and
-    // agent 2's own active runtime keeps it available.
+    // Agent 2 presents agent 1's runtime id.
     expect(await closeRuntime(id2, r1)).toBe(204);
     expect(getRuntimeInstanceById(r1)?.status).toBe("active");
     expect(getRuntimeInstanceById(r2)?.status).toBe("active");
@@ -653,7 +629,7 @@ describe("runtime liveness via ping", () => {
     const before = getRuntimeInstanceById(rA);
 
     await Bun.sleep(10);
-    // Accepted (old workers keep working on rollout) but mutates nothing.
+    // Accepted so pre-flag workers keep running, but mutates nothing.
     expect(await pingAgent(id)).toBe(204);
     expect(getRuntimeInstanceById(rA)?.lastSeenAt).toBe(before?.lastSeenAt ?? "");
     expect(getAgentById(id)?.status).toBe("idle");
@@ -684,20 +660,64 @@ describe("runtime liveness via ping", () => {
 
   test("an id-less ping cannot revive an agent that has zero active runtimes", async () => {
     const id = makeAgent(3);
-    // Old worker registered before enablement — it has no runtime identity.
     await register(id, { maxTasks: 2 });
 
     process.env.MULTI_RUNTIME_ENABLED = "true";
     const rY = crypto.randomUUID();
     await register(id, { maxTasks: 2, runtimeInstanceId: rY });
     await closeRuntime(id, rY);
-    // No active runtime remains, so the logical agent is offline.
     expect(getAgentById(id)?.status).toBe("offline");
 
-    // The pre-enablement worker pings anonymously: it must not make the
-    // logical agent look available again.
+    // An anonymous ping must not make the agent look available again.
     expect(await pingAgent(id)).toBe(204);
     expect(getAgentById(id)?.status).toBe("offline");
+  });
+
+  test("a closed runtime's ping neither reactivates it nor revives the agent", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rA = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rA });
+    await closeRuntime(id, rA);
+    expect(getAgentById(id)?.status).toBe("offline");
+    const closed = getRuntimeInstanceById(rA);
+
+    await Bun.sleep(10);
+    expect(await pingAgent(id, rA)).toBe(204);
+    expect(getRuntimeInstanceById(rA)?.status).toBe("offline");
+    expect(getRuntimeInstanceById(rA)?.lastSeenAt).toBe(closed?.lastSeenAt ?? "");
+    expect(getAgentById(id)?.status).toBe("offline");
+  });
+
+  test("an unknown runtime id leaves agent status untouched", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rA = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rA });
+    await closeRuntime(id, rA);
+    expect(getAgentById(id)?.status).toBe("offline");
+
+    expect(await pingAgent(id, crypto.randomUUID())).toBe(204);
+    expect(getAgentById(id)?.status).toBe("offline");
+    expect(getRuntimeInstancesForAgent(id)).toHaveLength(1);
+  });
+
+  test("a foreign runtime id cannot drive the presenting agent's status", async () => {
+    const id1 = makeAgent(3);
+    const id2 = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const r1 = crypto.randomUUID();
+    const r2 = crypto.randomUUID();
+    await register(id1, { maxTasks: 1, runtimeInstanceId: r1 });
+    await register(id2, { maxTasks: 1, runtimeInstanceId: r2 });
+    await closeRuntime(id2, r2);
+    expect(getAgentById(id2)?.status).toBe("offline");
+    const before = getRuntimeInstanceById(r1);
+
+    await Bun.sleep(10);
+    expect(await pingAgent(id2, r1)).toBe(204);
+    expect(getAgentById(id2)?.status).toBe("offline");
+    expect(getRuntimeInstanceById(r1)?.lastSeenAt).toBe(before?.lastSeenAt ?? "");
   });
 
   test("a ping cannot touch another agent's runtime row", async () => {
@@ -719,7 +739,6 @@ describe("runtime liveness via ping", () => {
 
 describe("end-to-end multi-runtime lifecycle", () => {
   test("policy, capacity, close, and liveness compose across two runtimes", async () => {
-    // Logical agent "coder" with operator-owned policy 4.
     const coder = makeAgent(2);
     expect(await putAgentMaxTasks(coder, "4")).toBe(200);
     expect(getAgentById(coder)?.maxTasks).toBe(4);
@@ -730,7 +749,6 @@ describe("end-to-end multi-runtime lifecycle", () => {
     await register(coder, { maxTasks: 1, runtimeInstanceId: rA });
     await register(coder, { maxTasks: 2, runtimeInstanceId: rB });
 
-    // Both runtimes active with their own capacities; policy untouched.
     expect(getRuntimeInstanceById(rA)?.reportedSlots).toBe(1);
     expect(getRuntimeInstanceById(rB)?.reportedSlots).toBe(2);
     expect(getRuntimeInstanceById(rA)?.status).toBe("active");
@@ -738,14 +756,12 @@ describe("end-to-end multi-runtime lifecycle", () => {
     expect(getAgentById(coder)?.maxTasks).toBe(4);
     expect(getAgentMaxTasksConfig(coder)?.value).toBe("4");
 
-    // A closes: A offline, B active, coder stays available, policy intact.
     await closeRuntime(coder, rA);
     expect(getRuntimeInstanceById(rA)?.status).toBe("offline");
     expect(getRuntimeInstanceById(rB)?.status).toBe("active");
     expect(getAgentById(coder)?.status).toBe("idle");
     expect(getAgentById(coder)?.maxTasks).toBe(4);
 
-    // B heartbeats: only B.last_seen_at advances.
     const aSeen = getRuntimeInstanceById(rA)?.lastSeenAt;
     const bSeen = getRuntimeInstanceById(rB)?.lastSeenAt;
     await Bun.sleep(10);
@@ -754,7 +770,6 @@ describe("end-to-end multi-runtime lifecycle", () => {
     const bSeenAfter = getRuntimeInstanceById(rB)?.lastSeenAt;
     expect(bSeenAfter && bSeen && bSeenAfter > bSeen).toBe(true);
 
-    // B closes: no active runtime remains, coder goes offline; policy intact.
     await closeRuntime(coder, rB);
     expect(getRuntimeInstanceById(rB)?.status).toBe("offline");
     expect(getAgentById(coder)?.status).toBe("offline");

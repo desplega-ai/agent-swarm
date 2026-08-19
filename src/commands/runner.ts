@@ -483,11 +483,10 @@ export interface ApiConfig {
   apiKey: string;
   agentId: string;
   /**
-   * Per-boot runtime-instance identity (see runAgent). Sent as the
-   * X-Runtime-Instance-ID header on ping/close so a multi-runtime server can
-   * track this process's liveness and close only this runtime. Optional so
-   * auxiliary ApiConfig constructions stay valid; servers ignore it unless
-   * MULTI_RUNTIME_ENABLED.
+   * Per-boot identity for this worker PROCESS, as opposed to `agentId` (the
+   * logical agent). Sent as the X-Runtime-Instance-ID header on ping/close so
+   * a server can track this process's liveness and retire only this runtime.
+   * Servers ignore it unless MULTI_RUNTIME_ENABLED.
    */
   runtimeInstanceId?: string;
 }
@@ -2638,12 +2637,6 @@ async function registerAgent(opts: {
    * haven't migrated to passing it explicitly.
    */
   harnessProvider?: ProviderName;
-  /**
-   * Per-boot runtime-instance identity. AGENT_ID stays the logical agent;
-   * this distinguishes the worker PROCESS so servers running in multi-runtime
-   * mode can tell two runtimes serving the same agent apart. Servers ignore
-   * it unless MULTI_RUNTIME_ENABLED.
-   */
   runtimeInstanceId?: string;
 }): Promise<{ serverCapabilities?: string[] }> {
   const headers: Record<string, string> = {
@@ -4732,9 +4725,8 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastBedrockRefreshAt = 0;
   const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-  // Fresh per boot, shared by registration, ping, and close: a restarted
-  // process is a new runtime instance, but one process must present one
-  // identity so multi-runtime servers track a single row for it.
+  // Fresh per boot and shared by registration, ping, and close: a restarted
+  // process is a new runtime, but one process presents one identity.
   const runtimeInstanceId = crypto.randomUUID();
 
   // Create API config for ping/close
