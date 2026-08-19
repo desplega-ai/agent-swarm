@@ -30,8 +30,18 @@ function githubPullRequestExistsSql(value: string): string {
         substr(remaining, instr(lower(remaining), 'github.com/') + length('github.com/')),
         substr(remaining, instr(lower(remaining), 'github.com/')),
         instr(lower(remaining), 'github.com/') = 1
+          OR substr(
+            lower(remaining),
+            instr(lower(remaining), 'github.com/') - length('https://'),
+            length('https://')
+          ) = 'https://'
+          OR substr(
+            lower(remaining),
+            instr(lower(remaining), 'github.com/') - length('http://'),
+            length('http://')
+          ) = 'http://'
           OR substr(remaining, instr(lower(remaining), 'github.com/') - 1, 1)
-            NOT GLOB '[A-Za-z0-9._-]'
+            NOT GLOB '[A-Za-z0-9._/-]'
       FROM github_occurrences
       WHERE instr(lower(remaining), 'github.com/') > 0
     ),

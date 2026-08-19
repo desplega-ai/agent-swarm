@@ -52,6 +52,7 @@ describe("migration 132 task pull-request attachment backfill", () => {
           "https://github.com/org/repo/tree/pull/123 and " +
           "https://github.com/org/repo/issues/1/pull/2 and " +
           "https://_github.com/org/repo/pull/3 and " +
+          "https://evil.example/github.com/org/repo/pull/4 and " +
           "https://github.com/org/repo/pull/123abc",
         now,
         now,

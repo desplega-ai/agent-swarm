@@ -6,7 +6,7 @@ export interface GitHubPullRequestUrl {
 }
 
 const GITHUB_PULL_REQUEST_URL_RE =
-  /(?<![\w.-])(?:https?:\/\/)?github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?=$|[/?#\s)\]}>"'`,.;:!])/gi;
+  /(?<![\w./-])(?:https?:\/\/)?github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?=$|[/?#\s)\]}>"'`,.;:!])/gi;
 
 /** Extract distinct canonical GitHub pull-request URLs from free text. */
 export function extractGitHubPullRequestUrls(
