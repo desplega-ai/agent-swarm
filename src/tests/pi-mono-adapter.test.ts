@@ -171,6 +171,104 @@ describe("PiMonoAdapter.createSession — OPENROUTER_BASE_URL gateway", () => {
   });
 });
 
+// ─── MCP runtime identity (multi-runtime dispatch gate) ──────────────────────
+
+describe("PiMonoAdapter.createSession — MCP runtime identity header", () => {
+  let createAgentSessionSpy: ReturnType<typeof spyOn>;
+
+  afterEach(() => {
+    createAgentSessionSpy?.mockRestore();
+  });
+
+  function spyOnCreateAgentSession() {
+    createAgentSessionSpy = spyOn(piCodingAgent, "createAgentSession").mockImplementation((async (
+      _opts: Record<string, unknown>,
+    ) => {
+      return {
+        session: {
+          sessionId: "fake-session",
+          isStreaming: false,
+          model: undefined,
+          subscribe: () => () => {},
+          dispose: () => {},
+        },
+      };
+    }) as typeof piCodingAgent.createAgentSession);
+  }
+
+  function makeMcpConfig(apiUrl: string): ProviderSessionConfig {
+    return {
+      prompt: "hello",
+      systemPrompt: "",
+      model: "openrouter/google/gemini-3-flash-preview",
+      role: "worker",
+      agentId: "test-agent",
+      taskId: "test-task",
+      apiUrl,
+      apiKey: "test-key",
+      cwd: "/tmp",
+      logFile: `/tmp/pi-mcp-header-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
+    };
+  }
+
+  /** Stub swarm API: records the runtime header on every /mcp request. */
+  function serveStub(seen: Array<string | null>) {
+    return Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/mcp") {
+          seen.push(req.headers.get("x-runtime-instance-id"));
+          return Response.json({
+            jsonrpc: "2.0",
+            id: 1,
+            result: { protocolVersion: "2025-03-26", capabilities: {}, tools: [] },
+          });
+        }
+        return Response.json({ servers: [] });
+      },
+    });
+  }
+
+  test("swarm MCP requests carry the per-boot X-Runtime-Instance-ID", async () => {
+    const seen: Array<string | null> = [];
+    const server = serveStub(seen);
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    process.env.SWARM_RUNTIME_INSTANCE_ID = "pi-runtime-1";
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      // initialize + initialized + tools/list all hit /mcp — every one must
+      // present the same per-boot identity.
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen)).toEqual(new Set(["pi-runtime-1"]));
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+
+  test("no per-boot identity in the environment → no runtime header", async () => {
+    const seen: Array<string | null> = [];
+    const server = serveStub(seen);
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+    try {
+      spyOnCreateAgentSession();
+      const adapter = new PiMonoAdapter();
+      await adapter.createSession(makeMcpConfig(`http://localhost:${server.port}`));
+      expect(seen.length).toBeGreaterThan(0);
+      expect(new Set(seen)).toEqual(new Set([null]));
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+      server.stop(true);
+    }
+  });
+});
+
 describe("AGENTS.md symlink management", () => {
   const tmpDir = `/tmp/pi-mono-test-${Date.now()}`;
 

@@ -20,7 +20,20 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createUser, getBudget, getDb, initDb, upsertKv } from "../be/db";
+import {
+  closeDb,
+  createScheduledTask,
+  createUser,
+  createWorkflow,
+  createWorkflowRun,
+  getBudget,
+  getDb,
+  getScheduledTaskById,
+  getWorkflowRun,
+  initDb,
+  updateWorkflowRun,
+  upsertKv,
+} from "../be/db";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -91,6 +104,10 @@ beforeEach(() => {
   db.run("DELETE FROM user_identity_events");
   db.run("DELETE FROM user_external_ids");
   db.run("DELETE FROM user_tokens");
+  db.run("DELETE FROM workflow_run_steps");
+  db.run("DELETE FROM workflow_runs");
+  db.run("DELETE FROM workflows");
+  db.run("DELETE FROM scheduled_tasks");
   db.run("DELETE FROM users");
   db.run("DELETE FROM budgets");
   db.run("DELETE FROM kv_entries");
@@ -620,6 +637,24 @@ describe("POST /api/users/:id/merge", () => {
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     linkIdentity(source.id, "slack", "U_SRC", actor);
     linkIdentity(source.id, "github", "src-gh", actor);
+    const workflow = createWorkflow({
+      name: `merge-user-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: source.id,
+    });
+    updateWorkflowRun(run.id, {
+      context: { swarm: { requestedByUserId: source.id }, retained: "value" },
+    });
+    const schedule = createScheduledTask({
+      name: `merge-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Run merged schedule",
+      createdBy: source.id,
+    });
 
     const r = await authedFetch(`/api/users/${target.id}/merge`, {
       method: "POST",
@@ -647,6 +682,13 @@ describe("POST /api/users/:id/merge", () => {
     // Source user is gone.
     const sourceR = await authedFetch(`/api/users/${source.id}`);
     expect(sourceR.status).toBe(404);
+    expect(getWorkflowRun(run.id)?.createdBy).toBe(target.id);
+    expect(getWorkflowRun(run.id)?.context).toEqual({
+      swarm: { requestedByUserId: target.id },
+      retained: "value",
+    });
+    expect(getScheduledTaskById(schedule.id)?.createdBy).toBe(target.id);
+    expect(getScheduledTaskById(schedule.id)?.updatedBy).toBe(target.id);
   });
 
   test("manual_merge event payload carries the source user's id/name", async () => {
@@ -673,6 +715,79 @@ describe("POST /api/users/:id/merge", () => {
     expect(mergeEvent!.after?.source?.id).toBe(source.id);
     expect(mergeEvent!.after?.source?.name).toBe("MergeSource");
     expect(mergeEvent!.after?.source?.email).toBe("ms@x.com");
+  });
+
+  test("rolls back identity moves when deletion fails", async () => {
+    const target = createUser({ name: "RollbackTarget", email: "rollback-target@x.com" });
+    const source = createUser({ name: "RollbackSource", email: "rollback-source@x.com" });
+    const workflow = createWorkflow({
+      name: `rollback-attribution-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: source.id,
+    });
+    updateWorkflowRun(run.id, {
+      context: { swarm: { requestedByUserId: source.id }, retained: "rollback" },
+    });
+    const schedule = createScheduledTask({
+      name: `rollback-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Retain rollback schedule",
+      createdBy: source.id,
+    });
+    linkIdentity(source.id, "slack", "U_MERGE_ROLLBACK", {
+      kind: "operator",
+      id: OPERATOR_FP,
+    });
+    getDb().run(`CREATE TEMP TRIGGER fail_merge_source_delete
+      BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
+      BEGIN SELECT RAISE(ABORT, 'forced merge failure'); END`);
+
+    try {
+      const response = await authedFetch(`/api/users/${target.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: source.id }),
+      });
+      expect(response.status).toBe(500);
+
+      const identity = getDb()
+        .prepare<{ userId: string }, [string, string]>(
+          "SELECT userId FROM user_external_ids WHERE kind = ? AND externalId = ?",
+        )
+        .get("slack", "U_MERGE_ROLLBACK");
+      expect(identity?.userId).toBe(source.id);
+      expect(
+        getDb()
+          .prepare<{ count: number }, [string]>("SELECT COUNT(*) AS count FROM users WHERE id = ?")
+          .get(source.id)?.count,
+      ).toBe(1);
+      expect(
+        getDb()
+          .prepare<{ emailAliases: string }, [string]>(
+            "SELECT emailAliases FROM users WHERE id = ?",
+          )
+          .get(target.id)?.emailAliases,
+      ).toBe("[]");
+      expect(
+        getDb()
+          .prepare<{ count: number }, [string]>(
+            "SELECT COUNT(*) AS count FROM user_identity_events WHERE userId = ?",
+          )
+          .get(target.id)?.count,
+      ).toBe(0);
+      expect(getWorkflowRun(run.id)?.createdBy).toBe(source.id);
+      expect(getWorkflowRun(run.id)?.context).toEqual({
+        swarm: { requestedByUserId: source.id },
+        retained: "rollback",
+      });
+      expect(getScheduledTaskById(schedule.id)?.createdBy).toBe(source.id);
+      expect(getScheduledTaskById(schedule.id)?.updatedBy).toBe(source.id);
+    } finally {
+      getDb().run("DROP TRIGGER fail_merge_source_delete");
+    }
   });
 
   test("400 when target == source", async () => {

@@ -65,7 +65,12 @@ import { interpolate } from "../utils/template.ts";
 import { detectVcsProvider } from "../vcs/index.ts";
 import { validateJsonSchema } from "../workflows/json-schema-validator.ts";
 import { buildContextPreamble, buildResumeContextPreamble } from "./context-preamble.ts";
-import { awaitCredentials, BootMaxWaitExceededError, EX_CONFIG } from "./credential-wait.ts";
+import {
+  awaitCredentials,
+  BootMaxWaitExceededError,
+  EX_CONFIG,
+  retryBootStep,
+} from "./credential-wait.ts";
 import {
   contentSha256,
   prependProfileSyncRejectionBanner,
@@ -81,6 +86,7 @@ import {
   isCredCheckDisabled,
   reportCredStatus,
   reportLatestModel,
+  sendCredStatusReport,
 } from "./provider-credentials.ts";
 import {
   type ResumeSessionCandidate,
@@ -482,6 +488,13 @@ export interface ApiConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
+  /**
+   * Per-boot identity for this worker PROCESS, as opposed to `agentId` (the
+   * logical agent). Sent as the X-Runtime-Instance-ID header on ping/close so
+   * a server can track this process's liveness and retire only this runtime.
+   * Servers ignore it unless MULTI_RUNTIME_ENABLED.
+   */
+  runtimeInstanceId?: string;
 }
 
 export interface SteeringDispatchState {
@@ -590,6 +603,9 @@ async function pingServer(config: ApiConfig, _role: string): Promise<void> {
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
+  }
 
   try {
     await fetch(`${config.apiUrl}/ping`, {
@@ -608,6 +624,9 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2449,6 +2468,7 @@ async function registerActiveSession(
         triggerType: session.triggerType,
         taskDescription: session.taskDescription,
         runnerSessionId: session.runnerSessionId,
+        runtimeInstanceId: config.runtimeInstanceId,
       }),
     });
   } catch {
@@ -2582,6 +2602,8 @@ interface PollOptions {
   apiUrl: string;
   apiKey: string;
   agentId: string;
+  /** Identifies the polling process so a retired runtime is not given work. */
+  runtimeInstanceId?: string;
   pollInterval: number;
   pollTimeout: number;
   since?: string; // Optional: for filtering finished tasks
@@ -2624,6 +2646,7 @@ async function registerAgent(opts: {
    * haven't migrated to passing it explicitly.
    */
   harnessProvider?: ProviderName;
+  runtimeInstanceId?: string;
 }): Promise<{ serverCapabilities?: string[] }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -2655,6 +2678,7 @@ async function registerAgent(opts: {
       maxTasks: opts.maxTasks,
       provider,
       harness_provider: harnessProvider,
+      runtimeInstanceId: opts.runtimeInstanceId,
     }),
   });
 
@@ -2703,6 +2727,9 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   const headers: Record<string, string> = {
     "X-Agent-ID": opts.agentId,
   };
+  if (opts.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = opts.runtimeInstanceId;
+  }
   if (opts.apiKey) {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
@@ -4710,8 +4737,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastBedrockRefreshAt = 0;
   const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
+  // Fresh per boot and shared by registration, ping, and close: a restarted
+  // process is a new runtime, but one process presents one identity.
+  const runtimeInstanceId = crypto.randomUUID();
+
+  // Session MCP configs are built in provider adapters, which read this to
+  // stamp the runtime identity onto worker tool calls.
+  process.env.SWARM_RUNTIME_INSTANCE_ID = runtimeInstanceId;
+
   // Create API config for ping/close
-  const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
+  const apiConfig: ApiConfig = { apiUrl, apiKey, agentId, runtimeInstanceId };
 
   // Setup graceful shutdown handlers with API config and runner state access
   setupShutdownHandlers(role, apiConfig, () => state);
@@ -4832,22 +4867,32 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     }
   };
 
-  /** Push the current live state back to the API so the dashboard reflects it. */
+  /** Register this boot's runtime with the current live state; propagates failure. */
+  const registerCurrentRuntime = async () => {
+    const reg = await registerAgent({
+      apiUrl,
+      apiKey,
+      agentId,
+      name: agentName,
+      role,
+      isLead,
+      capabilities,
+      maxTasks: state.maxConcurrent,
+      harnessProvider: state.harnessProvider,
+      runtimeInstanceId,
+    });
+    lastServerCapsRefreshAt = Date.now();
+    await applyServerCapabilities(reg.serverCapabilities);
+  };
+
+  /**
+   * Best-effort wrapper for the periodic/fire-and-forget callers: the
+   * dashboard tolerates a missed refresh. Recovery paths that must observe
+   * failure use registerCurrentRuntime directly.
+   */
   const reregisterAgent = async () => {
     try {
-      const reg = await registerAgent({
-        apiUrl,
-        apiKey,
-        agentId,
-        name: agentName,
-        role,
-        isLead,
-        capabilities,
-        maxTasks: state.maxConcurrent,
-        harnessProvider: state.harnessProvider,
-      });
-      lastServerCapsRefreshAt = Date.now();
-      await applyServerCapabilities(reg.serverCapabilities);
+      await registerCurrentRuntime();
     } catch (err) {
       console.warn(`[${role}] [config] Re-register failed (non-fatal): ${err}`);
     }
@@ -4863,6 +4908,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       capabilities,
       maxTasks: maxConcurrent,
       harnessProvider: bootProvider,
+      runtimeInstanceId,
     });
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before
@@ -4929,6 +4975,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             headers: {
               Authorization: `Bearer ${apiKey}`,
               "X-Agent-ID": agentId,
+              "X-Runtime-Instance-ID": runtimeInstanceId,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ ready: status.ready, missing: status.missing }),
@@ -4945,16 +4992,71 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       throw err;
     }
 
+    // Re-register before reporting readiness or doing any work. A worker
+    // blocked on credentials is not usable execution capacity, so its runtime
+    // is allowed to expire during the wait rather than being kept alive
+    // artificially — but once it can work again the server has to know, or
+    // its pings and polls would reference a runtime that no longer exists
+    // until the periodic refresh (up to 5 min later) happened to fix it.
+    // Same per-boot runtime id, so this refreshes the original row instead of
+    // creating a second one. Ordering matters: a readiness report sent while
+    // the row is still stale is dropped (only a live runtime may report), and
+    // the revival preserves credential_ready — reporting first would leave
+    // the agent parked on waiting_for_credentials forever. Best-effort is not
+    // enough here for the same reason: a swallowed transient failure would
+    // still let the report target the stale row, so recovery retries and
+    // treats exhaustion like boot-registration failure.
+    try {
+      await retryBootStep(registerCurrentRuntime, {
+        label: "runtime re-registration",
+        log: (line) => console.warn(`[${role}] ${line}`),
+      });
+    } catch (error) {
+      console.error(`[${role}] Failed to re-register after credential wait: ${error}`);
+      process.exit(1);
+    }
+
     // Migration 055: build the full snapshot (presence + live test) once
     // creds are ready and POST it to the agent row. Status endpoint reads
     // this instead of running predicates server-side. Always uses the
     // *current* state.harnessProvider in case it flipped during the wait.
+    // The snapshot build stays best-effort — its live test can hiccup, and
+    // that must not lose the readiness transition below.
+    let bootCredSnapshot: Awaited<ReturnType<typeof buildCredStatusReport>> | undefined;
     try {
-      const snapshot = await buildCredStatusReport(state.harnessProvider, process.env, {}, "boot");
-      await reportCredStatus(apiUrl, apiKey, agentId, snapshot);
+      bootCredSnapshot = await buildCredStatusReport(
+        state.harnessProvider,
+        process.env,
+        {},
+        "boot",
+      );
     } catch (err) {
-      // Non-fatal — worker proceeds even if reporting fails.
-      console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
+      console.warn(`[${role}] cred_status boot snapshot failed (non-fatal): ${err}`);
+    }
+
+    // The readiness write is the only transition out of
+    // waiting_for_credentials after a stale-runtime revival (the wait's final
+    // tick targeted the pre-registration row, and revival preserves the old
+    // credential_ready) — so like the registration above, it retries and
+    // treats exhaustion as a failed boot rather than proceeding parked.
+    try {
+      await retryBootStep(
+        () =>
+          sendCredStatusReport(apiUrl, apiKey, agentId, runtimeInstanceId, {
+            // The snapshot's verdict when it built; otherwise the wait's own
+            // conclusion (it only returns once credentials are ready).
+            ready: bootCredSnapshot?.ready ?? true,
+            missing: bootCredSnapshot?.missing ?? [],
+            credStatus: bootCredSnapshot,
+          }),
+        {
+          label: "credential readiness report",
+          log: (line) => console.warn(`[${role}] ${line}`),
+        },
+      );
+    } catch (error) {
+      console.error(`[${role}] Failed to report credential readiness after recovery: ${error}`);
+      process.exit(1);
     }
   }
 
@@ -5547,7 +5649,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       if (currentHarness !== cachedCredHarnessProvider) {
         cachedCredHarnessProvider = currentHarness;
         buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
           .catch((err) =>
             console.warn(`[${role}] cred_status post_task report failed (non-fatal): ${err}`),
           );
@@ -5563,7 +5665,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // account state. One bounded AWS round-trip per tick.
         lastBedrockRefreshAt = Date.now();
         buildCredStatusReport(currentHarness, process.env, {}, "post_task")
-          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, snap))
+          .then((snap) => reportCredStatus(apiUrl, apiKey, agentId, runtimeInstanceId, snap))
           .catch((err) =>
             console.warn(`[${role}] bedrock enumeration refresh failed (non-fatal): ${err}`),
           );
@@ -5661,6 +5763,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         apiKey,
         agentId,
         pollInterval: PollIntervalMs,
+        runtimeInstanceId,
         pollTimeout: effectiveTimeout,
       });
 

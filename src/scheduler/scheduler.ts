@@ -4,6 +4,7 @@ import {
   getDb,
   getDueScheduledTasks,
   getScheduledTaskById,
+  getUserById,
   getWorkflow,
   updateScheduledTask,
 } from "@/be/db";
@@ -117,10 +118,16 @@ export interface DispatchScheduleResult {
   task?: AgentTask;
 }
 
+function withoutDeletedRequester(schedule: ScheduledTask): ScheduledTask {
+  if (!schedule.createdBy || getUserById(schedule.createdBy)) return schedule;
+  return { ...schedule, createdBy: undefined };
+}
+
 export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): Promise<DispatchScheduleResult> {
+  schedule = withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
       if (!schedule.workflowId) {

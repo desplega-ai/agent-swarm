@@ -80,7 +80,7 @@ function resolveKapsoIdentity(externalId: string): IdentityResolution {
   return kapsoResolution;
 }
 
-function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
+export function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 

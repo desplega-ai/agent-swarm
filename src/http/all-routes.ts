@@ -17,6 +17,7 @@ import "./budgets";
 import "./codex-oauth-keep-warm";
 import "./config";
 import "./context";
+import "./core";
 import "./db-query";
 import "./ecosystem";
 

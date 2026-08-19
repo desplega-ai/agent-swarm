@@ -213,6 +213,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "30",
       },
       {
+        key: "RUNTIME_STALE_THRESHOLD_MIN",
+        label: "Runtime stale threshold (min)",
+        description:
+          "Minutes without a worker ping before that worker process stops counting as serving its agent. Only applies when multiple runtimes per agent is enabled; an agent whose last live worker expires is marked offline.",
+        kind: "number",
+        defaultValue: "5",
+        placeholder: "5",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
+      {
         key: "HEARTBEAT_STALL_NO_SESSION_MIN",
         label: "No-session threshold (min)",
         description:
@@ -279,6 +289,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}guides/scripts-only-mode`,
+      },
+      {
+        key: "MULTI_RUNTIME_ENABLED",
+        label: "Multiple runtimes per agent",
+        description:
+          "Let several worker processes serve one agent. Each process is tracked separately with its own capacity and liveness, and the agent's task limit moves to its AGENT_MAX_TASKS setting instead of being overwritten by whichever worker registered last. Leave off for one worker per agent.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}ui/configuration`,
       },
       {
         key: "CAPABILITIES",

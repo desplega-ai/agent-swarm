@@ -789,6 +789,19 @@ export function updateAgentCredentialState(
   return row ? rowToAgent(row) : null;
 }
 
+/**
+ * Record which env vars a worker is missing without touching status — the
+ * logical status is derived from runtime readiness in multi-runtime mode.
+ */
+export function updateAgentCredentialMissing(agentId: string, missing: string[] | null): void {
+  const json = missing && missing.length > 0 ? JSON.stringify(missing) : null;
+  getDb()
+    .prepare(
+      "UPDATE agents SET credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    )
+    .run(json, agentId);
+}
+
 export function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
 ): Agent {
@@ -1028,12 +1041,22 @@ export function deleteAgent(id: string): boolean {
  * Get the count of active (in_progress) tasks for an agent.
  * Used to determine current capacity usage.
  */
+/**
+ * Tasks occupying one of the agent's concurrency slots.
+ *
+ * A claimed offer counts too — omitting it let a second concurrent poll take
+ * another task past the limit. It is counted only through `offeredTo`, the
+ * agent actually reviewing it: `agentId` on an offer may still be the lead
+ * that created it, which would otherwise consume the lead's own capacity.
+ */
 export function getActiveTaskCount(agentId: string): number {
   const result = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
+    .prepare<{ count: number }, [string, string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE (agentId = ? AND status = 'in_progress')
+          OR (offeredTo = ? AND status = 'reviewing')`,
     )
-    .get(agentId);
+    .get(agentId, agentId);
   return result?.count ?? 0;
 }
 
@@ -8780,6 +8803,7 @@ export function insertActiveSession(session: {
   inboxMessageId?: string;
   taskDescription?: string;
   runnerSessionId?: string;
+  runtimeInstanceId?: string;
 }): ActiveSession {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -8795,12 +8819,13 @@ export function insertActiveSession(session: {
         string | null,
         string | null,
         string | null,
+        string | null,
         string,
         string,
       ]
     >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -8811,6 +8836,7 @@ export function insertActiveSession(session: {
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
       session.runnerSessionId ?? null,
+      session.runtimeInstanceId ?? null,
       now,
       now,
     );
@@ -9426,6 +9452,7 @@ type WorkflowRunRow = {
   triggerData: string | null;
   context: string | null;
   error: string | null;
+  created_by: string | null;
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -9439,6 +9466,7 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
     context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
+    createdBy: row.created_by ?? undefined,
     startedAt: normalizeDateRequired(row.startedAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
@@ -9449,13 +9477,20 @@ export function createWorkflowRun(data: {
   id: string;
   workflowId: string;
   triggerData?: unknown;
+  createdBy?: string;
 }): WorkflowRun {
   const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string | null, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?) RETURNING *`,
     )
-    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
+    .get(
+      data.id,
+      data.workflowId,
+      now,
+      data.triggerData ? JSON.stringify(data.triggerData) : null,
+      data.createdBy ?? null,
+    );
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
@@ -13376,13 +13411,104 @@ export function updateUser(
   return row ? rowToUser(row) : null;
 }
 
-export function deleteUser(id: string): boolean {
-  // Clear any task references before deleting
-  getDb()
-    .prepare("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?")
-    .run(id);
-  const result = getDb().prepare("DELETE FROM users WHERE id = ?").run(id);
-  return result.changes > 0;
+type UserReferenceRow = {
+  tableName: string;
+  columnName: string;
+};
+
+function quoteSqlIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+export function deleteUser(id: string, replacementUserId?: string): boolean {
+  if (replacementUserId === id) {
+    throw new Error("Replacement user must differ from deleted user");
+  }
+
+  const database = getDb();
+  return database.transaction(() => {
+    const userExists = database
+      .prepare<{ present: number }, [string]>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+      )
+      .get(id)?.present;
+    if (!userExists) return false;
+
+    if (replacementUserId) {
+      const replacementExists = database
+        .prepare<{ present: number }, [string]>(
+          "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+        )
+        .get(replacementUserId)?.present;
+      if (!replacementExists) throw new Error("Replacement user not found");
+    }
+
+    // Preserve rows that carry user attribution but lack ON DELETE semantics.
+    // Schema discovery keeps this correct as new nullable user audit columns are added.
+    // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
+    // recreating that table, so discover those two known logical references as
+    // well until the table is next rebuilt with its original constraints.
+    const references = database
+      .prepare<UserReferenceRow, []>(
+        `SELECT tables.name AS tableName, foreign_keys."from" AS columnName
+         FROM sqlite_schema AS tables
+         JOIN pragma_foreign_key_list(tables.name) AS foreign_keys
+         JOIN pragma_table_info(tables.name) AS columns
+           ON columns.name = foreign_keys."from"
+         WHERE tables.type = 'table'
+           AND foreign_keys."table" = 'users'
+           AND foreign_keys.on_delete IN ('NO ACTION', 'RESTRICT')
+           AND columns."notnull" = 0
+         UNION ALL
+         SELECT 'scheduled_tasks' AS tableName, columns.name AS columnName
+         FROM pragma_table_info('scheduled_tasks') AS columns
+         WHERE columns.name IN ('created_by', 'updated_by')
+           AND columns."notnull" = 0
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pragma_foreign_key_list('scheduled_tasks') AS foreign_keys
+             WHERE foreign_keys."from" = columns.name
+               AND foreign_keys."table" = 'users'
+           )`,
+      )
+      .all();
+    const replacement = replacementUserId ?? null;
+    for (const reference of references) {
+      const table = quoteSqlIdentifier(reference.tableName);
+      const column = quoteSqlIdentifier(reference.columnName);
+      database
+        .prepare<unknown, [string | null, string]>(
+          `UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`,
+        )
+        .run(replacement, id);
+    }
+
+    // Workflow context is persisted JSON rather than a relational column, but
+    // it exposes the same requester identity to downstream interpolation. Keep
+    // it consistent with workflow_runs.created_by inside this transaction.
+    if (replacementUserId) {
+      database
+        .prepare<unknown, [string, string]>(
+          `UPDATE workflow_runs
+           SET context = json_set(context, '$.swarm.requestedByUserId', ?)
+           WHERE json_valid(context)
+             AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        )
+        .run(replacementUserId, id);
+    } else {
+      database
+        .prepare<unknown, [string]>(
+          `UPDATE workflow_runs
+           SET context = json_remove(context, '$.swarm.requestedByUserId')
+           WHERE json_valid(context)
+             AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        )
+        .run(id);
+    }
+
+    const result = database.prepare("DELETE FROM users WHERE id = ?").run(id);
+    return result.changes > 0;
+  })();
 }
 
 // ============================================================================

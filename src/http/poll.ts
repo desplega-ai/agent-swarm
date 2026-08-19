@@ -27,6 +27,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
@@ -36,7 +37,8 @@ import {
   TaskAttachmentSchema,
   UserSchema,
 } from "../types";
-import { route } from "./route-def";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
 // ─── Budget-refused trigger envelope ────────────────────────────────────────
@@ -156,6 +158,7 @@ const pollTriggers = route({
   summary: "Poll for triggers (tasks, mentions)",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
+  headers: runtimeInstanceHeader("poll for work"),
   responses: {
     200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
@@ -224,6 +227,9 @@ export async function handlePoll(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
+    req.headers["x-runtime-instance-id"],
+  );
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
     const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
@@ -267,9 +273,26 @@ export async function handlePoll(
           return { error: "Agent not found", status: 404 };
         }
 
+        // A process whose runtime has been retired must not be handed work: it
+        // would execute alongside whatever replaced it. Dispatch is gated on a
+        // live runtime identity rather than on X-Agent-ID alone, which only
+        // names the logical agent. Polling is worker activity, so this also
+        // refreshes liveness — it cannot revive a retired runtime, since the
+        // update only matches one that is still live.
+        if (
+          isMultiRuntimeEnabled() &&
+          !(runtimeInstanceId && touchRuntimeInstance(runtimeInstanceId, agent.id))
+        ) {
+          return { trigger: null };
+        }
+
         // Check for offered tasks first (highest priority for both workers and leads)
-        // Atomically claim the task for review to prevent duplicate processing
-        const offeredTasks = getOfferedTasksForAgent(myAgentId);
+        // Atomically claim the task for review to prevent duplicate processing.
+        // Capacity is checked in the same transaction as the claim: with
+        // several runtimes serving one agent these polls run concurrently, and
+        // an unguarded claim here would let each of them take a task past the
+        // agent's logical limit.
+        const offeredTasks = hasCapacity(myAgentId) ? getOfferedTasksForAgent(myAgentId) : [];
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
           const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);

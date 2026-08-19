@@ -69,6 +69,12 @@
               "null"
             ]
           },
+          "runtimeInstanceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "startedAt": {
             "type": "string",
             "format": "date-time"
@@ -4291,6 +4297,9 @@
           "error": {
             "type": "string"
           },
+          "createdBy": {
+            "type": "string"
+          },
           "startedAt": {
             "type": "string"
           },
@@ -4696,6 +4705,9 @@
                   },
                   "runnerSessionId": {
                     "type": "string"
+                  },
+                  "runtimeInstanceId": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -5039,6 +5051,108 @@
           },
           "403": {
             "description": "Can only recover orphaned tasks for the calling agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "post": {
+        "summary": "Report agent liveness",
+        "description": "Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.",
+        "tags": [
+          "Core"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to refresh a runtime's liveness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to refresh a runtime's liveness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Liveness recorded (or accepted as a no-op)"
+          },
+          "400": {
+            "description": "Missing X-Agent-ID header",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/close": {
+      "post": {
+        "summary": "Mark an agent or runtime offline on shutdown",
+        "description": "Retires the calling process. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header is required and only that runtime is retired; the agent goes offline once no live runtime remains. With the flag off, the agent is marked offline as before.",
+        "tags": [
+          "Core"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to retire a runtime when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to retire a runtime when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Runtime (and agent, when last) marked offline"
+          },
+          "400": {
+            "description": "Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -8452,6 +8566,10 @@
                       "claude-managed",
                       "opencode"
                     ]
+                  },
+                  "runtimeInstanceId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -9448,6 +9566,16 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to report credential readiness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to report credential readiness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -9524,6 +9652,16 @@
                       ]
                     }
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing X-Runtime-Instance-ID in multi-runtime mode",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -22401,6 +22539,18 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Trigger data or null",
@@ -34028,6 +34178,18 @@
             "bearerAuth": []
           }
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -35456,6 +35618,18 @@
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise."
+            },
+            "required": false,
+            "description": "Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+            "name": "X-Runtime-Instance-ID",
+            "in": "header"
           }
         ],
         "requestBody": {

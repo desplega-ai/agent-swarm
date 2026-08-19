@@ -3,15 +3,21 @@ import { unlinkSync } from "node:fs";
 import {
   closeDb,
   createAgent,
+  createScheduledTask,
   createTaskExtended,
   createUser,
+  createWorkflow,
+  createWorkflowRun,
   deleteUser,
   getAllUsers,
   getDb,
+  getScheduledTaskById,
   getTaskById,
   getUserById,
+  getWorkflowRun,
   initDb,
   updateUser,
+  updateWorkflowRun,
 } from "../be/db";
 import {
   findOrCreateUserByEmail,
@@ -276,12 +282,68 @@ describe("deleteUser", () => {
       source: "slack",
       requestedByUserId: user.id,
     });
+    getDb().prepare("UPDATE agent_tasks SET created_by = ? WHERE id = ?").run(user.id, task.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBe(user.id);
+    expect(
+      getDb()
+        .prepare<{ created_by: string | null }, [string]>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+        )
+        .get(task.id)?.created_by,
+    ).toBe(user.id);
 
     deleteUser(user.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
+    expect(
+      getDb()
+        .prepare<{ created_by: string | null }, [string]>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+        )
+        .get(task.id)?.created_by,
+    ).toBeNull();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
     expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
+  });
+
+  test("clears retained workflow run attribution before deleting the user", () => {
+    const user = createUser({ name: "Workflow Trigger" });
+    const workflow = createWorkflow({
+      name: `delete-user-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: user.id,
+    });
+    updateWorkflowRun(run.id, {
+      context: {
+        swarm: { requestedByUserId: user.id, retained: "swarm-value" },
+        retained: "root-value",
+      },
+    });
+
+    expect(deleteUser(user.id)).toBe(true);
+    expect(getUserById(user.id)).toBeNull();
+    expect(getWorkflowRun(run.id)?.createdBy).toBeUndefined();
+    expect(getWorkflowRun(run.id)?.context).toEqual({
+      swarm: { retained: "swarm-value" },
+      retained: "root-value",
+    });
+  });
+
+  test("clears schedule attribution whose audit FKs were dropped by migration 103", () => {
+    const user = createUser({ name: "Schedule Trigger" });
+    const schedule = createScheduledTask({
+      name: `delete-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Run scheduled work",
+      createdBy: user.id,
+    });
+
+    expect(deleteUser(user.id)).toBe(true);
+    expect(getScheduledTaskById(schedule.id)?.createdBy).toBeUndefined();
+    expect(getScheduledTaskById(schedule.id)?.updatedBy).toBeUndefined();
   });
 });
 

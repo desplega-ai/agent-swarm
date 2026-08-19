@@ -10,6 +10,11 @@ import {
   shouldBlockPolling,
   updateAgentStatus,
 } from "../be/db";
+import {
+  markRuntimeInstanceOffline,
+  reconcileAgentStatusFromRuntimes,
+  touchRuntimeInstance,
+} from "../be/multi-runtime";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { initGitHub, resetGitHub } from "../github";
@@ -19,11 +24,12 @@ import { initLinear, resetLinear } from "../linear";
 import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { findRoute, isPublicRoute } from "./route-def";
+import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
 
 /**
@@ -273,6 +279,58 @@ export function _resetAutoReloadForTests(): void {
   autoReloadInvocations = 0;
 }
 
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+const RUNTIME_HEADER_DOC =
+  "Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. " +
+  "It is ignored unless MULTI_RUNTIME_ENABLED is set.";
+
+const pingRoute = route({
+  method: "post",
+  path: "/ping",
+  pattern: ["ping"],
+  summary: "Report agent liveness",
+  description:
+    `Refreshes the calling agent's status. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, ` +
+    "the header must identify a live runtime of this agent; an absent, unknown, offline, or " +
+    "foreign identifier makes the call a no-op instead of an error, so workers predating the " +
+    "flag keep running.",
+  tags: ["Core"],
+  auth: { apiKey: true, agentId: true },
+  headers: runtimeInstanceHeader("refresh a runtime's liveness"),
+  rbac: { ungated: "self-scoped: an agent reports its own liveness" },
+  responses: {
+    204: { description: "Liveness recorded (or accepted as a no-op)" },
+    400: { description: "Missing X-Agent-ID header" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const closeRoute = route({
+  method: "post",
+  path: "/close",
+  pattern: ["close"],
+  summary: "Mark an agent or runtime offline on shutdown",
+  description:
+    `Retires the calling process. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, the header ` +
+    "is required and only that runtime is retired; the agent goes offline once no live runtime " +
+    "remains. With the flag off, the agent is marked offline as before.",
+  tags: ["Core"],
+  auth: { apiKey: true, agentId: true },
+  headers: runtimeInstanceHeader("retire a runtime"),
+  rbac: { ungated: "self-scoped: an agent retires its own runtime" },
+  responses: {
+    204: { description: "Runtime (and agent, when last) marked offline" },
+    400: {
+      description: "Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode",
+    },
+    404: { description: "Agent not found" },
+  },
+});
+
 export async function handleCore(
   req: IncomingMessage,
   res: ServerResponse,
@@ -473,12 +531,15 @@ export async function handleCore(
     return true;
   }
 
-  if (req.method === "POST" && req.url === "/ping") {
+  if (pingRoute.match(req.method, getPathSegments(req.url || ""))) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
       return true;
     }
+
+    const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
+    const multiRuntime = isMultiRuntimeEnabled();
 
     const tx = getDb().transaction(() => {
       const agent = getAgentById(myAgentId);
@@ -487,6 +548,18 @@ export async function handleCore(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
+      }
+
+      if (multiRuntime) {
+        // Prove the identity before touching the agent: the status ladder
+        // below resolves `offline` to `idle`, so an anonymous, unknown, or
+        // already-closed runtime could otherwise revive an agent whose
+        // runtimes have all exited. Failing that check is a no-op rather
+        // than an error — ping is non-destructive, and rejecting it would
+        // break workers that predate the flag.
+        if (!runtimeInstanceId || !touchRuntimeInstance(runtimeInstanceId, agent.id)) {
+          return true;
+        }
       }
 
       let status: AgentStatus = "idle";
@@ -514,10 +587,26 @@ export async function handleCore(
     return true;
   }
 
-  if (req.method === "POST" && req.url === "/close") {
+  if (closeRoute.match(req.method, getPathSegments(req.url || ""))) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
+      return true;
+    }
+
+    const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
+    const multiRuntime = isMultiRuntimeEnabled();
+
+    // Unlike ping, close is destructive, so it fails closed: an anonymous
+    // close would fall through to the legacy agent-wide close and take down
+    // an agent a sibling runtime is still serving.
+    if (multiRuntime && !runtimeInstanceId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "X-Runtime-Instance-ID is required when multi-runtime mode is enabled",
+        }),
+      );
       return true;
     }
 
@@ -530,7 +619,16 @@ export async function handleCore(
         return false;
       }
 
-      updateAgentStatus(agent.id, "offline");
+      if (multiRuntime && runtimeInstanceId) {
+        // One process exiting retires only its own runtime; the logical state
+        // is then recomputed from whatever is left — offline when nothing is,
+        // otherwise reflecting the surviving runtimes' readiness and work.
+        markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
+        reconcileAgentStatusFromRuntimes(agent.id);
+      } else {
+        // Legacy semantics, with or without a runtime header.
+        updateAgentStatus(agent.id, "offline");
+      }
 
       return true;
     });

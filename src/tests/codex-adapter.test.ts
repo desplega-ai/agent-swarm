@@ -1011,6 +1011,36 @@ describe("buildCodexConfig", () => {
     expect(emitted.filter((e) => e.type === "raw_stderr")).toHaveLength(0);
   });
 
+  test("forwards the per-boot runtime identity to the swarm MCP headers", async () => {
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    process.env.SWARM_RUNTIME_INSTANCE_ID = "codex-runtime-1";
+    try {
+      const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+      const headers = (merged.mcp_servers as Record<string, Record<string, unknown>>)["agent-swarm"]
+        ?.http_headers as Record<string, string>;
+      expect(headers["X-Runtime-Instance-ID"]).toBe("codex-runtime-1");
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+    }
+  });
+
+  test("no runtime identity in the environment → no runtime header", async () => {
+    globalThis.fetch = stubFetch({ servers: [], total: 0 });
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+    try {
+      const merged = await buildCodexConfig(cfg(), "gpt-5.4", () => {});
+      const headers = (merged.mcp_servers as Record<string, Record<string, unknown>>)["agent-swarm"]
+        ?.http_headers as Record<string, string>;
+      expect(headers["X-Runtime-Instance-ID"]).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+    }
+  });
+
   test("one HTTP-transport installed server → both 'agent-swarm' and installed server present", async () => {
     globalThis.fetch = stubFetch({
       servers: [

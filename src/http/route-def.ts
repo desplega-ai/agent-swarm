@@ -26,6 +26,24 @@ type ResponsesDef = Record<number, RouteResponseDef>;
 /** Extracts the payload type respond() accepts for one response def. */
 type ResponseData<R> = R extends { schema: infer S extends z.ZodType } ? z.input<S> : never;
 
+/**
+ * Optional `X-Runtime-Instance-ID` header shared by the lifecycle and poll
+ * routes. Optional in the schema because the requirement is conditional:
+ * only multi-runtime mode needs it, and legacy deployments must keep working
+ * without it.
+ */
+export const runtimeInstanceHeader = (operation: string) =>
+  z.object({
+    "X-Runtime-Instance-ID": z
+      .string()
+      .optional()
+      .describe(
+        "Identifies the concrete runtime instance (worker process) making the call, " +
+          `as generated at its boot. Required to ${operation} when multi-runtime mode ` +
+          "(MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
+      ),
+  });
+
 export interface RouteDef<
   TParams extends z.ZodType = z.ZodType,
   TQuery extends z.ZodType = z.ZodType,
@@ -42,6 +60,14 @@ export interface RouteDef<
   tags: string[];
   params?: TParams;
   query?: TQuery;
+  /**
+   * Request headers to publish as OpenAPI parameters, beyond the global
+   * `Authorization`/`X-Agent-ID` security schemes. Declaration-only: handlers
+   * still read headers off `req`, so adding this to a route changes the
+   * generated spec and nothing else. Mark each property `.optional()` unless
+   * the header is unconditionally required.
+   */
+  headers?: z.ZodObject;
   body?: TBody;
   responses: TResponses;
   auth?: {

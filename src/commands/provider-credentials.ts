@@ -444,35 +444,62 @@ export async function buildCredStatusReport(
 }
 
 /**
- * Fire-and-forget POST of a `cred_status` snapshot to the API. Used by the
- * worker boot path (`runner.ts` after `awaitCredentials`) and the post-task
- * cache-miss path (also in `runner.ts`). Failures are logged, not thrown —
- * a stale dashboard is acceptable; blocking the worker is not.
+ * Strict PUT of credential readiness to the API: propagates network errors
+ * and non-2xx responses. The post-credential-wait boot path uses this — after
+ * a stale-runtime revival this write is the only transition out of
+ * `waiting_for_credentials`, so the caller must be able to observe (and
+ * retry) a failure instead of proceeding as though it landed.
  *
  * Posts to the existing `PUT /api/agents/:id/credential-status` endpoint
- * which (per migration 055) now accepts an optional `cred_status` field.
- * `ready` and `missing` are also included so legacy `agents.credentialMissing`
- * and `agents.status='waiting_for_credentials'` keep tracking.
+ * which (per migration 055) accepts an optional `cred_status` field. `ready`
+ * and `missing` are always included so legacy `agents.credentialMissing` and
+ * `agents.status='waiting_for_credentials'` keep tracking; the snapshot is
+ * optional so a hiccup while building it cannot lose the transition.
+ */
+export async function sendCredStatusReport(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  runtimeInstanceId: string | undefined,
+  report: { ready: boolean; missing: string[]; credStatus?: AgentCredStatus },
+): Promise<void> {
+  const res = await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "X-Agent-ID": agentId,
+      ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ready: report.ready,
+      missing: report.missing,
+      ...(report.credStatus ? { cred_status: report.credStatus } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`credential-status report failed: ${res.status} ${body}`.trim());
+  }
+}
+
+/**
+ * Fire-and-forget wrapper around {@link sendCredStatusReport}. Used by the
+ * post-task cache-miss path (`runner.ts`), where a stale dashboard is
+ * acceptable and blocking the worker is not.
  */
 export async function reportCredStatus(
   apiUrl: string,
   apiKey: string,
   agentId: string,
+  runtimeInstanceId: string | undefined,
   credStatus: AgentCredStatus,
 ): Promise<void> {
   try {
-    await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "X-Agent-ID": agentId,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        ready: credStatus.ready,
-        missing: credStatus.missing,
-        cred_status: credStatus,
-      }),
+    await sendCredStatusReport(apiUrl, apiKey, agentId, runtimeInstanceId, {
+      ready: credStatus.ready,
+      missing: credStatus.missing,
+      credStatus,
     });
   } catch (err) {
     console.warn(`[cred-status] POST failed (non-fatal): ${err}`);

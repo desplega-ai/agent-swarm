@@ -49,6 +49,7 @@ export interface paths {
                         inboxMessageId?: string;
                         taskDescription?: string;
                         runnerSessionId?: string;
+                        runtimeInstanceId?: string;
                     };
                 };
             };
@@ -332,6 +333,122 @@ export interface paths {
                 };
                 /** @description Can only recover orphaned tasks for the calling agent */
                 403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/ping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report agent liveness
+         * @description Refreshes the calling agent's status. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header must identify a live runtime of this agent; an absent, unknown, offline, or foreign identifier makes the call a no-op instead of an error, so workers predating the flag keep running.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to refresh a runtime's liveness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Liveness recorded (or accepted as a no-op) */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing X-Agent-ID header */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark an agent or runtime offline on shutdown
+         * @description Retires the calling process. Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. It is ignored unless MULTI_RUNTIME_ENABLED is set. With multi-runtime mode on, the header is required and only that runtime is retired; the agent goes offline once no live runtime remains. With the flag off, the agent is marked offline as before.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to retire a runtime when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Runtime (and agent, when last) marked offline */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Agent not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -2054,6 +2171,7 @@ export interface paths {
                         provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
                         /** @enum {string} */
                         harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        runtimeInstanceId?: string;
                     };
                 };
             };
@@ -2608,7 +2726,10 @@ export interface paths {
         put: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to report credential readiness when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2638,6 +2759,15 @@ export interface paths {
                                 available: number;
                             };
                         };
+                    };
+                };
+                /** @description Missing X-Runtime-Instance-ID in multi-runtime mode */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Agent not found */
@@ -10077,7 +10207,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to poll for work when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -13689,7 +13822,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through bridged tools when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                    "X-Runtime-Instance-ID"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -19353,6 +19489,7 @@ export interface components {
             taskDescription: string | null;
             runnerSessionId: string | null;
             providerSessionId: string | null;
+            runtimeInstanceId?: string | null;
             /** Format: date-time */
             startedAt: string;
             /** Format: date-time */
@@ -20537,6 +20674,7 @@ export interface components {
                 [key: string]: unknown;
             };
             error?: string;
+            createdBy?: string;
             startedAt: string;
             lastUpdatedAt: string;
             finishedAt?: string;
@@ -22874,7 +23012,10 @@ export interface operations {
     scripts_run: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Identifies the concrete runtime instance (worker process) making the call, as generated at its boot. Required to acquire work through the script SDK when multi-runtime mode (MULTI_RUNTIME_ENABLED) is on; ignored otherwise. */
+                "X-Runtime-Instance-ID"?: string;
+            };
             path?: never;
             cookie?: never;
         };

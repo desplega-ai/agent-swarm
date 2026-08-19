@@ -19,6 +19,8 @@ export type RunScriptInput = {
   args?: unknown;
   fsMode?: ScriptFsMode;
   agentId: string;
+  /** Per-boot runtime identity of the invoking worker; system context, never script input. */
+  runtimeInstanceId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
   mcpBaseUrl?: string;
@@ -50,6 +52,9 @@ async function buildConfigPayload(input: RunScriptInput): Promise<SwarmConfigPay
         value: input.mcpBaseUrl ?? process.env.MCP_BASE_URL ?? "http://localhost:3013",
         isSecret: false,
       },
+      ...(input.runtimeInstanceId
+        ? { runtimeInstanceId: { value: input.runtimeInstanceId, isSecret: false as const } }
+        : {}),
     },
     user: input.userConfig ?? {},
     egressSecrets: input.egressSecrets ?? (await buildEgressSecrets()),

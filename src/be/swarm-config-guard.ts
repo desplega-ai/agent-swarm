@@ -126,7 +126,19 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     if (value === "sdk" || value === "bearer") return null;
     return "Invalid BEDROCK_AUTH_MODE value (must be one of: sdk, bearer)";
   },
+  // Logical agent concurrency policy (agent scope) — the authoritative source
+  // that upsertSwarmConfigWithPolicyMirror mirrors into agents.maxTasks.
+  // Bounded to AgentSchema's maxTasks range [1, 100] so the mirrored column
+  // stays schema-valid.
+  AGENT_MAX_TASKS: (value) => {
+    const str = String(value).trim();
+    if (!/^\d+$/.test(str) || Number(str) < 1 || Number(str) > 100) {
+      return "Invalid AGENT_MAX_TASKS (must be an integer between 1 and 100)";
+    }
+    return null;
+  },
   ...booleanValidators([
+    "MULTI_RUNTIME_ENABLED",
     "STEERING_ENABLED",
     "MEMORY_HYBRID_SEARCH",
     "MEMORY_GRAPH_EXPANSION",
@@ -167,6 +179,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "WORKFLOW_MAX_ITERATIONS",
       "WORKFLOW_MAX_STEPS_PER_RUN",
       "SCHEDULER_INTERVAL_MS",
+      "RUNTIME_STALE_THRESHOLD_MIN",
       "SCRIPT_RUN_CONCURRENCY_CAP",
       "WORKER_API_READY_TIMEOUT_SECONDS",
     ],

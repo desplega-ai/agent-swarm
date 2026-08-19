@@ -5,6 +5,8 @@ export class SwarmConfig {
   readonly apiKey: RedactedValue<string>;
   readonly agentId: RedactedValue<string>;
   readonly mcpBaseUrl: RedactedValue<string>;
+  /** Per-boot runtime identity of the invoking worker; system context, never script input. */
+  readonly runtimeInstanceId: RedactedValue<string> | undefined;
 
   private readonly userValues: Map<string, RedactedValue<string>>;
 
@@ -21,6 +23,12 @@ export class SwarmConfig {
       type: "system",
       isSecret: payload.system.mcpBaseUrl.isSecret,
     });
+    this.runtimeInstanceId = payload.system.runtimeInstanceId
+      ? Redacted.make(payload.system.runtimeInstanceId.value, {
+          type: "system",
+          isSecret: payload.system.runtimeInstanceId.isSecret,
+        })
+      : undefined;
     this.userValues = new Map(
       Object.entries(payload.user ?? {}).map(([key, value]) => [
         key,

@@ -14,6 +14,7 @@ import {
   resetEmptyPollCount,
   setAgentHarnessProvider,
   updateAgentActivity,
+  updateAgentCredentialMissing,
   updateAgentCredentialState,
   updateAgentCredStatus,
   updateAgentMaxTasks,
@@ -24,6 +25,13 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { createEvent } from "../be/events";
+import {
+  getRuntimeInstanceById,
+  reconcileAgentMaxTasksPolicy,
+  reconcileAgentStatusFromRuntimes,
+  setRuntimeCredentialReady,
+  upsertRuntimeInstance,
+} from "../be/multi-runtime";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";
@@ -45,9 +53,15 @@ import {
   IDENTITY_FIELD_BUDGETS,
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { route } from "./route-def";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, json, jsonError } from "./utils";
+
+function singleHeaderValue(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
 
@@ -112,6 +126,13 @@ const registerAgent = route({
      * the canonical list — unknown values reject the request with 400.
      */
     harness_provider: ProviderNameSchema.optional(),
+    /**
+     * Per-process runtime identity; `X-Agent-ID` remains the logical agent.
+     * Ignored when MULTI_RUNTIME_ENABLED is off, required when it is on —
+     * schema-optional so older workers still parse, with the handler
+     * enforcing the mode-dependent requirement.
+     */
+    runtimeInstanceId: z.string().min(1).optional(),
   }),
   responses: {
     200: {
@@ -325,12 +346,14 @@ const updateAgentCredentialStatusRoute = route({
   summary: "Worker self-report of credential readiness (Phase 3 boot loop)",
   tags: ["Agents"],
   params: z.object({ id: z.string() }),
+  headers: runtimeInstanceHeader("report credential readiness"),
   body: credentialStatusBody,
   responses: {
     200: {
       description: "State updated; returns the agent row.",
       schema: AgentWithCapacitySchema,
     },
+    400: { description: "Missing X-Runtime-Instance-ID in multi-runtime mode" },
     404: { description: "Agent not found" },
   },
 });
@@ -378,6 +401,25 @@ export async function handleAgentRegister(
     if (!parsed) return true;
 
     const agentId = myAgentId || crypto.randomUUID();
+    // Read once so one mode applies consistently even if a config reload
+    // flips the flag mid-request.
+    const multiRuntime = isMultiRuntimeEnabled();
+
+    if (multiRuntime && parsed.body.runtimeInstanceId) {
+      // Runtime ownership is permanent: a runtime id already serving another
+      // agent must not be moved. `upsertRuntimeInstance` enforces this in SQL
+      // too; rejecting here keeps the failure legible and pre-mutation.
+      const existingRuntime = getRuntimeInstanceById(parsed.body.runtimeInstanceId);
+      if (existingRuntime && existingRuntime.agentId !== agentId) {
+        jsonError(res, "runtimeInstanceId is already registered to another agent", 400);
+        return true;
+      }
+    } else if (multiRuntime) {
+      // Enforced here rather than in the schema so the field stays optional
+      // for workers running against a server with the flag off.
+      jsonError(res, "runtimeInstanceId is required when multi-runtime mode is enabled", 400);
+      return true;
+    }
 
     const result = getDb().transaction(() => {
       const existingAgent = getAgentById(agentId);
@@ -385,7 +427,15 @@ export async function handleAgentRegister(
         if (existingAgent.status === "offline") {
           updateAgentStatus(existingAgent.id, "idle");
         }
-        if (parsed.body.maxTasks !== undefined && parsed.body.maxTasks !== existingAgent.maxTasks) {
+        if (multiRuntime) {
+          // body.maxTasks is this runtime's own capacity, recorded below; it
+          // must not redefine the logical policy, or two runtimes serving one
+          // agent would race to overwrite it.
+          reconcileAgentMaxTasksPolicy(existingAgent.id);
+        } else if (
+          parsed.body.maxTasks !== undefined &&
+          parsed.body.maxTasks !== existingAgent.maxTasks
+        ) {
           updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
@@ -403,6 +453,16 @@ export async function handleAgentRegister(
           setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
         }
         resetEmptyPollCount(existingAgent.id);
+        if (multiRuntime && parsed.body.runtimeInstanceId) {
+          upsertRuntimeInstance({
+            id: parsed.body.runtimeInstanceId,
+            agentId: existingAgent.id,
+            reportedSlots: parsed.body.maxTasks ?? 1,
+          });
+          // A new live runtime can lift the agent out of waiting without
+          // forcing idle over work another runtime is already doing.
+          reconcileAgentStatusFromRuntimes(existingAgent.id);
+        }
         return { agent: getAgentById(agentId), created: false };
       }
 
@@ -414,10 +474,28 @@ export async function handleAgentRegister(
         description: parsed.body.description,
         role: parsed.body.role,
         capabilities: parsed.body.capabilities ?? [],
+        // The first registration establishes the logical policy — including
+        // role defaults such as a lead's two concurrent tasks. Later
+        // registrations cannot change it; reconcile below only seeds.
         maxTasks: parsed.body.maxTasks ?? 1,
         provider: parsed.body.provider,
         harnessProvider: parsed.body.harness_provider ?? null,
       });
+
+      if (multiRuntime) {
+        // Re-fetch below: this may adopt a policy row an operator wrote
+        // before the agent existed.
+        reconcileAgentMaxTasksPolicy(agent.id);
+        if (parsed.body.runtimeInstanceId) {
+          upsertRuntimeInstance({
+            id: parsed.body.runtimeInstanceId,
+            agentId: agent.id,
+            reportedSlots: parsed.body.maxTasks ?? 1,
+          });
+          reconcileAgentStatusFromRuntimes(agent.id);
+        }
+        return { agent: getAgentById(agent.id), created: true };
+      }
 
       return { agent, created: true };
     })();
@@ -816,14 +894,36 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    const agent =
-      parsed.body.ready !== undefined
-        ? (updateAgentCredentialState(
+    // Credential readiness is process-local. With several runtimes serving one
+    // agent, writing it straight onto the shared row lets the last reporter win
+    // — so the report is stored on its own runtime and the logical state is
+    // recomputed from all live runtimes.
+    const runtimeInstanceId = singleHeaderValue(req, "x-runtime-instance-id");
+    const multiRuntime = isMultiRuntimeEnabled();
+    // Only the readiness write is process-scoped; model/status metadata on this
+    // same endpoint stays agent-level and needs no runtime identity.
+    if (multiRuntime && parsed.body.ready !== undefined && !runtimeInstanceId) {
+      jsonError(res, "X-Runtime-Instance-ID is required when multi-runtime mode is enabled", 400);
+      return true;
+    }
+
+    let agent = existing;
+    if (parsed.body.ready !== undefined) {
+      if (multiRuntime && runtimeInstanceId) {
+        if (setRuntimeCredentialReady(runtimeInstanceId, parsed.params.id, parsed.body.ready)) {
+          updateAgentCredentialMissing(parsed.params.id, parsed.body.missing ?? null);
+          reconcileAgentStatusFromRuntimes(parsed.params.id);
+        }
+        agent = getAgentById(parsed.params.id) ?? existing;
+      } else {
+        agent =
+          updateAgentCredentialState(
             parsed.params.id,
             parsed.body.ready,
             parsed.body.missing ?? null,
-          ) ?? existing)
-        : existing;
+          ) ?? existing;
+      }
+    }
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;

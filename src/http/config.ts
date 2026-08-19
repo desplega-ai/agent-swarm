@@ -8,8 +8,12 @@ import {
   getSwarmConfigLookupById,
   getSwarmConfigs,
   maskSecrets,
-  upsertSwarmConfig,
 } from "../be/db";
+import {
+  AGENT_MAX_TASKS_CONFIG_KEY,
+  resetAgentMaxTasksMirror,
+  upsertSwarmConfigWithPolicyMirror,
+} from "../be/multi-runtime";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   isReservedConfigKey,
@@ -394,7 +398,7 @@ export async function handleConfig(
 
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
-      const config = upsertSwarmConfig({
+      const config = upsertSwarmConfigWithPolicyMirror({
         scope,
         scopeId: scopeId || null,
         key,
@@ -434,6 +438,13 @@ export async function handleConfig(
     }
     if (existing.scope === "global") {
       scheduleIntegrationsReload();
+    }
+    if (
+      existing.scope === "agent" &&
+      existing.scopeId &&
+      existing.key === AGENT_MAX_TASKS_CONFIG_KEY
+    ) {
+      resetAgentMaxTasksMirror(existing.scopeId);
     }
     deleteConfig.respond(res, 200, { success: true });
     return true;

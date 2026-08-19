@@ -50,7 +50,7 @@ import {
 import type { KapsoConfig } from "../integrations/kapso/config";
 import { getKapsoConfig } from "../integrations/kapso/config";
 import type { KapsoWebhookPayload } from "../integrations/kapso/inbound";
-import { routeKapsoInbound } from "../integrations/kapso/inbound";
+import { resolveKapsoRequestedByUserId, routeKapsoInbound } from "../integrations/kapso/inbound";
 import { getExecutorRegistry } from "../workflows";
 import { workflowEventBus } from "../workflows/event-bus";
 import { handleWebhookTrigger, verifyHmacSignature, WebhookError } from "../workflows/triggers";
@@ -600,7 +600,10 @@ export async function handleWebhooks(
             rawBody,
             req.headers,
             getExecutorRegistry(),
-            { alreadyAuthenticated: true },
+            {
+              alreadyAuthenticated: true,
+              requestedByUserId: resolveKapsoRequestedByUserId(payload),
+            },
           );
           break;
         case "no_mapping":

@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, maskSecrets, upsertSwarmConfig } from "@/be/db";
+import { getAgentById, maskSecrets } from "@/be/db";
+import { upsertSwarmConfigWithPolicyMirror } from "@/be/multi-runtime";
 import {
   isReservedConfigKey,
   reservedKeyError,
@@ -110,7 +111,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
 
-        const config = upsertSwarmConfig({
+        const config = upsertSwarmConfigWithPolicyMirror({
           scope,
           scopeId: scope === "global" ? null : scopeId,
           key,

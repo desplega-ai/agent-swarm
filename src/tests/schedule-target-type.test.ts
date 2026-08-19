@@ -20,7 +20,9 @@ import {
   closeDb,
   createAgent,
   createScheduledTask,
+  createUser,
   createWorkflow,
+  deleteUser,
   getDb,
   getScheduledTaskById,
   getWorkflowRun,
@@ -226,11 +228,13 @@ describe("scheduled_tasks DB layer — targetType", () => {
 describe("dispatchScheduleTarget — workflow target", () => {
   test("triggers the workflow directly and returns its run ID (no implicit-binding lookup)", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const requester = createUser({ name: "Workflow Schedule Requester" });
     const schedule = createScheduledTask({
       name: `dispatch-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
       workflowId: wf.id,
+      createdBy: requester.id,
     });
 
     const result = await dispatchScheduleTarget(schedule);
@@ -239,6 +243,40 @@ describe("dispatchScheduleTarget — workflow target", () => {
 
     const run = getWorkflowRun(result.workflowRunIds![0]!);
     expect(run?.workflowId).toBe(wf.id);
+    expect(run?.createdBy).toBe(requester.id);
+  });
+
+  test("runs an implicitly bound workflow without dangling attribution after owner deletion", async () => {
+    const requester = createUser({ name: "Deleted Schedule Requester" });
+    const schedule = createScheduledTask({
+      name: `dispatch-deleted-owner-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Fallback task that should not run",
+      createdBy: requester.id,
+    });
+    const wf = createWorkflow({
+      name: `implicit-schedule-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] },
+      triggers: [{ type: "schedule", scheduleId: schedule.id }],
+      createdByAgentId: agentId,
+    });
+
+    expect(deleteUser(requester.id)).toBe(true);
+    // Simulate an orphan created before deleteUser learned to clean audit
+    // columns whose FK was dropped by migration 103.
+    getDb()
+      .prepare("UPDATE scheduled_tasks SET created_by = ? WHERE id = ?")
+      .run(requester.id, schedule.id);
+    const reloaded = getScheduledTaskById(schedule.id)!;
+    expect(reloaded.createdBy).toBe(requester.id);
+
+    const result = await dispatchScheduleTarget(reloaded);
+    expect(result.triggeredWorkflows).toBe(true);
+    expect(result.task).toBeUndefined();
+    expect(result.workflowRunIds).toHaveLength(1);
+    const run = getWorkflowRun(result.workflowRunIds![0]!);
+    expect(run?.workflowId).toBe(wf.id);
+    expect(run?.createdBy).toBeUndefined();
   });
 
   test("throws when the target workflow is disabled", async () => {

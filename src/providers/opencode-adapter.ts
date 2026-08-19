@@ -19,6 +19,7 @@ import {
 } from "../utils/context-window";
 import { validateOpencodeCredentials } from "../utils/credentials";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { resolveSlashSkillPrompt } from "./codex-skill-resolver";
@@ -726,6 +727,10 @@ export class OpencodeAdapter implements ProviderAdapter {
     const installedMcp =
       (await fetchInstalledMcpServers(config.apiUrl, config.apiKey, config.agentId, "opencode")) ??
       {};
+    // Same per-boot runtime identity the runner registers with — dispatch
+    // tools require it in multi-runtime mode, and it travels as request
+    // context, not as a tool argument.
+    const runtimeInstanceId = swarmRuntimeInstanceId();
     const mcpConfig: Config["mcp"] = {
       swarm: {
         type: "remote",
@@ -733,6 +738,7 @@ export class OpencodeAdapter implements ProviderAdapter {
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           "X-Agent-ID": config.agentId,
+          ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
         },
       },
       ...installedMcp,

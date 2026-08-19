@@ -27,6 +27,7 @@ import {
   releaseTask,
   updateTaskClaudeSessionId,
 } from "@/be/db";
+import { touchRuntimeInstance } from "@/be/multi-runtime";
 import { assertOwnsTask, ownerCtx, type ToolCtx } from "@/tools/task-tool-ctx";
 import {
   createToolRegistrar,
@@ -42,6 +43,7 @@ import {
   ReasoningEffortSchema,
   splitLegacyModelAlias,
 } from "@/types";
+import { isMultiRuntimeEnabled } from "@/utils/multi-runtime";
 import { looseAgentTaskOutputSchema } from "./get-task-details";
 
 export const TaskActionSchema = z.enum([
@@ -138,6 +140,28 @@ type TaskActionResult = {
 
 function agentOnlyActionResult(): SwarmToolResult {
   return toolErr("This action is only available to worker agents.");
+}
+
+/**
+ * Work-acquisition gate shared by claim and accept — the same dispatch gate
+ * as HTTP poll and poll-task: a process whose runtime is gone must not take
+ * work beside its replacement. Identity travels as request context, never as
+ * a tool argument; touch refreshes liveness and cannot revive a retired
+ * runtime. Returns null when acquisition may proceed.
+ */
+function staleRuntimeResult(ctx: ToolCtx, agentId: string): TaskActionResult | null {
+  if (!isMultiRuntimeEnabled()) return null;
+  if (
+    ctx.kind === "owner" &&
+    ctx.runtimeInstanceId &&
+    touchRuntimeInstance(ctx.runtimeInstanceId, agentId)
+  ) {
+    return null;
+  }
+  return {
+    success: false,
+    message: "This runtime is no longer registered. Re-register before taking work.",
+  };
 }
 
 function taskActionResult(result: TaskActionResult, agentId?: string): SwarmToolResult {
@@ -285,6 +309,8 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'claim' action." };
         }
+        const staleClaimRuntime = staleRuntimeResult(ctx, agentId);
+        if (staleClaimRuntime) return staleClaimRuntime;
         // Check capacity before claiming
         if (!hasCapacity(agentId)) {
           const activeCount = getActiveTaskCount(agentId);
@@ -388,6 +414,10 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'accept' action." };
         }
+        // Accept is a work-acquisition transition too — gate it before the
+        // budget admission below so a retired process cannot take the offer.
+        const staleAcceptRuntime = staleRuntimeResult(ctx, agentId);
+        if (staleAcceptRuntime) return staleAcceptRuntime;
         const existingTask = getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
