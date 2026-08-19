@@ -35,6 +35,7 @@ import getChildOutputsSrc from "./catalog/get-child-outputs.ts" with { type: "te
 import ghPrSnapshotSrc from "./catalog/gh-pr-snapshot.ts" with { type: "text" };
 import githubIssuesPullSrc from "./catalog/github-issues-pull.ts" with { type: "text" };
 import groupCountSrc from "./catalog/group-count.ts" with { type: "text" };
+import humalikeForeseeSrc from "./catalog/humalike-foresee.ts" with { type: "text" };
 import jsonQuerySrc from "./catalog/json-query.ts" with { type: "text" };
 import linearIssueSrc from "./catalog/linear-issue.ts" with { type: "text" };
 import memoryDedupCheckSrc from "./catalog/memory-dedup-check.ts" with { type: "text" };
@@ -274,6 +275,14 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "See who is in the swarm and what tasks are running — swarm stats / agent list / task counts in a single call.",
     source: asText(swarmOverviewSrc),
+  },
+  {
+    name: "humalike-foresee",
+    description:
+      "Opt-in beta: pre-send theory-of-mind check via the Humalike foresee API — scores a draft reply's predicted risk/reactions and logs the {draft, refinedReply} pair to KV for blind human review. Never mutates, sends, or auto-applies the refined reply; every failure path (402 payment required, 502 upstream with one retry, 401 unauthorized, 400/422 validation, timeout) falls through to {ok:false, draft} unchanged. Also supports a free 'usage' mode for 30-day credit burn tracking.",
+    intent:
+      "How will this land, tone check, theory of mind, foresee, predict reaction before sending a reply — internal pilot only, gated to the Researcher agent's credential binding.",
+    source: asText(humalikeForeseeSrc),
   },
 ];
 
