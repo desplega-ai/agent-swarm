@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { runMigrations } from "../be/migrations/runner";
+import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 
 const DB_PATH = "./test-task-pull-request-backfill-migration.sqlite";
 
@@ -115,7 +116,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
           taskId: firstTaskId,
           name: "GitHub pull request #41",
           url: "https://github.com/desplega-ai/agent-swarm/pull/41",
-          providerId: "url",
+          providerId: "github",
           providerKey: "https://github.com/desplega-ai/agent-swarm/pull/41",
           intent: "task-deliverable",
         },
@@ -124,7 +125,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
           taskId: firstTaskId,
           name: "GitHub pull request #9",
           url: "https://github.com/desplega-ai/docs/pull/9",
-          providerId: "url",
+          providerId: "github",
           providerKey: "https://github.com/desplega-ai/docs/pull/9",
           intent: "task-deliverable",
         },
@@ -142,7 +143,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
           taskId: thirdTaskId,
           name: "GitHub pull request #43",
           url: "https://github.com/desplega-ai/agent-swarm/pull/43",
-          providerId: "url",
+          providerId: "github",
           providerKey: "https://github.com/desplega-ai/agent-swarm/pull/43",
           intent: "task-deliverable",
         },
@@ -169,6 +170,51 @@ describe("migration 135 task pull-request attachment backfill", () => {
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()
           ?.count,
       ).toBe(5);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("matches the TypeScript extractor across host and token boundaries", async () => {
+    await removeDb();
+    const db = new Database(DB_PATH, { create: true });
+    try {
+      runMigrations(db);
+      db.run("DELETE FROM _migrations WHERE version = 133");
+      const fixtures = [
+        "https://evil.example/?next=github.com/o/r/pull/8",
+        "xhttps://github.com/o/r/pull/1",
+        "https://github.com/o/r/pull/8/files",
+        "github.com/o/r/pull/8",
+        "Shipped https://github.com/o/r/pull/8, with follow-up prose.",
+        "https://notgithub.com/o/r/pull/8",
+        "https://_github.com/o/r/pull/8",
+        "https://evil.example/github.com/o/r/pull/8",
+        "https://github.com/o/r/pull/123abc",
+      ];
+      const now = new Date().toISOString();
+      const insertTask = db.prepare(
+        `INSERT INTO agent_tasks
+           (id, task, status, source, output, createdAt, lastUpdatedAt)
+         VALUES (?, 'fixture', 'completed', 'api', ?, ?, ?)`,
+      );
+      fixtures.forEach((fixture, index) => {
+        const suffix = String(index + 1).padStart(12, "0");
+        insertTask.run(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`, fixture, now, now);
+      });
+
+      runMigrations(db);
+
+      fixtures.forEach((fixture, index) => {
+        const suffix = String(index + 1).padStart(12, "0");
+        const taskId = `aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`;
+        const count = db
+          .query<{ count: number }, [string]>(
+            "SELECT COUNT(*) AS count FROM task_attachments WHERE task_id = ?",
+          )
+          .get(taskId)?.count;
+        expect(Boolean(count)).toBe(extractGitHubPullRequestUrls(fixture).length > 0);
+      });
     } finally {
       db.close();
     }

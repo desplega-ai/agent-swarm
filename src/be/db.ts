@@ -2196,8 +2196,11 @@ export function updateTaskVcs(
         new Date().toISOString(),
         taskId,
       );
-    if (updated && vcs.vcsProvider === "github") {
-      recordTaskPullRequestAttachments(taskId, updated.agentId, vcs.vcsUrl);
+    if (updated) {
+      reconcileTaskPullRequestAttachments(taskId, updated.agentId, [
+        updated.output,
+        vcs.vcsProvider === "github" ? vcs.vcsUrl : null,
+      ]);
     }
     return updated;
   })();
@@ -2991,7 +2994,10 @@ export function completeTask(id: string, output?: string): AgentTask | null {
       completed = taskQueries.setOutput().get(scrubSecrets(output), id);
     }
     if (completed) {
-      recordTaskPullRequestAttachments(id, completed.agentId, completed.output);
+      reconcileTaskPullRequestAttachments(id, completed.agentId, [
+        completed.output,
+        completed.vcsProvider === "github" ? completed.vcsUrl : null,
+      ]);
     }
     return completed;
   })();
@@ -3138,7 +3144,16 @@ export function overwriteTerminalTaskResultText(
     patch.failureReason !== undefined
       ? scrubSecrets(patch.failureReason)
       : (task.failureReason ?? null);
-  const row = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+  const row = getDb().transaction(() => {
+    const updated = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+    if (updated && patch.output !== undefined) {
+      reconcileTaskPullRequestAttachments(id, updated.agentId, [
+        updated.output,
+        updated.vcsProvider === "github" ? updated.vcsUrl : null,
+      ]);
+    }
+    return updated;
+  })();
 
   return row ? rowToAgentTask(row) : task;
 }
@@ -3675,10 +3690,20 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
   })();
 }
 
+const GENERATED_PULL_REQUEST_PROVIDER_ID = "github";
+const GENERATED_PULL_REQUEST_INTENT = "task-deliverable";
+const GENERATED_PULL_REQUEST_DESCRIPTION = "Pull request shipped by this task";
+
+function pullRequestKey(pullRequest: { owner: string; repo: string; number: number }): string {
+  return `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`;
+}
+
 /**
  * Persist PRs detected by server-owned task lifecycle paths. Existing URL
  * attachments win regardless of display name, so an agent-authored row and an
- * automatic row never duplicate the same task deliverable.
+ * automatic row never duplicate the same task deliverable. The GitHub provider
+ * marker lets reconciliation distinguish generated rows from caller-authored
+ * URL attachments.
  */
 export function recordTaskPullRequestAttachments(
   taskId: string,
@@ -3695,14 +3720,11 @@ export function recordTaskPullRequestAttachments(
       )
       .all(taskId)
       .flatMap((row) => extractGitHubPullRequestUrls(row.url))
-      .map(
-        (pullRequest) =>
-          `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`,
-      ),
+      .map(pullRequestKey),
   );
   const stored: TaskAttachment[] = [];
   for (const pullRequest of pullRequests) {
-    const dedupeKey = `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`;
+    const dedupeKey = pullRequestKey(pullRequest);
     if (existingPullRequests.has(dedupeKey)) continue;
     stored.push(
       insertTaskAttachment({
@@ -3711,13 +3733,59 @@ export function recordTaskPullRequestAttachments(
         name: `GitHub pull request #${pullRequest.number}`,
         kind: "url",
         url: pullRequest.url,
-        intent: "task-deliverable",
-        description: "Pull request shipped by this task",
+        providerId: GENERATED_PULL_REQUEST_PROVIDER_ID,
+        intent: GENERATED_PULL_REQUEST_INTENT,
+        description: GENERATED_PULL_REQUEST_DESCRIPTION,
       }),
     );
     existingPullRequests.add(dedupeKey);
   }
   return stored;
+}
+
+/** Reconcile only lifecycle-generated PR rows against their current source text. */
+function reconcileTaskPullRequestAttachments(
+  taskId: string,
+  agentId: string | null,
+  sourceTexts: Array<string | null | undefined>,
+): TaskAttachment[] {
+  const desiredPullRequests = sourceTexts.flatMap(extractGitHubPullRequestUrls);
+  const desiredKeys = new Set(desiredPullRequests.map(pullRequestKey));
+  const generatedRows = getDb()
+    .prepare<{ id: string; name: string; url: string }, [string, string, string, string]>(
+      `SELECT id, name, url
+       FROM task_attachments
+       WHERE task_id = ?
+         AND kind = 'url'
+         AND url IS NOT NULL
+         AND provider_id = ?
+         AND intent = ?
+         AND description = ?`,
+    )
+    .all(
+      taskId,
+      GENERATED_PULL_REQUEST_PROVIDER_ID,
+      GENERATED_PULL_REQUEST_INTENT,
+      GENERATED_PULL_REQUEST_DESCRIPTION,
+    );
+
+  for (const row of generatedRows) {
+    const pullRequest = extractGitHubPullRequestUrls(row.url)[0];
+    const expectedName = pullRequest ? `GitHub pull request #${pullRequest.number}` : null;
+    if (
+      !pullRequest ||
+      row.name !== expectedName ||
+      !desiredKeys.has(pullRequestKey(pullRequest))
+    ) {
+      getDb().run("DELETE FROM task_attachments WHERE id = ?", [row.id]);
+    }
+  }
+
+  return recordTaskPullRequestAttachments(
+    taskId,
+    agentId,
+    desiredPullRequests.map((pullRequest) => pullRequest.url).join("\n"),
+  );
 }
 
 function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachment {

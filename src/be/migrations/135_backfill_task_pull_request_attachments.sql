@@ -6,88 +6,59 @@
 -- task + canonical URL as the identity regardless of display name.
 
 WITH RECURSIVE
-candidate_tasks(task_id, agent_id, remaining) AS (
+candidate_tasks(task_id, agent_id, output) AS (
   SELECT id, agentId, output
   FROM agent_tasks
   WHERE output IS NOT NULL
     AND instr(lower(output), 'github.com/') > 0
 ),
-occurrences(task_id, agent_id, url_tail, remaining, valid_boundary) AS (
-  SELECT task_id, agent_id, NULL, remaining, 0
+normalized(task_id, agent_id, value) AS (
+  SELECT
+    task_id,
+    agent_id,
+    trim(
+      replace(replace(replace(replace(
+      replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+        output, char(9), ' '), char(10), ' '), char(13), ' '),
+        '(', ' '), ')', ' '), '[', ' '), ']', ' '), '{', ' '), '}', ' '), '<', ' '),
+        '>', ' '), char(34), ' '), char(39), ' '), char(96), ' ')
+    )
   FROM candidate_tasks
+),
+tokens(task_id, agent_id, remaining, token) AS (
+  SELECT
+    task_id,
+    agent_id,
+    value || ' ',
+    NULL
+  FROM normalized
 
   UNION ALL
 
   SELECT
     task_id,
     agent_id,
-    substr(remaining, instr(lower(remaining), 'github.com/')),
-    substr(
-      remaining,
-      instr(lower(remaining), 'github.com/') + length('github.com/')
-    ),
-    instr(lower(remaining), 'github.com/') = 1
-      OR substr(
-        lower(remaining),
-        instr(lower(remaining), 'github.com/') - length('https://'),
-        length('https://')
-      ) = 'https://'
-      OR substr(
-        lower(remaining),
-        instr(lower(remaining), 'github.com/') - length('http://'),
-        length('http://')
-      ) = 'http://'
-      OR substr(remaining, instr(lower(remaining), 'github.com/') - 1, 1)
-        NOT GLOB '[A-Za-z0-9._/-]'
-  FROM occurrences
-  WHERE instr(lower(remaining), 'github.com/') > 0
-),
-tokens(task_id, agent_id, token) AS (
-  SELECT
-    task_id,
-    agent_id,
-    substr(cleaned, 1, instr(cleaned || ' ', ' ') - 1)
-  FROM (
-    SELECT
-      task_id,
-      agent_id,
-      replace(
-        replace(
-          replace(
-            replace(
-              replace(
-                replace(
-                  replace(
-                    replace(
-                      replace(url_tail, char(9), ' '),
-                      char(10), ' '
-                    ),
-                    char(13), ' '
-                  ),
-                  ')', ' '
-                ),
-                ']', ' '
-              ),
-              '>', ' '
-            ),
-            '"', ' '
-          ),
-          '''', ' '
-        ),
-        '`', ' '
-      ) AS cleaned
-    FROM occurrences
-    WHERE url_tail IS NOT NULL
-      AND valid_boundary
-  )
+    ltrim(substr(remaining, instr(remaining, ' ') + 1)),
+    substr(remaining, 1, instr(remaining, ' ') - 1)
+  FROM tokens
+  WHERE remaining <> ''
 ),
 token_paths(task_id, agent_id, token, path) AS (
   SELECT
     task_id,
     agent_id,
     token,
-    substr(token, length('github.com/') + 1)
+    CASE
+      WHEN lower(token) GLOB 'https://github.com/*'
+        THEN substr(token, length('https://github.com/') + 1)
+      WHEN lower(token) GLOB 'http://github.com/*'
+        THEN substr(token, length('http://github.com/') + 1)
+      ELSE substr(token, length('github.com/') + 1)
+    END
   FROM tokens
+  WHERE lower(token) GLOB 'https://github.com/*'
+     OR lower(token) GLOB 'http://github.com/*'
+     OR lower(token) GLOB 'github.com/*'
 ),
 token_segments(task_id, agent_id, token, owner, repo, remainder) AS (
   SELECT
@@ -112,9 +83,9 @@ digit_scan(task_id, agent_id, token, position) AS (
   SELECT
     task_id,
     agent_id,
-    'https://github.com/' || substr(token, length('github.com/') + 1),
+    'https://github.com/' || owner || '/' || repo || '/' || remainder,
     instr(
-      lower('https://github.com/' || substr(token, length('github.com/') + 1)),
+      lower('https://github.com/' || owner || '/' || repo || '/' || remainder),
       '/pull/'
     ) + length('/pull/')
   FROM token_segments
@@ -165,7 +136,7 @@ SELECT
   'GitHub pull request #' || substr(candidate.url, instr(lower(candidate.url), '/pull/') + 6),
   'url',
   candidate.url,
-  'url',
+  'github',
   candidate.url,
   'task-deliverable',
   'Pull request shipped by this task',

@@ -66,6 +66,25 @@ describe("GitHub pull-request extraction", () => {
     ]);
     expect(extractGitHubPullRequestUrls("https://notgithub.com/o/r/pull/8")).toEqual([]);
   });
+
+  test("requires GitHub to be the host or a bare token", () => {
+    for (const fixture of [
+      "https://evil.example/?next=github.com/o/r/pull/8",
+      "xhttps://github.com/o/r/pull/1",
+      "https://evil.example/github.com/o/r/pull/8",
+    ]) {
+      expect(extractGitHubPullRequestUrls(fixture)).toEqual([]);
+    }
+    for (const fixture of [
+      "https://github.com/o/r/pull/8/files",
+      "github.com/o/r/pull/8",
+      "Shipped https://github.com/o/r/pull/8, with follow-up prose.",
+    ]) {
+      expect(extractGitHubPullRequestUrls(fixture)).toEqual([
+        { url: "https://github.com/o/r/pull/8", owner: "o", repo: "r", number: 8 },
+      ]);
+    }
+  });
 });
 
 describe("automatic task pull-request attachments", () => {
@@ -90,14 +109,14 @@ describe("automatic task pull-request attachments", () => {
         name: "GitHub pull request #1200",
         url: "https://github.com/desplega-ai/agent-swarm/pull/1200",
         intent: "task-deliverable",
-        providerId: "url",
+        providerId: "github",
         providerKey: "https://github.com/desplega-ai/agent-swarm/pull/1200",
       },
       {
         name: "GitHub pull request #81",
         url: "https://github.com/desplega-ai/docs/pull/81",
         intent: "task-deliverable",
-        providerId: "url",
+        providerId: "github",
         providerKey: "https://github.com/desplega-ai/docs/pull/81",
       },
     ]);
@@ -136,6 +155,56 @@ describe("automatic task pull-request attachments", () => {
     expect(attachments).toHaveLength(1);
     expect(attachments[0]?.url).toBe(vcs.vcsUrl);
   });
+
+  test("reconciles generated VCS attachments while preserving caller-authored rows", () => {
+    const task = createTaskExtended("VCS discovery replaces generated PR", {
+      agentId,
+      source: "api",
+    });
+    const callerUrl = "https://github.com/caller/owned/pull/77";
+    insertTaskAttachment({
+      taskId: task.id,
+      agentId,
+      name: "Caller-owned evidence",
+      kind: "url",
+      url: callerUrl,
+      intent: "review",
+    });
+
+    updateTaskVcs(task.id, {
+      vcsProvider: "github",
+      vcsRepo: "owner/repo",
+      vcsNumber: 1,
+      vcsUrl: "https://github.com/owner/repo/pull/1",
+    });
+    updateTaskVcs(task.id, {
+      vcsProvider: "github",
+      vcsRepo: "owner/repo",
+      vcsNumber: 2,
+      vcsUrl: "https://github.com/owner/repo/pull/2",
+    });
+
+    expect(
+      getTaskAttachments(task.id).map(({ name, url, providerId }) => ({ name, url, providerId })),
+    ).toEqual([
+      { name: "Caller-owned evidence", url: callerUrl, providerId: "url" },
+      {
+        name: "GitHub pull request #2",
+        url: "https://github.com/owner/repo/pull/2",
+        providerId: "github",
+      },
+    ]);
+
+    updateTaskVcs(task.id, {
+      vcsProvider: "gitlab",
+      vcsRepo: "owner/repo",
+      vcsNumber: 3,
+      vcsUrl: "https://gitlab.com/owner/repo/-/merge_requests/3",
+    });
+    expect(getTaskAttachments(task.id).map(({ name, url }) => ({ name, url }))).toEqual([
+      { name: "Caller-owned evidence", url: callerUrl },
+    ]);
+  });
 });
 
 describe("attachment-first task shipping evidence", () => {
@@ -147,8 +216,12 @@ describe("attachment-first task shipping evidence", () => {
     "https://notgithub.com/o/r/pull/8",
     "https://_github.com/o/r/pull/8",
     "https://evil.example/github.com/o/r/pull/8",
+    "https://evil.example/?next=github.com/o/r/pull/8",
+    "xhttps://github.com/o/r/pull/1",
     "https://github.com/o/r/pull/123abc",
     "https://github.com/o/r/pull/123/files",
+    "https://github.com/o/r/pull/8/files",
+    "github.com/o/r/pull/8",
     "https://github.com/o/r/pull/123.",
     "Reject https://github.com/org/repo/tree/pull/123, then accept github.com/o/r/pull/8",
   ];
