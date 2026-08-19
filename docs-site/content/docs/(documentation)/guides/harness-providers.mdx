@@ -343,7 +343,7 @@ All steps live in [`src/commands/runner.ts`](https://github.com/desplega-ai/agen
 
 When a session finishes, the runner syncs the agent's **self-editable** files back to the API so edits the agent made during the session persist into its profile (`context_versions`):
 
-- `SOUL.md` / `IDENTITY.md` / `TOOLS.md` / `HEARTBEAT.md` (bundled identity update)
+- `SOUL.md` / `IDENTITY.md` / `TOOLS.md` / `HEARTBEAT.md` (independent field updates)
 - the `CLAUDE.md` source — **provider-dependent** (see below)
 - the agent-managed section of `/workspace/start-up.sh` (`setupScript`)
 
@@ -356,6 +356,7 @@ The sync lives in [`src/commands/profile-sync.ts`](https://github.com/desplega-a
 
 - **`CLAUDE.md` source is provider-routed (`resolveClaudeMdPath`).** `claude` edits its personal file at `~/.claude/CLAUDE.md` (also synced by the Claude Stop hook); every other local harness (`codex`/`pi`/`opencode`) edits `/workspace/CLAUDE.md` — the file the runner materializes from the `claudeMd` DB field at boot and that the base-prompt truncation notice points them to. An all-`claude` batch syncs the personal file (the runner is a backstop and never overwrites it with the stale workspace copy); any non-`claude` session in the batch routes to `/workspace/CLAUDE.md`. This closes the previously-open non-Claude `CLAUDE.md` FS → DB gap.
 - **Baseline hashes protect lead-side profile edits.** At session start the runner records SHA-256 baselines for the identity files it just materialized from the DB. On session-end sync, unchanged files are skipped; only files the agent actually modified sync back. That preserves `update-profile` edits made by the lead during a running session instead of having the stale local copy blindly overwrite the DB row at shutdown.
+- **Identity budgets ratchet oversized fields down without truncating them.** SOUL.md and IDENTITY.md have 10,000-character budgets; CLAUDE.md and TOOLS.md have 20,000-character budgets. A field already above its budget may stay level or shrink, but cannot grow. Each file is posted independently, so one rejection does not discard valid edits to the others. Rejections and later reconciliations are persisted as events, and unresolved rejections add recovery guidance to the next worker prompt. Run `bun src/commands/profile-sync-audit.ts` inside the worker to compare the local files with DB state; it exits `2` when divergence exists.
 
 Notes:
 

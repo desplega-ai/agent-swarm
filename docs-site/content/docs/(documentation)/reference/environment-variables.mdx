@@ -252,7 +252,7 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION` | Set to `true` to require @mention for thread follow-up routing (default: `false`) |
 | `LEAD_MONITOR_CHANNELS` | Set to `true` to have the lead agent additionally poll monitored Slack channels for non-mention activity (not just @mentions/DMs), throttled to once per 60s per poll cycle |
 | `LEAD_MONITOR_CHANNEL_IDS` | Comma-separated Slack channel IDs allowlist restricting `LEAD_MONITOR_CHANNELS` activity monitoring to specific channels. Unset monitors every channel the bot is a member of |
-| `SLACK_ALERTS_CHANNEL` | Slack channel ID/name that the OAuth keepalive (Linear/Jira token-refresh failures) and Jira webhook keepalive post failure alerts to. Unset means alerts are logged only, not sent |
+| `SLACK_ALERTS_CHANNEL` | Slack channel ID/name for OAuth/Jira keepalive failures and claimable-queue stall/recovery alerts. Unset means alerts are logged only, not sent |
 
 ## GitHub Integration
 

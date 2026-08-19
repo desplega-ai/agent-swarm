@@ -121,8 +121,8 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 
 ## Highlights
 
-- **Lead/worker orchestration in Docker** — isolated dev environments, priority queues, pause/resume across deploys. [Architecture →](https://docs.agent-swarm.dev/docs/architecture/overview)
-- **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
+- **Lead/worker orchestration in Docker** — isolated dev environments, priority queues, pause/resume across deploys, and API-side alerts when claimable work stops being picked up. [Architecture →](https://docs.agent-swarm.dev/docs/architecture/overview)
+- **Compounding memory & persistent identity** — agents remember past sessions and evolve their own persona, expertise, and notes, with ratcheting file budgets and visible recovery when local edits exceed prompt limits. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
 - **Hybrid + graph-linked memory recall** — memory retrieval can blend vector and full-text ranking, expand through linked memories, surface usefulness readouts, and let agents correct an existing memory without losing its ID or history. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools#memory-tools)
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
 - **Persistent Slack thread trees** — opt in to one editable task tree per conversation, complete streamed outcome cards, and explicit agent-authored Block Kit messages without routine relay spam. [Slack guide →](https://docs.agent-swarm.dev/docs/guides/slack-integration)

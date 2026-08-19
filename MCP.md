@@ -787,11 +787,11 @@ Updates an agent's profile information (name, description, role, capabilities). 
 | `description` | `string` | No | - | Agent description. |
 | `role` | `string` | No | - | Agent role (free-form, e.g., 'frontend dev', 'code reviewer'). |
 | `capabilities` | `array` | No | - | List of capabilities (e.g., ['typescript', 'react', 'testing']). |
-| `claudeMd` | `string` | No | - | Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions. |
-| `soulMd` | `string` | No | - | Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption. |
-| `identityMd` | `string` | No | - | Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption. |
+| `claudeMd` | `string` | No | - | Personal CLAUDE.md content. Loaded on session start and synced back on session end. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory. |
+| `soulMd` | `string` | No | - | Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters; above 10,000 characters, updates may only keep or reduce the stored size. |
+| `identityMd` | `string` | No | - | Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters; above 10,000 characters, updates may only keep or reduce the stored size. |
 | `setupScript` | `string` | No | - | Setup script content (bash). Runs at container start as the worker user after privilege drop. Persists across sessions. Also written to /workspace/start-up.sh. |
-| `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md. |
+| `toolsMd` | `string` | No | - | Environment-specific operational knowledge. Synced to /workspace/TOOLS.md. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory. |
 | `heartbeatMd` | `string` | No | - | Heartbeat checklist content (HEARTBEAT.md). Checked periodically — add standing orders for the lead to review. Synced to /workspace/HEARTBEAT.md. |
 | `avatar` | `unknown` | No | - | Custom avatar: { type: 'lucide', icon: '<kebab-case-lucide-name>', color?: '#RRGGBB' }. Pass null to reset to the default deterministic icon/color. |
 

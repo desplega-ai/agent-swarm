@@ -110,7 +110,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Use for persistent notes and instructions.",
+            "Personal CLAUDE.md content. Loaded on session start and synced back on session end. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory.",
           ),
         soulMd: z
           .string()
@@ -118,7 +118,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters to prevent accidental corruption.",
+            "Soul content: persona and behavioral directives. Updates both DB and /workspace/SOUL.md. Must be at least 200 characters; above 10,000 characters, updates may only keep or reduce the stored size.",
           ),
         identityMd: z
           .string()
@@ -126,7 +126,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters to prevent accidental corruption.",
+            "Identity content: expertise and working style. Updates both DB and /workspace/IDENTITY.md. Must be at least 200 characters; above 10,000 characters, updates may only keep or reduce the stored size.",
           ),
         setupScript: z
           .string()
@@ -140,7 +140,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
           .max(MAX_PROFILE_FILE_LENGTH)
           .optional()
           .describe(
-            "Environment-specific operational knowledge. Repos, services, SSH hosts, APIs, device names — anything specific to your setup. Synced to /workspace/TOOLS.md.",
+            "Environment-specific operational knowledge. Synced to /workspace/TOOLS.md. Above 20,000 characters, updates may only keep or reduce the stored size; move durable overflow into memory.",
           ),
         heartbeatMd: z
           .string()
