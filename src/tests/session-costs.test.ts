@@ -1266,7 +1266,7 @@ describe("Session Costs API", () => {
       expect(mine?.firstPassYield).toBe(null);
     });
 
-    test("counts a root as shipped via a task_attachments PR-URL row, and via output fallback", () => {
+    test("counts GitHub PR and GitLab MR evidence as shipped", () => {
       const agent = createAgent({ name: "Shipped Agent", isLead: false, status: "idle" });
       const user = createUser({ name: "Shipped Requester" });
 
@@ -1294,13 +1294,39 @@ describe("Session Costs API", () => {
         "Opened https://github.com/desplega-ai/agent-swarm/pull/5678",
       );
 
+      const shippedViaGitLabAttachment = createTaskExtended("Shipped via GitLab attachment", {
+        requestedByUserId: user.id,
+        vcsProvider: "gitlab",
+      });
+      const gitLabAttachmentChild = createTaskExtended("Child with GitLab shipping evidence", {
+        parentTaskId: shippedViaGitLabAttachment.id,
+        requestedByUserId: user.id,
+      });
+      insertTaskAttachment({
+        taskId: gitLabAttachmentChild.id,
+        agentId: agent.id,
+        name: "MR",
+        kind: "url",
+        url: "https://gitlab.example.com/group/project/-/merge_requests/1234",
+      });
+      completeTask(shippedViaGitLabAttachment.id);
+
+      const shippedViaGitLabOutput = createTaskExtended("Shipped via GitLab output", {
+        requestedByUserId: user.id,
+        vcsProvider: "gitlab",
+      });
+      completeTask(
+        shippedViaGitLabOutput.id,
+        "Opened https://gitlab.internal/group/project/-/merge_requests/5678",
+      );
+
       const notShipped = createTaskExtended("Not shipped", { requestedByUserId: user.id });
       completeTask(notShipped.id, "Just some notes, no PR");
 
       const rows = getAttributionByPerson({});
       const mine = rows.find((r) => r.userId === user.id);
-      expect(mine?.problemsInitiated).toBe(3);
-      expect(mine?.problemsShipped).toBe(2);
+      expect(mine?.problemsInitiated).toBe(5);
+      expect(mine?.problemsShipped).toBe(4);
     });
 
     test("respects the date range filter", () => {

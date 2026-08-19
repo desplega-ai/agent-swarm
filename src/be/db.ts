@@ -7186,9 +7186,10 @@ export interface AttributionByPersonRow {
  * neither belongs to a person.
  *
  * "Problems shipped" detection walks each root's full task tree, preferring a
- * `task_attachments` row (`kind='url'` matching a GitHub PR URL, or
- * `kind='page'` for a published artifact) and falling back to a PR-URL string
- * match on any task output. This does NOT detect a closed ticket (no
+ * `task_attachments` row (`kind='url'` matching a GitHub PR or GitLab MR URL,
+ * or `kind='page'` for a published artifact) and falling back to the same
+ * provider-specific URL match on any task output. GitLab matching is host
+ * agnostic so self-hosted instances are covered. This does NOT detect a closed ticket (no
  * Linear/Jira issue-state table exists locally) — "shipped" undercounts
  * ticket-only outcomes until the real artifacts join lands.
  */
@@ -7258,7 +7259,10 @@ export function getAttributionByPerson(opts: {
             JOIN task_attachments ta ON ta.task_id = tree.taskId
             WHERE tree.rootId = t.id
               AND ta.kind = 'url'
-              AND ta.url LIKE '%github.com/%/pull/%'
+              AND (
+                ta.url LIKE '%github.com/%/pull/%'
+                OR ta.url LIKE '%/-/merge_requests/%'
+              )
           )
           OR EXISTS (
             SELECT 1 FROM task_attachments ta
@@ -7267,7 +7271,11 @@ export function getAttributionByPerson(opts: {
           )
           OR EXISTS (
             SELECT 1 FROM task_tree tree
-            WHERE tree.rootId = t.id AND tree.output LIKE '%github.com/%/pull/%'
+            WHERE tree.rootId = t.id
+              AND (
+                tree.output LIKE '%github.com/%/pull/%'
+                OR tree.output LIKE '%/-/merge_requests/%'
+              )
           )
         ) THEN 1 ELSE 0 END) as shipped
       FROM agent_tasks t
