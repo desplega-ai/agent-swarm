@@ -31,11 +31,11 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
 
   async function poll(): Promise<void> {
     try {
-      const retryableSteps = getRetryableSteps();
+      const retryableSteps = await getRetryableSteps();
 
       for (const step of retryableSteps) {
         try {
-          const run = getWorkflowRun(step.runId);
+          const run = await getWorkflowRun(step.runId);
           if (!run) continue;
 
           const workflow = await getWorkflow(run.workflowId);

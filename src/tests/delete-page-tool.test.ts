@@ -137,7 +137,7 @@ describe("delete-page MCP tool", () => {
 
   test("delete cascades versions and removes page-scoped KV and favorites", async () => {
     const page = makePage(ownerId, "cascade-delete", "Cascade Delete");
-    createPageVersion({
+    await createPageVersion({
       pageId: page.id,
       version: 1,
       snapshot: {

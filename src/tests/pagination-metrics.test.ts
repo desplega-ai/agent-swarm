@@ -77,11 +77,11 @@ describe("pagination metrics", () => {
     expect(getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
   });
 
-  test("countAllPages and countPagesByAgent", () => {
+  test("countAllPages and countPagesByAgent", async () => {
     const a1 = createAgent({ id: "pm-agent-1", name: "PM Agent 1", isLead: false, status: "idle" });
     const a2 = createAgent({ id: "pm-agent-2", name: "PM Agent 2", isLead: false, status: "busy" });
     for (let i = 0; i < 4; i++) {
-      createPage({
+      await createPage({
         agentId: a1.id,
         slug: `pm-page-a1-${i}`,
         title: `Page ${i}`,
@@ -91,7 +91,7 @@ describe("pagination metrics", () => {
       });
     }
     for (let i = 0; i < 2; i++) {
-      createPage({
+      await createPage({
         agentId: a2.id,
         slug: `pm-page-a2-${i}`,
         title: `Page ${i}`,
@@ -101,9 +101,9 @@ describe("pagination metrics", () => {
       });
     }
 
-    expect(countAllPages()).toBe(6);
-    expect(countPagesByAgent(a1.id)).toBe(4);
-    expect(countPagesByAgent(a2.id)).toBe(2);
+    expect(await countAllPages()).toBe(6);
+    expect(await countPagesByAgent(a1.id)).toBe(4);
+    expect(await countPagesByAgent(a2.id)).toBe(2);
   });
 
   test("countSessions is filter-aware on source", () => {

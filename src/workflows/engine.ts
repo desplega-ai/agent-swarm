@@ -74,9 +74,9 @@ export async function startWorkflowExecution(
   }
 
   // Cooldown check
-  if (workflow.cooldown && shouldSkipCooldown(workflow.id, workflow.cooldown)) {
+  if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
     const runId = crypto.randomUUID();
-    createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+    await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
     updateWorkflowRun(runId, {
       status: "skipped",
       error: "cooldown",
@@ -86,7 +86,7 @@ export async function startWorkflowExecution(
   }
 
   const runId = crypto.randomUUID();
-  createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+  await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
   telemetry.workflow("started", {
     workflowId: workflow.id,
     nodeCount: workflow.definition.nodes.length,
@@ -168,7 +168,7 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
-  const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
@@ -296,7 +296,7 @@ export async function walkGraph(
         // Check if the run was already marked failed in DB (e.g., executor error).
         // If so, stop immediately. If not (mustPass validation), skip this
         // node's successors but continue processing other branches.
-        const currentRun = getWorkflowRun(runId);
+        const currentRun = await getWorkflowRun(runId);
         if (currentRun?.status === "failed") return;
         continue;
       }
@@ -342,7 +342,7 @@ export async function walkGraph(
   // No more nodes to execute — check if the run should be completed.
   // Stay in current state if any steps are still waiting (async tasks
   // pending) or have pending retries.
-  const run = getWorkflowRun(runId);
+  const run = await getWorkflowRun(runId);
   if (run && run.status === "running") {
     const finalSteps = getWorkflowRunStepsByRunId(runId);
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
@@ -432,11 +432,11 @@ async function executeStep(
 ): Promise<StepResult> {
   // Use iteration-aware idempotency key to support loops.
   // Count existing steps for this node to determine the current iteration.
-  const iteration = getStepCountForNode(runId, node.id);
+  const iteration = await getStepCountForNode(runId, node.id);
   const idempotencyKey = `${runId}:${node.id}:${iteration}`;
 
   // 1. Memoization / deduplication check (within same iteration)
-  const existingStep = getStepByIdempotencyKey(idempotencyKey);
+  const existingStep = await getStepByIdempotencyKey(idempotencyKey);
   if (existingStep) {
     if (existingStep.status === "completed") {
       // Inject stored output into context
@@ -467,7 +467,7 @@ async function executeStep(
       : undefined;
   const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
   if (!reusableForeachStep) {
-    createWorkflowRunStep({
+    await createWorkflowRunStep({
       id: stepId,
       runId,
       nodeId: node.id,

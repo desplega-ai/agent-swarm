@@ -1051,7 +1051,7 @@ export async function handleApps(
       jsonError(res, "app not found", 404);
       return true;
     }
-    const version = getAppVersion(parsed.params.id, parsed.params.version);
+    const version = await getAppVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       jsonError(res, "app version not found", 404);
       return true;

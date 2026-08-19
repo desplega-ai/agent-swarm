@@ -44,7 +44,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         );
 
         // Check if the run was skipped due to cooldown
-        const run = getWorkflowRun(runId);
+        const run = await getWorkflowRun(runId);
         const skipped = run?.status === "skipped";
 
         if (skipped) {

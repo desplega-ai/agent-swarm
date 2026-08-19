@@ -7,8 +7,8 @@ import { can } from "@/rbac";
 import { computeDiff } from "@/tools/context-diff";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
-function definitionForVersion(appId: string, version: number): unknown | null {
-  const snapshot = getAppVersion(appId, version);
+async function definitionForVersion(appId: string, version: number): Promise<unknown | null> {
+  const snapshot = await getAppVersion(appId, version);
   if (!snapshot) return null;
   return (decodeAppVersion(snapshot).snapshot as { definition: unknown }).definition;
 }
@@ -59,10 +59,11 @@ export const registerAppDiffTool = (server: McpServer) => {
       const selectedFrom = from ?? getAppVersions(appId)[0]?.version;
       if (selectedFrom === undefined)
         return toolErr("No snapshots exist yet; create a definition write before diffing.");
-      const fromDefinition = definitionForVersion(appId, selectedFrom);
+      const fromDefinition = await definitionForVersion(appId, selectedFrom);
       if (fromDefinition === null) return toolErr(`App version ${selectedFrom} not found.`);
 
-      const toDefinition = to === undefined ? app.definition : definitionForVersion(appId, to);
+      const toDefinition =
+        to === undefined ? app.definition : await definitionForVersion(appId, to);
       if (toDefinition === null) return toolErr(`App version ${to} not found.`);
       const fromLabel = `v${selectedFrom}`;
       const toLabel = to === undefined ? "CURRENT" : `v${to}`;

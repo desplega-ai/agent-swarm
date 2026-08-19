@@ -63,13 +63,13 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
 
   for (const runId of runningRunIds) {
     try {
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       if (!run || run.status !== "running") continue;
 
       const workflow = await getWorkflow(run.workflowId);
       if (!workflow) continue;
 
-      const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+      const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
       const ctx = (run.context ?? {}) as Record<string, unknown>;
 
       // Find the next nodes that are ready to execute
@@ -107,12 +107,12 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
  * while the server was down.
  */
 async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckWorkflowRuns();
+  const stuckRuns = await getStuckWorkflowRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {
     try {
-      const run = getWorkflowRun(stuck.runId);
+      const run = await getWorkflowRun(stuck.runId);
       const workflow = await getWorkflow(stuck.workflowId);
       if (!run || run.status !== "waiting" || !workflow) continue;
 
@@ -145,7 +145,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
           ? parseRecoveredTaskOutput(stuck.taskOutput)
           : `${FAILED_TASK_OUTPUT_PREFIX} ${reason}] This node failed or was cancelled.`,
       };
-      const step = getWorkflowRunStep(stuck.stepId);
+      const step = await getWorkflowRunStep(stuck.stepId);
       if (!step) continue;
       const routing = completeTaskStepAndResolveSuccessors(
         workflow.definition,
@@ -202,7 +202,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
 
   for (const stuck of stuckRuns) {
     try {
-      const run = getWorkflowRun(stuck.runId);
+      const run = await getWorkflowRun(stuck.runId);
       const workflow = await getWorkflow(stuck.workflowId);
       if (!run || !workflow) continue;
 

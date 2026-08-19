@@ -52,7 +52,7 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const run = getWorkflowRun(id);
+        const run = await getWorkflowRun(id);
         if (!run) {
           return toolErr(`Workflow run not found: ${id}`, { data: { steps: [] } });
         }

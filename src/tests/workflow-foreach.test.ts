@@ -467,7 +467,7 @@ describe("workflow foreach", () => {
     const child = foreachChildren(runId)[0]!;
     const task = getTaskByWorkflowRunStepId(child.id)!;
 
-    cancelWorkflowRun(runId, "stop now");
+    await cancelWorkflowRun(runId, "stop now");
     bus.emit("task.cancelled", {
       taskId: task.id,
       workflowRunId: runId,

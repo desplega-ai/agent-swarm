@@ -9017,33 +9017,32 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
   };
 }
 
-export function createWorkflowRun(data: {
+export async function createWorkflowRun(data: {
   id: string;
   workflowId: string;
   triggerData?: unknown;
-}): WorkflowRun {
+}): Promise<WorkflowRun> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
-    )
-    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
+  const row = await getDbClient().get<WorkflowRunRow>(
+    `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
+    [data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null],
+  );
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }
 
-export function getWorkflowRun(id: string): WorkflowRun | null {
-  const row = getDb()
-    .prepare<WorkflowRunRow, [string]>("SELECT * FROM workflow_runs WHERE id = ?")
-    .get(id);
+export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
+  const row = await getDbClient().get<WorkflowRunRow>("SELECT * FROM workflow_runs WHERE id = ?", [
+    id,
+  ]);
   return row ? rowToWorkflowRun(row) : null;
 }
 
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   if (run.status !== "completed" && run.status !== "failed") return;
 
-  queueMicrotask(() => {
-    const latest = getWorkflowRun(run.id);
+  queueMicrotask(async () => {
+    const latest = await getWorkflowRun(run.id);
     if (!latest || latest.status !== run.status) return;
     const steps = getWorkflowRunStepsByRunId(run.id);
     telemetry.workflow(run.status, {
@@ -9082,7 +9081,15 @@ export function updateWorkflowRun(
     updates.push("finishedAt = ?");
     params.push(data.finishedAt);
   }
-  if (updates.length === 0) return getWorkflowRun(id);
+  if (updates.length === 0) {
+    // Stays on the raw sync handle (not the async getWorkflowRun) —
+    // updateWorkflowRun must remain fully synchronous for its
+    // getDb().transaction() callers (checkpoint.ts, task-step-routing.ts).
+    const row = getDb()
+      .prepare<WorkflowRunRow, [string]>("SELECT * FROM workflow_runs WHERE id = ?")
+      .get(id);
+    return row ? rowToWorkflowRun(row) : null;
+  }
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
@@ -9229,35 +9236,35 @@ function rowToWorkflowRunStep(row: WorkflowRunStepRow): WorkflowRunStep {
   };
 }
 
-export function createWorkflowRunStep(data: {
+export async function createWorkflowRunStep(data: {
   id: string;
   runId: string;
   nodeId: string;
   nodeType: string;
   input?: unknown;
-}): WorkflowRunStep {
+}): Promise<WorkflowRunStep> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<WorkflowRunStepRow, [string, string, string, string, string, string | null]>(
-      `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
        VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       data.id,
       data.runId,
       data.nodeId,
       data.nodeType,
       now,
       data.input ? JSON.stringify(data.input) : null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create workflow run step");
   return rowToWorkflowRunStep(row);
 }
 
-export function getWorkflowRunStep(id: string): WorkflowRunStep | null {
-  const row = getDb()
-    .prepare<WorkflowRunStepRow, [string]>("SELECT * FROM workflow_run_steps WHERE id = ?")
-    .get(id);
+export async function getWorkflowRunStep(id: string): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE id = ?",
+    [id],
+  );
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -9318,7 +9325,15 @@ export function updateWorkflowRunStep(
     updates.push("nextPort = ?");
     params.push(data.nextPort);
   }
-  if (updates.length === 0) return getWorkflowRunStep(id);
+  if (updates.length === 0) {
+    // Stays on the raw sync handle (not the async getWorkflowRunStep) —
+    // updateWorkflowRunStep must remain fully synchronous for its
+    // getDb().transaction() callers (checkpoint.ts).
+    const row = getDb()
+      .prepare<WorkflowRunStepRow, [string]>("SELECT * FROM workflow_run_steps WHERE id = ?")
+      .get(id);
+    return row ? rowToWorkflowRunStep(row) : null;
+  }
   params.push(id);
   const row = getDb()
     .prepare<WorkflowRunStepRow, (string | number | null)[]>(
@@ -9349,10 +9364,9 @@ export interface StuckWorkflowRun {
   workflowId: string;
 }
 
-export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
-  return getDb()
-    .prepare<StuckWorkflowRun, []>(
-      `SELECT
+export async function getStuckWorkflowRuns(): Promise<StuckWorkflowRun[]> {
+  return getDbClient().query<StuckWorkflowRun>(
+    `SELECT
         wr.id as runId,
         wrs.id as stepId,
         wrs.nodeId,
@@ -9366,86 +9380,78 @@ export function getStuckWorkflowRuns(): StuckWorkflowRun[] {
       WHERE wr.status = 'waiting'
         AND at.status IN ('completed', 'failed', 'cancelled')
       ORDER BY at.createdAt ASC, at.rowid ASC`,
-    )
-    .all();
+  );
 }
 
 // --- New Workflow Query Functions ---
 
-export function getLastSuccessfulRun(workflowId: string): WorkflowRun | null {
-  const row = getDb()
-    .prepare<WorkflowRunRow, [string]>(
-      `SELECT * FROM workflow_runs
+export async function getLastSuccessfulRun(workflowId: string): Promise<WorkflowRun | null> {
+  const row = await getDbClient().get<WorkflowRunRow>(
+    `SELECT * FROM workflow_runs
        WHERE workflowId = ? AND status = 'completed'
        ORDER BY finishedAt DESC LIMIT 1`,
-    )
-    .get(workflowId);
+    [workflowId],
+  );
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function getLastRunStart(workflowId: string): WorkflowRun | null {
-  const row = getDb()
-    .prepare<WorkflowRunRow, [string]>(
-      `SELECT * FROM workflow_runs
+export async function getLastRunStart(workflowId: string): Promise<WorkflowRun | null> {
+  const row = await getDbClient().get<WorkflowRunRow>(
+    `SELECT * FROM workflow_runs
        WHERE workflowId = ? AND status NOT IN ('skipped')
        ORDER BY startedAt DESC LIMIT 1`,
-    )
-    .get(workflowId);
+    [workflowId],
+  );
   return row ? rowToWorkflowRun(row) : null;
 }
 
-export function getRetryableSteps(): WorkflowRunStep[] {
+export async function getRetryableSteps(): Promise<WorkflowRunStep[]> {
   const now = new Date().toISOString();
-  return getDb()
-    .prepare<WorkflowRunStepRow, [string]>(
-      `SELECT * FROM workflow_run_steps
+  const rows = await getDbClient().query<WorkflowRunStepRow>(
+    `SELECT * FROM workflow_run_steps
        WHERE status = 'failed'
          AND nextRetryAt IS NOT NULL
          AND nextRetryAt <= ?
        ORDER BY nextRetryAt ASC`,
-    )
-    .all(now)
-    .map(rowToWorkflowRunStep);
+    [now],
+  );
+  return rows.map(rowToWorkflowRunStep);
 }
 
-export function getCompletedStepNodeIds(runId: string): string[] {
-  const rows = getDb()
-    .prepare<{ nodeId: string }, [string]>(
-      `SELECT nodeId FROM workflow_run_steps
+export async function getCompletedStepNodeIds(runId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ nodeId: string }>(
+    `SELECT nodeId FROM workflow_run_steps
        WHERE runId = ? AND status = 'completed'`,
-    )
-    .all(runId);
+    [runId],
+  );
   return rows.map((r) => r.nodeId);
 }
 
-export function getTaskByWorkflowRunStepId(stepId: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
-    )
-    .get(stepId);
+export async function getTaskByWorkflowRunStepId(stepId: string): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE workflowRunStepId = ? LIMIT 1",
+    [stepId],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
-export function detachTaskFromWorkflowRunStep(taskId: string): void {
-  getDb().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
+export async function detachTaskFromWorkflowRunStep(taskId: string): Promise<void> {
+  await getDbClient().run("UPDATE agent_tasks SET workflowRunStepId = NULL WHERE id = ?", [taskId]);
 }
 
-export function getStepByIdempotencyKey(key: string): WorkflowRunStep | null {
-  const row = getDb()
-    .prepare<WorkflowRunStepRow, [string]>(
-      "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
-    )
-    .get(key);
+export async function getStepByIdempotencyKey(key: string): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE idempotencyKey = ?",
+    [key],
+  );
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function getStepCountForNode(runId: string, nodeId: string): number {
-  const row = getDb()
-    .prepare<{ cnt: number }, [string, string]>(
-      "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
-    )
-    .get(runId, nodeId);
+export async function getStepCountForNode(runId: string, nodeId: string): Promise<number> {
+  const row = await getDbClient().get<{ cnt: number }>(
+    "SELECT COUNT(*) as cnt FROM workflow_run_steps WHERE runId = ? AND nodeId = ?",
+    [runId, nodeId],
+  );
   return row?.cnt ?? 0;
 }
 
@@ -9480,44 +9486,44 @@ function rowToWorkflowVersion(row: WorkflowVersionRow): WorkflowVersion {
   };
 }
 
-export function createWorkflowVersion(data: {
+export async function createWorkflowVersion(data: {
   workflowId: string;
   version: number;
   snapshot: WorkflowSnapshot;
   changedByAgentId?: string;
-}): WorkflowVersion {
+}): Promise<WorkflowVersion> {
   const id = crypto.randomUUID();
-  const row = getDb()
-    .prepare<WorkflowVersionRow, [string, string, number, string, string | null]>(
-      `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
+  const row = await getDbClient().get<WorkflowVersionRow>(
+    `INSERT INTO workflow_versions (id, workflowId, version, snapshot, changedByAgentId)
        VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       data.workflowId,
       data.version,
       JSON.stringify(data.snapshot),
       data.changedByAgentId ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create workflow version");
   return rowToWorkflowVersion(row);
 }
 
-export function getWorkflowVersions(workflowId: string): WorkflowVersion[] {
-  return getDb()
-    .prepare<WorkflowVersionRow, [string]>(
-      "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
-    )
-    .all(workflowId)
-    .map(rowToWorkflowVersion);
+export async function getWorkflowVersions(workflowId: string): Promise<WorkflowVersion[]> {
+  const rows = await getDbClient().query<WorkflowVersionRow>(
+    "SELECT * FROM workflow_versions WHERE workflowId = ? ORDER BY version DESC",
+    [workflowId],
+  );
+  return rows.map(rowToWorkflowVersion);
 }
 
-export function getWorkflowVersion(workflowId: string, version: number): WorkflowVersion | null {
-  const row = getDb()
-    .prepare<WorkflowVersionRow, [string, number]>(
-      "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
-    )
-    .get(workflowId, version);
+export async function getWorkflowVersion(
+  workflowId: string,
+  version: number,
+): Promise<WorkflowVersion | null> {
+  const row = await getDbClient().get<WorkflowVersionRow>(
+    "SELECT * FROM workflow_versions WHERE workflowId = ? AND version = ?",
+    [workflowId, version],
+  );
   return row ? rowToWorkflowVersion(row) : null;
 }
 
@@ -9585,12 +9591,11 @@ export function getAppVersions(appId: string): AppVersion[] {
     .map(rowToAppVersion);
 }
 
-export function getAppVersion(appId: string, version: number): AppVersion | null {
-  const row = getDb()
-    .prepare<AppVersionRow, [string, number]>(
-      "SELECT * FROM app_versions WHERE appId = ? AND version = ?",
-    )
-    .get(appId, version);
+export async function getAppVersion(appId: string, version: number): Promise<AppVersion | null> {
+  const row = await getDbClient().get<AppVersionRow>(
+    "SELECT * FROM app_versions WHERE appId = ? AND version = ?",
+    [appId, version],
+  );
   return row ? rowToAppVersion(row) : null;
 }
 
@@ -9641,7 +9646,7 @@ function rowToPage(row: PageRow): Page {
   };
 }
 
-export function createPage(data: {
+export async function createPage(data: {
   key?: string;
   agentId: string;
   slug: string;
@@ -9652,16 +9657,14 @@ export function createPage(data: {
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
-}): Page {
+}): Promise<Page> {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
-  const row = getDb()
-    .prepare<PageRow, (string | null)[]>(
-      `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
+  const row = await getDbClient().get<PageRow>(
+    `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("page", id)),
       data.agentId,
@@ -9673,29 +9676,30 @@ export function createPage(data: {
       data.passwordHash ?? null,
       data.body,
       data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create page");
   return rowToPage(row);
 }
 
-export function getPage(id: string): Page | null {
-  const row = getDb().prepare<PageRow, [string]>("SELECT * FROM pages WHERE id = ?").get(id);
+export async function getPage(id: string): Promise<Page | null> {
+  const row = await getDbClient().get<PageRow>("SELECT * FROM pages WHERE id = ?", [id]);
   return row ? rowToPage(row) : null;
 }
 
-export function getPageBySlug(agentId: string, slug: string): Page | null {
-  const row = getDb()
-    .prepare<PageRow, [string, string]>("SELECT * FROM pages WHERE agentId = ? AND slug = ?")
-    .get(agentId, slug);
+export async function getPageBySlug(agentId: string, slug: string): Promise<Page | null> {
+  const row = await getDbClient().get<PageRow>(
+    "SELECT * FROM pages WHERE agentId = ? AND slug = ?",
+    [agentId, slug],
+  );
   return row ? rowToPage(row) : null;
 }
 
-export function getLatestPageBySlug(slug: string): Page | null {
-  const row = getDb()
-    .prepare<PageRow, [string]>(
-      "SELECT * FROM pages WHERE slug = ? ORDER BY updatedAt DESC LIMIT 1",
-    )
-    .get(slug);
+export async function getLatestPageBySlug(slug: string): Promise<Page | null> {
+  const row = await getDbClient().get<PageRow>(
+    "SELECT * FROM pages WHERE slug = ? ORDER BY updatedAt DESC LIMIT 1",
+    [slug],
+  );
   return row ? rowToPage(row) : null;
 }
 
@@ -9729,25 +9733,25 @@ export interface PageListOptions {
   keyPrefix?: string;
 }
 
-export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Page[];
+export function listPagesByAgent(agentId: string, limit?: number, offset?: number): Promise<Page[]>;
 export function listPagesByAgent(
   agentId: string,
   limit: number | undefined,
   offset: number | undefined,
   opts: PageListOptions & { slim?: false },
-): Page[];
+): Promise<Page[]>;
 export function listPagesByAgent(
   agentId: string,
   limit: number | undefined,
   offset: number | undefined,
   opts: PageListOptions & { slim: true },
-): PageSummary[];
-export function listPagesByAgent(
+): Promise<PageSummary[]>;
+export async function listPagesByAgent(
   agentId: string,
   limit = 100,
   offset = 0,
   opts?: PageListOptions,
-): Page[] | PageSummary[] {
+): Promise<Page[] | PageSummary[]> {
   let query = "SELECT * FROM pages WHERE agentId = ?";
   const params: (string | number)[] = [agentId];
   if (opts?.key) {
@@ -9759,28 +9763,26 @@ export function listPagesByAgent(
   }
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
-  const rows = getDb()
-    .prepare<PageRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<PageRow>(query, params);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
-export function listAllPages(limit?: number, offset?: number): Page[];
+export function listAllPages(limit?: number, offset?: number): Promise<Page[]>;
 export function listAllPages(
   limit: number | undefined,
   offset: number | undefined,
   opts: PageListOptions & { slim?: false },
-): Page[];
+): Promise<Page[]>;
 export function listAllPages(
   limit: number | undefined,
   offset: number | undefined,
   opts: PageListOptions & { slim: true },
-): PageSummary[];
-export function listAllPages(
+): Promise<PageSummary[]>;
+export async function listAllPages(
   limit = 100,
   offset = 0,
   opts?: PageListOptions,
-): Page[] | PageSummary[] {
+): Promise<Page[] | PageSummary[]> {
   let query = "SELECT * FROM pages WHERE 1=1";
   const params: (string | number)[] = [];
   if (opts?.key) {
@@ -9792,9 +9794,7 @@ export function listAllPages(
   }
   query += " ORDER BY updatedAt DESC LIMIT ? OFFSET ?";
   params.push(limit, offset);
-  const rows = getDb()
-    .prepare<PageRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<PageRow>(query, params);
   return opts?.slim ? rows.map(rowToPageSummary) : rows.map(rowToPage);
 }
 
@@ -9802,7 +9802,9 @@ export function listAllPages(
  * Total page count — used to back a filter-aware `total` in the `/api/pages`
  * pager so the UI shows the real count, not just the current page's length.
  */
-export function countAllPages(filters?: Pick<PageListOptions, "key" | "keyPrefix">): number {
+export async function countAllPages(
+  filters?: Pick<PageListOptions, "key" | "keyPrefix">,
+): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE 1=1";
   const params: string[] = [];
   if (filters?.key) {
@@ -9812,17 +9814,15 @@ export function countAllPages(filters?: Pick<PageListOptions, "key" | "keyPrefix
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
-  const row = getDb()
-    .prepare<{ count: number }, string[]>(query)
-    .get(...params);
+  const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }
 
 /** Page count scoped to a single agent — companion to `listPagesByAgent`. */
-export function countPagesByAgent(
+export async function countPagesByAgent(
   agentId: string,
   filters?: Pick<PageListOptions, "key" | "keyPrefix">,
-): number {
+): Promise<number> {
   let query = "SELECT COUNT(*) AS count FROM pages WHERE agentId = ?";
   const params: string[] = [agentId];
   if (filters?.key) {
@@ -9832,9 +9832,7 @@ export function countPagesByAgent(
     query += ` AND "key" LIKE ? ESCAPE '\\'`;
     params.push(assetKeyPrefixPattern(filters.keyPrefix));
   }
-  const row = getDb()
-    .prepare<{ count: number }, string[]>(query)
-    .get(...params);
+  const row = await getDbClient().get<{ count: number }>(query, params);
   return row?.count ?? 0;
 }
 
@@ -9846,7 +9844,7 @@ export function countPagesByAgent(
  * Always bumps `updatedAt` even if no other field changed (keeps the index
  * useful for list ordering).
  */
-export function updatePage(
+export async function updatePage(
   id: string,
   data: {
     key?: string;
@@ -9859,7 +9857,7 @@ export function updatePage(
     needsCredentials?: string[] | null;
     slug?: string;
   },
-): Page | null {
+): Promise<Page | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.key !== undefined) {
@@ -9902,11 +9900,10 @@ export function updatePage(
   updates.push("updatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
-    .prepare<PageRow, (string | number | null)[]>(
-      `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<PageRow>(
+    `UPDATE pages SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   return row ? rowToPage(row) : null;
 }
 
@@ -9928,8 +9925,11 @@ export function deletePage(id: string): boolean {
  * path, so this only fires for valid ids. Wrapped in try/catch by the
  * caller so an unexpected DB error never breaks page serving.
  */
-export function incrementPageViewCount(id: string): boolean {
-  const result = getDb().run("UPDATE pages SET view_count = view_count + 1 WHERE id = ?", [id]);
+export async function incrementPageViewCount(id: string): Promise<boolean> {
+  const result = await getDbClient().run(
+    "UPDATE pages SET view_count = view_count + 1 WHERE id = ?",
+    [id],
+  );
   return result.changes > 0;
 }
 
@@ -9953,37 +9953,34 @@ function rowToPageVersion(row: PageVersionRow): PageVersion {
   };
 }
 
-export function createPageVersion(data: {
+export async function createPageVersion(data: {
   pageId: string;
   version: number;
   snapshot: PageSnapshot;
   changedByAgentId?: string;
-}): PageVersion {
-  const row = getDb()
-    .prepare<PageVersionRow, [string, number, string, string | null]>(
-      `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
+}): Promise<PageVersion> {
+  const row = await getDbClient().get<PageVersionRow>(
+    `INSERT INTO page_versions (pageId, version, snapshot, changedByAgentId)
        VALUES (?, ?, ?, ?) RETURNING *`,
-    )
-    .get(data.pageId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null);
+    [data.pageId, data.version, JSON.stringify(data.snapshot), data.changedByAgentId ?? null],
+  );
   if (!row) throw new Error("Failed to create page version");
   return rowToPageVersion(row);
 }
 
-export function getPageVersions(pageId: string): PageVersion[] {
-  return getDb()
-    .prepare<PageVersionRow, [string]>(
-      "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
-    )
-    .all(pageId)
-    .map(rowToPageVersion);
+export async function getPageVersions(pageId: string): Promise<PageVersion[]> {
+  const rows = await getDbClient().query<PageVersionRow>(
+    "SELECT * FROM page_versions WHERE pageId = ? ORDER BY version DESC",
+    [pageId],
+  );
+  return rows.map(rowToPageVersion);
 }
 
-export function getPageVersion(pageId: string, version: number): PageVersion | null {
-  const row = getDb()
-    .prepare<PageVersionRow, [string, number]>(
-      "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
-    )
-    .get(pageId, version);
+export async function getPageVersion(pageId: string, version: number): Promise<PageVersion | null> {
+  const row = await getDbClient().get<PageVersionRow>(
+    "SELECT * FROM page_versions WHERE pageId = ? AND version = ?",
+    [pageId, version],
+  );
   return row ? rowToPageVersion(row) : null;
 }
 
@@ -10030,38 +10027,38 @@ function rowToMetricSummary(row: MetricRow): MetricSummary {
   };
 }
 
-export function createMetric(data: {
+export async function createMetric(data: {
   agentId: string;
   slug: string;
   title: string;
   description?: string;
   definition: MetricDefinition;
-}): Metric {
-  const row = getDb()
-    .prepare<MetricRow, [string, string, string, string | null, string]>(
-      `INSERT INTO metrics (agentId, slug, title, description, definition)
+}): Promise<Metric> {
+  const row = await getDbClient().get<MetricRow>(
+    `INSERT INTO metrics (agentId, slug, title, description, definition)
        VALUES (?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       data.agentId,
       data.slug,
       data.title,
       data.description ?? null,
       JSON.stringify(data.definition),
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create metric");
   return rowToMetric(row);
 }
 
-export function getMetric(id: string): Metric | null {
-  const row = getDb().prepare<MetricRow, [string]>("SELECT * FROM metrics WHERE id = ?").get(id);
+export async function getMetric(id: string): Promise<Metric | null> {
+  const row = await getDbClient().get<MetricRow>("SELECT * FROM metrics WHERE id = ?", [id]);
   return row ? rowToMetric(row) : null;
 }
 
-export function getMetricBySlug(agentId: string, slug: string): Metric | null {
-  const row = getDb()
-    .prepare<MetricRow, [string, string]>("SELECT * FROM metrics WHERE agentId = ? AND slug = ?")
-    .get(agentId, slug);
+export async function getMetricBySlug(agentId: string, slug: string): Promise<Metric | null> {
+  const row = await getDbClient().get<MetricRow>(
+    "SELECT * FROM metrics WHERE agentId = ? AND slug = ?",
+    [agentId, slug],
+  );
   return row ? rowToMetric(row) : null;
 }
 
@@ -10117,7 +10114,7 @@ export function countMetricsByAgent(agentId: string): number {
   return row?.count ?? 0;
 }
 
-export function updateMetric(
+export async function updateMetric(
   id: string,
   data: {
     title?: string;
@@ -10125,7 +10122,7 @@ export function updateMetric(
     definition?: MetricDefinition;
     slug?: string;
   },
-): Metric | null {
+): Promise<Metric | null> {
   const updates: string[] = [];
   const params: (string | null)[] = [];
   if (data.title !== undefined) {
@@ -10148,11 +10145,10 @@ export function updateMetric(
   updates.push("updatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
-    .prepare<MetricRow, (string | null)[]>(
-      `UPDATE metrics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<MetricRow>(
+    `UPDATE metrics SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   return row ? rowToMetric(row) : null;
 }
 

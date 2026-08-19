@@ -689,7 +689,7 @@ describe("Workflow HTTP API v2", () => {
       const statuses = ["running", "failed", "running", "failed", "running"] as const;
 
       for (const [index, id] of runIds.entries()) {
-        createWorkflowRun({ id, workflowId: workflow.id });
+        await createWorkflowRun({ id, workflowId: workflow.id });
         getDb().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
           statuses[index]!,
           new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
@@ -949,10 +949,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state (notify executor completes instantly)
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Create a step in 'running' state
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",
@@ -1015,7 +1015,7 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
         method: "POST",
@@ -1035,10 +1035,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run with steps in various states
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Running step — should be cancelled
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",

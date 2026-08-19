@@ -107,9 +107,9 @@ describe("pages storage CRUD", () => {
     expect(row?.authMode).toBe("authed");
   });
 
-  test("snapshotPage captures PRE-update content; post-update lives on parent", () => {
+  test("snapshotPage captures PRE-update content; post-update lives on parent", async () => {
     const agentId = makeAgentId();
-    const page = createPage({
+    const page = await createPage({
       agentId,
       slug: "pre-update",
       title: "Original Title",
@@ -119,37 +119,37 @@ describe("pages storage CRUD", () => {
     });
 
     // 1. Snapshot first — captures v1 (pre-update) content
-    snapshotPage(page.id, agentId);
+    await snapshotPage(page.id, agentId);
     // 2. Then update — new content goes on parent
-    const updated = updatePage(page.id, {
+    const updated = await updatePage(page.id, {
       title: "Updated Title",
       body: "<h1>v2 body</h1>",
     });
     expect(updated?.title).toBe("Updated Title");
     expect(updated?.body).toBe("<h1>v2 body</h1>");
 
-    const v1 = getPageVersion(page.id, 1);
+    const v1 = await getPageVersion(page.id, 1);
     expect(v1).not.toBeNull();
     expect(v1?.snapshot.title).toBe("Original Title");
     expect(v1?.snapshot.body).toBe("<h1>v1 body</h1>");
 
     // Repeat — snapshot then update should produce v2 with the latest
     // pre-update state (i.e. "Updated Title").
-    snapshotPage(page.id, agentId);
-    updatePage(page.id, { title: "Third Title", body: "<h1>v3 body</h1>" });
+    await snapshotPage(page.id, agentId);
+    await updatePage(page.id, { title: "Third Title", body: "<h1>v3 body</h1>" });
 
-    const v2 = getPageVersion(page.id, 2);
+    const v2 = await getPageVersion(page.id, 2);
     expect(v2?.snapshot.title).toBe("Updated Title");
     expect(v2?.snapshot.body).toBe("<h1>v2 body</h1>");
 
     // Versions list ordered DESC
-    const all = getPageVersions(page.id);
+    const all = await getPageVersions(page.id);
     expect(all.map((v) => v.version)).toEqual([2, 1]);
   });
 
-  test("UNIQUE(agentId, slug) is enforced", () => {
+  test("UNIQUE(agentId, slug) is enforced", async () => {
     const agentId = makeAgentId();
-    createPage({
+    await createPage({
       agentId,
       slug: "dup",
       title: "First",

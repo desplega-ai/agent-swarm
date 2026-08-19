@@ -474,7 +474,7 @@ export async function handleWorkflows(
   if (getWorkflowVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const version = getWorkflowVersion(parsed.params.id, parsed.params.version);
+    const version = await getWorkflowVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -493,7 +493,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    const versions = getWorkflowVersions(parsed.params.id);
+    const versions = await getWorkflowVersions(parsed.params.id);
     listWorkflowVersionsRoute.respond(res, 200, { versions });
     return true;
   }
@@ -844,7 +844,7 @@ export async function handleWorkflows(
     }
 
     // Check if skipped due to cooldown
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     const skipped = run?.status === "skipped";
 
     triggerWorkflowRoute.respond(res, 201, { runId, skipped });
@@ -857,7 +857,7 @@ export async function handleWorkflows(
     const paginationRequested =
       parsed.query?.limit !== undefined || parsed.query?.offset !== undefined;
     if (paginationRequested) {
-      const page = listWorkflowRunsPage(parsed.params.id, {
+      const page = await listWorkflowRunsPage(parsed.params.id, {
         status: parsed.query?.status,
         limit: parsed.query?.limit ?? 20,
         offset: parsed.query?.offset ?? 0,
@@ -867,7 +867,7 @@ export async function handleWorkflows(
     }
     // Preserve the pre-pagination response for the UI when limit/offset are
     // omitted: a bare array containing every matching run.
-    const runs = listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
+    const runs = await listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
     listWorkflowRunsRoute.respond(res, 200, runs);
     return true;
   }
@@ -875,7 +875,7 @@ export async function handleWorkflows(
   if (getWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getWorkflowRun(parsed.params.id);
+    const run = await getWorkflowRun(parsed.params.id);
     if (!run) {
       res.writeHead(404);
       res.end();
@@ -905,7 +905,7 @@ export async function handleWorkflows(
     const parsed = await cancelWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
+      await cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
     } catch (err) {
       jsonError(res, String(err), 400);
       return true;

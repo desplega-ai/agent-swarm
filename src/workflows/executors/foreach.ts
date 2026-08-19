@@ -115,7 +115,7 @@ export class ForeachExecutor extends BaseExecutor<
       const childNodeId = `${meta.nodeId}#${itemKey}`;
       if (childStepsByNodeId.has(childNodeId)) continue;
       const childStepId = crypto.randomUUID();
-      const childStep = this.deps.db.createWorkflowRunStep({
+      const childStep = await this.deps.db.createWorkflowRunStep({
         id: childStepId,
         runId: meta.runId,
         nodeId: childNodeId,
@@ -151,11 +151,11 @@ export class ForeachExecutor extends BaseExecutor<
         });
       }
 
-      const linkedTask = this.deps.db.getTaskByWorkflowRunStepId(childStep.id);
+      const linkedTask = await this.deps.db.getTaskByWorkflowRunStepId(childStep.id);
       if (linkedTask?.status === "failed" || linkedTask?.status === "cancelled") {
         // A retry needs a fresh task. Detaching the stale terminal task keeps the
         // executor's one-task-per-step de-duplication deterministic and scoped.
-        this.deps.db.detachTaskFromWorkflowRunStep(linkedTask.id);
+        await this.deps.db.detachTaskFromWorkflowRunStep(linkedTask.id);
       }
 
       const childResult = await agentTaskExecutor.run({

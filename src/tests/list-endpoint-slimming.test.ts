@@ -148,8 +148,8 @@ describe("list-endpoint slimming", () => {
     expect(Array.isArray(full?.triggers)).toBe(true);
   });
 
-  test("listAllPages — slim drops body and passwordHash", () => {
-    createPage({
+  test("listAllPages — slim drops body and passwordHash", async () => {
+    await createPage({
       agentId: "slim-agent-1",
       slug: "slim-page",
       title: "Slim Page",
@@ -158,14 +158,14 @@ describe("list-endpoint slimming", () => {
       body: "<html>".concat("x".repeat(5000), "</html>"),
     });
 
-    const slim = listAllPages(50, 0, { slim: true });
+    const slim = await listAllPages(50, 0, { slim: true });
     const slimPage = slim.find((p) => p.slug === "slim-page");
     expect(slimPage).toBeDefined();
     expect((slimPage as unknown as Page).body).toBeUndefined();
     expect((slimPage as unknown as Page).passwordHash).toBeUndefined();
     expect(slimPage?.title).toBe("Slim Page");
 
-    const full = listAllPages(50, 0).find((p) => p.slug === "slim-page");
+    const full = (await listAllPages(50, 0)).find((p) => p.slug === "slim-page");
     expect(full?.body).toContain("x".repeat(5000));
   });
 

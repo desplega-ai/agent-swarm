@@ -323,11 +323,11 @@ describe("Workflow Retry v2 (Phase 4)", () => {
 
       // Simulate a run that was interrupted after s1 completed
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
 
       // Create a completed step for s1
       const step1Id = crypto.randomUUID();
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: step1Id,
         runId,
         nodeId: "s1",
@@ -373,10 +373,10 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       });
 
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
 
       const step1Id = crypto.randomUUID();
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: step1Id,
         runId,
         nodeId: "s1",

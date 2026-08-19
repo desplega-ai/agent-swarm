@@ -58,7 +58,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     const { db } = this.deps;
 
     // 1. Idempotency: check if a task was already created for this step
-    const existingTask = db.getTaskByWorkflowRunStepId(meta.stepId);
+    const existingTask = await db.getTaskByWorkflowRunStepId(meta.stepId);
     if (existingTask) {
       if (existingTask.status === "completed") {
         return {

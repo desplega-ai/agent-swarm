@@ -104,12 +104,12 @@ async function resumeFromTaskCompletion(
   event: TaskEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
+  const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
-  if (isStaleTaskEvent(step.id, event)) return;
+  if (await isStaleTaskEvent(step.id, event)) return;
 
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -189,12 +189,12 @@ async function handleTaskFailure(
   reason: string,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
+  const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
-  if (isStaleTaskEvent(step.id, event)) return;
+  if (await isStaleTaskEvent(step.id, event)) return;
 
   const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
@@ -247,9 +247,9 @@ async function handleTaskFailure(
  * reset and re-dispatched. An event whose taskId no longer matches the task
  * currently bound to the step must not complete or fail a step it doesn't own.
  */
-function isStaleTaskEvent(stepId: string, event: TaskEvent): boolean {
+async function isStaleTaskEvent(stepId: string, event: TaskEvent): Promise<boolean> {
   if (!event.taskId) return false;
-  const boundTask = getTaskByWorkflowRunStepId(stepId);
+  const boundTask = await getTaskByWorkflowRunStepId(stepId);
   return boundTask != null && boundTask.id !== event.taskId;
 }
 
@@ -274,7 +274,7 @@ function markRunFailed(event: TaskEvent, reason: string): void {
  * Retry a failed workflow run from its failed step.
  */
 export async function retryFailedRun(runId: string, registry: ExecutorRegistry): Promise<void> {
-  const run = getWorkflowRun(runId);
+  const run = await getWorkflowRun(runId);
   if (!run || run.status !== "failed") throw new Error("Run is not in failed state");
 
   const workflow = await getWorkflow(run.workflowId);
@@ -291,7 +291,7 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
 
   // Resume from the failed node — use findReadyNodes for convergence safety
-  const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
   const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
   const failedNode =
     resolveForeachParent(workflow.definition, failedStep.nodeId) ??
@@ -310,8 +310,8 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
  * Cancel a workflow run and all its non-terminal steps.
  * Also cancels any in-progress tasks spawned by waiting/running steps.
  */
-export function cancelWorkflowRun(runId: string, reason?: string): void {
-  const run = getWorkflowRun(runId);
+export async function cancelWorkflowRun(runId: string, reason?: string): Promise<void> {
+  const run = await getWorkflowRun(runId);
   if (!run) throw new Error("Workflow run not found");
 
   const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
@@ -328,7 +328,7 @@ export function cancelWorkflowRun(runId: string, reason?: string): void {
     if (terminalStatuses.includes(step.status)) continue;
 
     // Cancel any task linked to this step
-    const task = getTaskByWorkflowRunStepId(step.id);
+    const task = await getTaskByWorkflowRunStepId(step.id);
     if (task) {
       cancelTask(task.id, cancelReason);
     }
@@ -360,10 +360,10 @@ async function resumeFromApprovalResolution(
   event: ApprovalEvent,
   registry: ExecutorRegistry,
 ): Promise<void> {
-  const run = getWorkflowRun(event.workflowRunId!);
+  const run = await getWorkflowRun(event.workflowRunId!);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(event.workflowRunStepId!);
+  const step = await getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
 
   const workflow = await getWorkflow(run.workflowId);
@@ -448,10 +448,10 @@ export async function resumeWaitState(
 
   // 2. Load the surrounding run + step. If anything has moved on (cancelled,
   // failed, retried, etc.), stay quiet.
-  const run = getWorkflowRun(waitRow.workflowRunId);
+  const run = await getWorkflowRun(waitRow.workflowRunId);
   if (!run || (run.status !== "waiting" && run.status !== "running")) return;
 
-  const step = getWorkflowRunStep(waitRow.workflowRunStepId);
+  const step = await getWorkflowRunStep(waitRow.workflowRunStepId);
   if (!step || step.status !== "waiting") return;
 
   const workflow = await getWorkflow(run.workflowId);

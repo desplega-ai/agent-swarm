@@ -50,9 +50,9 @@ export const registerDeletePageTool = (server: McpServer) => {
       }
 
       const page = pageId
-        ? getPage(pageId)
+        ? await getPage(pageId)
         : slug
-          ? getPageBySlug(requestInfo.agentId, slug)
+          ? await getPageBySlug(requestInfo.agentId, slug)
           : null;
       if (!page) {
         return toolErr("Page not found.", { data: { yourAgentId: requestInfo.agentId } });

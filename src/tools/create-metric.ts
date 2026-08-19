@@ -72,16 +72,16 @@ export const registerCreateMetricTool = (server: McpServer) => {
       }
 
       const slug = input.slug ?? slugify(input.title);
-      const existing = getMetricBySlug(requestInfo.agentId, slug);
+      const existing = await getMetricBySlug(requestInfo.agentId, slug);
       let id: string;
 
       if (existing) {
         try {
-          snapshotMetric(existing.id, requestInfo.agentId);
+          await snapshotMetric(existing.id, requestInfo.agentId);
         } catch {
           // Snapshot failure should not block updates.
         }
-        const updated = updateMetric(existing.id, {
+        const updated = await updateMetric(existing.id, {
           title: input.title,
           description: input.description,
           definition: input.definition,
@@ -95,7 +95,7 @@ export const registerCreateMetricTool = (server: McpServer) => {
         id = updated.id;
       } else {
         try {
-          const created = createMetric({
+          const created = await createMetric({
             agentId: requestInfo.agentId,
             slug,
             title: input.title,
@@ -110,7 +110,7 @@ export const registerCreateMetricTool = (server: McpServer) => {
         }
       }
 
-      const fresh = getMetric(id);
+      const fresh = await getMetric(id);
       if (!fresh) {
         const msg = `Metric ${id} disappeared between write and read.`;
         return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id } });

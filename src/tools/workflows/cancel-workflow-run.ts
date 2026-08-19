@@ -19,7 +19,7 @@ export const registerCancelWorkflowRunTool = (server: McpServer) => {
     },
     async ({ runId, reason }) => {
       try {
-        cancelWorkflowRun(runId, reason);
+        await cancelWorkflowRun(runId, reason);
         return toolOk(`Cancelled workflow run ${runId}.`);
       } catch (err) {
         return toolErr(String(err));

@@ -20,7 +20,7 @@ export async function snapshotWorkflow(
   }
 
   // Get existing versions to determine next version number
-  const existingVersions = getWorkflowVersions(workflowId);
+  const existingVersions = await getWorkflowVersions(workflowId);
   const maxVersion = existingVersions.length > 0 ? existingVersions[0]!.version : 0;
   const nextVersion = maxVersion + 1;
 
