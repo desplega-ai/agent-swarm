@@ -37,7 +37,14 @@ describe("humalike-foresee", () => {
     const { ctx, kvSets } = makeCtx(async () => {
       calls++;
       return jsonResponse(200, {
-        mental_state: [{ name: "Taras", beliefs: ["the fix is done"], emotions: [{ type: "trust", intensity: 0.7 }], intentions: "approve" }],
+        mental_state: [
+          {
+            name: "Taras",
+            beliefs: ["the fix is done"],
+            emotions: [{ type: "trust", intensity: 0.7 }],
+            intentions: "approve",
+          },
+        ],
         predicted_reaction: [{ name: "Taras", risk: "low" }],
         refined_reply: "Refined text.",
         refinement_rationale: "Trimmed filler.",
@@ -144,7 +151,11 @@ describe("humalike-foresee", () => {
     const { ctx, errors } = makeCtx(async () => {
       calls++;
       return jsonResponse(422, {
-        error: { code: "VALIDATION_ERROR", message: "invalid transcript", details: ["transcript[0].speaker required"] },
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "invalid transcript",
+          details: ["transcript[0].speaker required"],
+        },
       });
     });
 
