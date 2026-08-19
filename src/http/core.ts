@@ -27,10 +27,9 @@ import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
-import { z } from "../utils/zod-openapi";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { findRoute, isPublicRoute, route } from "./route-def";
+import { findRoute, isPublicRoute, route, runtimeInstanceHeader } from "./route-def";
 import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
 
 /**
@@ -284,23 +283,6 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   const raw = req.headers[name];
   return Array.isArray(raw) ? raw[0] : raw;
 }
-
-/**
- * Optional in the schema because the requirement is conditional: only
- * multi-runtime mode needs it, and legacy deployments must keep working
- * without it.
- */
-const runtimeInstanceHeader = (operation: string) =>
-  z.object({
-    "X-Runtime-Instance-ID": z
-      .string()
-      .optional()
-      .describe(
-        "Identifies the concrete runtime instance (worker process) making the call, " +
-          `as generated at its boot. Required to ${operation} when multi-runtime mode ` +
-          "(MULTI_RUNTIME_ENABLED) is on; ignored otherwise.",
-      ),
-  });
 
 const RUNTIME_HEADER_DOC =
   "Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. " +

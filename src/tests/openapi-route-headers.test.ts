@@ -13,6 +13,7 @@ type Parameter = {
   in: string;
   required?: boolean;
   description?: string;
+  schema?: { type?: string };
 };
 
 const spec = JSON.parse(generateOpenApiSpec({ version: "test" })) as {
@@ -23,21 +24,29 @@ function headerParams(path: string, method = "post"): Parameter[] {
   return (spec.paths[path]?.[method]?.parameters ?? []).filter((p) => p.in === "header");
 }
 
+/** Every operation whose contract includes the runtime identity. */
+const RUNTIME_HEADER_OPERATIONS: Array<[string, string]> = [
+  ["/ping", "post"],
+  ["/close", "post"],
+  ["/api/poll", "get"],
+];
+
 describe("runtime identity header in OpenAPI", () => {
-  for (const path of ["/ping", "/close"]) {
-    test(`${path} declares X-Runtime-Instance-ID as a header parameter`, () => {
-      const header = headerParams(path).find((p) => p.name === "X-Runtime-Instance-ID");
+  for (const [path, method] of RUNTIME_HEADER_OPERATIONS) {
+    test(`${method.toUpperCase()} ${path} declares X-Runtime-Instance-ID as a header parameter`, () => {
+      const header = headerParams(path, method).find((p) => p.name === "X-Runtime-Instance-ID");
       expect(header).toBeDefined();
       expect(header?.in).toBe("header");
+      expect(header?.schema?.type).toBe("string");
     });
 
-    test(`${path} marks the header optional — the requirement is mode-dependent`, () => {
-      const header = headerParams(path).find((p) => p.name === "X-Runtime-Instance-ID");
+    test(`${method.toUpperCase()} ${path} marks the header optional — the requirement is mode-dependent`, () => {
+      const header = headerParams(path, method).find((p) => p.name === "X-Runtime-Instance-ID");
       expect(header?.required).toBe(false);
     });
 
-    test(`${path} describes what the header identifies`, () => {
-      const header = headerParams(path).find((p) => p.name === "X-Runtime-Instance-ID");
+    test(`${method.toUpperCase()} ${path} describes what the header identifies`, () => {
+      const header = headerParams(path, method).find((p) => p.name === "X-Runtime-Instance-ID");
       expect(header?.description).toContain("runtime instance");
       expect(header?.description).toContain("MULTI_RUNTIME_ENABLED");
     });
@@ -47,7 +56,7 @@ describe("runtime identity header in OpenAPI", () => {
     // Representative routes across the surface, none of which opt in.
     expect(headerParams("/api/agents")).toHaveLength(0);
     expect(headerParams("/api/config", "put")).toHaveLength(0);
-    expect(headerParams("/api/poll", "get")).toHaveLength(0);
+    expect(headerParams("/api/tasks")).toHaveLength(0);
   });
 
   test("header support adds parameters to no other operation", () => {
@@ -59,6 +68,6 @@ describe("runtime identity header in OpenAPI", () => {
         }
       }
     }
-    expect(withHeaders.sort()).toEqual(["POST /close", "POST /ping"]);
+    expect(withHeaders.sort()).toEqual(["GET /api/poll", "POST /close", "POST /ping"]);
   });
 });

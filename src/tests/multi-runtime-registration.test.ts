@@ -1376,3 +1376,65 @@ describe("pool eligibility during activation", () => {
     expect(getTaskById(task.id)?.agentId).toBe(id);
   });
 });
+
+describe("readiness after a credential wait", () => {
+  test("re-registering the same runtime id revives a runtime that expired during the wait", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    // Boot registration, then a long credential wait: the worker is not usable
+    // capacity, so its runtime is allowed to expire and be pruned.
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    makeRuntimeStale(rt);
+    expireStaleRuntimeInstances();
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+
+    // Credentials arrive; the worker re-registers before polling, reusing the
+    // per-boot identity rather than minting a new one.
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+
+    expect(getRuntimeInstanceById(rt)?.status).toBe("active");
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
+    expect(countActiveRuntimeInstancesForAgent(id)).toBe(1);
+  });
+
+  test("the revived runtime can immediately receive work", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    makeRuntimeStale(rt);
+    expireStaleRuntimeInstances();
+
+    // Before re-registration the gate correctly withholds work.
+    createTaskExtended("post-credential-work", { offeredTo: id });
+    expect((await pollAgent(id, rt))?.trigger ?? null).toBeNull();
+
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    expect((await pollAgent(id, rt))?.trigger?.type).toBe("task_offered");
+  });
+
+  test("re-registering before any expiry is idempotent and adds no second row", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const before = getRuntimeInstanceById(rt);
+
+    const { status } = await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    expect(status).toBe(200);
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
+    expect(getRuntimeInstanceById(rt)?.status).toBe("active");
+    expect(getRuntimeInstanceById(rt)?.createdAt).toBe(before?.createdAt ?? "");
+  });
+
+  test("with the flag off, the same re-registration writes no runtime rows", async () => {
+    const id = makeAgent(2);
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 3, runtimeInstanceId: rt });
+    await register(id, { maxTasks: 3, runtimeInstanceId: rt });
+
+    expect(runtimeInstancesFor(id)).toHaveLength(0);
+    expect(getAgentById(id)?.maxTasks).toBe(3);
+  });
+});

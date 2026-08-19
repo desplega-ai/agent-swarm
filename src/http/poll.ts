@@ -38,7 +38,7 @@ import {
   UserSchema,
 } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { route } from "./route-def";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
 // ─── Budget-refused trigger envelope ────────────────────────────────────────
@@ -158,6 +158,7 @@ const pollTriggers = route({
   summary: "Poll for triggers (tasks, mentions)",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
+  headers: runtimeInstanceHeader("poll for work"),
   responses: {
     200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
