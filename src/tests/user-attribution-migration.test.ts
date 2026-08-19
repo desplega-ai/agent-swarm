@@ -158,3 +158,57 @@ describe("migration 127 user attribution backfill", () => {
     }
   });
 });
+
+describe("migration 136 requester provenance backfill", () => {
+  test("marks matching descendant requesters as inherited", async () => {
+    await removeDb();
+    const db = new Database(DB_PATH, { create: true });
+    try {
+      db.run(`CREATE TABLE agent_tasks (
+        id TEXT PRIMARY KEY,
+        parentTaskId TEXT,
+        requestedByUserId TEXT,
+        taskType TEXT,
+        tags TEXT,
+        created_by TEXT
+      )`);
+      db.run(`INSERT INTO agent_tasks
+        (id, parentTaskId, requestedByUserId, taskType, tags, created_by) VALUES
+        ('root', NULL, 'user-a', 'heartbeat-checklist', '[]', NULL),
+        ('child', 'root', 'user-a', NULL, '[]', NULL),
+        ('grandchild', 'child', 'user-a', NULL, '[]', NULL),
+        ('handoff', 'root', 'user-b', NULL, '[]', NULL),
+        ('handoff-child', 'handoff', 'user-b', NULL, '[]', NULL),
+        ('same-user-handoff', 'root', 'user-a', NULL, '[]', 'user-a'),
+        ('same-user-handoff-child', 'same-user-handoff', 'user-a', NULL, '[]', NULL),
+        ('unattributed-child', 'root', NULL, NULL, '[]', NULL),
+        ('ordinary-root', NULL, 'user-a', NULL, '[]', NULL),
+        ('ordinary-child', 'ordinary-root', 'user-a', NULL, '[]', NULL)`);
+
+      const migration = await Bun.file(
+        new URL("../be/migrations/136_task_requester_provenance.sql", import.meta.url),
+      ).text();
+      db.exec(migration);
+
+      const rows = db
+        .query<{ id: string; inherited: number }, []>(
+          "SELECT id, requestedByUserIdInherited AS inherited FROM agent_tasks ORDER BY id",
+        )
+        .all();
+      expect(Object.fromEntries(rows.map((row) => [row.id, row.inherited]))).toEqual({
+        child: 1,
+        grandchild: 1,
+        handoff: 0,
+        "handoff-child": 0,
+        "ordinary-child": 0,
+        "ordinary-root": 0,
+        root: 0,
+        "same-user-handoff": 0,
+        "same-user-handoff-child": 0,
+        "unattributed-child": 0,
+      });
+    } finally {
+      db.close();
+    }
+  });
+});

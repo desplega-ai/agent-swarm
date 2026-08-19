@@ -223,11 +223,8 @@ export async function sendTaskHandler(
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
-  const callerTask = sourceTaskId ? getTaskById(sourceTaskId) : null;
   const requestedByUserId =
-    ctx.kind === "user"
-      ? ctx.userId
-      : (inputRequestedByUserId ?? callerTask?.requestedByUserId ?? undefined);
+    ctx.kind === "user" ? ctx.userId : (inputRequestedByUserId ?? undefined);
 
   if (ctx.kind === "owner" && agentId === ctx.agentId) {
     return toolErr("Cannot send a task to yourself, are you drunk?", {

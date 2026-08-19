@@ -76,7 +76,7 @@ export function promoteSteeringToTask(task: AgentTask, message: SteeringMessage)
     source: message.source === "script" ? "api" : message.source,
     taskType: "follow-up",
     parentTaskId: task.id,
-    requestedByUserId: message.createdByUserId ?? task.requestedByUserId,
+    requestedByUserId: message.createdByUserId,
     bypassTrackerContextDedup: true,
   });
 }

@@ -580,6 +580,13 @@ describe("recordIdentityEvent", () => {
 // ─── requestedByUserId on tasks ───────────────────────────────────────────────
 
 describe("requestedByUserId in tasks", () => {
+  const requesterWasInherited = (taskId: string): number | undefined =>
+    getDb()
+      .prepare<{ requestedByUserIdInherited: number }, [string]>(
+        "SELECT requestedByUserIdInherited FROM agent_tasks WHERE id = ?",
+      )
+      .get(taskId)?.requestedByUserIdInherited;
+
   test("createTaskExtended stores requestedByUserId", () => {
     const user = createUser({ name: "Requester" });
     const task = createTaskExtended("task with requester", {
@@ -589,6 +596,7 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetched = getTaskById(task.id);
     expect(fetched!.requestedByUserId).toBe(user.id);
+    expect(requesterWasInherited(task.id)).toBe(0);
     deleteUser(user.id);
   });
 
@@ -606,6 +614,7 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetchedChild = getTaskById(child.id);
     expect(fetchedChild!.requestedByUserId).toBe(user.id);
+    expect(requesterWasInherited(child.id)).toBe(1);
     deleteUser(user.id);
   });
 
@@ -624,6 +633,7 @@ describe("requestedByUserId in tasks", () => {
       requestedByUserId: user2.id,
     });
     expect(getTaskById(child.id)!.requestedByUserId).toBe(user2.id);
+    expect(requesterWasInherited(child.id)).toBe(0);
     deleteUser(user1.id);
     deleteUser(user2.id);
   });

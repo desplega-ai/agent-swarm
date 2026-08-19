@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
@@ -1212,6 +1212,53 @@ describe("Session Costs API", () => {
       // human-created schedule belongs in the per-person report.
       expect(workflowPerson?.problemsInitiated).toBe(1);
     });
+
+    test("inherited requesters do not end human-free propagation", () => {
+      const agent = createAgent({
+        name: "Inherited Requester Agent",
+        isLead: false,
+        status: "idle",
+      });
+      const user = createUser({ name: "Inherited Requester" });
+      const heartbeat = createTaskExtended("Stale attributed heartbeat", {
+        taskType: "heartbeat-checklist",
+        requestedByUserId: user.id,
+      });
+      const inheritedChild = createTaskExtended("Autonomous heartbeat child", {
+        parentTaskId: heartbeat.id,
+      });
+      const explicitHandoff = createTaskExtended("Explicit human handoff", {
+        parentTaskId: heartbeat.id,
+        requestedByUserId: user.id,
+      });
+
+      createSessionCost({
+        sessionId: "inherited-requester-child",
+        taskId: inheritedChild.id,
+        agentId: agent.id,
+        totalCostUsd: 2,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
+        sessionId: "explicit-requester-handoff",
+        taskId: explicitHandoff.id,
+        agentId: agent.id,
+        totalCostUsd: 3,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+
+      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
+      expect(summary.totals.totalCostUsd).toBe(5);
+      expect(summary.totals.attributedCostUsd).toBe(3);
+      expect(summary.totals.attributableCostUsd).toBe(3);
+      expect(summary.totals.excludedCostUsd).toBe(2);
+      expect(summary.byUser.find((row) => row.userId === user.id)?.costUsd).toBe(3);
+      expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBe(2);
+    });
   });
 
   describe("Database: getDashboardCostSummary", () => {
@@ -1320,6 +1367,50 @@ describe("Session Costs API", () => {
   });
 
   describe("Database: getAttributionByPerson", () => {
+    test("excludes inherited requesters below human-free roots from reach", () => {
+      const rootAgent = createAgent({ name: "Reach Root Agent", isLead: false, status: "idle" });
+      const inheritedAgent = createAgent({
+        name: "Reach Inherited Agent",
+        isLead: false,
+        status: "idle",
+      });
+      const handoffAgent = createAgent({
+        name: "Reach Handoff Agent",
+        isLead: false,
+        status: "idle",
+      });
+      const user = createUser({ name: "Reach Requester" });
+      createTaskExtended("Human root", {
+        requestedByUserId: user.id,
+        agentId: rootAgent.id,
+        source: "slack",
+        vcsRepo: "example/human-root",
+      });
+      const heartbeat = createTaskExtended("Heartbeat root", {
+        requestedByUserId: user.id,
+        taskType: "heartbeat-checklist",
+      });
+      createTaskExtended("Inherited autonomous child", {
+        parentTaskId: heartbeat.id,
+        agentId: inheritedAgent.id,
+        source: "jira",
+        vcsRepo: "example/autonomous",
+      });
+      createTaskExtended("Explicit handoff child", {
+        parentTaskId: heartbeat.id,
+        requestedByUserId: user.id,
+        agentId: handoffAgent.id,
+        source: "linear",
+        vcsRepo: "example/handoff",
+      });
+
+      const mine = getAttributionByPerson({}).find((row) => row.userId === user.id);
+      expect(mine?.problemsInitiated).toBe(1);
+      expect(mine?.agentsReached).toBe(2);
+      expect(mine?.reposReached).toBe(2);
+      expect(mine?.surfacesReached).toBe(2);
+    });
+
     test("counts root tasks only, and reach across the full task tree", () => {
       const agentA = createAgent({ name: "Attribution Agent A", isLead: false, status: "idle" });
       const agentB = createAgent({ name: "Attribution Agent B", isLead: false, status: "idle" });
@@ -1446,6 +1537,43 @@ describe("Session Costs API", () => {
         endDate: "2026-08-19",
       });
       expect(present.find((r) => r.userId === user.id)?.problemsInitiated).toBe(1);
+    });
+
+    test("seeds task traversal with the report's root predicates", () => {
+      const prepareSpy = spyOn(getDb(), "prepare");
+      try {
+        getAttributionByPerson({ startDate: "2026-08-19", endDate: "2026-08-19" });
+        const call = prepareSpy.mock.calls.find(([sql]) =>
+          String(sql).includes("task_tree(rootId, taskId, output)"),
+        );
+        const sql = String(call?.[0] ?? "");
+        const seed = sql.slice(0, sql.indexOf("task_tree(rootId, taskId, output)"));
+
+        expect(seed).toContain("selected_roots");
+        expect(seed).toContain("t.requestedByUserId IS NOT NULL");
+        expect(seed).toContain("t.createdAt >= ?");
+        expect(seed).toContain("t.createdAt < ?");
+        expect(seed).toContain("t.parentTaskId IS NULL");
+        expect(seed).not.toContain("human_free_tasks");
+        expect(sql).toMatch(
+          /task_tree\(rootId, taskId, output\) AS \(\s*SELECT id, id, output\s*FROM selected_roots/,
+        );
+        expect(sql.match(/\?/g)).toHaveLength(2);
+
+        const reachCall = prepareSpy.mock.calls.find(([preparedSql]) =>
+          String(preparedSql).includes("task_ancestry("),
+        );
+        const reachSql = String(reachCall?.[0] ?? "");
+        const reachSeed = reachSql.slice(0, reachSql.indexOf("task_ancestry("));
+        expect(reachSeed).toContain("report_tasks");
+        expect(reachSeed).toContain("t.requestedByUserId IS NOT NULL");
+        expect(reachSeed).toContain("t.createdAt >= ?");
+        expect(reachSeed).toContain("t.createdAt < ?");
+        expect(reachSql).toContain("JOIN task_ancestry child ON parent.id = child.parentTaskId");
+        expect(reachSql.match(/\?/g)).toHaveLength(2);
+      } finally {
+        prepareSpy.mockRestore();
+      }
     });
   });
 });

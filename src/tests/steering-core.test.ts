@@ -12,7 +12,9 @@ import {
   createAgent,
   createSteeringMessage,
   createTaskExtended,
+  createUser,
   getChildTasks,
+  getDb,
   getLatestLeadTaskInThread,
   getPendingSteeringForAgent,
   getSteeringMessageById,
@@ -244,6 +246,32 @@ describe("task steering core", () => {
       contextKey: parent.contextKey,
       task: "promote this into distinct follow-up work",
     });
+  });
+
+  test("automatic promotion preserves inherited requester provenance", () => {
+    const user = createUser({ name: "Steering provenance requester" });
+    const parent = createTaskExtended("heartbeat steering parent", {
+      agentId: agentIds.get("codex"),
+      taskType: "heartbeat-checklist",
+      requestedByUserId: user.id,
+    });
+    expect(startTask(parent.id)?.status).toBe("in_progress");
+
+    const result = requestSteering({
+      taskId: parent.id,
+      message: "promote autonomous steering",
+      source: "api",
+      createdByKind: "agent",
+      createdByAgentId: agentIds.get("lead"),
+    });
+    const promoted = markSteeringUndeliverable(result.steeringMessageId, "session died");
+    expect(getTaskById(promoted.promotedTaskId!)?.requestedByUserId).toBe(user.id);
+    const provenance = getDb()
+      .query<{ inherited: number }, [string]>(
+        "SELECT requestedByUserIdInherited AS inherited FROM agent_tasks WHERE id = ?",
+      )
+      .get(promoted.promotedTaskId!);
+    expect(provenance?.inherited).toBe(1);
   });
 
   test("claude steer requests degrade to queue while preserving requested mode", () => {

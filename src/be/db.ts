@@ -1241,6 +1241,7 @@ type AgentTaskRow = {
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
   requestedByUserId: string | null;
+  requestedByUserIdInherited: number;
   swarmVersion: string | null;
   provider: string | null;
   providerMeta: string | null;
@@ -4883,6 +4884,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   // coerce: a bad shape throws before anything reaches the INSERT; absent
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
+  let requestedByUserIdInherited = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const status: AgentTaskStatus = options?.offeredTo
@@ -5018,6 +5020,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       // Attribution
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
+        requestedByUserIdInherited = true;
       }
       if (parent.key && !options.key) {
         options.key = parent.key;
@@ -5133,8 +5136,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -5179,6 +5182,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
       options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
       options?.requestedByUserId ?? null,
+      requestedByUserIdInherited ? 1 : 0,
       options?.contextKey ?? null,
       options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
       pkg.version,
@@ -7071,34 +7075,10 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
-export function getSessionCostSummary(opts: {
-  startDate?: string;
-  endDate?: string;
-  agentId?: string;
-  /** A user id, or `UNATTRIBUTED_USER_ID` for spend with no human requester. */
-  userId?: string;
-  groupBy?: "day" | "agent" | "both" | "user";
-}): {
-  totals: SessionCostSummaryTotals;
-  daily: SessionCostDailyRow[];
-  byAgent: SessionCostByAgentRow[];
-  byUser: SessionCostByUserRow[];
-} {
-  // `session_costs` deliberately carries no `userId` column — a task can be
-  // re-attributed after the fact, so the human requester is resolved by joining
-  // through the task (same shape as `getDailySpendForUser`). Every column is
-  // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
-  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
-
-  // Structurally-human-free: the swarm maintaining itself, with no human
-  // requester by construction — heartbeat/boot-triage tasks, scheduled runs
-  // without a human creator (including workflow roots launched by such a
-  // schedule), and `source='system'` follow-ups whose parent itself has no
-  // human requester. That classification propagates through descendants while
-  // they remain unattributed, so autonomous fan-out cannot leak back into the
-  // denominator. An explicitly attributed child is an independent handoff and
-  // stops propagation down that branch.
-  const HUMAN_FREE_TASKS_CTE = `WITH RECURSIVE human_free_tasks(id) AS (
+// Structurally-human-free tasks and their descendants. An explicitly supplied
+// requester is a human handoff and stops propagation; a requester copied from
+// the parent does not.
+const HUMAN_FREE_TASKS_CTE = `human_free_tasks(id) AS (
         SELECT task.id
         FROM agent_tasks task
         LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
@@ -7129,9 +7109,53 @@ export function getSessionCostSummary(opts: {
         FROM agent_tasks child
         JOIN human_free_tasks parent ON child.parentTaskId = parent.id
         WHERE child.requestedByUserId IS NULL
+          OR child.requestedByUserIdInherited = 1
       )`;
-  const HUMAN_FREE_SQL = "EXISTS (SELECT 1 FROM human_free_tasks WHERE id = t.id)";
+const HUMAN_FREE_SQL = "EXISTS (SELECT 1 FROM human_free_tasks WHERE id = t.id)";
+const ROOT_HUMAN_FREE_SQL = `(
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
+        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
+        OR (
+          COALESCE(t.source, '') = 'workflow'
+          AND t.requestedByUserId IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workflow_runs run
+            WHERE run.id = t.workflowRunId
+              AND run.triggerType = 'schedule'
+              AND run.created_by IS NULL
+          )
+        )
+      )`;
 
+export function getSessionCostSummary(opts: {
+  startDate?: string;
+  endDate?: string;
+  agentId?: string;
+  /** A user id, or `UNATTRIBUTED_USER_ID` for spend with no human requester. */
+  userId?: string;
+  groupBy?: "day" | "agent" | "both" | "user";
+}): {
+  totals: SessionCostSummaryTotals;
+  daily: SessionCostDailyRow[];
+  byAgent: SessionCostByAgentRow[];
+  byUser: SessionCostByUserRow[];
+} {
+  // `session_costs` deliberately carries no `userId` column — a task can be
+  // re-attributed after the fact, so the human requester is resolved by joining
+  // through the task (same shape as `getDailySpendForUser`). Every column is
+  // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
+  const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
+
+  // Structurally-human-free: the swarm maintaining itself, with no human
+  // requester by construction — heartbeat/boot-triage tasks, scheduled runs
+  // without a human creator (including workflow roots launched by such a
+  // schedule), and `source='system'` follow-ups whose parent itself has no
+  // human requester. That classification propagates through descendants while
+  // they remain unattributed, so autonomous fan-out cannot leak back into the
+  // denominator. An explicitly attributed child is an independent handoff and
+  // stops propagation down that branch.
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -7173,7 +7197,7 @@ export function getSessionCostSummary(opts: {
 
   const totalsRow = getDb()
     .prepare<TotalsRow, string[]>(
-      `${HUMAN_FREE_TASKS_CTE}
+      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
       SELECT
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
@@ -7229,7 +7253,7 @@ export function getSessionCostSummary(opts: {
         },
         string[]
       >(
-        `${HUMAN_FREE_TASKS_CTE}
+        `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
         SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
@@ -7258,7 +7282,7 @@ export function getSessionCostSummary(opts: {
         },
         string[]
       >(
-        `${HUMAN_FREE_TASKS_CTE}
+        `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
         SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
@@ -7279,7 +7303,7 @@ export function getSessionCostSummary(opts: {
   if (groupBy === "user" || groupBy === "both") {
     byUser = getDb()
       .prepare<SessionCostByUserRow, string[]>(
-        `${HUMAN_FREE_TASKS_CTE}
+        `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
         SELECT
           CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
@@ -7369,24 +7393,17 @@ export function getAttributionByPerson(opts: {
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
 
-  // No parent-based `source='system'` clause needed here (unlike
-  // getSessionCostSummary's HUMAN_FREE_SQL): root-task rows have no parent by
-  // definition, and the reach query intentionally counts a person's full task
-  // tree, where a `source='system'` follow-up of THEIR OWN human-attributed
-  // work is legitimate reach, not something to exclude.
-  const humanFreeSql = `(
-        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
-        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
-        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
-      )`;
-
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = getDb()
     .prepare<RootRow, string[]>(
-      `WITH RECURSIVE task_tree(rootId, taskId, output) AS (
+      `WITH RECURSIVE selected_roots(id, requestedByUserId, status, output) AS (
+        SELECT t.id, t.requestedByUserId, t.status, t.output
+        FROM agent_tasks t
+        ${where} AND t.parentTaskId IS NULL AND NOT ${ROOT_HUMAN_FREE_SQL}
+      ),
+      task_tree(rootId, taskId, output) AS (
         SELECT id, id, output
-        FROM agent_tasks
-        WHERE parentTaskId IS NULL
+        FROM selected_roots
 
         UNION ALL
 
@@ -7423,8 +7440,7 @@ export function getAttributionByPerson(opts: {
               )
           )
         ) THEN 1 ELSE 0 END) as shipped
-      FROM agent_tasks t
-      ${where} AND t.parentTaskId IS NULL AND NOT ${humanFreeSql}
+      FROM selected_roots t
       GROUP BY t.requestedByUserId`,
     )
     .all(...params);
@@ -7437,13 +7453,63 @@ export function getAttributionByPerson(opts: {
   };
   const reachRows = getDb()
     .prepare<ReachRow, string[]>(
-      `SELECT
+      `WITH RECURSIVE report_tasks AS (
+        SELECT t.*
+        FROM agent_tasks t
+        ${where}
+      ),
+      task_ancestry(
+        taskId, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
+        taskType, tags, source, workflowRunId
+      ) AS (
+        SELECT
+          id, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
+          taskType, tags, source, workflowRunId
+        FROM report_tasks
+
+        UNION ALL
+
+        SELECT
+          child.taskId, parent.id, parent.parentTaskId, parent.requestedByUserId,
+          parent.requestedByUserIdInherited, parent.taskType, parent.tags,
+          parent.source, parent.workflowRunId
+        FROM agent_tasks parent
+        JOIN task_ancestry child ON parent.id = child.parentTaskId
+        WHERE child.requestedByUserId IS NULL
+          OR child.requestedByUserIdInherited = 1
+      ),
+      human_free_report_tasks(id) AS (
+        SELECT DISTINCT ancestor.taskId
+        FROM task_ancestry ancestor
+        LEFT JOIN agent_tasks parent ON parent.id = ancestor.parentTaskId
+        WHERE COALESCE(ancestor.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+          OR COALESCE(ancestor.tags, '[]') LIKE '%"heartbeat"%'
+          OR (COALESCE(ancestor.source, '') = 'schedule' AND ancestor.requestedByUserId IS NULL)
+          OR (
+            ancestor.parentTaskId IS NULL
+            AND COALESCE(ancestor.source, '') = 'workflow'
+            AND ancestor.requestedByUserId IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workflow_runs run
+              WHERE run.id = ancestor.workflowRunId
+                AND run.triggerType = 'schedule'
+                AND run.created_by IS NULL
+            )
+          )
+          OR (
+            COALESCE(ancestor.source, '') = 'system'
+            AND parent.id IS NOT NULL
+            AND parent.requestedByUserId IS NULL
+          )
+      )
+      SELECT
         t.requestedByUserId as userId,
         COUNT(DISTINCT t.agentId) as agentsReached,
         COUNT(DISTINCT t.vcsRepo) as reposReached,
         COUNT(DISTINCT t.source) as surfacesReached
-      FROM agent_tasks t
-      ${where} AND NOT ${humanFreeSql}
+      FROM report_tasks t
+      WHERE NOT EXISTS (SELECT 1 FROM human_free_report_tasks WHERE id = t.id)
       GROUP BY t.requestedByUserId`,
     )
     .all(...params);
