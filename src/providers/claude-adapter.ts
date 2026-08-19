@@ -19,6 +19,7 @@ import {
   trackErrorFromJson,
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
@@ -438,7 +439,7 @@ export async function createSessionMcpConfig(
       installedServers ?? null,
       taskId,
       contextKey,
-      process.env.SWARM_RUNTIME_INSTANCE_ID,
+      swarmRuntimeInstanceId(),
     );
     const sessionConfigPath = `/tmp/mcp-${taskId}.json`;
     await writeFile(sessionConfigPath, JSON.stringify(config, null, 2));

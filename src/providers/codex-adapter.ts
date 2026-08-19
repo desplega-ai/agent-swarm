@@ -77,6 +77,7 @@ import {
 } from "../utils/context-window";
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
@@ -365,12 +366,17 @@ export async function buildCodexConfig(
   // (2) Swarm MCP server — Streamable HTTP transport.
   // Field names verified against https://developers.openai.com/codex/mcp:
   // `url`, `http_headers`, `enabled`, `startup_timeout_sec`, `tool_timeout_sec`.
+  // Same per-boot runtime identity the runner registers with — dispatch tools
+  // require it in multi-runtime mode, and it travels as request context, not
+  // as a tool argument.
+  const runtimeInstanceId = swarmRuntimeInstanceId();
   mcpServers["agent-swarm"] = {
     url: `${config.apiUrl}/mcp`,
     http_headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "X-Agent-ID": config.agentId,
       "X-Source-Task-Id": config.taskId ?? "",
+      ...(runtimeInstanceId ? { "X-Runtime-Instance-ID": runtimeInstanceId } : {}),
     },
     enabled: true,
     startup_timeout_sec: 30,

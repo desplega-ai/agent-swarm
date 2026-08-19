@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { classifyAwsSdkError } from "../utils/aws-error-classifier";
+import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
 import { DEFAULT_OPENROUTER_BASE_URL, getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { readPkgVersion } from "./harness-version";
@@ -1089,6 +1090,13 @@ export class PiMonoAdapter implements ProviderAdapter {
           config.agentId,
           config.taskId,
         );
+        // Same per-boot runtime identity the runner registers with — dispatch
+        // tools require it in multi-runtime mode, and it travels as request
+        // context, not as a tool argument.
+        const runtimeInstanceId = swarmRuntimeInstanceId();
+        if (runtimeInstanceId) {
+          mcpClient.customHeaders["X-Runtime-Instance-ID"] = runtimeInstanceId;
+        }
         await mcpClient.initialize();
         const tools = await mcpClient.listTools();
         customTools = mcpToolsToDefinitions(mcpClient, tools);

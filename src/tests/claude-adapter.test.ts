@@ -687,6 +687,38 @@ describe("mergeMcpConfig (issue #369)", () => {
     expect((entry.headers as Record<string, string>)["X-Source-Task-Id"]).toBe(TASK_ID);
   });
 
+  test("agent-swarm server gets X-Runtime-Instance-ID when a runtime identity is given", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID, undefined, "runtime-boot-1");
+    const agentSwarm = merged.mcpServers["agent-swarm"] as Record<string, unknown>;
+    expect((agentSwarm.headers as Record<string, string>)["X-Runtime-Instance-ID"]).toBe(
+      "runtime-boot-1",
+    );
+  });
+
+  test("no runtime identity → no X-Runtime-Instance-ID header", () => {
+    const base = {
+      mcpServers: {
+        "agent-swarm": {
+          type: "http",
+          url: "http://localhost:3013/mcp",
+          headers: { Authorization: "Bearer KEY", "X-Agent-ID": "a1" },
+        },
+      },
+    };
+    const merged = mergeMcpConfig(base, null, TASK_ID);
+    const agentSwarm = merged.mcpServers["agent-swarm"] as Record<string, unknown>;
+    expect((agentSwarm.headers as Record<string, string>)["X-Runtime-Instance-ID"]).toBeUndefined();
+  });
+
   test("does not mutate the input baseConfig", () => {
     const base = {
       mcpServers: {
