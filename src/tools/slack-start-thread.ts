@@ -93,7 +93,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         const sourceTask = requestInfo.sourceTaskId
           ? getTaskById(requestInfo.sourceTaskId)
           : undefined;
-        recordSlackMessage({
+        await recordSlackMessage({
           contextKey: sourceTask?.contextKey ?? `task:slack:${resolvedChannelId}:${ts}`,
           channelId: resolvedChannelId,
           threadTs: ts,

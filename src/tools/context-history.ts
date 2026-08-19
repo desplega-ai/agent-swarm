@@ -83,7 +83,7 @@ export const registerContextHistoryTool = (server: McpServer) => {
         }
       }
 
-      const versions = getContextVersionHistory({
+      const versions = await getContextVersionHistory({
         agentId: targetAgentId,
         field: field as VersionableField | undefined,
         limit: limit ?? 10,

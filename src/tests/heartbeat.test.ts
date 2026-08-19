@@ -428,7 +428,7 @@ describe("Heartbeat Triage", () => {
       const healthy = createAgent({ name: "healthy-idle", isLead: false, status: "idle" });
       const gated = createAgent({ name: "gated-idle", isLead: false, status: "idle" });
       // Push the gated worker to the poll-gate threshold.
-      for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(gated.id);
+      for (let i = 0; i < MAX_EMPTY_POLLS; i++) await incrementEmptyPollCount(gated.id);
 
       createTaskExtended("Pool task");
 

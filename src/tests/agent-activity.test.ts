@@ -14,7 +14,10 @@ const TEST_DB_PATH = "./test-agent-activity.sqlite";
 const TEST_PORT = 13025;
 
 // Minimal HTTP handler for activity endpoint
-function handleRequest(req: { method: string; url: string }): { status: number; body: unknown } {
+async function handleRequest(req: { method: string; url: string }): {
+  status: number;
+  body: unknown;
+} {
   const pathEnd = req.url.indexOf("?");
   const path = pathEnd === -1 ? req.url : req.url.slice(0, pathEnd);
   const pathSegments = path.split("/").filter(Boolean);
@@ -28,7 +31,7 @@ function handleRequest(req: { method: string; url: string }): { status: number; 
     pathSegments[3] === "activity"
   ) {
     const agentId = pathSegments[2];
-    updateAgentActivity(agentId);
+    await updateAgentActivity(agentId);
     return { status: 204, body: null };
   }
 
@@ -95,7 +98,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
   });
 
   describe("DB: updateAgentActivity()", () => {
-    test("should update lastActivityAt timestamp for an existing agent", () => {
+    test("should update lastActivityAt timestamp for an existing agent", async () => {
       const agent = createAgent({
         name: "activity-test-agent-1",
         isLead: false,
@@ -109,7 +112,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       expect(before!.lastActivityAt).toBeUndefined();
 
       // Update activity
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
       // Now lastActivityAt should be set
       const after = getAgentById(agent.id);
@@ -130,14 +133,14 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
         capabilities: [],
       });
 
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
       const first = getAgentById(agent.id);
       expect(first!.lastActivityAt).toBeDefined();
 
       // Small delay to ensure timestamp differs
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
       const second = getAgentById(agent.id);
       expect(second!.lastActivityAt).toBeDefined();
 
@@ -152,7 +155,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       expect(() => updateAgentActivity("non-existent-agent-id")).not.toThrow();
     });
 
-    test("should not modify lastUpdatedAt when updating activity", () => {
+    test("should not modify lastUpdatedAt when updating activity", async () => {
       const agent = createAgent({
         name: "activity-test-agent-3",
         isLead: false,
@@ -164,7 +167,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       expect(before).not.toBeNull();
       const originalLastUpdatedAt = before!.lastUpdatedAt;
 
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
       const after = getAgentById(agent.id);
       expect(after!.lastUpdatedAt).toBe(originalLastUpdatedAt);
@@ -210,7 +213,7 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       });
 
       // Update activity so the field is set
-      updateAgentActivity(agent.id);
+      await updateAgentActivity(agent.id);
 
       const response = await fetch(`${baseUrl}/api/agents`);
       expect(response.status).toBe(200);

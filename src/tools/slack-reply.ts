@@ -101,7 +101,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
       try {
         const slackMessage = markdownToSlack(message);
 
-        const tree = getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
+        const tree = await getSlackTreeMessageByThread(slackChannelId, slackThreadTs);
         const messageBlocks: Record<string, unknown>[] = [
           ...(blocks ?? [
             {
@@ -144,7 +144,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
         const messageTs = result.ts;
         if (messageTs) {
-          recordSlackMessage({
+          await recordSlackMessage({
             contextKey: contextKey ?? `task:slack:${slackChannelId}:${slackThreadTs}`,
             channelId: slackChannelId,
             threadTs: slackThreadTs,

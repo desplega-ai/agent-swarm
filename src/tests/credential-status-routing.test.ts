@@ -75,7 +75,7 @@ describe("Phase 3 — credential status routing", () => {
     expect(refetched!.credentialMissing).toEqual(["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]);
   });
 
-  test("dispatcher routes around blocked workers — getIdleWorkersWithCapacity skips them", () => {
+  test("dispatcher routes around blocked workers — getIdleWorkersWithCapacity skips them", async () => {
     // Sanity: clear DB state by creating fresh agents in this test.
     const ready = createAgent({
       name: "routing-ready",
@@ -91,7 +91,7 @@ describe("Phase 3 — credential status routing", () => {
       capabilities: [],
       maxTasks: 5,
     });
-    updateAgentCredentialState(blocked.id, false, ["DEVIN_API_KEY"]);
+    await updateAgentCredentialState(blocked.id, false, ["DEVIN_API_KEY"]);
 
     const idleWorkers = getIdleWorkersWithCapacity();
     const idleIds = idleWorkers.map((a) => a.id);
@@ -99,7 +99,7 @@ describe("Phase 3 — credential status routing", () => {
     expect(idleIds).not.toContain(blocked.id);
   });
 
-  test("transition waiting → idle: dispatcher picks the agent up again", () => {
+  test("transition waiting → idle: dispatcher picks the agent up again", async () => {
     const agent = createAgent({
       name: "routing-recovery",
       isLead: false,
@@ -109,7 +109,7 @@ describe("Phase 3 — credential status routing", () => {
     });
 
     // Park the agent.
-    updateAgentCredentialState(agent.id, false, ["OPENAI_API_KEY"]);
+    await updateAgentCredentialState(agent.id, false, ["OPENAI_API_KEY"]);
     expect(getIdleWorkersWithCapacity().some((a) => a.id === agent.id)).toBe(false);
 
     // Simulate creds arriving.
@@ -121,7 +121,7 @@ describe("Phase 3 — credential status routing", () => {
     expect(getIdleWorkersWithCapacity().some((a) => a.id === agent.id)).toBe(true);
   });
 
-  test("ready=true clears any prior missing list even if missing[] is provided", () => {
+  test("ready=true clears any prior missing list even if missing[] is provided", async () => {
     const agent = createAgent({
       name: "routing-clear",
       isLead: false,
@@ -130,7 +130,7 @@ describe("Phase 3 — credential status routing", () => {
       maxTasks: 1,
     });
 
-    updateAgentCredentialState(agent.id, false, ["X", "Y"]);
+    await updateAgentCredentialState(agent.id, false, ["X", "Y"]);
     // Even if a caller passes a non-null `missing` with `ready=true`, the helper
     // canonicalises to NULL so the dashboard doesn't render a stale list.
     const cleared = updateAgentCredentialState(agent.id, true, ["X"]);
@@ -138,7 +138,7 @@ describe("Phase 3 — credential status routing", () => {
     expect(cleared!.credentialMissing).toBeNull();
   });
 
-  test("credential-refresh deadlock: recovery clears accumulated emptyPollCount", () => {
+  test("credential-refresh deadlock: recovery clears accumulated emptyPollCount", async () => {
     // Reproduces the wedge: a worker's credentials expire, its sessions exit and
     // emptyPollCount climbs to MAX_EMPTY_POLLS. The agent is parked on
     // `waiting_for_credentials`. When creds are refreshed the SAME parked session
@@ -155,11 +155,11 @@ describe("Phase 3 — credential status routing", () => {
     });
 
     // Park the agent on waiting_for_credentials (creds expired).
-    updateAgentCredentialState(agent.id, false, ["CLAUDE_CODE_OAUTH_TOKEN"]);
+    await updateAgentCredentialState(agent.id, false, ["CLAUDE_CODE_OAUTH_TOKEN"]);
     expect(getAgentById(agent.id)!.status).toBe("waiting_for_credentials");
 
     // Sessions exit empty until the poll gate would trip.
-    for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(agent.id);
+    for (let i = 0; i < MAX_EMPTY_POLLS; i++) await incrementEmptyPollCount(agent.id);
     expect(getAgentById(agent.id)!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
 
     // Creds arrive: genuine waiting_for_credentials -> ready transition.
@@ -169,7 +169,7 @@ describe("Phase 3 — credential status routing", () => {
     expect(getAgentById(agent.id)!.emptyPollCount).toBe(0);
   });
 
-  test("guard: routine ready=true report does NOT clobber an accumulated emptyPollCount", () => {
+  test("guard: routine ready=true report does NOT clobber an accumulated emptyPollCount", async () => {
     // updateAgentCredentialState is called on EVERY ready:true credential report,
     // including routine post-task reports where the agent is already `idle`.
     // Such a report must not reset a legitimately accumulated empty-poll count,
@@ -183,7 +183,7 @@ describe("Phase 3 — credential status routing", () => {
     });
 
     // Agent is idle (never parked) and has accumulated empty polls.
-    for (let i = 0; i < MAX_EMPTY_POLLS; i++) incrementEmptyPollCount(agent.id);
+    for (let i = 0; i < MAX_EMPTY_POLLS; i++) await incrementEmptyPollCount(agent.id);
     expect(getAgentById(agent.id)!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
 
     // A routine post-task ready:true report arrives while status is already idle.

@@ -227,7 +227,7 @@ beforeEach(async () => {
   closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
-  ensureSlackRenderV2Activation();
+  await ensureSlackRenderV2Activation();
   calls.length = 0;
   remoteMessages.clear();
   treeCounter = 0;

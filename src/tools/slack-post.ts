@@ -74,7 +74,7 @@ export const registerSlackPostTool = (server: McpServer) => {
           ? getTaskById(requestInfo.sourceTaskId)
           : undefined;
         const contextKey = sourceTask?.contextKey;
-        const tree = threadTs ? getSlackTreeMessageByThread(channelId, threadTs) : null;
+        const tree = threadTs ? await getSlackTreeMessageByThread(channelId, threadTs) : null;
         const messageBlocks: Record<string, unknown>[] = [
           ...(blocks ?? [
             {
@@ -118,7 +118,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const messageTs = result.ts;
         if (messageTs) {
           const effectiveThreadTs = threadTs ?? messageTs;
-          recordSlackMessage({
+          await recordSlackMessage({
             contextKey: contextKey ?? `task:slack:${channelId}:${effectiveThreadTs}`,
             channelId,
             threadTs: effectiveThreadTs,

@@ -161,7 +161,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // occurred during this poll window.
       const newCount = wasBudgetRefused
         ? (getAgentById(agentId)?.emptyPollCount ?? 0)
-        : incrementEmptyPollCount(agentId);
+        : await incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
 
       // If no task was found within the time limit. An empty poll is a routine

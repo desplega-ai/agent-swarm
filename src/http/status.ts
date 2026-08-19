@@ -188,8 +188,8 @@ export function _resetTestConnectionCache(): void {
   // intentionally empty
 }
 
-function rollupCredStatusForProvider(provider: string): CredRollup {
-  const agents = listAgentsWithCredStatusByProvider(provider);
+async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
+  const agents = await listAgentsWithCredStatusByProvider(provider);
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
   if (reports.length === 0) {
@@ -292,8 +292,8 @@ function describeRoll(roll: CredRollup): string {
  * may run several harnesses simultaneously. Empty fleet → `unverified` with
  * an onboarding hint.
  */
-function harnessMilestone(): SetupMilestone {
-  const fleet = getAgentHarnessProviders();
+async function harnessMilestone(): Promise<SetupMilestone> {
+  const fleet = await getAgentHarnessProviders();
 
   if (fleet.length === 0) {
     return {
@@ -305,15 +305,15 @@ function harnessMilestone(): SetupMilestone {
     };
   }
 
-  const perProvider = fleet
-    .map(({ provider }) => {
-      const parsed = ProviderNameSchema.safeParse(provider);
-      if (!parsed.success) return null;
-      return { provider: parsed.data, roll: rollupCredStatusForProvider(parsed.data) };
-    })
-    .filter(
-      (x): x is { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup } => x !== null,
-    );
+  const perProvider: { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup }[] = [];
+  for (const { provider } of fleet) {
+    const parsed = ProviderNameSchema.safeParse(provider);
+    if (!parsed.success) continue;
+    perProvider.push({
+      provider: parsed.data,
+      roll: await rollupCredStatusForProvider(parsed.data),
+    });
+  }
 
   if (perProvider.length === 0) {
     return {
@@ -514,9 +514,9 @@ function firstTaskMilestone(): SetupMilestone {
   };
 }
 
-function buildSetup(): SetupMilestone[] {
+async function buildSetup(): Promise<SetupMilestone[]> {
   return [
-    harnessMilestone(),
+    await harnessMilestone(),
     slackMilestone(),
     githubMilestone(),
     linearMilestone(),
@@ -569,8 +569,8 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 
 // ─── Public payload builder (also exported for tests) ────────────────────────
 
-export function buildStatusPayload(): StatusResponse {
-  const setup = buildSetup();
+export async function buildStatusPayload(): Promise<StatusResponse> {
+  const setup = await buildSetup();
   return {
     identity: buildIdentity(),
     setup,
@@ -646,7 +646,7 @@ export async function handleStatus(
 ): Promise<boolean> {
   if (getStatus.match(req.method, pathSegments)) {
     try {
-      const payload = buildStatusPayload();
+      const payload = await buildStatusPayload();
       json(res, payload);
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to build status", 500);
@@ -659,7 +659,7 @@ export async function handleStatus(
     if (!parsed) return true;
 
     const { provider } = parsed.body;
-    const roll = rollupCredStatusForProvider(provider);
+    const roll = await rollupCredStatusForProvider(provider);
 
     // No workers registered for this provider — the operator needs to start
     // a worker before any live test can run. Surface as a soft failure so

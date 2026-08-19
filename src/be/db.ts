@@ -579,35 +579,34 @@ export function getLatestContextVersion(
   return row ? rowToContextVersion(row) : null;
 }
 
-export function getContextVersion(id: string): ContextVersion | null {
-  const row = getDb()
-    .prepare<ContextVersionRow, [string]>(`SELECT * FROM context_versions WHERE id = ?`)
-    .get(id);
+export async function getContextVersion(id: string): Promise<ContextVersion | null> {
+  const row = await getDbClient().get<ContextVersionRow>(
+    `SELECT * FROM context_versions WHERE id = ?`,
+    [id],
+  );
 
   return row ? rowToContextVersion(row) : null;
 }
 
-export function getContextVersionHistory(params: {
+export async function getContextVersionHistory(params: {
   agentId: string;
   field?: VersionableField;
   limit?: number;
-}): ContextVersion[] {
+}): Promise<ContextVersion[]> {
   const limit = params.limit ?? 10;
 
   if (params.field) {
-    const rows = getDb()
-      .prepare<ContextVersionRow, [string, string, number]>(
-        `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT ?`,
-      )
-      .all(params.agentId, params.field, limit);
+    const rows = await getDbClient().query<ContextVersionRow>(
+      `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT ?`,
+      [params.agentId, params.field, limit],
+    );
     return rows.map(rowToContextVersion);
   }
 
-  const rows = getDb()
-    .prepare<ContextVersionRow, [string, number]>(
-      `SELECT * FROM context_versions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?`,
-    )
-    .all(params.agentId, limit);
+  const rows = await getDbClient().query<ContextVersionRow>(
+    `SELECT * FROM context_versions WHERE agentId = ? ORDER BY createdAt DESC LIMIT ?`,
+    [params.agentId, limit],
+  );
   return rows.map(rowToContextVersion);
 }
 
@@ -765,11 +764,6 @@ export const agentQueries = {
       "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
     ),
 
-  updateCredentialState: () =>
-    getDb().prepare<AgentRow, [AgentStatus, string | null, string]>(
-      "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-    ),
-
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
 };
 
@@ -784,15 +778,18 @@ export const agentQueries = {
  * `status === 'idle'` so the new value is implicitly excluded with no other
  * code change.
  */
-export function updateAgentCredentialState(
+export async function updateAgentCredentialState(
   agentId: string,
   ready: boolean,
   missing: string[] | null,
-): Agent | null {
+): Promise<Agent | null> {
   const prev = getAgentById(agentId);
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
-  const row = agentQueries.updateCredentialState().get(status, missingJson, agentId);
+  const row = await getDbClient().get<AgentRow>(
+    "UPDATE agents SET status = ?, credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+    [status, missingJson, agentId],
+  );
   // Only clear the accumulated empty-poll count on a genuine recovery
   // (waiting_for_credentials -> ready), so routine post-task `ready:true`
   // reports don't clobber a legitimately accumulated count and defeat the
@@ -917,17 +914,16 @@ export function setAgentHarnessProvider(id: string, provider: ProviderName | nul
  * one-row-one-fact, and the PATCH handler can choose which to call based
  * on which fields the request body carried.
  */
-export function updateAgentCredStatus(
+export async function updateAgentCredStatus(
   id: string,
   credStatus: AgentCredStatus | null,
-): Agent | null {
+): Promise<Agent | null> {
   const json = credStatus ? JSON.stringify(credStatus) : null;
-  const row = getDb()
-    .prepare<AgentRow, [string | null, string]>(
-      `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  const row = await getDbClient().get<AgentRow>(
+    `UPDATE agents SET cred_status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(json, id);
+    [json, id],
+  );
   return row ? rowToAgent(row) : null;
 }
 
@@ -939,10 +935,11 @@ export function updateAgentCredStatus(
  * Agents with NULL `cred_status` (never reported, or CRED_CHECK_DISABLE=1)
  * are still returned — the caller surfaces them as "unreported".
  */
-export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
-  const rows = getDb()
-    .prepare<AgentRow, [string]>(`SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`)
-    .all(provider);
+export async function listAgentsWithCredStatusByProvider(provider: string): Promise<Agent[]> {
+  const rows = await getDbClient().query<AgentRow>(
+    `SELECT * FROM agents WHERE harness_provider = ? ORDER BY name`,
+    [provider],
+  );
   return rows.map((row) => rowToAgent(row));
 }
 
@@ -954,25 +951,24 @@ export function listAgentsWithCredStatusByProvider(provider: string): Agent[] {
  *
  * Used by future fleet displays. Not consumed in this phase.
  */
-export function getAgentHarnessProviders(): Array<{ provider: string; count: number }> {
-  const rows = getDb()
-    .prepare<{ provider: string; count: number }, []>(
-      `SELECT harness_provider AS provider, COUNT(*) AS count
+export async function getAgentHarnessProviders(): Promise<
+  Array<{ provider: string; count: number }>
+> {
+  const rows = await getDbClient().query<{ provider: string; count: number }>(
+    `SELECT harness_provider AS provider, COUNT(*) AS count
        FROM agents
        WHERE harness_provider IS NOT NULL
        GROUP BY harness_provider
        ORDER BY harness_provider`,
-    )
-    .all();
+  );
   return rows.map((r) => ({ provider: r.provider, count: r.count }));
 }
 
-export function updateAgentActivity(id: string): void {
-  getDb()
-    .prepare<null, [string]>(
-      `UPDATE agents SET lastActivityAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
-    )
-    .run(id);
+export async function updateAgentActivity(id: string): Promise<void> {
+  await getDbClient().run(
+    `UPDATE agents SET lastActivityAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`,
+    [id],
+  );
 }
 
 // ============================================================================
@@ -986,16 +982,15 @@ export const MAX_EMPTY_POLLS = 2;
  * Increment the empty poll count for an agent.
  * Returns the new count after incrementing.
  */
-export function incrementEmptyPollCount(agentId: string): number {
-  const row = getDb()
-    .prepare<{ emptyPollCount: number }, [string]>(
-      `UPDATE agents
+export async function incrementEmptyPollCount(agentId: string): Promise<number> {
+  const row = await getDbClient().get<{ emptyPollCount: number }>(
+    `UPDATE agents
        SET emptyPollCount = emptyPollCount + 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ?
        RETURNING emptyPollCount`,
-    )
-    .get(agentId);
+    [agentId],
+  );
   return row?.emptyPollCount ?? 0;
 }
 
@@ -1021,14 +1016,14 @@ export function shouldBlockPolling(agentId: string): boolean {
   return (agent?.emptyPollCount ?? 0) >= MAX_EMPTY_POLLS;
 }
 
-export function deleteAgent(id: string): boolean {
+export async function deleteAgent(id: string): Promise<boolean> {
   const agent = getAgentById(id);
   if (agent) {
     try {
       createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
     } catch {}
   }
-  const result = getDb().run("DELETE FROM agents WHERE id = ?", [id]);
+  const result = await getDbClient().run("DELETE FROM agents WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -1397,26 +1392,6 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
 }
 
 export const taskQueries = {
-  insert: () =>
-    getDb().prepare<
-      AgentTaskRow,
-      [
-        string,
-        string,
-        string,
-        string,
-        AgentTaskStatus,
-        AgentTaskSource,
-        string | null,
-        string | null,
-        string | null,
-        string,
-      ]
-    >(
-      `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    ),
-
   getById: () => getDb().prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
 
   getByAgentId: () =>
@@ -1469,7 +1444,7 @@ export const taskQueries = {
   delete: () => getDb().prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),
 };
 
-export function createTask(
+export async function createTask(
   agentId: string,
   task: string,
   options?: {
@@ -1478,12 +1453,13 @@ export function createTask(
     slackThreadTs?: string;
     slackUserId?: string;
   },
-): AgentTask {
+): Promise<AgentTask> {
   const id = crypto.randomUUID();
   const source = options?.source ?? "mcp";
-  const row = taskQueries
-    .insert()
-    .get(
+  const row = await getDbClient().get<AgentTaskRow>(
+    `INSERT INTO agent_tasks (id, "key", agentId, task, status, source, slackChannelId, slackThreadTs, slackUserId, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    [
       id,
       defaultAssetKey("task", id),
       agentId,
@@ -1494,7 +1470,8 @@ export function createTask(
       options?.slackThreadTs ?? null,
       options?.slackUserId ?? null,
       pkg.version,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create task");
   try {
     createLogEntry({
@@ -1615,25 +1592,22 @@ export function getTaskById(id: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getSlackRenderV2ActivatedAt(): string | null {
-  return (
-    getDb()
-      .prepare<{ activated_at: string }, []>(
-        `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
-      )
-      .get()?.activated_at ?? null
+export async function getSlackRenderV2ActivatedAt(): Promise<string | null> {
+  const row = await getDbClient().get<{ activated_at: string }>(
+    `SELECT activated_at FROM slack_render_v2_state WHERE id = 1`,
   );
+  return row?.activated_at ?? null;
 }
 
-export function ensureSlackRenderV2Activation(): string {
+export async function ensureSlackRenderV2Activation(): Promise<string> {
   const activatedAt = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO slack_render_v2_state (id, activated_at)
      VALUES (1, ?)
      ON CONFLICT(id) DO NOTHING`,
     [activatedAt],
   );
-  const persisted = getSlackRenderV2ActivatedAt();
+  const persisted = await getSlackRenderV2ActivatedAt();
   if (!persisted) throw new Error("Failed to persist Slack render v2 activation");
   return persisted;
 }
@@ -1693,7 +1667,7 @@ function rowToSlackMessage(row: SlackMessageRow): SlackMessageRecord {
   };
 }
 
-export function recordSlackMessage(input: {
+export async function recordSlackMessage(input: {
   contextKey: string;
   channelId: string;
   threadTs: string;
@@ -1704,30 +1678,11 @@ export function recordSlackMessage(input: {
   finalized?: boolean;
   streamChunksAppended?: number;
   actorId?: string;
-}): SlackMessageRecord {
+}): Promise<SlackMessageRecord> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<
-      SlackMessageRow,
-      [
-        string,
-        string,
-        string,
-        string,
-        string,
-        SlackMessageKind,
-        string | null,
-        string | null,
-        string | null,
-        number,
-        string,
-        string,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO slack_messages (
+  const row = await getDbClient().get<SlackMessageRow>(
+    `INSERT INTO slack_messages (
          id, context_key, channel_id, thread_ts, ts, kind, task_id, permalink,
          finalized_at, stream_chunks_appended, created_at, updated_at, created_by, updated_by
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1744,8 +1699,7 @@ export function recordSlackMessage(input: {
          updated_at = excluded.updated_at,
          updated_by = excluded.updated_by
        RETURNING *`,
-    )
-    .get(
+    [
       id,
       input.contextKey,
       input.channelId,
@@ -1760,19 +1714,20 @@ export function recordSlackMessage(input: {
       now,
       input.actorId ?? null,
       input.actorId ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to record Slack message");
   return rowToSlackMessage(row);
 }
 
-export function reserveSlackMessage(input: {
+export async function reserveSlackMessage(input: {
   contextKey: string;
   channelId: string;
   threadTs: string;
   kind: "tree" | "outcome";
   taskId?: string;
   actorId?: string;
-}): { record: SlackMessageRecord; created: boolean } {
+}): Promise<{ record: SlackMessageRecord; created: boolean }> {
   if (input.kind === "outcome" && !input.taskId) {
     throw new Error("Outcome Slack message reservations require a task ID");
   }
@@ -1780,31 +1735,14 @@ export function reserveSlackMessage(input: {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const pendingTs = `${PENDING_SLACK_MESSAGE_TS_PREFIX}${id}`;
-  const inserted = getDb()
-    .prepare<
-      SlackMessageRow,
-      [
-        string,
-        string,
-        string,
-        string,
-        string,
-        "tree" | "outcome",
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO slack_messages (
+  const inserted = await getDbClient().get<SlackMessageRow>(
+    `INSERT INTO slack_messages (
          id, context_key, channel_id, thread_ts, ts, kind, task_id,
          stream_chunks_appended, created_at, updated_at, created_by, updated_by
        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
        ON CONFLICT DO NOTHING
        RETURNING *`,
-    )
-    .get(
+    [
       id,
       input.contextKey,
       input.channelId,
@@ -1816,37 +1754,37 @@ export function reserveSlackMessage(input: {
       now,
       input.actorId ?? null,
       input.actorId ?? null,
-    );
+    ],
+  );
   if (inserted) return { record: rowToSlackMessage(inserted), created: true };
 
   const existing =
     input.kind === "tree"
-      ? getSlackTreeMessageByThread(input.channelId, input.threadTs)
-      : getSlackOutcomeMessage(input.taskId!);
+      ? await getSlackTreeMessageByThread(input.channelId, input.threadTs)
+      : await getSlackOutcomeMessage(input.taskId!);
   if (!existing) throw new Error("Failed to reserve Slack message");
   return { record: existing, created: false };
 }
 
-export function bindSlackMessageTimestamp(
+export async function bindSlackMessageTimestamp(
   id: string,
   ts: string,
   options: { streamChunksAppended?: number; renderedThrough?: string } = {},
-): SlackMessageRecord | null {
+): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<SlackMessageRow, [string, number, string | null, string, string]>(
-      `UPDATE slack_messages SET
+  const row = await getDbClient().get<SlackMessageRow>(
+    `UPDATE slack_messages SET
          ts = ?,
          stream_chunks_appended = MAX(stream_chunks_appended, ?),
          updated_at = COALESCE(?, ?)
        WHERE id = ? AND ts LIKE 'pending:%'
        RETURNING *`,
-    )
-    .get(ts, options.streamChunksAppended ?? 0, options.renderedThrough ?? null, now, id);
+    [ts, options.streamChunksAppended ?? 0, options.renderedThrough ?? null, now, id],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function updateSlackMessageRecord(
+export async function updateSlackMessageRecord(
   id: string,
   updates: {
     permalink?: string;
@@ -1855,14 +1793,10 @@ export function updateSlackMessageRecord(
     actorId?: string;
     touchUpdatedAt?: boolean;
   },
-): SlackMessageRecord | null {
+): Promise<SlackMessageRecord | null> {
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<
-      SlackMessageRow,
-      [string | null, number, string, number | null, number, string, string | null, string]
-    >(
-      `UPDATE slack_messages SET
+  const row = await getDbClient().get<SlackMessageRow>(
+    `UPDATE slack_messages SET
          permalink = COALESCE(?, permalink),
          finalized_at = CASE WHEN ? = 1 THEN COALESCE(finalized_at, ?) ELSE finalized_at END,
          stream_chunks_appended = COALESCE(?, stream_chunks_appended),
@@ -1870,8 +1804,7 @@ export function updateSlackMessageRecord(
          updated_by = COALESCE(?, updated_by)
        WHERE id = ?
        RETURNING *`,
-    )
-    .get(
+    [
       updates.permalink ?? null,
       updates.finalized ? 1 : 0,
       now,
@@ -1880,64 +1813,61 @@ export function updateSlackMessageRecord(
       now,
       updates.actorId ?? null,
       id,
-    );
+    ],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function markSlackTreeRendered(
+export async function markSlackTreeRendered(
   id: string,
   renderedThrough: string,
-): SlackMessageRecord | null {
-  const row = getDb()
-    .prepare<SlackMessageRow, [string, string]>(
-      `UPDATE slack_messages SET updated_at = ?
+): Promise<SlackMessageRecord | null> {
+  const row = await getDbClient().get<SlackMessageRow>(
+    `UPDATE slack_messages SET updated_at = ?
        WHERE id = ? AND kind = 'tree'
        RETURNING *`,
-    )
-    .get(renderedThrough, id);
+    [renderedThrough, id],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function deleteSlackMessageRecord(id: string): boolean {
-  return getDb().run(`DELETE FROM slack_messages WHERE id = ?`, [id]).changes > 0;
+export async function deleteSlackMessageRecord(id: string): Promise<boolean> {
+  const result = await getDbClient().run(`DELETE FROM slack_messages WHERE id = ?`, [id]);
+  return result.changes > 0;
 }
 
-export function getSlackTreeMessage(contextKey: string): SlackMessageRecord | null {
-  const row = getDb()
-    .prepare<SlackMessageRow, [string]>(
-      `SELECT * FROM slack_messages WHERE context_key = ? AND kind = 'tree' LIMIT 1`,
-    )
-    .get(contextKey);
+export async function getSlackTreeMessage(contextKey: string): Promise<SlackMessageRecord | null> {
+  const row = await getDbClient().get<SlackMessageRow>(
+    `SELECT * FROM slack_messages WHERE context_key = ? AND kind = 'tree' LIMIT 1`,
+    [contextKey],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function getSlackTreeMessageByThread(
+export async function getSlackTreeMessageByThread(
   channelId: string,
   threadTs: string,
-): SlackMessageRecord | null {
-  const row = getDb()
-    .prepare<SlackMessageRow, [string, string]>(
-      `SELECT * FROM slack_messages
+): Promise<SlackMessageRecord | null> {
+  const row = await getDbClient().get<SlackMessageRow>(
+    `SELECT * FROM slack_messages
        WHERE channel_id = ? AND thread_ts = ? AND kind = 'tree'
        LIMIT 1`,
-    )
-    .get(channelId, threadTs);
+    [channelId, threadTs],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function getSlackOutcomeMessage(taskId: string): SlackMessageRecord | null {
-  const row = getDb()
-    .prepare<SlackMessageRow, [string]>(
-      `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome' LIMIT 1`,
-    )
-    .get(taskId);
+export async function getSlackOutcomeMessage(taskId: string): Promise<SlackMessageRecord | null> {
+  const row = await getDbClient().get<SlackMessageRow>(
+    `SELECT * FROM slack_messages WHERE task_id = ? AND kind = 'outcome' LIMIT 1`,
+    [taskId],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function getSlackTreeMessages(): SlackMessageRecord[] {
-  return getDb()
-    .prepare<SlackMessageRow, []>(
-      `SELECT tree.*
+export async function getSlackTreeMessages(): Promise<SlackMessageRecord[]> {
+  const rows = await getDbClient().query<SlackMessageRow>(
+    `SELECT tree.*
        FROM slack_messages tree
        JOIN slack_render_v2_state state ON state.id = 1
        WHERE tree.kind = 'tree'
@@ -1986,32 +1916,32 @@ export function getSlackTreeMessages(): SlackMessageRecord[] {
          )
        )
        ORDER BY tree.created_at ASC`,
-    )
-    .all()
-    .map(rowToSlackMessage);
+  );
+  return rows.map(rowToSlackMessage);
 }
 
-export function getSlackMessageByChannelTs(
+export async function getSlackMessageByChannelTs(
   channelId: string,
   ts: string,
-): SlackMessageRecord | null {
-  const row = getDb()
-    .prepare<SlackMessageRow, [string, string]>(
-      `SELECT * FROM slack_messages WHERE channel_id = ? AND ts = ? LIMIT 1`,
-    )
-    .get(channelId, ts);
+): Promise<SlackMessageRecord | null> {
+  const row = await getDbClient().get<SlackMessageRow>(
+    `SELECT * FROM slack_messages WHERE channel_id = ? AND ts = ? LIMIT 1`,
+    [channelId, ts],
+  );
   return row ? rowToSlackMessage(row) : null;
 }
 
-export function getSlackTasksInThread(channelId: string, threadTs: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT * FROM agent_tasks
+export async function getSlackTasksInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId = ? AND slackThreadTs = ?
        ORDER BY createdAt ASC, rowid ASC`,
-    )
-    .all(channelId, threadTs)
-    .map(rowToAgentTask);
+    [channelId, threadTs],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 export function markTaskSlackReplySent(taskId: string): void {

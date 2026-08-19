@@ -249,7 +249,11 @@ function isTreeFullyTerminal(nodes: TreeNode[]): boolean {
  * Removes tree from treeMessages, removes all task IDs from taskToTree,
  * adds root task IDs to notifiedCompletions, and cleans up rendering state.
  */
-function cleanupCompletedTree(messageTs: string, _tree: TreeMessageState, nodes: TreeNode[]): void {
+async function cleanupCompletedTree(
+  messageTs: string,
+  _tree: TreeMessageState,
+  nodes: TreeNode[],
+): Promise<void> {
   const now = Date.now();
 
   // Collect all task IDs in this tree (roots + children)
@@ -261,7 +265,7 @@ function cleanupCompletedTree(messageTs: string, _tree: TreeMessageState, nodes:
     }
   }
 
-  finalizeTerminalSlackReactions(
+  await finalizeTerminalSlackReactions(
     allTaskIds.map((taskId) => getTaskById(taskId)).filter((task): task is AgentTask => !!task),
   );
 
@@ -343,7 +347,7 @@ export async function processTreeMessages(): Promise<void> {
       // No changes — skip update
       if (fullyTerminal && outputDeliverySucceeded) {
         // Even though nothing changed visually, clean up if terminal
-        cleanupCompletedTree(messageTs, tree, nodes);
+        await cleanupCompletedTree(messageTs, tree, nodes);
       }
       continue;
     }
@@ -407,7 +411,7 @@ export async function processTreeMessages(): Promise<void> {
 
     // Clean up fully terminal trees after final render
     if (fullyTerminal && success && outputDeliverySucceeded) {
-      cleanupCompletedTree(messageTs, tree, nodes);
+      await cleanupCompletedTree(messageTs, tree, nodes);
     }
   }
 }
@@ -788,7 +792,7 @@ export function startTaskWatcher(intervalMs = 3000): void {
           }
           // Clean up progress tracking
           sentProgress.delete(task.id);
-          finalizeTerminalSlackReactions([task]);
+          await finalizeTerminalSlackReactions([task]);
           console.log(`[Slack] Sent ${task.status} response for task ${task.id.slice(0, 8)}`);
         } catch (error) {
           // If send fails, remove from notified so we can retry

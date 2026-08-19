@@ -295,7 +295,7 @@ async function ensureTreePermalink(
 ): Promise<SlackMessageRecord> {
   if (tree.permalink) return tree;
   const permalink = await resolvePermalink(client, tree.channelId, tree.ts);
-  return updateSlackMessageRecord(tree.id, { permalink, touchUpdatedAt: false }) ?? tree;
+  return (await updateSlackMessageRecord(tree.id, { permalink, touchUpdatedAt: false })) ?? tree;
 }
 
 function physicalThreadKey(channelId: string, threadTs: string): string {
@@ -342,21 +342,24 @@ async function findReservedSlackMessage(
   return undefined;
 }
 
-function discardTreeRecord(tree: SlackMessageRecord): void {
+async function discardTreeRecord(tree: SlackMessageRecord): Promise<void> {
   const timer = pendingTreeUpdates.get(tree.id);
   if (timer) clearTimeout(timer);
   pendingTreeUpdates.delete(tree.id);
   lastTreeText.delete(tree.id);
   lastTreeUpdateAt.delete(tree.id);
-  deleteSlackMessageRecord(tree.id);
+  await deleteSlackMessageRecord(tree.id);
 }
 
-function findThreadTree(
+async function findThreadTree(
   contextKey: string,
   channelId: string,
   threadTs: string,
-): SlackMessageRecord | null {
-  return getSlackTreeMessage(contextKey) ?? getSlackTreeMessageByThread(channelId, threadTs);
+): Promise<SlackMessageRecord | null> {
+  return (
+    (await getSlackTreeMessage(contextKey)) ??
+    (await getSlackTreeMessageByThread(channelId, threadTs))
+  );
 }
 
 async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | null> {
@@ -368,16 +371,16 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
     });
-  const existing = findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
+  const existing = await findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
   if (existing && !isPendingSlackMessage(existing)) return existing;
 
   const renderedThrough = new Date().toISOString();
-  const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const agent = task.agentId ? getAgentById(task.agentId) : undefined;
   const text = renderThreadTree(tasks);
   const reserved = existing
     ? { record: existing, created: false }
-    : reserveSlackMessage({
+    : await reserveSlackMessage({
         contextKey,
         channelId: task.slackChannelId,
         threadTs: task.slackThreadTs,
@@ -417,11 +420,11 @@ async function createThreadTree(task: AgentTask): Promise<SlackMessageRecord | n
       unfurl_media: false,
     });
   }
-  let record = bindSlackMessageTimestamp(reservation.id, remote.ts, {
+  let record = await bindSlackMessageTimestamp(reservation.id, remote.ts, {
     renderedThrough,
   });
   if (!record) {
-    record = getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs);
+    record = await getSlackTreeMessageByThread(task.slackChannelId, task.slackThreadTs);
   }
   if (!record || isPendingSlackMessage(record)) {
     throw new Error("Failed to persist the thread tree timestamp");
@@ -441,7 +444,7 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
     });
-  const existing = findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
+  const existing = await findThreadTree(contextKey, task.slackChannelId, task.slackThreadTs);
   if (existing && !isPendingSlackMessage(existing)) {
     const app = getSlackApp();
     try {
@@ -450,7 +453,7 @@ export async function ensureSlackThreadTree(taskIds: string[]): Promise<SlackMes
       return resolved;
     } catch (error) {
       if (!isSlackMessageNotFound(error)) throw error;
-      discardTreeRecord(existing);
+      await discardTreeRecord(existing);
       return ensureSlackThreadTree(taskIds);
     }
   }
@@ -503,8 +506,10 @@ async function withTreeUpdateLock<T>(
 }
 
 async function replaceMissingTree(tree: SlackMessageRecord): Promise<SlackMessageRecord | null> {
-  discardTreeRecord(tree);
-  const taskIds = getSlackTasksInThread(tree.channelId, tree.threadTs).map((task) => task.id);
+  await discardTreeRecord(tree);
+  const taskIds = (await getSlackTasksInThread(tree.channelId, tree.threadTs)).map(
+    (task) => task.id,
+  );
   return taskIds.length > 0 ? ensureSlackThreadTree(taskIds) : null;
 }
 
@@ -515,18 +520,18 @@ async function updateThreadTree(
   const result = await withTreeUpdateLock(tree.channelId, tree.threadTs, async () => {
     const app = getSlackApp();
     if (!app) return "unchanged" as const;
-    const current = getSlackTreeMessageByThread(tree.channelId, tree.threadTs);
+    const current = await getSlackTreeMessageByThread(tree.channelId, tree.threadTs);
     if (!current || current.id !== tree.id) return "unchanged" as const;
     if (isPendingSlackMessage(current)) return "pending" as const;
 
     const renderedThrough = new Date().toISOString();
-    const tasks = getSlackTasksInThread(current.channelId, current.threadTs);
+    const tasks = await getSlackTasksInThread(current.channelId, current.threadTs);
     if (tasks.length === 0) return "unchanged" as const;
     const text = renderThreadTree(tasks);
     const lastText = lastTreeText.get(current.id);
     const lastUpdate = lastTreeUpdateAt.get(current.id) ?? 0;
     if (text === lastText) {
-      markSlackTreeRendered(current.id, renderedThrough);
+      await markSlackTreeRendered(current.id, renderedThrough);
       return "unchanged" as const;
     }
     const remaining = TREE_UPDATE_MIN_INTERVAL_MS - (Date.now() - lastUpdate);
@@ -549,7 +554,7 @@ async function updateThreadTree(
     }
     lastTreeText.set(current.id, text);
     lastTreeUpdateAt.set(current.id, Date.now());
-    markSlackTreeRendered(current.id, renderedThrough);
+    await markSlackTreeRendered(current.id, renderedThrough);
     return "updated" as const;
   });
 
@@ -706,11 +711,11 @@ export async function streamOutcomeCard(
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs || !isOutcomeStatus(task.status))
     return null;
-  const existing = getSlackOutcomeMessage(task.id);
+  const existing = await getSlackOutcomeMessage(task.id);
   if (existing?.finalizedAt) return existing;
   if (!tree.permalink) throw new Error(`Tree ${tree.id} has no permalink`);
 
-  const tasks = getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
+  const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
   const attachment = attachmentLine(getTaskAttachments(task.id));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
@@ -742,7 +747,7 @@ export async function streamOutcomeCard(
   let outcome = existing;
   let reservationWasCreated = false;
   if (!outcome) {
-    const reserved = reserveSlackMessage({
+    const reserved = await reserveSlackMessage({
       contextKey: task.contextKey ?? tree.contextKey,
       channelId: task.slackChannelId,
       threadTs: task.slackThreadTs,
@@ -763,7 +768,7 @@ export async function streamOutcomeCard(
     if (typeof started.ts !== "string" || !started.ts) {
       throw new Error("Slack did not return a timestamp for the outcome stream");
     }
-    const persisted = bindSlackMessageTimestamp(outcome.id, started.ts, {
+    const persisted = await bindSlackMessageTimestamp(outcome.id, started.ts, {
       streamChunksAppended: 1,
     });
     if (!persisted) throw new Error("Failed to persist the outcome stream timestamp");
@@ -793,12 +798,12 @@ export async function streamOutcomeCard(
     if (!isStreamAlreadyStopped(error)) throw error;
   }
   const permalink = await resolvePermalink(app.client, task.slackChannelId, outcome.ts);
-  return updateSlackMessageRecord(outcome.id, { permalink, finalized: true });
+  return await updateSlackMessageRecord(outcome.id, { permalink, finalized: true });
 }
 
 export async function processSlackRenderV2(): Promise<void> {
   if (!isSlackRenderV2Enabled()) return;
-  const activatedAt = ensureSlackRenderV2Activation();
+  const activatedAt = await ensureSlackRenderV2Activation();
 
   for (const task of getSlackTasksMissingTree()) {
     if (!isSlackRenderV2Enabled()) return;
@@ -810,10 +815,10 @@ export async function processSlackRenderV2(): Promise<void> {
     }
   }
 
-  for (const storedTree of getSlackTreeMessages()) {
+  for (const storedTree of await getSlackTreeMessages()) {
     if (!isSlackRenderV2Enabled()) return;
     let tree = storedTree;
-    const initialTasks = getSlackTasksInThread(tree.channelId, tree.threadTs);
+    const initialTasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
     if (isPendingSlackMessage(tree)) {
       try {
         const recovered = await ensureSlackThreadTree(initialTasks.map((task) => task.id));
@@ -844,14 +849,15 @@ export async function processSlackRenderV2(): Promise<void> {
         continue;
       }
     }
-    let tasks = getSlackTasksInThread(tree.channelId, tree.threadTs);
-    const needsOutcome = tasks.some(
-      (task) =>
-        task.source === "slack" &&
-        task.createdAt >= activatedAt &&
-        isOutcomeStatus(task.status) &&
-        !getSlackOutcomeMessage(task.id)?.finalizedAt,
-    );
+    let tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
+    let needsOutcome = false;
+    for (const task of tasks) {
+      if (task.source !== "slack" || task.createdAt < activatedAt) continue;
+      if (!isOutcomeStatus(task.status)) continue;
+      if ((await getSlackOutcomeMessage(task.id))?.finalizedAt) continue;
+      needsOutcome = true;
+      break;
+    }
     if (needsOutcome && app) {
       try {
         await resolvePermalink(app.client, tree.channelId, tree.ts);
@@ -864,7 +870,7 @@ export async function processSlackRenderV2(): Promise<void> {
           const replacement = await replaceMissingTree(tree);
           if (!replacement) continue;
           tree = replacement;
-          tasks = getSlackTasksInThread(tree.channelId, tree.threadTs);
+          tasks = await getSlackTasksInThread(tree.channelId, tree.threadTs);
         } catch (replacementError) {
           console.error(`[Slack] Failed to replace missing v2 tree ${tree.id}:`, replacementError);
           continue;
@@ -876,10 +882,10 @@ export async function processSlackRenderV2(): Promise<void> {
       if (!isSlackRenderV2Enabled()) return;
       if (task.source !== "slack" || !isOutcomeStatus(task.status)) continue;
       if (task.createdAt < activatedAt) continue;
-      if (getSlackOutcomeMessage(task.id)?.finalizedAt) continue;
+      if ((await getSlackOutcomeMessage(task.id))?.finalizedAt) continue;
       try {
         const outcome = await streamOutcomeCard(task, tree);
-        if (outcome) finalizeTerminalSlackReactions([task]);
+        if (outcome) await finalizeTerminalSlackReactions([task]);
         outcomeCreated ||= !!outcome;
       } catch (error) {
         console.error(`[Slack] Failed to stream outcome for task ${task.id}:`, error);

@@ -662,7 +662,7 @@ export async function handleAgentsRest(
   if (updateAgentActivityRoute.match(req.method, pathSegments)) {
     const parsed = await updateAgentActivityRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    updateAgentActivity(parsed.params.id);
+    await updateAgentActivity(parsed.params.id);
     res.writeHead(204);
     res.end();
     return true;
@@ -818,11 +818,11 @@ export async function handleAgentsRest(
     }
     const agent =
       parsed.body.ready !== undefined
-        ? (updateAgentCredentialState(
+        ? ((await updateAgentCredentialState(
             parsed.params.id,
             parsed.body.ready,
             parsed.body.missing ?? null,
-          ) ?? existing)
+          )) ?? existing)
         : existing;
     if (!agent) {
       jsonError(res, "Agent not found", 404);
@@ -843,7 +843,7 @@ export async function handleAgentsRest(
               null,
           }
         : null;
-      finalAgent = updateAgentCredStatus(parsed.params.id, nextStatus) ?? agent;
+      finalAgent = (await updateAgentCredStatus(parsed.params.id, nextStatus)) ?? agent;
     } else if (parsed.body.latest_model) {
       const current = agent.credStatus ?? {
         ready: parsed.body.ready ?? true,
@@ -857,10 +857,10 @@ export async function handleAgentsRest(
         bedrock: null,
       };
       finalAgent =
-        updateAgentCredStatus(parsed.params.id, {
+        (await updateAgentCredStatus(parsed.params.id, {
           ...current,
           latestModel: parsed.body.latest_model,
-        }) ?? agent;
+        })) ?? agent;
     }
     updateAgentCredentialStatusRoute.respond(res, 200, agentWithCapacity(finalAgent));
     return true;

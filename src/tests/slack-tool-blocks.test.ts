@@ -79,7 +79,7 @@ beforeAll(async () => {
     slackThreadTs: "300.1",
     contextKey,
   }).id;
-  recordSlackMessage({
+  await recordSlackMessage({
     contextKey,
     channelId: "C_BLOCKS",
     threadTs: "300.1",
