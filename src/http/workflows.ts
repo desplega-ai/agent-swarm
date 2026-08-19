@@ -31,7 +31,6 @@ import {
   WorkflowSchema,
   WorkflowVersionSchema,
 } from "../types";
-import { getRequestAuth } from "../utils/request-auth-context";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
 import {
   applyDefinitionPatch,
@@ -827,13 +826,11 @@ export async function handleWorkflows(
       return true;
     }
     const body = await parseBody<Record<string, unknown>>(req);
-    const auth = getRequestAuth(req);
-
     let runId: string;
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
-        requestedByUserId: auth?.kind === "user" ? auth.userId : workflow.createdBy,
+        requestedByUserId: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
       });
     } catch (err) {
       if (err instanceof TriggerSchemaError) {

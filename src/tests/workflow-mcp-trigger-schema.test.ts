@@ -8,7 +8,19 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, deleteWorkflow, getWorkflow, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  createWorkflow,
+  deleteWorkflow,
+  getTaskByWorkflowRunStepId,
+  getWorkflow,
+  getWorkflowRun,
+  getWorkflowRunStepsByRunId,
+  initDb,
+} from "../be/db";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { handleWorkflows } from "../http/workflows";
 import { SCRIPT_LONG_TIMEOUT_HINT_MS } from "../scripts-runtime/executors/types";
@@ -66,12 +78,17 @@ function buildServerWithTools() {
 
   const callTool =
     (name: string) =>
-    async (args: Record<string, unknown>, agentId = "agent-test") => {
+    async (args: Record<string, unknown>, agentId = "agent-test", sourceTaskId?: string) => {
       const tool = registeredTools[name];
       expect(tool).toBeDefined();
       const extra = {
         sessionId: "session-test",
-        requestInfo: { headers: { "x-agent-id": agentId } },
+        requestInfo: {
+          headers: {
+            "x-agent-id": agentId,
+            ...(sourceTaskId ? { "x-source-task-id": sourceTaskId } : {}),
+          },
+        },
       };
       return (await tool.handler(args, extra)) as ToolResult;
     };
@@ -578,6 +595,38 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
   });
 
   // ─── Phase 3: trigger-workflow surfaces TriggerSchemaError ──
+
+  test("trigger-workflow attributes the run and its root task to the calling task's requester", async () => {
+    const requester = createUser({ name: "MCP Workflow Requester" });
+    const agent = createAgent({
+      name: uniqueName("mcp-trigger-agent"),
+      isLead: false,
+      status: "idle",
+    });
+    const sourceTask = createTaskExtended("Trigger a workflow", {
+      agentId: agent.id,
+      requestedByUserId: requester.id,
+    });
+    const workflow = createWorkflow({
+      name: uniqueName("mcp-trigger-attribution"),
+      definition: minimalDefinition,
+    });
+    createdWorkflowIds.push(workflow.id);
+
+    const triggered = await tools.callTrigger(
+      { id: workflow.id, triggerData: { source: "test" } },
+      agent.id,
+      sourceTask.id,
+    );
+
+    expect(triggered.structuredContent?.success).toBe(true);
+    const runId = triggered.structuredContent?.runId as string;
+    expect(getWorkflowRun(runId)?.createdBy).toBe(requester.id);
+
+    const [step] = getWorkflowRunStepsByRunId(runId);
+    expect(step).toBeDefined();
+    expect(getTaskByWorkflowRunStepId(step!.id)?.requestedByUserId).toBe(requester.id);
+  });
 
   test("trigger-workflow with missing required field → structured TriggerSchemaError", async () => {
     const triggerSchema: Record<string, unknown> = {

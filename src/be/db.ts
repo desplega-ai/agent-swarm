@@ -9198,6 +9198,7 @@ type WorkflowRunRow = {
   triggerData: string | null;
   context: string | null;
   error: string | null;
+  created_by: string | null;
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -9211,6 +9212,7 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
     context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
+    createdBy: row.created_by ?? undefined,
     startedAt: normalizeDateRequired(row.startedAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
@@ -9221,13 +9223,20 @@ export function createWorkflowRun(data: {
   id: string;
   workflowId: string;
   triggerData?: unknown;
+  createdBy?: string;
 }): WorkflowRun {
   const now = new Date().toISOString();
   const row = getDb()
-    .prepare<WorkflowRunRow, [string, string, string, string | null]>(
-      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
+    .prepare<WorkflowRunRow, [string, string, string, string | null, string | null]>(
+      `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?) RETURNING *`,
     )
-    .get(data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null);
+    .get(
+      data.id,
+      data.workflowId,
+      now,
+      data.triggerData ? JSON.stringify(data.triggerData) : null,
+      data.createdBy ?? null,
+    );
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
 }

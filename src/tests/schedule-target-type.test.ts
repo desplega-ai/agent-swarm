@@ -20,6 +20,7 @@ import {
   closeDb,
   createAgent,
   createScheduledTask,
+  createUser,
   createWorkflow,
   getDb,
   getScheduledTaskById,
@@ -226,11 +227,13 @@ describe("scheduled_tasks DB layer — targetType", () => {
 describe("dispatchScheduleTarget — workflow target", () => {
   test("triggers the workflow directly and returns its run ID (no implicit-binding lookup)", async () => {
     const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const requester = createUser({ name: "Workflow Schedule Requester" });
     const schedule = createScheduledTask({
       name: `dispatch-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
       workflowId: wf.id,
+      createdBy: requester.id,
     });
 
     const result = await dispatchScheduleTarget(schedule);
@@ -239,6 +242,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
 
     const run = getWorkflowRun(result.workflowRunIds![0]!);
     expect(run?.workflowId).toBe(wf.id);
+    expect(run?.createdBy).toBe(requester.id);
   });
 
   test("throws when the target workflow is disabled", async () => {
