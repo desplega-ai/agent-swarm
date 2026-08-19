@@ -1211,3 +1211,38 @@ describe("heartbeat ordering vs auto-assignment", () => {
     expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
   });
 });
+
+describe("sweep coverage and rollback inertness", () => {
+  test("a cleanup-only tick still retires a dead runtime", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    makeRuntimeStale(rt);
+
+    // No in-progress work and no queued pool task: the preflight gate treats
+    // this tick as "nothing actionable", but expiry must still run.
+    await runHeartbeatSweep();
+
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+    expect(getAgentById(id)?.status).toBe("offline");
+  });
+
+  test("with the flag off, leftover runtime rows do not block pool assignment", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+
+    // Rolled back; the legacy worker stops refreshing its retained row.
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+    const task = createTaskExtended("pool-work-legacy");
+
+    await runHeartbeatSweep();
+
+    // The healthy legacy worker still receives the task.
+    expect(getAgentById(id)?.status).not.toBe("offline");
+    expect(getTaskById(task.id)?.agentId).toBe(id);
+  });
+});

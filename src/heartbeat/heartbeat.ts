@@ -49,6 +49,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -771,7 +772,10 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     // A multi-runtime agent whose runtimes have all died still reads as idle
     // until its rows expire; assigning to it would strand the task, since
     // nothing is left to poll for it.
-    const withoutRuntime = agentsWithoutLiveRuntime();
+    // Only meaningful in multi-runtime mode: after a rollback, legacy workers
+    // stop refreshing their retained rows, and filtering on them would park
+    // pool tasks against perfectly healthy agents.
+    const withoutRuntime = isMultiRuntimeEnabled() ? agentsWithoutLiveRuntime() : new Set<string>();
     const idleWorkers = getIdleWorkersWithCapacity().filter(
       (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS && !withoutRuntime.has(w.id),
     );
@@ -1286,6 +1290,10 @@ export async function runHeartbeatSweep(): Promise<void> {
           staleRuntimes: 0,
         },
       };
+      // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
+      // stopped pinging is exactly the case the preflight gate sees as
+      // "nothing actionable", and it would otherwise stay available forever.
+      cleanupOnlyFindings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early

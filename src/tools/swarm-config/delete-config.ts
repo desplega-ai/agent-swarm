@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
 import { deleteSwarmConfig, getAgentById, getSwarmConfigLookupById } from "@/be/db";
+import { AGENT_MAX_TASKS_CONFIG_KEY, resetAgentMaxTasksMirror } from "@/be/multi-runtime";
 import { scheduleIntegrationsReload } from "@/http/core";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
@@ -56,6 +57,14 @@ export const registerDeleteConfigTool = (server: McpServer) => {
         }
 
         const deleted = deleteSwarmConfig(id);
+        if (
+          deleted &&
+          existing.scope === "agent" &&
+          existing.scopeId &&
+          existing.key === AGENT_MAX_TASKS_CONFIG_KEY
+        ) {
+          resetAgentMaxTasksMirror(existing.scopeId);
+        }
         if (!deleted) {
           return toolErr(`Failed to delete config entry "${id}".`, {
             data: { yourAgentId: requestInfo.agentId },
