@@ -107,9 +107,8 @@ canonical_pull_requests(task_id, agent_id, url) AS (
   FROM digit_scan
   GROUP BY task_id, agent_id, token
   HAVING substr(token, max(position), 1) = ''
-    OR unicode(substr(token, max(position), 1)) IN (
-      9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
-    )
+    OR substr(token, max(position), 1) IN ('/', '?', '#')
+    OR trim(substr(token, max(position)), ')]},.;:!') = ''
 )
 INSERT INTO task_attachments (
   id,

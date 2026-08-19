@@ -72,6 +72,8 @@ describe("GitHub pull-request extraction", () => {
       "https://evil.example/?next=github.com/o/r/pull/8",
       "xhttps://github.com/o/r/pull/1",
       "https://evil.example/github.com/o/r/pull/8",
+      "https://github.com/o/r/pull/123.foo",
+      "https://github.com/o/r/pull/123,abc",
     ]) {
       expect(extractGitHubPullRequestUrls(fixture)).toEqual([]);
     }
@@ -219,6 +221,8 @@ describe("attachment-first task shipping evidence", () => {
     "https://evil.example/?next=github.com/o/r/pull/8",
     "xhttps://github.com/o/r/pull/1",
     "https://github.com/o/r/pull/123abc",
+    "https://github.com/o/r/pull/123.foo",
+    "https://github.com/o/r/pull/123,abc",
     "https://github.com/o/r/pull/123/files",
     "https://github.com/o/r/pull/8/files",
     "github.com/o/r/pull/8",

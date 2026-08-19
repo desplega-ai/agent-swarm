@@ -88,9 +88,8 @@ function githubPullRequestExistsSql(value: string): string {
     WHERE substr(remainder, position, 1) NOT GLOB '[0-9]'
       AND (
         substr(remainder, position, 1) = ''
-        OR unicode(substr(remainder, position, 1)) IN (
-          9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
-        )
+        OR substr(remainder, position, 1) IN ('/', '?', '#')
+        OR trim(substr(remainder, position), ')]},.;:!') = ''
       )
     LIMIT 1
   )`;

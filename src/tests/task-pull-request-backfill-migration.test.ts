@@ -191,6 +191,8 @@ describe("migration 135 task pull-request attachment backfill", () => {
         "https://_github.com/o/r/pull/8",
         "https://evil.example/github.com/o/r/pull/8",
         "https://github.com/o/r/pull/123abc",
+        "https://github.com/o/r/pull/123.foo",
+        "https://github.com/o/r/pull/123,abc",
       ];
       const now = new Date().toISOString();
       const insertTask = db.prepare(
