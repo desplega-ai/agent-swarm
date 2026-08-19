@@ -218,7 +218,7 @@ export async function requestSteering(args: RequestSteeringArgs): Promise<SteerR
       : undefined;
   const effectiveMode: SteerMode = degradedFrom ? "queue" : requestedMode;
 
-  const steeringMessage = createSteeringMessage({
+  const steeringMessage = await createSteeringMessage({
     taskId: activeTask.id,
     body,
     mode: requestedMode,

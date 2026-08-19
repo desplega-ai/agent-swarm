@@ -463,7 +463,7 @@ async function sendDelete(res: ServerResponse, attachment: TaskAttachment): Prom
       if (normalized.code !== "NotFound") return sendProviderError(res, normalized);
     }
   }
-  deleteTaskAttachment(attachment.id);
+  await deleteTaskAttachment(attachment.id);
   res.writeHead(204);
   res.end();
   return true;

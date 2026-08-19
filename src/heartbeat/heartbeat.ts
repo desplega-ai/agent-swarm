@@ -323,7 +323,9 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
     const sessionHeartbeatAgeMs = session
       ? Date.now() - new Date(session.lastHeartbeatAt).getTime()
       : null;
-    const pendingSteering = hasPendingSteering(task.id) ? getPendingSteeringForTask(task.id) : [];
+    const pendingSteering = (await hasPendingSteering(task.id))
+      ? getPendingSteeringForTask(task.id)
+      : [];
     const newestPendingSteeringAt = pendingSteering.reduce<number>(
       (latest, message) => Math.max(latest, new Date(message.createdAt).getTime()),
       0,
@@ -965,7 +967,7 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
  */
 async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
   findings.staleCleanup.sessions = cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
-  findings.staleCleanup.reviewingTasks = releaseStaleReviewingTasks(
+  findings.staleCleanup.reviewingTasks = await releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
   findings.staleCleanup.mentionProcessing = releaseStaleMentionProcessing(

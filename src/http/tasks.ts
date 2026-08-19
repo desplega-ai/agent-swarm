@@ -1000,7 +1000,7 @@ export async function handleTasks(
     }
 
     getPendingSteeringMessagesRoute.respond(res, 200, {
-      messages: getPendingSteeringForAgent(myAgentId),
+      messages: await getPendingSteeringForAgent(myAgentId),
     });
     return true;
   }
@@ -1034,7 +1034,8 @@ export async function handleTasks(
     }
 
     const delivered =
-      markSteeringDelivered(message.id, parsed.body.mode) ?? getSteeringMessageById(message.id);
+      (await markSteeringDelivered(message.id, parsed.body.mode)) ??
+      getSteeringMessageById(message.id);
     if (!delivered) {
       jsonError(res, "Failed to mark steering message delivered", 500);
       return true;
@@ -1083,7 +1084,8 @@ export async function handleTasks(
       // No/invalid JSON body — the note is optional.
     }
 
-    const handled = markSteeringHandled(message.id, note) ?? getSteeringMessageById(message.id);
+    const handled =
+      (await markSteeringHandled(message.id, note)) ?? getSteeringMessageById(message.id);
     if (!handled) {
       jsonError(res, "Failed to mark steering message handled", 500);
       return true;
@@ -1149,7 +1151,7 @@ export async function handleTasks(
       return true;
     }
 
-    const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
+    const logs = await getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
     const attachments = getTaskAttachments(parsed.params.id);
     getTask.respond(res, 200, { ...task, ...getTaskSteeringFields(task), logs, attachments });
     return true;

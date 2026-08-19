@@ -262,7 +262,7 @@ export async function handleAssets(
       }
       types.push(result.data);
     }
-    const assets = listAssetSummaries({
+    const assets = await listAssetSummaries({
       keyPrefix: parsed.query.keyPrefix,
       types: types.length > 0 ? types : undefined,
       limit: parsed.query.limit,

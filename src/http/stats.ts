@@ -202,9 +202,9 @@ export async function handleStats(
     const agentId = parsed.query.agentId;
     let logs: AgentLog[] = [];
     if (agentId) {
-      logs = getLogsByAgentId(agentId).slice(0, limit);
+      logs = (await getLogsByAgentId(agentId)).slice(0, limit);
     } else {
-      logs = getAllLogs(limit);
+      logs = await getAllLogs(limit);
     }
     listLogs.respond(res, 200, { logs });
     return true;

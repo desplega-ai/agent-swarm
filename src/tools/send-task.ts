@@ -306,7 +306,7 @@ export async function sendTaskHandler(
 
   // Dedup guard: check for similar recent tasks
   if (!allowDuplicate && creatorAgentId) {
-    const duplicate = findDuplicateTask({
+    const duplicate = await findDuplicateTask({
       taskDescription: task,
       creatorAgentId,
       targetAgentId: effectiveAgentId ?? undefined,

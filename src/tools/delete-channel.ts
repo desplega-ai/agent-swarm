@@ -56,7 +56,7 @@ export const registerDeleteChannelTool = (server: McpServer) => {
         // Find channel by ID or name
         let channel = args.channelId ? getChannelById(args.channelId) : null;
         if (!channel && args.name) {
-          channel = getChannelByName(args.name);
+          channel = await getChannelByName(args.name);
         }
 
         if (!channel) {

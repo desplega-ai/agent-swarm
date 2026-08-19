@@ -41,7 +41,7 @@ export const registerPostMessageTool = (server: McpServer) => {
       }
 
       // Find channel by name or ID
-      let targetChannel = getChannelByName(channel);
+      let targetChannel = await getChannelByName(channel);
       if (!targetChannel) {
         targetChannel = getChannelById(channel);
       }
@@ -53,7 +53,7 @@ export const registerPostMessageTool = (server: McpServer) => {
       }
 
       try {
-        const posted = postMessage(targetChannel.id, requestInfo.agentId, content, {
+        const posted = await postMessage(targetChannel.id, requestInfo.agentId, content, {
           replyToId: replyTo,
           mentions,
         });

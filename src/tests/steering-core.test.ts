@@ -174,7 +174,7 @@ describe("task steering core", () => {
   test("cancels every pending row for a task", async () => {
     const task = runningTask("pi", "cancel pending");
     for (const body of ["one", "two"]) {
-      createSteeringMessage({
+      await createSteeringMessage({
         taskId: task.id,
         body,
         mode: "queue",

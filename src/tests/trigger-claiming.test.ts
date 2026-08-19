@@ -444,7 +444,7 @@ describe("Trigger Claiming - Offered Tasks", () => {
 });
 
 describe("Trigger Claiming - Mentions", () => {
-  test("claimMentions marks channels as processing atomically", () => {
+  test("claimMentions marks channels as processing atomically", async () => {
     const agent = createAgent({
       name: "mention-agent",
       isLead: true,
@@ -457,10 +457,10 @@ describe("Trigger Claiming - Mentions", () => {
     const channel2 = createChannel("test-channel-2", "public");
 
     // Post messages with mentions
-    postMessage(channel1.id, agent.id, `Hey @${agent.id}, check this out!`, {
+    await postMessage(channel1.id, agent.id, `Hey @${agent.id}, check this out!`, {
       mentions: [agent.id],
     });
-    postMessage(channel2.id, agent.id, `@${agent.id} urgent task`, { mentions: [agent.id] });
+    await postMessage(channel2.id, agent.id, `@${agent.id} urgent task`, { mentions: [agent.id] });
 
     // Claim mentions
     const claimed = claimMentions(agent.id);
@@ -470,7 +470,7 @@ describe("Trigger Claiming - Mentions", () => {
     expect(claimed.map((c) => c.channelId).sort()).toEqual([channel1.id, channel2.id].sort());
   });
 
-  test("concurrent claims do not return duplicate mentions", () => {
+  test("concurrent claims do not return duplicate mentions", async () => {
     const agent = createAgent({
       name: "concurrent-mention-agent",
       isLead: true,
@@ -480,8 +480,8 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Create channel and post mentions
     const channel = createChannel("concurrent-channel", "public");
-    postMessage(channel.id, agent.id, `@${agent.id} message 1`, { mentions: [agent.id] });
-    postMessage(channel.id, agent.id, `@${agent.id} message 2`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} message 1`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} message 2`, { mentions: [agent.id] });
 
     // Simulate concurrent polls
     const claim1 = claimMentions(agent.id);
@@ -497,7 +497,7 @@ describe("Trigger Claiming - Mentions", () => {
     expect(claim3.length).toBe(0);
   });
 
-  test("releaseMentionProcessing allows reclaiming", () => {
+  test("releaseMentionProcessing allows reclaiming", async () => {
     const agent = createAgent({
       name: "release-agent",
       isLead: true,
@@ -507,7 +507,7 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Create channel and post mention
     const channel = createChannel("release-channel", "public");
-    postMessage(channel.id, agent.id, `@${agent.id} test`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} test`, { mentions: [agent.id] });
 
     // Claim
     const claimed = claimMentions(agent.id);
@@ -536,7 +536,7 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Create channel and post mention
     const channel = createChannel("stale-channel", "public");
-    postMessage(channel.id, agent.id, `@${agent.id} stale test`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} stale test`, { mentions: [agent.id] });
 
     // Claim
     const claimed = claimMentions(agent.id);
@@ -567,7 +567,7 @@ describe("Trigger Claiming - Mentions", () => {
     expect(claimed.length).toBe(0);
   });
 
-  test("claimMentions only claims channels with unread mentions", () => {
+  test("claimMentions only claims channels with unread mentions", async () => {
     const agent = createAgent({
       name: "read-mention-agent",
       isLead: true,
@@ -577,7 +577,7 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Create channel and post mention
     const channel = createChannel("read-channel", "public");
-    const _msg = postMessage(channel.id, agent.id, `@${agent.id} test message`, {
+    const _msg = await postMessage(channel.id, agent.id, `@${agent.id} test message`, {
       mentions: [agent.id],
     });
 
@@ -599,8 +599,8 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Create channel and post mentions
     const channel = createChannel("repoll-channel", "public");
-    postMessage(channel.id, agent.id, `@${agent.id} first`, { mentions: [agent.id] });
-    postMessage(channel.id, agent.id, `@${agent.id} second`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} first`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} second`, { mentions: [agent.id] });
 
     // Poll 1: Claim
     const poll1 = claimMentions(agent.id);
@@ -622,7 +622,7 @@ describe("Trigger Claiming - Mentions", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Post new mention
-    postMessage(channel.id, agent.id, `@${agent.id} third`, { mentions: [agent.id] });
+    await postMessage(channel.id, agent.id, `@${agent.id} third`, { mentions: [agent.id] });
 
     // Poll 4: Should claim new mention
     const poll4 = claimMentions(agent.id);

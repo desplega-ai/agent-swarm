@@ -3922,7 +3922,7 @@ function assetSummaryQueries(types: Set<AssetEntityType>): string[] {
   return queries;
 }
 
-export function listAssetSummaries(filters?: AssetSummaryFilters): AssetSummary[] {
+export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise<AssetSummary[]> {
   const requestedTypes = new Set<AssetEntityType>(
     filters?.types?.length
       ? filters.types
@@ -3939,9 +3939,7 @@ export function listAssetSummaries(filters?: AssetSummaryFilters): AssetSummary[
   }
   query += ' ORDER BY "key" ASC, updatedAt DESC LIMIT ?';
   params.push(limit);
-  const rows = getDb()
-    .prepare<AssetSummaryRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<AssetSummaryRow>(query, params);
 
   return rows.map((row) => ({
     entityType: row.entityType,
@@ -4125,41 +4123,17 @@ export function moveAssetKey(input: {
   return true;
 }
 
-export function deleteTaskAttachment(id: string): boolean {
-  const result = getDb().run("DELETE FROM task_attachments WHERE id = ?", [id]);
+export async function deleteTaskAttachment(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
-export function replaceTaskAttachment(
+export async function replaceTaskAttachment(
   id: string,
   input: Omit<InsertTaskAttachmentInput, "taskId">,
-): TaskAttachment | null {
-  const row = getDb()
-    .prepare<
-      TaskAttachmentRow,
-      [
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        number | null,
-        string | null,
-        string | null,
-        string | null,
-        number,
-        string | null,
-        string,
-      ]
-    >(
-      `UPDATE task_attachments
+): Promise<TaskAttachment | null> {
+  const row = await getDbClient().get<TaskAttachmentRow>(
+    `UPDATE task_attachments
        SET agent_id = ?,
            name = ?,
            kind = ?,
@@ -4180,8 +4154,7 @@ export function replaceTaskAttachment(
            updated_by = ?
        WHERE id = ?
        RETURNING *`,
-    )
-    .get(
+    [
       input.agentId ?? null,
       input.name,
       input.kind,
@@ -4201,7 +4174,8 @@ export function replaceTaskAttachment(
       input.isPrimary ? 1 : 0,
       input.updatedBy ?? null,
       id,
-    );
+    ],
+  );
 
   return row ? rowToTaskAttachment(row) : null;
 }
@@ -4267,20 +4241,17 @@ export interface CreateSteeringMessageArgs {
   createdByAgentId?: string;
 }
 
-export function createSteeringMessage(args: CreateSteeringMessageArgs): SteeringMessage {
+export async function createSteeringMessage(
+  args: CreateSteeringMessageArgs,
+): Promise<SteeringMessage> {
   const id = crypto.randomUUID();
-  const row = getDb()
-    .prepare<
-      TaskSteeringMessageRow,
-      [string, string, string, SteerMode, SteeringSource, string, string | null, string | null]
-    >(
-      `INSERT INTO task_steering_messages
+  const row = await getDbClient().get<TaskSteeringMessageRow>(
+    `INSERT INTO task_steering_messages
          (id, task_id, body, mode, source, created_by_kind,
           created_by_user_id, created_by_agent_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       id,
       args.taskId,
       args.body,
@@ -4289,7 +4260,8 @@ export function createSteeringMessage(args: CreateSteeringMessageArgs): Steering
       args.createdByKind,
       args.createdByUserId ?? null,
       args.createdByAgentId ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create steering message");
 
   try {
@@ -4345,33 +4317,31 @@ export function getPendingSteeringForTask(taskId: string): SteeringMessage[] {
   return getSteeringMessagesForTask(taskId, { status: "pending" });
 }
 
-export function getPendingSteeringForAgent(agentId: string): SteeringMessage[] {
-  return getDb()
-    .prepare<TaskSteeringMessageRow, [string]>(
-      `SELECT m.*
+export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
+  const rows = await getDbClient().query<TaskSteeringMessageRow>(
+    `SELECT m.*
        FROM task_steering_messages m
        JOIN agent_tasks t ON t.id = m.task_id
        WHERE t.agentId = ? AND m.status = 'pending'
        ORDER BY m.created_at ASC, m.rowid ASC`,
-    )
-    .all(agentId)
-    .map(rowToSteeringMessage);
+    [agentId],
+  );
+  return rows.map(rowToSteeringMessage);
 }
 
-export function markSteeringDelivered(
+export async function markSteeringDelivered(
   id: string,
   deliveredMode: SteerMode,
-): SteeringMessage | null {
-  const row = getDb()
-    .prepare<TaskSteeringMessageRow, [SteerMode, string]>(
-      `UPDATE task_steering_messages
+): Promise<SteeringMessage | null> {
+  const row = await getDbClient().get<TaskSteeringMessageRow>(
+    `UPDATE task_steering_messages
        SET status = 'delivered',
            delivered_mode = ?,
            delivered_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    )
-    .get(deliveredMode, id);
+    [deliveredMode, id],
+  );
 
   if (row) {
     try {
@@ -4391,17 +4361,19 @@ export function markSteeringDelivered(
   return row ? rowToSteeringMessage(row) : null;
 }
 
-export function markSteeringHandled(id: string, note?: string): SteeringMessage | null {
-  const row = getDb()
-    .prepare<TaskSteeringMessageRow, [string | null, string]>(
-      `UPDATE task_steering_messages
+export async function markSteeringHandled(
+  id: string,
+  note?: string,
+): Promise<SteeringMessage | null> {
+  const row = await getDbClient().get<TaskSteeringMessageRow>(
+    `UPDATE task_steering_messages
        SET status = 'handled',
            handled_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
            handled_note = ?
        WHERE id = ? AND status = 'delivered'
        RETURNING *`,
-    )
-    .get(note ?? null, id);
+    [note ?? null, id],
+  );
   return row ? rowToSteeringMessage(row) : null;
 }
 
@@ -4418,26 +4390,25 @@ export function markSteeringPromoted(id: string, promotedTaskId: string): Steeri
   return row ? rowToSteeringMessage(row) : null;
 }
 
-export function cancelPendingSteeringForTask(taskId: string): number {
-  return getDb().run(
+export async function cancelPendingSteeringForTask(taskId: string): Promise<number> {
+  const result = await getDbClient().run(
     `UPDATE task_steering_messages
        SET status = 'cancelled'
        WHERE task_id = ? AND status = 'pending'`,
     [taskId],
-  ).changes;
+  );
+  return result.changes;
 }
 
-export function hasPendingSteering(taskId: string): boolean {
-  return (
-    getDb()
-      .prepare<{ present: number }, [string]>(
-        `SELECT 1 AS present
+export async function hasPendingSteering(taskId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ present: number }>(
+    `SELECT 1 AS present
          FROM task_steering_messages
          WHERE task_id = ? AND status = 'pending'
          LIMIT 1`,
-      )
-      .get(taskId) !== null
+    [taskId],
   );
+  return row !== null;
 }
 
 // ============================================================================
@@ -4496,34 +4467,6 @@ function rowToAgentLog(row: AgentLogRow): AgentLog {
   };
 }
 
-export const logQueries = {
-  insert: () =>
-    getDb().prepare<
-      AgentLogRow,
-      [string, string, string | null, string | null, string | null, string | null, string | null]
-    >(
-      `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    ),
-
-  getByAgentId: () =>
-    getDb().prepare<AgentLogRow, [string]>(
-      "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
-    ),
-
-  getByTaskId: () =>
-    getDb().prepare<AgentLogRow, [string]>(
-      "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC",
-    ),
-
-  getByEventType: () =>
-    getDb().prepare<AgentLogRow, [string]>(
-      "SELECT * FROM agent_log WHERE eventType = ? ORDER BY createdAt DESC",
-    ),
-
-  getAll: () => getDb().prepare<AgentLogRow, []>("SELECT * FROM agent_log ORDER BY createdAt DESC"),
-};
-
 export function createLogEntry(entry: {
   eventType: AgentLogEventType;
   agentId?: string;
@@ -4534,8 +4477,14 @@ export function createLogEntry(entry: {
 }): AgentLog {
   const id = crypto.randomUUID();
   const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
-  const row = logQueries
-    .insert()
+  const row = getDb()
+    .prepare<
+      AgentLogRow,
+      [string, string, string | null, string | null, string | null, string | null, string | null]
+    >(
+      `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
+    )
     .get(
       id,
       entry.eventType,
@@ -4549,46 +4498,54 @@ export function createLogEntry(entry: {
   return rowToAgentLog(row);
 }
 
-export function getLogsByAgentId(agentId: string): AgentLog[] {
-  return logQueries.getByAgentId().all(agentId).map(rowToAgentLog);
+export async function getLogsByAgentId(agentId: string): Promise<AgentLog[]> {
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log WHERE agentId = ? ORDER BY createdAt DESC",
+    [agentId],
+  );
+  return rows.map(rowToAgentLog);
 }
 
-export function getLogsByTaskId(taskId: string, limit = 200): AgentLog[] {
-  return getDb()
-    .prepare<AgentLogRow, [string, number]>(
-      "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
-    )
-    .all(taskId, limit)
-    .map(rowToAgentLog);
+export async function getLogsByTaskId(taskId: string, limit = 200): Promise<AgentLog[]> {
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC LIMIT ?",
+    [taskId, limit],
+  );
+  return rows.map(rowToAgentLog);
 }
 
-export function getLogsByTaskIdChronological(taskId: string): AgentLog[] {
-  return getDb()
-    .prepare<AgentLogRow, [string]>(
-      "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
-    )
-    .all(taskId)
-    .map(rowToAgentLog);
+export async function getLogsByTaskIdChronological(taskId: string): Promise<AgentLog[]> {
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log WHERE taskId = ? ORDER BY createdAt ASC",
+    [taskId],
+  );
+  return rows.map(rowToAgentLog);
 }
 
 /**
  * Phase 6: list all log rows of a given eventType, newest first. Used by the
  * REST audit-log tests to assert mutation rows landed.
  */
-export function getLogsByEventType(eventType: AgentLogEventType): AgentLog[] {
-  return logQueries.getByEventType().all(eventType).map(rowToAgentLog);
+export async function getLogsByEventType(eventType: AgentLogEventType): Promise<AgentLog[]> {
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log WHERE eventType = ? ORDER BY createdAt DESC",
+    [eventType],
+  );
+  return rows.map(rowToAgentLog);
 }
 
-export function getAllLogs(limit?: number): AgentLog[] {
+export async function getAllLogs(limit?: number): Promise<AgentLog[]> {
   if (limit) {
-    return getDb()
-      .prepare<AgentLogRow, [number]>(
-        "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
-      )
-      .all(limit)
-      .map(rowToAgentLog);
+    const rows = await getDbClient().query<AgentLogRow>(
+      "SELECT * FROM agent_log WHERE eventType != 'agent_status_change' ORDER BY createdAt DESC LIMIT ?",
+      [limit],
+    );
+    return rows.map(rowToAgentLog);
   }
-  return logQueries.getAll().all().map(rowToAgentLog);
+  const rows = await getDbClient().query<AgentLogRow>(
+    "SELECT * FROM agent_log ORDER BY createdAt DESC",
+  );
+  return rows.map(rowToAgentLog);
 }
 
 // ============================================================================
@@ -4605,12 +4562,12 @@ export type { CreateTaskOptions } from "../types";
  * Find recent tasks within a time window for deduplication checks.
  * Returns tasks created in the last N minutes, optionally filtered by creator or target agent.
  */
-export function findRecentSimilarTasks(opts: {
+export async function findRecentSimilarTasks(opts: {
   windowMinutes?: number;
   creatorAgentId?: string;
   agentId?: string;
   limit?: number;
-}): AgentTask[] {
+}): Promise<AgentTask[]> {
   const since = new Date(Date.now() - (opts.windowMinutes ?? 10) * 60 * 1000).toISOString();
   const conditions: string[] = ["createdAt > ?"];
   const params: (string | number)[] = [since];
@@ -4631,10 +4588,8 @@ export function findRecentSimilarTasks(opts: {
   const limit = opts.limit ?? 50;
   const query = `SELECT * FROM agent_tasks WHERE ${conditions.join(" AND ")} ORDER BY createdAt DESC LIMIT ${limit}`;
 
-  return getDb()
-    .prepare<AgentTaskRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToAgentTask);
+  const rows = await getDbClient().query<AgentTaskRow>(query, params);
+  return rows.map(rowToAgentTask);
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
@@ -5209,11 +5164,11 @@ export function moveTaskFromBacklog(taskId: string): AgentTask | null {
  * Release tasks that have been in 'reviewing' status for too long.
  * Returns them to 'offered' status for retry.
  */
-export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number {
+export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): Promise<number> {
   const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
   const now = new Date().toISOString();
 
-  const result = getDb().run(
+  const result = await getDbClient().run(
     `UPDATE agent_tasks SET status = 'offered', lastUpdatedAt = ?
      WHERE status = 'reviewing' AND lastUpdatedAt < ?`,
     [now, cutoffTime],
@@ -5265,22 +5220,19 @@ export function claimOfferedTask(taskId: string, agentId: string): AgentTask | n
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getUnassignedTasksCount(): number {
-  const result = getDb()
-    .prepare<{ count: number }, []>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-    )
-    .get();
+export async function getUnassignedTasksCount(): Promise<number> {
+  const result = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
+  );
   return result?.count ?? 0;
 }
 
 /** Get unassigned task IDs, ordered by priority (highest first) then creation time */
-export function getUnassignedTaskIds(limit = 10): string[] {
-  const rows = getDb()
-    .prepare<{ id: string }, [number]>(
-      "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
-    )
-    .all(limit);
+export async function getUnassignedTaskIds(limit = 10): Promise<string[]> {
+  const rows = await getDbClient().query<{ id: string }>(
+    "SELECT id FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ?",
+    [limit],
+  );
   return rows.map((r) => r.id);
 }
 
@@ -5645,7 +5597,7 @@ function rowToChannelMessage(row: ChannelMessageRow, agentName?: string): Channe
   };
 }
 
-export function createChannel(
+export async function createChannel(
   name: string,
   options?: {
     description?: string;
@@ -5653,19 +5605,14 @@ export function createChannel(
     createdBy?: string;
     participants?: string[];
   },
-): Channel {
+): Promise<Channel> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<
-      ChannelRow,
-      [string, string, string | null, ChannelType, string | null, string, string]
-    >(
-      `INSERT INTO channels (id, name, description, type, createdBy, participants, createdAt)
+  const row = await getDbClient().get<ChannelRow>(
+    `INSERT INTO channels (id, name, description, type, createdBy, participants, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       name,
       options?.description ?? null,
@@ -5673,16 +5620,18 @@ export function createChannel(
       options?.createdBy ?? null,
       JSON.stringify(options?.participants ?? []),
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create channel");
   return rowToChannel(row);
 }
 
-export function getMessageById(id: string): ChannelMessage | null {
-  const row = getDb()
-    .prepare<ChannelMessageRow, [string]>("SELECT * FROM channel_messages WHERE id = ?")
-    .get(id);
+export async function getMessageById(id: string): Promise<ChannelMessage | null> {
+  const row = await getDbClient().get<ChannelMessageRow>(
+    "SELECT * FROM channel_messages WHERE id = ?",
+    [id],
+  );
   if (!row) return null;
   const agent = row.agentId ? getAgentById(row.agentId) : null;
   return rowToChannelMessage(row, agent?.name);
@@ -5693,10 +5642,8 @@ export function getChannelById(id: string): Channel | null {
   return row ? rowToChannel(row) : null;
 }
 
-export function getChannelByName(name: string): Channel | null {
-  const row = getDb()
-    .prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE name = ?")
-    .get(name);
+export async function getChannelByName(name: string): Promise<Channel | null> {
+  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE name = ?", [name]);
   return row ? rowToChannel(row) : null;
 }
 
@@ -5712,7 +5659,7 @@ export function deleteChannel(id: string): boolean {
   return result.changes > 0;
 }
 
-export function postMessage(
+export async function postMessage(
   channelId: string,
   agentId: string | null,
   content: string,
@@ -5720,7 +5667,7 @@ export function postMessage(
     replyToId?: string;
     mentions?: string[];
   },
-): ChannelMessage {
+): Promise<ChannelMessage> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
@@ -5728,15 +5675,10 @@ export function postMessage(
   const isTaskMessage = content.trimStart().startsWith("/task ");
   const messageContent = isTaskMessage ? content.replace(/^\s*\/task\s+/, "") : content;
 
-  const row = getDb()
-    .prepare<
-      ChannelMessageRow,
-      [string, string, string | null, string, string | null, string, string]
-    >(
-      `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
+  const row = await getDbClient().get<ChannelMessageRow>(
+    `INSERT INTO channel_messages (id, channelId, agentId, content, replyToId, mentions, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       channelId,
       agentId,
@@ -5744,7 +5686,8 @@ export function postMessage(
       options?.replyToId ?? null,
       JSON.stringify(options?.mentions ?? []),
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to post message");
 
@@ -5762,7 +5705,7 @@ export function postMessage(
   // Thread follow-up: If no explicit mentions and this is a reply, inherit from parent message
   // Note: Only for notifications, not for task creation (requires explicit /task)
   if (targetMentions.length === 0 && options?.replyToId) {
-    const parentMessage = getMessageById(options.replyToId);
+    const parentMessage = await getMessageById(options.replyToId);
     if (parentMessage?.mentions && parentMessage.mentions.length > 0) {
       targetMentions = parentMessage.mentions;
     }
@@ -5806,20 +5749,20 @@ export function postMessage(
         .map((taskId) => `[#${taskId.slice(0, 8)}](task:${taskId})`)
         .join(" ");
       const updatedContent = `${messageContent}\n\n→ Created: ${taskLinks}`;
-      getDb()
-        .prepare(`UPDATE channel_messages SET content = ? WHERE id = ?`)
-        .run(updatedContent, id);
+      await getDbClient().run(`UPDATE channel_messages SET content = ? WHERE id = ?`, [
+        updatedContent,
+        id,
+      ]);
     }
   }
 
   // Get agent name for the response - re-fetch to get updated content
   const agent = agentId ? getAgentById(agentId) : null;
-  const updatedRow = getDb()
-    .prepare<ChannelMessageRow, [string]>(
-      `SELECT m.*, a.name as agentName FROM channel_messages m
+  const updatedRow = await getDbClient().get<ChannelMessageRow>(
+    `SELECT m.*, a.name as agentName FROM channel_messages m
        LEFT JOIN agents a ON m.agentId = a.id WHERE m.id = ?`,
-    )
-    .get(id);
+    [id],
+  );
   return rowToChannelMessage(updatedRow ?? row, agent?.name);
 }
 

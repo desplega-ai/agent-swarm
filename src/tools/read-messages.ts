@@ -119,7 +119,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
         }
 
         // Find channel by name or ID
-        let targetChannel = getChannelByName(channel);
+        let targetChannel = await getChannelByName(channel);
         if (!targetChannel) {
           targetChannel = getChannelById(channel);
         }

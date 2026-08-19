@@ -107,7 +107,7 @@ export async function acceptSteerHandler(
   }
 
   const safeNote = note ? scrubSecrets(note) : undefined;
-  const updated = markSteeringHandled(steeringMessageId, safeNote);
+  const updated = await markSteeringHandled(steeringMessageId, safeNote);
   if (!updated) {
     return toolErr(`Steering message cannot be acknowledged from status "${steering.status}".`, {
       data: { yourAgentId: ctx.agentId },
