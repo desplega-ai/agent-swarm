@@ -173,7 +173,7 @@ export default function AgentsPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<AgentWithTasks>) => {
-      if (event.data) navigate(`/agents/${event.data.id}`);
+      if (event.data) void navigate(`/agents/${event.data.id}`);
     },
     [navigate],
   );

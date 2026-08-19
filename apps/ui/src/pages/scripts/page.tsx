@@ -121,7 +121,7 @@ export default function ScriptsPage() {
     (event: RowClickedEvent<ScriptListItem>) => {
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest("a, button")) return;
-      if (event.data) navigate(`/scripts/${event.data.id}`);
+      if (event.data) void navigate(`/scripts/${event.data.id}`);
     },
     [navigate],
   );

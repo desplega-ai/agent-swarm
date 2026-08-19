@@ -12,9 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Identity files now have ratcheting prompt-size budgets** (#1174) — SOUL.md and IDENTITY.md converge toward 10,000 characters, CLAUDE.md and TOOLS.md toward 20,000, and existing oversized profiles can stay level or shrink without accepting further growth.
 
 ### Changed
-- **Worker harness pins track current compatible releases** (#1173) — Claude Code moves to 2.1.233, Pi to 0.84.2, and OpenCode plus its SDK to 1.18.18.
+- **Worker harness pins track current compatible releases** (#1173, #1185) — Claude Code moves to 2.1.235, Pi to 0.84.2, Codex to 0.148.0, and OpenCode plus its SDK to 1.18.18.
+- **Session log queries use a creation-time index** (#1182) — deployments add an index on `session_logs.createdAt` for faster chronological lookups.
 
 ### Fixed
+- **Task creation validates input at the shared service boundary** (#1186) — REST, MCP, scripts, webhooks, schedulers, and internal callers reject malformed task payloads before persistence while preserving explicit priority zero.
 - **Rejected identity-file syncs are visible and isolated by field** (#1181) — valid profile edits still persist when another field exceeds its budget, rejection and reconciliation events preserve the evidence, pre-boot backups protect divergent local content, and the next session receives recovery guidance.
 - **The API alerts operators when claimable tasks stop being picked up** (#1177) — a database-backed alarm reports a queue stalled for 30 minutes and posts recovery once pickups resume.
 - **Task claims synchronize agent activity state immediately** (#1178) — polling transitions the claiming worker to active status alongside the task start.

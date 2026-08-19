@@ -55,7 +55,7 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
     const handleEnter = useCallback(
       (e?: React.MouseEvent<HTMLDivElement>) => {
         if (!isAnimated || reduced) return;
-        if (!isControlled.current) controls.start("animate");
+        if (!isControlled.current) void controls.start("animate");
         else if (e) onMouseEnter?.(e);
       },
       [controls, reduced, isAnimated, onMouseEnter],
@@ -63,7 +63,7 @@ const ContactIcon = forwardRef<ContactIconHandle, ContactIconProps>(
 
     const handleLeave = useCallback(
       (e?: React.MouseEvent<HTMLDivElement>) => {
-        if (!isControlled.current) controls.start("normal");
+        if (!isControlled.current) void controls.start("normal");
         else if (e) onMouseLeave?.(e);
       },
       [controls, onMouseLeave],

@@ -214,7 +214,7 @@ export function ScriptRunsGrid({
       // guard on the click target instead.
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest("a, button")) return;
-      if (event.data) navigate(`/script-runs/${event.data.id}`);
+      if (event.data) void navigate(`/script-runs/${event.data.id}`);
     },
     [navigate],
   );

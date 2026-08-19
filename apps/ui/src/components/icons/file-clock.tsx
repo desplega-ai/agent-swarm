@@ -55,7 +55,7 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
     const handleEnter = useCallback(
       (e?: React.MouseEvent<HTMLDivElement>) => {
         if (!isAnimated || reduced) return;
-        if (!isControlled.current) controls.start("animate");
+        if (!isControlled.current) void controls.start("animate");
         else if (e) onMouseEnter?.(e);
       },
       [controls, reduced, isAnimated, onMouseEnter],
@@ -64,7 +64,7 @@ const FileClockIcon = forwardRef<FileClockIconHandle, FileClockIconProps>(
     const handleLeave = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
         if (!isControlled.current) {
-          controls.start("normal");
+          void controls.start("normal");
         } else {
           if (e) onMouseLeave?.(e);
         }

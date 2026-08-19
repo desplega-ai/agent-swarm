@@ -633,6 +633,102 @@ export const AgentTaskSchema = z
   })
   .openapi("AgentTask");
 
+// ─── Create-task input contract ──────────────────────────────────────────────
+//
+// Runtime schema for `createTaskExtended` options (src/be/db.ts). Every task
+// write — REST POST /api/tasks, MCP send-task, the scripts bridge, webhooks,
+// the scheduler, and internal callers — funnels through that function, so
+// this schema is the single enforcement point for task-input shapes. It
+// rejects, never coerces: a type mismatch or out-of-range value throws, and
+// only an ABSENT field falls back to the `??` defaults at the INSERT bind
+// site. Deliberately NOT an `.openapi()` component: it is an internal write
+// contract, not a response shape.
+export const CreateTaskOptionsSchema = z.object({
+  key: z.string().min(1).optional(),
+  agentId: z.string().nullable().optional(),
+  creatorAgentId: z.string().optional(),
+  source: AgentTaskSourceSchema.optional(),
+  taskType: z.string().max(50).optional(),
+  tags: z.array(z.string()).optional(),
+  priority: z.number().int().min(0).max(100).optional(),
+  dependsOn: z.array(z.string()).optional(),
+  offeredTo: z.string().optional(),
+  /** Explicitly set initial status. */
+  status: z.enum(["backlog", "unassigned"]).optional(),
+  slackChannelId: z.string().optional(),
+  slackThreadTs: z.string().optional(),
+  /** Exact Slack message that directly triggered this task; never inherited. */
+  slackTriggerMessageTs: z.string().optional(),
+  slackUserId: z.string().optional(),
+  /**
+   * Opt out of the residual Slack/contextKey normalization (see the
+   * "Residual-mismatch guard" comment near the INSERT in src/be/db.ts): a
+   * deliberate cross-channel/thread dispatch (e.g. `send-task`'s
+   * `overrideSlackContext: true`) sets this so its explicit slackChannelId/
+   * slackThreadTs survive even when they disagree with a slack-family
+   * `contextKey`/parent. Trusted callers that don't set this get normalized —
+   * this boundary must not let a caller silently persist a mismatch.
+   */
+  overrideSlackContext: z.boolean().optional(),
+  vcsProvider: z.enum(["github", "gitlab"]).optional(),
+  vcsRepo: z.string().optional(),
+  vcsEventType: z.string().optional(),
+  vcsNumber: z.number().int().optional(),
+  vcsCommentId: z.number().int().optional(),
+  vcsAuthor: z.string().optional(),
+  vcsUrl: z.string().optional(),
+  vcsInstallationId: z.number().int().optional(),
+  vcsNodeId: z.string().optional(),
+  agentmailInboxId: z.string().optional(),
+  agentmailMessageId: z.string().optional(),
+  agentmailThreadId: z.string().optional(),
+  mentionMessageId: z.string().optional(),
+  mentionChannelId: z.string().optional(),
+  dir: z.string().optional(),
+  parentTaskId: z.string().optional(),
+  model: z.string().optional(),
+  modelTier: ModelTierSchema.optional(),
+  effort: ReasoningEffortSchema.optional(),
+  scheduleId: z.string().optional(),
+  workflowRunId: z.string().optional(),
+  workflowRunStepId: z.string().optional(),
+  sourceTaskId: z.string().optional(),
+  /**
+   * Optional JSON Schema the agent's final output must conform to.
+   *
+   * Enforced via the MCP `store-progress` tool (validated in
+   * `src/tools/store-progress.ts`). NOT enforced when the task runs on
+   * default-mode Devin (no MCP) — see runbooks/harness-providers.md
+   * ("Per-task outputSchema support"). Callers reading `task.output` for
+   * a schema'd task should be defensive about JSON parsing.
+   */
+  outputSchema: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * When a `parentTaskId` is set, the child inherits the parent's `outputSchema`
+   * by default. Set this to `false` to opt out — used by control-plane children
+   * (e.g. the Lead `reroute-decision` task) that must inherit Slack/VCS context
+   * from the parent but must NOT be forced to satisfy the original work's output
+   * contract on completion (which would block the control task — DES-523).
+   */
+  inheritParentOutputSchema: z.boolean().optional(),
+  followUpConfig: FollowUpConfigSchema.optional(),
+  requestedByUserId: z.string().optional(),
+  contextKey: z.string().optional(),
+  /**
+   * Internal control-plane escape hatch for continuations that MUST coexist
+   * with their active Linear parent (for example promoted steering). General
+   * task creation keeps tracker-context dedup enabled.
+   */
+  bypassTrackerContextDedup: z.boolean().optional(),
+  /**
+   * Routing-affinity snapshot gating pool eligibility (see
+   * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
+   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
+   */
+  routingAffinity: RoutingAffinitySchema.optional(),
+});
+export type CreateTaskOptions = z.infer<typeof CreateTaskOptionsSchema>;
+
 // ============================================================================
 // Task Attachments (Phase 1 — pointer-based artifacts)
 // ============================================================================

@@ -342,7 +342,7 @@ export default function ReposPage() {
       const target = event.event?.target as HTMLElement;
       if (target?.closest("button") || target?.closest("a")) return;
       if (event.data) {
-        navigate(`/repos/${event.data.id}`);
+        void navigate(`/repos/${event.data.id}`);
       }
     },
     [navigate],

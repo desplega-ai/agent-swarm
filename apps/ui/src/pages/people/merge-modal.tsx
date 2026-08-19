@@ -92,7 +92,7 @@ export function MergeModal({
       toast.success("Merged. Source user deleted. manual_merge event recorded.");
       onOpenChange(false);
       reset();
-      navigate(`/people/${merged.id}`);
+      void navigate(`/people/${merged.id}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to merge users");
     }

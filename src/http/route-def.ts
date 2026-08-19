@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import type { PermissionVerb } from "../rbac";
+import { scrubSecrets } from "../utils/secret-scrubber";
 import { jsonError, matchRoute, parseBody } from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -187,10 +188,14 @@ export function describeRequestRoute(
 // ─── Factory ─────────────────────────────────────────────────────────────────
 
 /**
- * Runtime response validation gate for `respond()`. NODE_ENV is deliberately
- * unset on prod deploys, so this is opt-in outside `bun test` (which sets
- * NODE_ENV=test): response schemas must never introduce a production failure
- * mode — they fail loudly in tests and (opt-in) local dev instead.
+ * Runtime response validation gate for `respond()`. Only `bun test`
+ * (NODE_ENV=test) fails hard on a violation: one bad row must never take an
+ * endpoint down outside tests (2026-08-18 incident — a single priority='high'
+ * row 500'd every task listing). When the gate is on outside tests
+ * (NODE_ENV=development, or VALIDATE_HTTP_RESPONSES=true), `respond()` logs
+ * the violation and sends the response anyway. Note: the compiled Bun binary
+ * defaults NODE_ENV to "development", so deploys must also set
+ * NODE_ENV=production explicitly (see the deploy-env change in the fix PR).
  */
 const VALIDATE_RESPONSES =
   process.env.NODE_ENV === "test" ||
@@ -216,12 +221,15 @@ export function route<
         if (schema) {
           const result = schema.safeParse(data);
           if (!result.success) {
-            throw new Error(
+            const detail =
               `Response schema violation: ${def.method.toUpperCase()} ${def.path} ${code} — ` +
-                result.error.issues
-                  .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
-                  .join("; "),
-            );
+              result.error.issues
+                .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+                .join("; ");
+            if (process.env.NODE_ENV === "test") {
+              throw new Error(detail);
+            }
+            console.error(`[route-def] ${scrubSecrets(detail)}`);
           }
         }
       }

@@ -2436,7 +2436,7 @@ function OAuthAppsSection({
           const target = event.event?.target as HTMLElement | null;
           if (target?.closest("a, button")) return;
           if (event.data) {
-            navigate(`/connections/oauth-apps/${encodeURIComponent(event.data.id)}`);
+            void navigate(`/connections/oauth-apps/${encodeURIComponent(event.data.id)}`);
           }
         }}
       />
@@ -3186,7 +3186,7 @@ export default function ConnectionsPage() {
             onRowClicked={(event) => {
               const target = event.event?.target as HTMLElement | null;
               if (target?.closest("a, button")) return;
-              if (event.data?.id) navigate(`/connections/${event.data.id}`);
+              if (event.data?.id) void navigate(`/connections/${event.data.id}`);
             }}
             loading={isLoading}
             emptyMessage="No script connections found"

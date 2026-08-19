@@ -550,7 +550,7 @@ export default function SchedulesPage() {
       // Skip navigation when clicking interactive elements (switch, button, etc.)
       const target = event.event?.target as HTMLElement | null;
       if (target?.closest('[data-slot="switch"], button')) return;
-      if (event.data) navigate(`/schedules/${event.data.id}`);
+      if (event.data) void navigate(`/schedules/${event.data.id}`);
     },
     [navigate],
   );

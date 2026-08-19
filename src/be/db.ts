@@ -116,6 +116,8 @@ import type {
 } from "../types";
 import {
   AgentAvatarSchema,
+  type CreateTaskOptions,
+  CreateTaskOptionsSchema,
   FollowUpConfigSchema,
   isTerminalTaskStatus,
   type ModelTier,
@@ -4675,89 +4677,11 @@ export function getAllLogs(limit?: number): AgentLog[] {
 // Task Pool Operations
 // ============================================================================
 
-export interface CreateTaskOptions {
-  key?: string;
-  agentId?: string | null;
-  creatorAgentId?: string;
-  source?: AgentTaskSource;
-  taskType?: string;
-  tags?: string[];
-  priority?: number;
-  dependsOn?: string[];
-  offeredTo?: string;
-  status?: "backlog" | "unassigned"; // Explicitly set initial status
-  slackChannelId?: string;
-  slackThreadTs?: string;
-  /** Exact Slack message that directly triggered this task; never inherited. */
-  slackTriggerMessageTs?: string;
-  slackUserId?: string;
-  /**
-   * Opt out of the residual Slack/contextKey normalization below (see the
-   * "Residual-mismatch guard" comment near the INSERT): a deliberate
-   * cross-channel/thread dispatch (e.g. `send-task`'s
-   * `overrideSlackContext: true`) sets this so its explicit slackChannelId/
-   * slackThreadTs survive even when they disagree with a slack-family
-   * `contextKey`/parent. Trusted callers that don't set this get normalized —
-   * this boundary must not let a caller silently persist a mismatch.
-   */
-  overrideSlackContext?: boolean;
-  vcsProvider?: "github" | "gitlab";
-  vcsRepo?: string;
-  vcsEventType?: string;
-  vcsNumber?: number;
-  vcsCommentId?: number;
-  vcsAuthor?: string;
-  vcsUrl?: string;
-  vcsInstallationId?: number;
-  vcsNodeId?: string;
-  agentmailInboxId?: string;
-  agentmailMessageId?: string;
-  agentmailThreadId?: string;
-  mentionMessageId?: string;
-  mentionChannelId?: string;
-  dir?: string;
-  parentTaskId?: string;
-  model?: string;
-  modelTier?: ModelTier;
-  effort?: ReasoningEffort;
-  scheduleId?: string;
-  workflowRunId?: string;
-  workflowRunStepId?: string;
-  sourceTaskId?: string;
-  /**
-   * Optional JSON Schema the agent's final output must conform to.
-   *
-   * Enforced via the MCP `store-progress` tool (validated in
-   * `src/tools/store-progress.ts`). NOT enforced when the task runs on
-   * default-mode Devin (no MCP) — see runbooks/harness-providers.md
-   * ("Per-task outputSchema support"). Callers reading `task.output` for
-   * a schema'd task should be defensive about JSON parsing.
-   */
-  outputSchema?: Record<string, unknown>;
-  /**
-   * When a `parentTaskId` is set, the child inherits the parent's `outputSchema`
-   * by default. Set this to `false` to opt out — used by control-plane children
-   * (e.g. the Lead `reroute-decision` task) that must inherit Slack/VCS context
-   * from the parent but must NOT be forced to satisfy the original work's output
-   * contract on completion (which would block the control task — DES-523).
-   */
-  inheritParentOutputSchema?: boolean;
-  followUpConfig?: FollowUpConfig;
-  requestedByUserId?: string;
-  contextKey?: string;
-  /**
-   * Internal control-plane escape hatch for continuations that MUST coexist
-   * with their active Linear parent (for example promoted steering). General
-   * task creation keeps tracker-context dedup enabled.
-   */
-  bypassTrackerContextDedup?: boolean;
-  /**
-   * Routing-affinity snapshot gating pool eligibility (see
-   * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
-   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
-   */
-  routingAffinity?: RoutingAffinity;
-}
+// The runtime contract for task creation lives in src/types.ts
+// (`CreateTaskOptionsSchema`); `createTaskExtended` parses options against it.
+// The type is re-exported so existing importers (src/tasks/sibling-awareness.ts)
+// keep resolving it from this module.
+export type { CreateTaskOptions } from "../types";
 
 /**
  * Find recent tasks within a time window for deduplication checks.
@@ -4796,6 +4720,14 @@ export function findRecentSimilarTasks(opts: {
 }
 
 export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+  if (typeof task !== "string" || task.trim().length === 0) {
+    throw new Error("createTaskExtended: 'task' must be a non-empty string");
+  }
+  // Single runtime enforcement point for every task write (REST, MCP,
+  // scripts bridge, webhooks, scheduler, internal callers). Reject, never
+  // coerce: a bad shape throws before anything reaches the INSERT; absent
+  // fields keep the `??` defaults at the bind site below.
+  options = CreateTaskOptionsSchema.parse(options ?? {});
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const status: AgentTaskStatus = options?.offeredTo

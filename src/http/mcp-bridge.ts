@@ -1,5 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  type AnySchema,
+  getParseErrorMessage,
+  normalizeObjectSchema,
+  safeParseAsync,
+} from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { createServer } from "@/server";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
@@ -23,7 +29,7 @@ function getBridgeServer(): McpServer {
 
 type RegisteredTool = {
   handler: (argsOrExtra: unknown, extra?: unknown) => unknown | Promise<unknown>;
-  inputSchema?: unknown;
+  inputSchema?: AnySchema;
   enabled?: boolean;
 };
 
@@ -98,9 +104,30 @@ export async function handleMcpBridge(
     },
   });
 
+  // Mirror the SDK's own tools/call validation (`validateToolInput` in
+  // @modelcontextprotocol/sdk server/mcp.js). The bridge bypasses the MCP
+  // transport, so without this parse raw script args reach handlers
+  // unchecked (2026-08-18 priority='high' incident) and the schema's
+  // `.default()`/`.transform()` never apply.
+  let handlerArgs: unknown = args;
+  if (tool.inputSchema) {
+    const inputObj = normalizeObjectSchema(tool.inputSchema);
+    const parseResult = await safeParseAsync(inputObj ?? tool.inputSchema, args);
+    if (!parseResult.success) {
+      const parseError = "error" in parseResult ? parseResult.error : "Unknown error";
+      jsonError(
+        res,
+        `Invalid arguments for tool '${toolName}': ${getParseErrorMessage(parseError)}`,
+        400,
+      );
+      return true;
+    }
+    handlerArgs = parseResult.data;
+  }
+
   try {
     const result = tool.inputSchema
-      ? await Promise.resolve(tool.handler(args, extra))
+      ? await Promise.resolve(tool.handler(handlerArgs, extra))
       : await Promise.resolve(tool.handler(extra));
 
     if (result && typeof result === "object" && "structuredContent" in result) {
