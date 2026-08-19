@@ -19,8 +19,8 @@ export function BackButton({
   const navigate = useNavigate();
   const location = useLocation();
   const goBack = () => {
-    if (location.key !== "default") navigate(-1);
-    else navigate(fallback);
+    if (location.key !== "default") void navigate(-1);
+    else void navigate(fallback);
   };
   if (iconOnly) {
     return (

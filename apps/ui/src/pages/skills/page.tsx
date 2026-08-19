@@ -161,7 +161,7 @@ export default function SkillsPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<Skill>) => {
-      if (event.data) navigate(`/skills/${event.data.id}`);
+      if (event.data) void navigate(`/skills/${event.data.id}`);
     },
     [navigate],
   );

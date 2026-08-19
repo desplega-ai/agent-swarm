@@ -31,7 +31,7 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
     const handleMouseEnter = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
         if (isControlledRef.current) onMouseEnter?.(e);
-        else controls.start("animate");
+        else void controls.start("animate");
       },
       [controls, onMouseEnter],
     );
@@ -39,7 +39,7 @@ const RefreshCWIcon = forwardRef<RefreshCCWIconWIcon, RefreshCCWIcoWIcon>(
     const handleMouseLeave = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
         if (isControlledRef.current) onMouseLeave?.(e);
-        else controls.start("normal");
+        else void controls.start("normal");
       },
       [controls, onMouseLeave],
     );

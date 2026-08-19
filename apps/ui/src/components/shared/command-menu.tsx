@@ -95,7 +95,7 @@ export function CommandMenu() {
   }, []);
 
   function handleSelect(path: string) {
-    navigate(path);
+    void navigate(path);
     setOpen(false);
   }
 
@@ -111,7 +111,7 @@ export function CommandMenu() {
   }
 
   function handleCreateForAgent(agentId: string) {
-    navigate(`/tasks?new=true&agentId=${encodeURIComponent(agentId)}`);
+    void navigate(`/tasks?new=true&agentId=${encodeURIComponent(agentId)}`);
     setOpen(false);
   }
 

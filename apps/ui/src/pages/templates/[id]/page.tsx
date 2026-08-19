@@ -143,7 +143,7 @@ export default function TemplateDetailPage() {
         onSuccess: (newTemplate) => {
           toast.success("Template customized — you can now edit it");
           if (newTemplate?.id && newTemplate.id !== id) {
-            navigate(`/templates/${newTemplate.id}`);
+            void navigate(`/templates/${newTemplate.id}`);
           }
         },
         onError: () => toast.error("Failed to customize template"),
@@ -156,7 +156,7 @@ export default function TemplateDetailPage() {
     deleteMutation.mutate(id, {
       onSuccess: () => {
         toast.success("Template deleted");
-        navigate("/templates");
+        void navigate("/templates");
       },
       onError: () => toast.error("Failed to delete template"),
     });
@@ -260,7 +260,7 @@ export default function TemplateDetailPage() {
   const onHistoryRowClicked = useCallback(
     (event: RowClickedEvent<PromptTemplateHistory>) => {
       if (event.data) {
-        navigate(`/templates/${id}/history/${event.data.version}`);
+        void navigate(`/templates/${id}/history/${event.data.version}`);
       }
     },
     [navigate, id],

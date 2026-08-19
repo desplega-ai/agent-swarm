@@ -83,7 +83,7 @@ function AddMcpServerDialog({
       });
       toast.success(`MCP server ${server.name} created`);
       onOpenChange(false);
-      navigate(`/mcp-servers/${server.id}`);
+      void navigate(`/mcp-servers/${server.id}`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     }
@@ -319,7 +319,7 @@ export default function McpServersPage() {
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<McpServer>) => {
-      if (event.data) navigate(`/mcp-servers/${event.data.id}`);
+      if (event.data) void navigate(`/mcp-servers/${event.data.id}`);
     },
     [navigate],
   );
