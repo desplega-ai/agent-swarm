@@ -11,7 +11,11 @@ import {
   insertTaskAttachment,
   replaceTaskAttachment,
 } from "../be/db";
-import { AttachmentInputSchema, TaskAttachmentSchema } from "../types";
+import {
+  AttachmentInputSchema,
+  SERVER_GENERATED_ATTACHMENT_CAPABILITY,
+  TaskAttachmentSchema,
+} from "../types";
 
 const TEST_DB_PATH = "./test-task-attachments-schema.sqlite";
 
@@ -153,5 +157,17 @@ describe("task_attachments provider-agnostic metadata", () => {
       capabilities: { signedUrl: true },
     });
     expect(parsed.success).toBe(true);
+  });
+
+  test("AttachmentInputSchema rejects the server-generated provenance marker", () => {
+    const parsed = AttachmentInputSchema.safeParse({
+      kind: "url",
+      name: "spoofed generated attachment",
+      url: "https://github.com/owner/repo/pull/1",
+      capabilities: {
+        [SERVER_GENERATED_ATTACHMENT_CAPABILITY]: "task-pull-request-recorder",
+      },
+    });
+    expect(parsed.success).toBe(false);
   });
 });

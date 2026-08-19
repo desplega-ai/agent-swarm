@@ -177,7 +177,9 @@ describe("automatic task pull-request attachments", () => {
       name: "Caller-owned evidence",
       kind: "url",
       url: callerUrl,
-      intent: "review",
+      providerId: "github",
+      intent: "task-deliverable",
+      description: "Pull request shipped by this task",
     });
 
     updateTaskVcs(task.id, {
@@ -196,7 +198,7 @@ describe("automatic task pull-request attachments", () => {
     expect(
       getTaskAttachments(task.id).map(({ name, url, providerId }) => ({ name, url, providerId })),
     ).toEqual([
-      { name: "Caller-owned evidence", url: callerUrl, providerId: "url" },
+      { name: "Caller-owned evidence", url: callerUrl, providerId: "github" },
       {
         name: "GitHub pull request #2",
         url: "https://github.com/owner/repo/pull/2",

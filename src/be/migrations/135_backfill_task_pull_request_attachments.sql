@@ -6,28 +6,58 @@
 -- task + canonical URL as the identity regardless of display name.
 
 WITH RECURSIVE
-candidate_tasks(task_id, agent_id, output) AS (
+candidate_sources(task_id, agent_id, source_text) AS (
   SELECT id, agentId, output
   FROM agent_tasks
   WHERE output IS NOT NULL
     AND instr(lower(output), 'github.com/') > 0
+
+  UNION ALL
+
+  SELECT id, agentId, vcsUrl
+  FROM agent_tasks
+  WHERE lower(vcsProvider) = 'github'
+    AND vcsUrl IS NOT NULL
+    AND instr(lower(vcsUrl), 'github.com/') > 0
+),
+whitespace_delimiters(position, code_point) AS (
+  VALUES
+    (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 32), (7, 160), (8, 5760),
+    (9, 8192), (10, 8193), (11, 8194), (12, 8195), (13, 8196), (14, 8197),
+    (15, 8198), (16, 8199), (17, 8200), (18, 8201), (19, 8202), (20, 8232),
+    (21, 8233), (22, 8239), (23, 8287), (24, 12288), (25, 65279)
 ),
 token_delimiters(position, code_point) AS (
-  VALUES
-    (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 160), (7, 5760),
-    (8, 8192), (9, 8193), (10, 8194), (11, 8195), (12, 8196), (13, 8197),
-    (14, 8198), (15, 8199), (16, 8200), (17, 8201), (18, 8202), (19, 8232),
-    (20, 8233), (21, 8239), (22, 8287), (23, 12288), (24, 65279),
-    (25, 40), (26, 41), (27, 91), (28, 93), (29, 123), (30, 125),
-    (31, 60), (32, 62), (33, 34), (34, 39), (35, 96)
+  SELECT position, code_point FROM whitespace_delimiters
+  UNION ALL SELECT 26, 40
+  UNION ALL SELECT 27, 41
+  UNION ALL SELECT 28, 91
+  UNION ALL SELECT 29, 93
+  UNION ALL SELECT 30, 123
+  UNION ALL SELECT 31, 125
+  UNION ALL SELECT 32, 60
+  UNION ALL SELECT 33, 62
+  UNION ALL SELECT 34, 34
+  UNION ALL SELECT 35, 39
+  UNION ALL SELECT 36, 96
+),
+whitespace_characters(value, position) AS (
+  SELECT '', 0
+
+  UNION ALL
+
+  SELECT value || char(code_point), whitespace_characters.position + 1
+  FROM whitespace_characters
+  JOIN whitespace_delimiters
+    ON whitespace_delimiters.position = whitespace_characters.position + 1
 ),
 normalized(task_id, agent_id, value, position) AS (
   SELECT
     task_id,
     agent_id,
-    output,
+    source_text,
     0
-  FROM candidate_tasks
+  FROM candidate_sources
 
   UNION ALL
 
@@ -136,6 +166,7 @@ INSERT INTO task_attachments (
   url,
   provider_id,
   provider_key,
+  capabilities,
   intent,
   description,
   is_primary
@@ -154,6 +185,7 @@ SELECT
   candidate.url,
   'github',
   candidate.url,
+  json_object('_agentSwarmGeneratedBy', 'task-pull-request-recorder'),
   'task-deliverable',
   'Pull request shipped by this task',
   0
@@ -172,10 +204,22 @@ WHERE NOT EXISTS (
           UNION ALL
           SELECT 'http://' || substr(lower(candidate.url), 9)
         ) forms
-        WHERE lower(trim(existing.url)) = forms.base_url
+        WHERE lower(trim(
+                existing.url,
+                (SELECT value FROM whitespace_characters
+                 WHERE position = (SELECT max(position) FROM whitespace_delimiters))
+              )) = forms.base_url
           OR (
-            substr(lower(trim(existing.url)), 1, length(forms.base_url)) = forms.base_url
-            AND unicode(substr(lower(trim(existing.url)), length(forms.base_url) + 1, 1)) IN (
+            substr(lower(trim(
+              existing.url,
+              (SELECT value FROM whitespace_characters
+               WHERE position = (SELECT max(position) FROM whitespace_delimiters))
+            )), 1, length(forms.base_url)) = forms.base_url
+            AND unicode(substr(lower(trim(
+              existing.url,
+              (SELECT value FROM whitespace_characters
+               WHERE position = (SELECT max(position) FROM whitespace_delimiters))
+            )), length(forms.base_url) + 1, 1)) IN (
               9, 10, 13, 32, 33, 34, 35, 39, 41, 44, 46, 47, 58, 59, 62, 63, 93, 96, 125
             )
           )

@@ -124,6 +124,7 @@ import {
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
@@ -3693,6 +3694,7 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
 const GENERATED_PULL_REQUEST_PROVIDER_ID = "github";
 const GENERATED_PULL_REQUEST_INTENT = "task-deliverable";
 const GENERATED_PULL_REQUEST_DESCRIPTION = "Pull request shipped by this task";
+const GENERATED_PULL_REQUEST_SOURCE = "task-pull-request-recorder";
 
 function pullRequestKey(pullRequest: { owner: string; repo: string; number: number }): string {
   return `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`;
@@ -3701,9 +3703,9 @@ function pullRequestKey(pullRequest: { owner: string; repo: string; number: numb
 /**
  * Persist PRs detected by server-owned task lifecycle paths. Existing URL
  * attachments win regardless of display name, so an agent-authored row and an
- * automatic row never duplicate the same task deliverable. The GitHub provider
- * marker lets reconciliation distinguish generated rows from caller-authored
- * URL attachments.
+ * automatic row never duplicate the same task deliverable. A capability key
+ * rejected by AttachmentInputSchema marks server-generated rows so
+ * reconciliation cannot mistake caller-authored metadata for provenance.
  */
 export function recordTaskPullRequestAttachments(
   taskId: string,
@@ -3734,6 +3736,9 @@ export function recordTaskPullRequestAttachments(
         kind: "url",
         url: pullRequest.url,
         providerId: GENERATED_PULL_REQUEST_PROVIDER_ID,
+        capabilities: {
+          [SERVER_GENERATED_ATTACHMENT_CAPABILITY]: GENERATED_PULL_REQUEST_SOURCE,
+        },
         intent: GENERATED_PULL_REQUEST_INTENT,
         description: GENERATED_PULL_REQUEST_DESCRIPTION,
       }),
@@ -3752,22 +3757,15 @@ function reconcileTaskPullRequestAttachments(
   const desiredPullRequests = sourceTexts.flatMap(extractGitHubPullRequestUrls);
   const desiredKeys = new Set(desiredPullRequests.map(pullRequestKey));
   const generatedRows = getDb()
-    .prepare<{ id: string; name: string; url: string }, [string, string, string, string]>(
+    .prepare<{ id: string; name: string; url: string }, [string, string]>(
       `SELECT id, name, url
        FROM task_attachments
        WHERE task_id = ?
          AND kind = 'url'
          AND url IS NOT NULL
-         AND provider_id = ?
-         AND intent = ?
-         AND description = ?`,
+         AND json_extract(capabilities, '$.${SERVER_GENERATED_ATTACHMENT_CAPABILITY}') = ?`,
     )
-    .all(
-      taskId,
-      GENERATED_PULL_REQUEST_PROVIDER_ID,
-      GENERATED_PULL_REQUEST_INTENT,
-      GENERATED_PULL_REQUEST_DESCRIPTION,
-    );
+    .all(taskId, GENERATED_PULL_REQUEST_SOURCE);
 
   for (const row of generatedRows) {
     const pullRequest = extractGitHubPullRequestUrls(row.url)[0];

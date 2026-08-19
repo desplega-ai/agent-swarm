@@ -42,6 +42,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
       const firstTaskId = "11111111-1111-4111-8111-111111111111";
       const secondTaskId = "22222222-2222-4222-8222-222222222222";
       const thirdTaskId = "44444444-4444-4444-8444-444444444444";
+      const vcsOnlyTaskId = "66666666-6666-4666-8666-666666666666";
       insertTask.run(
         firstTaskId,
         "Ignore https://notgithub.com/wrong/repo/pull/88. Shipped " +
@@ -67,6 +68,14 @@ describe("migration 135 task pull-request attachment backfill", () => {
         "Valid output https://github.com/desplega-ai/agent-swarm/pull/43",
         now,
         now,
+      );
+      insertTask.run(vcsOnlyTaskId, "Completed through the historical VCS path", now, now);
+      db.run(
+        `UPDATE agent_tasks
+         SET vcsProvider = 'github', vcsRepo = 'desplega-ai/agent-swarm',
+             vcsNumber = 44, vcsUrl = 'https://github.com/desplega-ai/agent-swarm/pull/44'
+         WHERE id = ?`,
+        [vcsOnlyTaskId],
       );
       const existingId = "33333333-3333-4333-8333-333333333333";
       db.run(
@@ -103,18 +112,26 @@ describe("migration 135 task pull-request attachment backfill", () => {
             url: string;
             providerId: string | null;
             providerKey: string | null;
+            capabilities: Record<string, unknown> | null;
             intent: string | null;
           },
           []
         >(
           `SELECT id, task_id AS taskId, name, url,
-                  provider_id AS providerId, provider_key AS providerKey, intent
+                  provider_id AS providerId, provider_key AS providerKey,
+                  json(capabilities) AS capabilities, intent
            FROM task_attachments
            ORDER BY task_id, url`,
         )
         .all();
-      expect(rows).toHaveLength(5);
-      expect(rows.map((row) => ({ ...row, id: undefined }))).toEqual([
+      expect(rows).toHaveLength(6);
+      expect(
+        rows.map((row) => ({
+          ...row,
+          id: undefined,
+          capabilities: row.capabilities ? JSON.parse(String(row.capabilities)) : null,
+        })),
+      ).toEqual([
         {
           id: undefined,
           taskId: firstTaskId,
@@ -122,6 +139,9 @@ describe("migration 135 task pull-request attachment backfill", () => {
           url: "https://github.com/desplega-ai/agent-swarm/pull/41",
           providerId: "github",
           providerKey: "https://github.com/desplega-ai/agent-swarm/pull/41",
+          capabilities: {
+            _agentSwarmGeneratedBy: "task-pull-request-recorder",
+          },
           intent: "task-deliverable",
         },
         {
@@ -131,6 +151,9 @@ describe("migration 135 task pull-request attachment backfill", () => {
           url: "https://github.com/desplega-ai/docs/pull/9",
           providerId: "github",
           providerKey: "https://github.com/desplega-ai/docs/pull/9",
+          capabilities: {
+            _agentSwarmGeneratedBy: "task-pull-request-recorder",
+          },
           intent: "task-deliverable",
         },
         {
@@ -140,6 +163,7 @@ describe("migration 135 task pull-request attachment backfill", () => {
           url: "http://GitHub.com/desplega-ai/agent-swarm/pull/42/files",
           providerId: "url",
           providerKey: "http://GitHub.com/desplega-ai/agent-swarm/pull/42/files",
+          capabilities: null,
           intent: "review",
         },
         {
@@ -149,6 +173,9 @@ describe("migration 135 task pull-request attachment backfill", () => {
           url: "https://github.com/desplega-ai/agent-swarm/pull/43",
           providerId: "github",
           providerKey: "https://github.com/desplega-ai/agent-swarm/pull/43",
+          capabilities: {
+            _agentSwarmGeneratedBy: "task-pull-request-recorder",
+          },
           intent: "task-deliverable",
         },
         {
@@ -158,7 +185,20 @@ describe("migration 135 task pull-request attachment backfill", () => {
           url: "https://github.com/desplega-ai/agent-swarm/pull/43abc",
           providerId: "url",
           providerKey: "https://github.com/desplega-ai/agent-swarm/pull/43abc",
+          capabilities: null,
           intent: "review",
+        },
+        {
+          id: undefined,
+          taskId: vcsOnlyTaskId,
+          name: "GitHub pull request #44",
+          url: "https://github.com/desplega-ai/agent-swarm/pull/44",
+          providerId: "github",
+          providerKey: "https://github.com/desplega-ai/agent-swarm/pull/44",
+          capabilities: {
+            _agentSwarmGeneratedBy: "task-pull-request-recorder",
+          },
+          intent: "task-deliverable",
         },
       ]);
       for (const row of rows) {
@@ -173,7 +213,55 @@ describe("migration 135 task pull-request attachment backfill", () => {
       expect(
         db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()
           ?.count,
-      ).toBe(5);
+      ).toBe(6);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("deduplicates caller URLs ending in ECMAScript whitespace", async () => {
+    await removeDb();
+    const db = new Database(DB_PATH, { create: true });
+    try {
+      runMigrations(db);
+      db.run("DELETE FROM _migrations WHERE version = 133");
+      const now = new Date().toISOString();
+      const whitespaceCodePoints = [11, 12, 160];
+
+      whitespaceCodePoints.forEach((codePoint, index) => {
+        const suffix = String(index + 1).padStart(12, "0");
+        const taskId = `bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`;
+        const canonicalUrl = `https://github.com/owner/repo/pull/${index + 1}`;
+        db.run(
+          `INSERT INTO agent_tasks
+             (id, task, status, source, output, createdAt, lastUpdatedAt)
+           VALUES (?, 'fixture', 'completed', 'api', ?, ?, ?)`,
+          [taskId, `Shipped ${canonicalUrl}`, now, now],
+        );
+        db.run(
+          `INSERT INTO task_attachments (id, task_id, name, kind, url)
+           VALUES (?, ?, 'Caller supplied', 'url', ?)`,
+          [
+            `cccccccc-cccc-4ccc-8ccc-${suffix}`,
+            taskId,
+            `${canonicalUrl}${String.fromCodePoint(codePoint)}`,
+          ],
+        );
+      });
+
+      runMigrations(db);
+
+      expect(
+        db.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM task_attachments").get()
+          ?.count,
+      ).toBe(whitespaceCodePoints.length);
+      expect(
+        db
+          .query<{ count: number }, []>(
+            "SELECT COUNT(*) AS count FROM task_attachments WHERE capabilities IS NOT NULL",
+          )
+          .get()?.count,
+      ).toBe(0);
     } finally {
       db.close();
     }

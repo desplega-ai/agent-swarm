@@ -741,11 +741,19 @@ export type CreateTaskOptions = z.infer<typeof CreateTaskOptionsSchema>;
 export const TaskAttachmentKindSchema = z.enum(["agent-fs", "url", "shared-fs", "page"]);
 export type TaskAttachmentKind = z.infer<typeof TaskAttachmentKindSchema>;
 
+export const SERVER_GENERATED_ATTACHMENT_CAPABILITY = "_agentSwarmGeneratedBy";
+
+const attachmentCapabilitiesSchema = z
+  .record(z.string(), z.unknown())
+  .refine((capabilities) => !(SERVER_GENERATED_ATTACHMENT_CAPABILITY in capabilities), {
+    message: `${SERVER_GENERATED_ATTACHMENT_CAPABILITY} is reserved for server-generated attachments`,
+  });
+
 const attachmentCommonFields = {
   name: z.string().min(1).describe("Display name for the attachment."),
   providerId: z.string().min(1).optional(),
   providerKey: z.string().min(1).optional(),
-  capabilities: z.record(z.string(), z.unknown()).optional(),
+  capabilities: attachmentCapabilitiesSchema.optional(),
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().min(0).optional(),
   sha256: z.string().optional(),
