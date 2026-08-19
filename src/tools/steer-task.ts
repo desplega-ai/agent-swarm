@@ -94,7 +94,7 @@ export async function steerTaskHandler(
   }
 
   try {
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId,
       message,
       mode,

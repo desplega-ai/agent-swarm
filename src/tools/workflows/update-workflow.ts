@@ -124,7 +124,8 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         const version = snapshotWorkflow(id, requestInfo.agentId);
 
         const updatedBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
         const assetKey = key === undefined ? undefined : authorizeAssetKeyWrite(key, updatedBy);
         const workflow = updateWorkflow(id, {
           key: assetKey,

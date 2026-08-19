@@ -129,7 +129,7 @@ describe("Task Working Directory", () => {
       });
     });
 
-    test("getPausedTasksForAgent returns dir field", () => {
+    test("getPausedTasksForAgent returns dir field", async () => {
       const task = createTaskExtended("pausable task with dir", {
         agentId,
         dir: "/workspace/repos/my-project",
@@ -137,30 +137,30 @@ describe("Task Working Directory", () => {
 
       // Move to in_progress then pause
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
-      const paused = getPausedTasksForAgent(agentId);
+      const paused = await getPausedTasksForAgent(agentId);
       const found = paused.find((t) => t.id === task.id);
       expect(found).toBeDefined();
       expect(found!.dir).toBe("/workspace/repos/my-project");
     });
 
-    test("getPausedTasksForAgent returns vcsRepo field", () => {
+    test("getPausedTasksForAgent returns vcsRepo field", async () => {
       const task = createTaskExtended("pausable task with vcsRepo", {
         agentId,
         vcsRepo: "desplega-ai/agent-swarm",
       });
 
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
-      const paused = getPausedTasksForAgent(agentId);
+      const paused = await getPausedTasksForAgent(agentId);
       const found = paused.find((t) => t.id === task.id);
       expect(found).toBeDefined();
       expect(found!.vcsRepo).toBe("desplega-ai/agent-swarm");
     });
 
-    test("getPausedTasksForAgent returns both dir and vcsRepo", () => {
+    test("getPausedTasksForAgent returns both dir and vcsRepo", async () => {
       const task = createTaskExtended("pausable task with both", {
         agentId,
         dir: "/workspace/repos/agent-swarm",
@@ -168,9 +168,9 @@ describe("Task Working Directory", () => {
       });
 
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
-      const paused = getPausedTasksForAgent(agentId);
+      const paused = await getPausedTasksForAgent(agentId);
       const found = paused.find((t) => t.id === task.id);
       expect(found).toBeDefined();
       expect(found!.dir).toBe("/workspace/repos/agent-swarm");

@@ -25,15 +25,15 @@ import { findUserByExternalId } from "./users";
  * Returns `null` when no trusted actor can be established — which leaves the
  * audit column untouched on updates and NULL on inserts.
  */
-export function resolveTaskAuditUserId(
+export async function resolveTaskAuditUserId(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
-): string | null {
+): Promise<string | null> {
   if (!callerAgentId) return null;
 
   let resolvedSourceTaskId = sourceTaskId;
   if (!resolvedSourceTaskId) {
-    const currentTask = getAgentCurrentTask(callerAgentId);
+    const currentTask = await getAgentCurrentTask(callerAgentId);
     if (currentTask) resolvedSourceTaskId = currentTask.id;
   }
   if (!resolvedSourceTaskId) return null;
@@ -61,10 +61,10 @@ export function resolveTaskAuditUserId(
  * authenticated request user is never client-controlled), then falls back to
  * the ownership-validated `X-Source-Task-Id` resolution.
  */
-export function resolveHttpAuditUserId(
+export async function resolveHttpAuditUserId(
   req: IncomingMessage,
   callerAgentId: string | undefined,
-): string | null {
+): Promise<string | null> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") return auth.userId;
   const header = req.headers["x-source-task-id"];

@@ -157,12 +157,12 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("rejects new requests with 403 before looking up or creating rows", async () => {
-    await withSteeringDisabled(() => {
+    await withSteeringDisabled(async () => {
       const { task } = createRunningTask("disabled request");
       expect(getSteeringMessagesForTask(task.id)).toEqual([]);
       let thrown: unknown;
       try {
-        requestSteering({ taskId: task.id, message: "do not create a row" });
+        await requestSteering({ taskId: task.id, message: "do not create a row" });
       } catch (error) {
         thrown = error;
       }
@@ -327,14 +327,18 @@ describe("STEERING_ENABLED opt-in", () => {
 
       await withSteeringDisabled(async () => {
         expect(
-          requestSlackThreadSteering({ channelId, threadTs, message: "take the fallback path" }),
+          await requestSlackThreadSteering({
+            channelId,
+            threadTs,
+            message: "take the fallback path",
+          }),
         ).toBeNull();
         bufferThreadMessage(channelId, threadTs, "create the normal follow-up", "U1", "1.0002");
         await instantFlush(`${channelId}:${threadTs}`);
       });
 
       expect(getSteeringMessagesForTask(task.id)).toEqual([]);
-      expect(getChildTasks(task.id)).toHaveLength(1);
+      expect(await getChildTasks(task.id)).toHaveLength(1);
     } finally {
       restoreEnv("SLACK_THREAD_STEERING", previousMode);
       restoreEnv("SLACK_THREAD_STEERING_MODE", previousDeliveryMode);

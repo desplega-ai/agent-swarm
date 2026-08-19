@@ -158,7 +158,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
 
         // After successful postMessage, mark task as having a Slack reply
         if (taskId) {
-          markTaskSlackReplySent(taskId);
+          await markTaskSlackReplySent(taskId);
           console.log(`[Slack] Marked slackReplySent=1 for task ${taskId}`);
         }
 

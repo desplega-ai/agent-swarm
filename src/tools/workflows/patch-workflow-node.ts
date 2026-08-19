@@ -63,7 +63,8 @@ export const registerPatchWorkflowNodeTool = (server: McpServer) => {
         const version = snapshotWorkflow(id, requestInfo.agentId);
 
         const updatedBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
         const updateArgs: Parameters<typeof updateWorkflow>[1] = {
           definition: patchResult.definition,
         };

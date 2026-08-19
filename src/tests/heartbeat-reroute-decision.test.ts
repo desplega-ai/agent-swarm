@@ -51,7 +51,7 @@ const TEST_DB_PATH = "./test-heartbeat-reroute-decision.sqlite";
  * Build the post-crash state: a superseded original + a pending resume R1
  * (generation 1) pinned to the recoverable-looking agent.
  */
-function seedPinnedCrash(agentName: string) {
+async function seedPinnedCrash(agentName: string) {
   const agent = createAgent({ name: agentName, isLead: false, status: "idle" });
   const original = createTaskExtended("Crashed worker's original work", { agentId: agent.id });
   startTask(original.id);
@@ -68,7 +68,7 @@ function seedPinnedCrash(agentName: string) {
       CRASH_RECOVERY_PIN_TAG,
     ],
   });
-  supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
+  await supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
   return { agent, original: getTaskById(original.id)!, r1 };
 }
 
@@ -77,7 +77,7 @@ function seedPinnedCrash(agentName: string) {
  * resume R1 (generation 1) pinned to the original agent with its own provenance
  * tag.
  */
-function seedPinnedGracefulShutdown(agentName: string) {
+async function seedPinnedGracefulShutdown(agentName: string) {
   const agent = createAgent({ name: agentName, isLead: false, status: "idle" });
   const original = createTaskExtended("Gracefully stopped worker's original work", {
     agentId: agent.id,
@@ -94,7 +94,7 @@ function seedPinnedGracefulShutdown(agentName: string) {
       GRACEFUL_SHUTDOWN_PIN_TAG,
     ],
   });
-  supersedeTask(original.id, { reason: "shutdown", resumeTaskId: r1.id });
+  await supersedeTask(original.id, { reason: "shutdown", resumeTaskId: r1.id });
   return { agent, original: getTaskById(original.id)!, r1 };
 }
 
@@ -166,9 +166,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   // Phase 2 — capability (createRerouteDecisionTask) invoked directly
   // --------------------------------------------------------------------------
 
-  test("creates a Lead-owned reroute-decision; resume not pooled, original not reassigned to Lead", () => {
+  test("creates a Lead-owned reroute-decision; resume not pooled, original not reassigned to Lead", async () => {
     const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { agent, original, r1 } = seedPinnedCrash("coder-7");
+    const { agent, original, r1 } = await seedPinnedCrash("coder-7");
     // Give the crashed agent an identity slice so the template carries context.
     getDb().run("UPDATE agents SET identityMd = ? WHERE id = ?", [
       "Senior backend coder — owns the billing service.",
@@ -214,9 +214,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(getTaskById(original.id)!.agentId).toBe(agent.id);
   });
 
-  test("idempotent: a second call does not create a duplicate decision", () => {
+  test("idempotent: a second call does not create a duplicate decision", async () => {
     createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { original, r1 } = seedPinnedCrash("coder-dup");
+    const { original, r1 } = await seedPinnedCrash("coder-dup");
 
     const first = createRerouteDecisionTask({
       original,
@@ -235,12 +235,14 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(second.kind).toBe("skipped");
     if (second.kind === "skipped") expect(second.reason).toBe("duplicate_exists");
 
-    const decisions = getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision");
+    const decisions = (await getChildTasks(original.id)).filter(
+      (c) => c.taskType === "reroute-decision",
+    );
     expect(decisions.length).toBe(1);
   });
 
-  test("no lead agent → no-op (skipped: lead_not_found), no decision created", () => {
-    const { original, r1 } = seedPinnedCrash("coder-nolead"); // no lead created
+  test("no lead agent → no-op (skipped: lead_not_found), no decision created", async () => {
+    const { original, r1 } = await seedPinnedCrash("coder-nolead"); // no lead created
 
     const result = createRerouteDecisionTask({
       original,
@@ -250,9 +252,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     });
     expect(result.kind).toBe("skipped");
     if (result.kind === "skipped") expect(result.reason).toBe("lead_not_found");
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
   });
 
   // NOTE: a dedicated "template resolves with no unresolved variables" test was
@@ -267,7 +269,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
   test("pinned resume older than grace → escalated to a Lead decision exactly once (idempotent)", async () => {
     const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { original, r1 } = seedPinnedCrash("coder-grace");
+    const { original, r1 } = await seedPinnedCrash("coder-grace");
     ageCreatedAtPastGrace(r1.id);
 
     const first = await codeLevelTriage();
@@ -276,21 +278,23 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     // R1 was terminalized (no longer pending) and a Lead-owned decision exists.
     expect(getTaskById(r1.id)!.status).not.toBe("pending");
-    const decisions = getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision");
+    const decisions = (await getChildTasks(original.id)).filter(
+      (c) => c.taskType === "reroute-decision",
+    );
     expect(decisions.length).toBe(1);
     expect(decisions[0]!.agentId).toBe(lead.id);
 
     // Idempotent: second sweep — R1 is no longer pending, so it is not re-escalated.
     const second = await codeLevelTriage();
     expect(second.escalatedReroutes.length).toBe(0);
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      1,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(1);
   });
 
   test("stale graceful_shutdown pin older than grace → escalated to a Lead decision", async () => {
     const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { original, r1 } = seedPinnedGracefulShutdown("coder-graceful");
+    const { original, r1 } = await seedPinnedGracefulShutdown("coder-graceful");
     expect(r1.tags).toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
     ageCreatedAtPastGrace(r1.id);
 
@@ -299,20 +303,22 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(findings.escalatedReroutes.length).toBe(1);
     expect(findings.escalatedReroutes[0]!.originalTaskId).toBe(original.id);
     expect(getTaskById(r1.id)!.status).not.toBe("pending");
-    const decisions = getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision");
+    const decisions = (await getChildTasks(original.id)).filter(
+      (c) => c.taskType === "reroute-decision",
+    );
     expect(decisions.length).toBe(1);
     expect(decisions[0]!.agentId).toBe(lead.id);
 
     const second = await codeLevelTriage();
     expect(second.escalatedReroutes.length).toBe(0);
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      1,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(1);
   });
 
   test("pinned resume reclaimed (in_progress) before the grace window is NOT escalated", async () => {
     createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { original, r1 } = seedPinnedCrash("coder-reclaim");
+    const { original, r1 } = await seedPinnedCrash("coder-reclaim");
     ageCreatedAtPastGrace(r1.id);
     // The original agent returned and reclaimed it: pending → in_progress. startTask
     // also refreshes lastUpdatedAt, so the stall detector leaves it alone too.
@@ -321,9 +327,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     const findings = await codeLevelTriage();
     expect(findings.escalatedReroutes.length).toBe(0);
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
     // The reclaimed resume is untouched — the reaper's status='pending' clause excludes it.
     expect(getTaskById(r1.id)!.status).toBe("in_progress");
   });
@@ -344,14 +350,14 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
         CRASH_RECOVERY_PIN_TAG,
       ],
     });
-    supersedeTask(original.id, { reason: "crash", resumeTaskId: capped.id });
+    await supersedeTask(original.id, { reason: "crash", resumeTaskId: capped.id });
     ageCreatedAtPastGrace(capped.id);
 
     const findings = await codeLevelTriage();
     expect(findings.escalatedReroutes.length).toBe(0);
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
     const updated = getTaskById(capped.id)!;
     expect(updated.status).toBe("failed");
     expect(updated.failureReason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
@@ -374,7 +380,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     // Pin via the real path: supersede frees capacity, then createResumeFollowUp pins
     // R1 to agentA AND repoints the tracker original → R1.
-    supersedeTask(original.id, { reason: "crash", resumeTaskId: null });
+    await supersedeTask(original.id, { reason: "crash", resumeTaskId: null });
     const pin = createResumeFollowUp({ parentId: original.id, reason: "crash_recovery" });
     expect(pin.kind).toBe("created");
     if (pin.kind !== "created") throw new Error("expected pin");
@@ -391,7 +397,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(getTrackerSync("linear", "task", original.id)?.externalId).toBe("ENG-900");
     expect(getTrackerSync("linear", "task", r1.id)).toBeNull();
 
-    const decision = getChildTasks(original.id).find((c) => c.taskType === "reroute-decision");
+    const decision = (await getChildTasks(original.id)).find(
+      (c) => c.taskType === "reroute-decision",
+    );
     expect(decision).toBeDefined();
 
     // Lead re-delegates to agent B via send-task (taskType resume, parentTaskId original).
@@ -418,7 +426,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
   test("a fresh (within-grace) crash pin is NOT escalated by the reaper", async () => {
     createAgent({ name: "lead", isLead: true, status: "busy" });
-    const { original, r1 } = seedPinnedCrash("coder-fresh");
+    const { original, r1 } = await seedPinnedCrash("coder-fresh");
     // Deliberately do NOT age createdAt — the pin is well within the grace
     // window, so the reaper must leave it alone. (Guards against a regression
     // that drops/inverts the createdAt cutoff and escalates pins immediately.)
@@ -427,9 +435,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     expect(findings.escalatedReroutes.length).toBe(0);
     expect(getTaskById(r1.id)!.status).toBe("pending"); // still pinned, untouched
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
   });
 
   test("failPendingResumeIfUnclaimed cancels a pending resume but no-ops a reclaimed (in_progress) one", () => {
@@ -480,7 +488,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       tags: ["auto-resume", "reason:graceful_shutdown", `${RESUME_GENERATION_TAG_PREFIX}1`],
     });
     expect(pooled.status).toBe("unassigned");
-    supersedeTask(original.id, { reason: "shutdown", resumeTaskId: pooled.id });
+    await supersedeTask(original.id, { reason: "shutdown", resumeTaskId: pooled.id });
     ageCreatedAtPastGrace(pooled.id);
 
     const findings = await codeLevelTriage();
@@ -490,9 +498,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(after.status).toBe("pending");
     expect(after.agentId).toBe(worker.id);
     expect(findings.escalatedReroutes.length).toBe(0);
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
   });
 
   test("a pin at generation MAX-1 escalates (not budget-failed) with next-generation = MAX", async () => {
@@ -511,13 +519,15 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
         CRASH_RECOVERY_PIN_TAG,
       ],
     });
-    supersedeTask(original.id, { reason: "crash", resumeTaskId: r.id });
+    await supersedeTask(original.id, { reason: "crash", resumeTaskId: r.id });
     ageCreatedAtPastGrace(r.id);
 
     const findings = await codeLevelTriage();
 
     expect(findings.escalatedReroutes.length).toBe(1);
-    const decision = getChildTasks(original.id).find((c) => c.taskType === "reroute-decision");
+    const decision = (await getChildTasks(original.id)).find(
+      (c) => c.taskType === "reroute-decision",
+    );
     expect(decision).toBeDefined();
     // generation_next derives from the failed pin (MAX-1) → MAX.
     expect(decision!.task).toContain(`${RESUME_GENERATION_TAG_PREFIX}${maxResumeGenerations()}`);
@@ -527,7 +537,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   // Review hardening (codex PR review on #791)
   // --------------------------------------------------------------------------
 
-  test("reroute-decision does NOT inherit the original's outputSchema (control task stays completable)", () => {
+  test("reroute-decision does NOT inherit the original's outputSchema (control task stays completable)", async () => {
     createAgent({ name: "lead", isLead: true, status: "busy" });
     const agent = createAgent({ name: "coder-schema", isLead: false, status: "idle" });
     const original = createTaskExtended("work with a strict output contract", {
@@ -553,7 +563,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       ],
     });
     expect(r1.outputSchema).toBeDefined();
-    supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
+    await supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
 
     const result = createRerouteDecisionTask({
       original: getTaskById(original.id)!,
@@ -570,7 +580,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
   test("offline-only Lead → reaper leaves the pin pending (no escalation to an unpollable Lead)", async () => {
     createAgent({ name: "stale-lead", isLead: true, status: "offline" });
-    const { original, r1 } = seedPinnedCrash("coder-offlinelead");
+    const { original, r1 } = await seedPinnedCrash("coder-offlinelead");
     ageCreatedAtPastGrace(r1.id);
 
     const findings = await codeLevelTriage();
@@ -578,9 +588,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect(findings.escalatedReroutes.length).toBe(0);
     // Pin is left pending (recoverable when a live Lead returns), NOT cancelled.
     expect(getTaskById(r1.id)!.status).toBe("pending");
-    expect(getChildTasks(original.id).filter((c) => c.taskType === "reroute-decision").length).toBe(
-      0,
-    );
+    expect(
+      (await getChildTasks(original.id)).filter((c) => c.taskType === "reroute-decision").length,
+    ).toBe(0);
   });
 
   test("getLeadAgent prefers a non-offline lead, falls back to any when all offline", () => {
@@ -614,6 +624,8 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
 
     // Failed via the legacy path (skip-auto-resume), NOT superseded into a resume.
     expect(getTaskById(decision.id)!.status).toBe("failed");
-    expect(getChildTasks(decision.id).filter((c) => c.taskType === "resume").length).toBe(0);
+    expect((await getChildTasks(decision.id)).filter((c) => c.taskType === "resume").length).toBe(
+      0,
+    );
   });
 });

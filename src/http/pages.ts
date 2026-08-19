@@ -461,7 +461,7 @@ export async function handlePages(
 
     try {
       const key = parsed.body.key
-        ? authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId))
+        ? authorizeAssetKeyWrite(parsed.body.key, await resolveHttpAuditUserId(req, myAgentId))
         : undefined;
       const page = createPage({
         key,
@@ -537,7 +537,7 @@ export async function handlePages(
       res.end();
       return true;
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     resolvePageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
@@ -572,7 +572,7 @@ export async function handlePages(
         : listAllPages(limit, offset, { ...keyFilters, slim: true });
       total = countAllPages(keyFilters);
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const decoratedPages = withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
     listPagesRoute.respond(res, 200, {
       pages: decoratedPages.map(withShareUrls),
@@ -645,7 +645,7 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     getPageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
@@ -687,7 +687,7 @@ export async function handlePages(
     let key: string | undefined;
     if (parsed.body.key !== undefined) {
       try {
-        key = authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId));
+        key = authorizeAssetKeyWrite(parsed.body.key, await resolveHttpAuditUserId(req, myAgentId));
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);

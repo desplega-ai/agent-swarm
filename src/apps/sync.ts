@@ -356,10 +356,10 @@ function taskRecord(task: AgentTask): SourceRecord {
   };
 }
 
-function pullFromSwarmTasks(
+async function pullFromSwarmTasks(
   source: Extract<SourceDef, { connector: "swarm-tasks" }>,
   invokedBy?: string,
-): PullResult {
+): Promise<PullResult> {
   const warnings: string[] = [];
   const config = source.config ?? {};
   for (const key of Object.keys(config)) {
@@ -429,7 +429,7 @@ function pullFromSwarmTasks(
     warn(warnings, "pull scoped to tasks requested by the invoking user");
   }
 
-  const records = getAllTasks(filters).map(taskRecord);
+  const records = (await getAllTasks(filters)).map(taskRecord);
   // A full page means the window may have cut records off.
   return { records, complete: scopedUserId === undefined && records.length < limit, warnings };
 }
@@ -810,7 +810,7 @@ async function executePass(args: {
             sourceName: args.sourceName,
             source,
           })
-        : pullFromSwarmTasks(source, args.invokedBy),
+        : await pullFromSwarmTasks(source, args.invokedBy),
     );
     pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);

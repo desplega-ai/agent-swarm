@@ -103,7 +103,7 @@ export async function sendInlineTaskOutput(task: AgentTask): Promise<boolean> {
         })),
       });
     }
-    markTaskSlackReplySent(task.id);
+    await markTaskSlackReplySent(task.id);
     return true;
   } catch (error) {
     console.error(`[Slack] Failed to send inline output for task ${task.id}:`, error);

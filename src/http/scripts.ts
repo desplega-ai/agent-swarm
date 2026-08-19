@@ -649,7 +649,7 @@ export async function handleScripts(
       return true;
     }
 
-    const createdBy = resolveHttpAuditUserId(req, agent.id);
+    const createdBy = await resolveHttpAuditUserId(req, agent.id);
 
     const existingAgentScript =
       parsed.body.scope === "global"
@@ -1038,7 +1038,7 @@ export async function handleScripts(
       agentId: runAsAgentId,
       authMode: parsed.body.authMode,
       label: parsed.body.label ?? null,
-      createdBy: resolveHttpAuditUserId(req, agentId),
+      createdBy: await resolveHttpAuditUserId(req, agentId),
     });
     createScriptApiRoute.respond(res, 201, endpoint);
     return true;
@@ -1075,7 +1075,7 @@ export async function handleScripts(
       jsonError(res, "Endpoint not found", 404);
       return true;
     }
-    const rotated = rotateScriptApiSecret(endpoint.id, resolveHttpAuditUserId(req, agentId));
+    const rotated = rotateScriptApiSecret(endpoint.id, await resolveHttpAuditUserId(req, agentId));
     if (!rotated) {
       jsonError(res, "Cannot rotate a token on a 'none' auth endpoint", 400);
       return true;
@@ -1095,7 +1095,7 @@ export async function handleScripts(
     const updated = updateScriptApi(endpoint.id, {
       enabled: parsed.body.enabled,
       label: parsed.body.label,
-      updatedBy: resolveHttpAuditUserId(req, agentId),
+      updatedBy: await resolveHttpAuditUserId(req, agentId),
     });
     patchScriptApiRoute.respond(res, 200, updated);
     return true;

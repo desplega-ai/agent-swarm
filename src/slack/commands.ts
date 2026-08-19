@@ -7,7 +7,7 @@ export function registerCommandHandler(app: App): void {
     await ack();
 
     const agents = getAllAgents();
-    const tasks = getAllTasks({ status: "in_progress" });
+    const tasks = await getAllTasks({ status: "in_progress" });
 
     const statusEmoji: Record<string, string> = {
       idle: ":white_circle:",

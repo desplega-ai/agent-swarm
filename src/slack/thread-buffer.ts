@@ -153,14 +153,14 @@ async function slackFlush(
   const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining
-  const latestActiveTask = getLatestActiveTaskInThread(channelId, threadTs);
+  const latestActiveTask = await getLatestActiveTaskInThread(channelId, threadTs);
   if (latestActiveTask) {
     console.log(
       `[Slack] Dependency chaining: latest active task ${latestActiveTask.id} (status: ${latestActiveTask.status})`,
     );
   }
 
-  const steering = requestSlackThreadSteering({
+  const steering = await requestSlackThreadSteering({
     channelId,
     threadTs,
     message: combinedText,
@@ -206,7 +206,7 @@ async function slackFlush(
   // Otherwise, depend on the latest active task so it queues naturally.
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
-  const mostRecentTask = getMostRecentTaskInThread(channelId, threadTs);
+  const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
   const task = createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
     source: "slack",
@@ -255,7 +255,7 @@ async function slackFlush(
 
       // Register the batching message as the tree message for this task
       if (result.ts && task) {
-        registerTreeMessage(task.id, channelId, threadTs, result.ts);
+        await registerTreeMessage(task.id, channelId, threadTs, result.ts);
         console.log(
           `[Slack] Registered batched task ${task.id.slice(0, 8)} tree message from buffer flush`,
         );

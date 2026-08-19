@@ -1923,7 +1923,7 @@ export async function handleScriptConnections(
               oauthAuthorizationId: parsed.body.oauthAuthorizationId,
               allowedHosts: parsed.body.allowedHosts,
             });
-      const userId = resolveHttpAuditUserId(req, agentId);
+      const userId = await resolveHttpAuditUserId(req, agentId);
       const openapiSpecUrl =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
       const openapiSpecJson =
@@ -1997,7 +1997,7 @@ export async function handleScriptConnections(
     try {
       const refreshed = await refreshHttpConnection(
         parsed.params.id,
-        resolveHttpAuditUserId(req, agentId),
+        await resolveHttpAuditUserId(req, agentId),
         agentId,
       );
       if (!refreshed) {
@@ -2020,7 +2020,7 @@ export async function handleScriptConnections(
     const updated = setScriptConnectionEnabled(
       parsed.params.id,
       parsed.body.enabled,
-      resolveHttpAuditUserId(req, agentId),
+      await resolveHttpAuditUserId(req, agentId),
     );
     if (!updated) {
       jsonError(res, "Script connection not found.", 404);
@@ -2085,7 +2085,7 @@ export async function handleScriptConnections(
         active: nextBinding.active,
         authKind: nextBinding.authKind,
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
-        userId: resolveHttpAuditUserId(req, agentId),
+        userId: await resolveHttpAuditUserId(req, agentId),
       });
       upsertCredentialBindingRoute.respond(res, 200, { binding: decorateBinding(binding) });
     } catch (err) {
@@ -2281,7 +2281,7 @@ export async function handleScriptConnections(
         label,
         flow: "generic",
         ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
-        userId: resolveHttpAuditUserId(req, agentId),
+        userId: await resolveHttpAuditUserId(req, agentId),
       });
       authorizeUrlRoute.respond(res, 200, {
         authorizeUrl: result.url,

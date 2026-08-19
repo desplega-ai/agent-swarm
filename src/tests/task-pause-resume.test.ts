@@ -46,7 +46,7 @@ async function handleRequest(req: {
       return { status: 404, body: { error: "Agent not found" } };
     }
 
-    const pausedTasks = getPausedTasksForAgent(myAgentId);
+    const pausedTasks = await getPausedTasksForAgent(myAgentId);
     return { status: 200, body: { paused: pausedTasks } };
   }
 
@@ -65,7 +65,7 @@ async function handleRequest(req: {
       return { status: 404, body: { error: "Task not found" } };
     }
 
-    const paused = pauseTask(taskId);
+    const paused = await pauseTask(taskId);
     if (!paused) {
       return {
         status: 400,
@@ -91,7 +91,7 @@ async function handleRequest(req: {
       return { status: 404, body: { error: "Task not found" } };
     }
 
-    const resumed = resumeTask(taskId);
+    const resumed = await resumeTask(taskId);
     if (!resumed) {
       return {
         status: 400,
@@ -169,7 +169,7 @@ describe("Task Pause/Resume", () => {
   });
 
   describe("pauseTask database function", () => {
-    test("should pause an in_progress task", () => {
+    test("should pause an in_progress task", async () => {
       const leadAgent = createAgent({
         id: "lead-agent-pause",
         name: "Lead Agent",
@@ -195,14 +195,14 @@ describe("Task Pause/Resume", () => {
       expect(startedTask?.status).toBe("in_progress");
 
       // Now pause it
-      const paused = pauseTask(task.id);
+      const paused = await pauseTask(task.id);
 
       expect(paused).not.toBeNull();
       expect(paused?.status).toBe("paused");
       expect(paused?.agentId).toBe(workerAgent.id); // Agent assignment retained
     });
 
-    test("should not pause a pending task", () => {
+    test("should not pause a pending task", async () => {
       const workerAgent = createAgent({
         id: "worker-pending-pause",
         name: "Worker Pending",
@@ -217,11 +217,11 @@ describe("Task Pause/Resume", () => {
 
       expect(task.status).toBe("pending");
 
-      const result = pauseTask(task.id);
+      const result = await pauseTask(task.id);
       expect(result).toBeNull();
     });
 
-    test("should not pause a completed task", () => {
+    test("should not pause a completed task", async () => {
       const task = createTaskExtended("Completed task for pause test", {
         creatorAgentId: "lead-agent-pause",
       });
@@ -235,11 +235,11 @@ describe("Task Pause/Resume", () => {
       const completedTask = getTaskById(task.id);
       expect(completedTask?.status).toBe("completed");
 
-      const result = pauseTask(task.id);
+      const result = await pauseTask(task.id);
       expect(result).toBeNull();
     });
 
-    test("should not pause a failed task", () => {
+    test("should not pause a failed task", async () => {
       const task = createTaskExtended("Failed task for pause test", {
         creatorAgentId: "lead-agent-pause",
       });
@@ -253,18 +253,18 @@ describe("Task Pause/Resume", () => {
       const failedTask = getTaskById(task.id);
       expect(failedTask?.status).toBe("failed");
 
-      const result = pauseTask(task.id);
+      const result = await pauseTask(task.id);
       expect(result).toBeNull();
     });
 
-    test("should return null for non-existent task", () => {
-      const result = pauseTask("non-existent-task-id");
+    test("should return null for non-existent task", async () => {
+      const result = await pauseTask("non-existent-task-id");
       expect(result).toBeNull();
     });
   });
 
   describe("resumeTask database function", () => {
-    test("should resume a paused task", () => {
+    test("should resume a paused task", async () => {
       const workerAgent = createAgent({
         id: "worker-resume-test",
         name: "Worker Resume",
@@ -279,20 +279,20 @@ describe("Task Pause/Resume", () => {
 
       // Start and then pause the task
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
       const pausedTask = getTaskById(task.id);
       expect(pausedTask?.status).toBe("paused");
 
       // Now resume it
-      const resumed = resumeTask(task.id);
+      const resumed = await resumeTask(task.id);
 
       expect(resumed).not.toBeNull();
       expect(resumed?.status).toBe("in_progress");
       expect(resumed?.agentId).toBe(workerAgent.id);
     });
 
-    test("should not resume a non-paused task", () => {
+    test("should not resume a non-paused task", async () => {
       const workerAgent = createAgent({
         id: "worker-not-paused",
         name: "Worker Not Paused",
@@ -311,16 +311,16 @@ describe("Task Pause/Resume", () => {
       const runningTask = getTaskById(task.id);
       expect(runningTask?.status).toBe("in_progress");
 
-      const result = resumeTask(task.id);
+      const result = await resumeTask(task.id);
       expect(result).toBeNull();
     });
 
-    test("should return null for non-existent task", () => {
-      const result = resumeTask("non-existent-task-id");
+    test("should return null for non-existent task", async () => {
+      const result = await resumeTask("non-existent-task-id");
       expect(result).toBeNull();
     });
 
-    test("should not resume a pending task", () => {
+    test("should not resume a pending task", async () => {
       const workerAgent = createAgent({
         id: "worker-pending-resume",
         name: "Worker Pending Resume",
@@ -335,13 +335,13 @@ describe("Task Pause/Resume", () => {
 
       expect(task.status).toBe("pending");
 
-      const result = resumeTask(task.id);
+      const result = await resumeTask(task.id);
       expect(result).toBeNull();
     });
   });
 
   describe("getPausedTasksForAgent database function", () => {
-    test("should return paused tasks for an agent", () => {
+    test("should return paused tasks for an agent", async () => {
       const agentId = "worker-get-paused";
       createAgent({
         id: agentId,
@@ -361,11 +361,11 @@ describe("Task Pause/Resume", () => {
 
       // Start and pause both tasks
       startTask(task1.id);
-      pauseTask(task1.id);
+      await pauseTask(task1.id);
       startTask(task2.id);
-      pauseTask(task2.id);
+      await pauseTask(task2.id);
 
-      const pausedTasks = getPausedTasksForAgent(agentId);
+      const pausedTasks = await getPausedTasksForAgent(agentId);
 
       expect(pausedTasks.length).toBeGreaterThanOrEqual(2);
       const taskIds = pausedTasks.map((t) => t.id);
@@ -373,7 +373,7 @@ describe("Task Pause/Resume", () => {
       expect(taskIds).toContain(task2.id);
     });
 
-    test("should not return paused tasks from other agents", () => {
+    test("should not return paused tasks from other agents", async () => {
       const agentA = "agent-a-paused-isolated";
       const agentB = "agent-b-paused-isolated";
 
@@ -400,17 +400,17 @@ describe("Task Pause/Resume", () => {
       });
 
       startTask(taskA.id);
-      pauseTask(taskA.id);
+      await pauseTask(taskA.id);
       startTask(taskB.id);
-      pauseTask(taskB.id);
+      await pauseTask(taskB.id);
 
-      const pausedForA = getPausedTasksForAgent(agentA);
+      const pausedForA = await getPausedTasksForAgent(agentA);
       const taskIdsA = pausedForA.map((t) => t.id);
       expect(taskIdsA).toContain(taskA.id);
       expect(taskIdsA).not.toContain(taskB.id);
     });
 
-    test("should return tasks ordered by creation time (FIFO)", () => {
+    test("should return tasks ordered by creation time (FIFO)", async () => {
       const agentId = "worker-fifo-paused";
       createAgent({
         id: agentId,
@@ -431,11 +431,11 @@ describe("Task Pause/Resume", () => {
       });
 
       startTask(task1.id);
-      pauseTask(task1.id);
+      await pauseTask(task1.id);
       startTask(task2.id);
-      pauseTask(task2.id);
+      await pauseTask(task2.id);
 
-      const pausedTasks = getPausedTasksForAgent(agentId);
+      const pausedTasks = await getPausedTasksForAgent(agentId);
       const relevantTasks = pausedTasks.filter((t) => t.id === task1.id || t.id === task2.id);
 
       // First task should come before second task (FIFO order)
@@ -444,7 +444,7 @@ describe("Task Pause/Resume", () => {
       expect(task1Index).toBeLessThan(task2Index);
     });
 
-    test("should return empty array if no paused tasks", () => {
+    test("should return empty array if no paused tasks", async () => {
       const agentId = "worker-no-paused-tasks";
       createAgent({
         id: agentId,
@@ -453,7 +453,7 @@ describe("Task Pause/Resume", () => {
         status: "idle",
       });
 
-      const pausedTasks = getPausedTasksForAgent(agentId);
+      const pausedTasks = await getPausedTasksForAgent(agentId);
       // Filter to only tasks belonging to this agent (in case of shared test state)
       const agentPausedTasks = pausedTasks.filter((t) => t.agentId === agentId);
       expect(agentPausedTasks.length).toBe(0);
@@ -461,7 +461,7 @@ describe("Task Pause/Resume", () => {
   });
 
   describe("updateAgentStatusFromCapacity after pause", () => {
-    test("should update agent status to idle after task is paused", () => {
+    test("should update agent status to idle after task is paused", async () => {
       const agentId = "worker-capacity-pause";
       createAgent({
         id: agentId,
@@ -482,7 +482,7 @@ describe("Task Pause/Resume", () => {
       expect(agent?.status).toBe("busy");
 
       // Pause the task
-      const paused = pauseTask(task.id);
+      const paused = await pauseTask(task.id);
       expect(paused).not.toBeNull();
 
       // Update agent status based on capacity
@@ -523,7 +523,7 @@ describe("Task Pause/Resume", () => {
       });
 
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/paused-tasks`, {
         headers: { "X-Agent-ID": agentId },
@@ -622,7 +622,7 @@ describe("Task Pause/Resume", () => {
       });
 
       startTask(task.id);
-      pauseTask(task.id);
+      await pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/resume`, {
         method: "POST",

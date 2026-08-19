@@ -695,8 +695,10 @@ export async function handleTasks(
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
     const tasks =
-      parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
-    const total = getTasksCount(filters);
+      parsed.query.fields === "full"
+        ? await getAllTasks(filters)
+        : await getAllTasks(filters, { slim: true });
+    const total = await getTasksCount(filters);
     listTasks.respond(res, 200, { tasks, total });
     return true;
   }
@@ -718,7 +720,7 @@ export async function handleTasks(
     // Set TRUST_BODY_REQUESTED_BY_USER_ID=false anywhere holders of the
     // shared/global key are NOT all equally trusted — with it on, any such
     // caller can attribute a task to any user.
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
@@ -922,7 +924,7 @@ export async function handleTasks(
       return true;
     }
 
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await await resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     if (
       process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&
@@ -936,7 +938,7 @@ export async function handleTasks(
       const auth = getRequestAuth(req);
       const createdByAgentId =
         !auth && myAgentId && getAgentById(myAgentId) ? myAgentId : undefined;
-      const result = requestSteering({
+      const result = await requestSteering({
         taskId: task.id,
         message: parsed.body.message,
         mode: parsed.body.mode,
@@ -1342,7 +1344,7 @@ export async function handleTasks(
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-    const pausedTasks = getPausedTasksForAgent(myAgentId);
+    const pausedTasks = await getPausedTasksForAgent(myAgentId);
     listPausedTasks.respond(res, 200, { tasks: pausedTasks });
     return true;
   }
@@ -1367,7 +1369,7 @@ export async function handleTasks(
       return true;
     }
 
-    const pausedTask = pauseTask(parsed.params.id);
+    const pausedTask = await pauseTask(parsed.params.id);
     if (!pausedTask) {
       jsonError(res, "Failed to pause task", 500);
       return true;
@@ -1396,7 +1398,7 @@ export async function handleTasks(
   if (updateTaskVcsRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskVcs(parsed.params.id, parsed.body);
+    const task = await updateTaskVcs(parsed.params.id, parsed.body);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1408,7 +1410,7 @@ export async function handleTasks(
   if (updateTaskTitleRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskTitleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskTitle(parsed.params.id, parsed.body.title);
+    const task = await updateTaskTitle(parsed.params.id, parsed.body.title);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1437,7 +1439,7 @@ export async function handleTasks(
       return true;
     }
 
-    const resumedTask = resumeTask(parsed.params.id);
+    const resumedTask = await resumeTask(parsed.params.id);
     if (!resumedTask) {
       jsonError(res, "Failed to resume task", 500);
       return true;
@@ -1524,7 +1526,7 @@ export async function handleTasks(
     // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
     // resume child if a worker races to complete/fail/cancel between the
     // pre-read status check and the supersede UPDATE.
-    const superseded = supersedeTask(parsed.params.id, {
+    const superseded = await supersedeTask(parsed.params.id, {
       reason: parsed.body.reason,
       // resumeTaskId is attached AFTER the child is created. Lost race here
       // means no child is created at all, so the log entry's null is accurate.
@@ -1568,7 +1570,7 @@ export async function handleTasks(
     }
 
     const resumeTaskId = followUp.task.id;
-    backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
+    await backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
 
     ensure({
       id: "task.superseded",

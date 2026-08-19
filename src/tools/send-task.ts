@@ -274,7 +274,7 @@ export async function sendTaskHandler(
   let assetKey: string | undefined;
   try {
     const trustedUserId =
-      ctx.kind === "user" ? ctx.userId : resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
+      ctx.kind === "user" ? ctx.userId : await resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
     const requestedKey = key ?? effectiveParentTask?.key;
     assetKey = requestedKey ? authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
   } catch (error) {
@@ -339,13 +339,13 @@ export async function sendTaskHandler(
       sourceTask.slackThreadTs &&
       sourceTask.slackChannelId
     ) {
-      const recentCompleted = findCompletedTaskInThread(
+      const recentCompleted = await findCompletedTaskInThread(
         sourceTask.slackChannelId,
         sourceTask.slackThreadTs,
         2880, // 48 hours in minutes
       );
       if (recentCompleted) {
-        const recentCancelled = findRecentCancelledTaskInThread(
+        const recentCancelled = await findRecentCancelledTaskInThread(
           sourceTask.slackChannelId,
           sourceTask.slackThreadTs,
           2880,

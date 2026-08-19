@@ -592,7 +592,7 @@ export async function handleScriptRuns(
     }
 
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
-    let task = getLatestScriptRunStepTaskByContextKey(contextKey);
+    let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
       task = createTaskExtended(parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey, {
         agentId: parsed.body.agentId,

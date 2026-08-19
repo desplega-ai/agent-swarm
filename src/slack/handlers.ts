@@ -565,7 +565,7 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = routeMessage(
+    const matches = await routeMessage(
       routingText,
       botUserId,
       botMentioned || isImplicitMention,
@@ -700,10 +700,10 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
-        const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
+        const latestTask = await getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
           const steering = msg.thread_ts
-            ? requestSlackThreadSteering({
+            ? await requestSlackThreadSteering({
                 channelId: msg.channel,
                 threadTs,
                 message: taskDescription,
@@ -834,11 +834,11 @@ export function registerMessageHandler(app: App): void {
         // (assignment → progress → completion all in one evolving tree message)
         if (resp?.ts) {
           for (const { taskId } of results.assigned) {
-            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+            await registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
           }
           // Also register queued tasks so they appear in the tree when they start
           for (const { taskId } of results.queued) {
-            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+            await registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
           }
         }
       }

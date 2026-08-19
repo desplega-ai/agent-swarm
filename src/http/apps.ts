@@ -1675,7 +1675,7 @@ export async function handleApps(
     }
     if (definitionNeedsRepair(res, app)) return true;
     const schema = app.definition.userConfig ?? {};
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
     const stored = owner ? getAppUserConfigValues(app.id, owner.scope) : {};
     getUserConfigRoute.respond(res, 200, { values: mergeUserConfigValues(schema, stored), schema });
     return true;
@@ -1707,7 +1707,7 @@ export async function handleApps(
       jsonError(res, "app does not define userConfig", 400);
       return true;
     }
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
     if (!owner) {
       jsonError(res, "userConfig is per-user; agents have no user scope", 403);
       return true;

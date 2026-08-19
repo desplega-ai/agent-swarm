@@ -1393,55 +1393,6 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
 
 export const taskQueries = {
   getById: () => getDb().prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
-
-  getByAgentId: () =>
-    getDb().prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
-    ),
-
-  getByStatus: () =>
-    getDb().prepare<AgentTaskRow, [AgentTaskStatus]>(
-      "SELECT * FROM agent_tasks WHERE status = ? ORDER BY createdAt DESC",
-    ),
-
-  updateStatus: () =>
-    getDb().prepare<AgentTaskRow, [AgentTaskStatus, string | null, string]>(
-      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
-    ),
-
-  setOutput: () =>
-    getDb().prepare<AgentTaskRow, [string, string]>(
-      "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-    ),
-
-  setFailure: () =>
-    getDb().prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    ),
-
-  setTerminalResultText: () =>
-    getDb().prepare<AgentTaskRow, [string | null, string | null, string]>(
-      `UPDATE agent_tasks SET output = ?, failureReason = ?
-       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
-       RETURNING *`,
-    ),
-
-  setCancelled: () =>
-    getDb().prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    ),
-
-  setProgress: () =>
-    getDb().prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET progress = ?,
-       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
-       lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
-    ),
-
-  delete: () => getDb().prepare<null, [string]>("DELETE FROM agent_tasks WHERE id = ?"),
 };
 
 export async function createTask(
@@ -1944,17 +1895,17 @@ export async function getSlackTasksInThread(
   return rows.map(rowToAgentTask);
 }
 
-export function markTaskSlackReplySent(taskId: string): void {
-  getDb().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
+export async function markTaskSlackReplySent(taskId: string): Promise<void> {
+  await getDbClient().run(`UPDATE agent_tasks SET slackReplySent = 1 WHERE id = ?`, [taskId]);
 }
 
-export function setSlackMessageTracking(
+export async function setSlackMessageTracking(
   taskId: string,
   fields: {
     slackProgressMessageTs?: string | null;
     slackTreeRootMessageTs?: string | null;
   },
-): void {
+): Promise<void> {
   const sets: string[] = [];
   const args: (string | null)[] = [];
 
@@ -1969,16 +1920,15 @@ export function setSlackMessageTracking(
   if (sets.length === 0) return;
 
   args.push(taskId);
-  getDb().run(`UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = ?`, args);
+  await getDbClient().run(`UPDATE agent_tasks SET ${sets.join(", ")} WHERE id = ?`, args);
 }
 
-export function getChildTasks(parentTaskId: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC, rowid ASC`,
-    )
-    .all(parentTaskId)
-    .map(rowToAgentTask);
+export async function getChildTasks(parentTaskId: string): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks WHERE parentTaskId = ? ORDER BY createdAt ASC, rowid ASC`,
+    [parentTaskId],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -1993,16 +1943,15 @@ export function getChildTasks(parentTaskId: string): AgentTask[] {
  * Treating those as "already resumed" would incorrectly skip the resume
  * path for a crashed worker that had delegated subtasks (PR #594 review).
  */
-export function hasNonTerminalResumeChild(parentId: string): boolean {
-  const row = getDb()
-    .prepare(
-      `SELECT 1 FROM agent_tasks
+export async function hasNonTerminalResumeChild(parentId: string): Promise<boolean> {
+  const row = await getDbClient().get(
+    `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'resume'
          AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        LIMIT 1`,
-    )
-    .get(parentId);
+    [parentId],
+  );
   return row !== undefined && row !== null;
 }
 
@@ -2080,17 +2029,19 @@ export function updateTaskClaudeSessionId(
  * `lastUpdatedAt` — a rename is not activity, and the sessions sidebar sorts
  * on chain-wide max `lastUpdatedAt`, so bumping it here would reorder the list.
  */
-export function updateTaskTitle(taskId: string, title: string | null): AgentTask | null {
+export async function updateTaskTitle(
+  taskId: string,
+  title: string | null,
+): Promise<AgentTask | null> {
   const normalized = title === null ? null : title.trim() || null;
-  const row = getDb()
-    .prepare<AgentTaskRow, [string | null, string]>(
-      "UPDATE agent_tasks SET title = ? WHERE id = ? RETURNING *",
-    )
-    .get(normalized, taskId);
+  const row = await getDbClient().get<AgentTaskRow>(
+    "UPDATE agent_tasks SET title = ? WHERE id = ? RETURNING *",
+    [normalized, taskId],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
-export function updateTaskVcs(
+export async function updateTaskVcs(
   taskId: string,
   vcs: {
     vcsProvider: "github" | "gitlab";
@@ -2098,19 +2049,23 @@ export function updateTaskVcs(
     vcsNumber: number;
     vcsUrl: string;
   },
-): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, number, string, string, string]>(
-      `UPDATE agent_tasks
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
        SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
-    )
-    .get(vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId);
+    [vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
 export function getTasksByAgentId(agentId: string): AgentTask[] {
-  return taskQueries.getByAgentId().all(agentId).map(rowToAgentTask);
+  return getDb()
+    .prepare<AgentTaskRow, [string]>(
+      "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
+    )
+    .all(agentId)
+    .map(rowToAgentTask);
 }
 
 /**
@@ -2121,17 +2076,20 @@ export function getTasksByAgentId(agentId: string): AgentTask[] {
  * updated one. This is a best-effort fallback — the X-Source-Task-Id header
  * is the authoritative source when available.
  */
-export function getAgentCurrentTask(agentId: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'in_progress' ORDER BY lastUpdatedAt DESC LIMIT 1",
-    )
-    .get(agentId);
+export async function getAgentCurrentTask(agentId: string): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'in_progress' ORDER BY lastUpdatedAt DESC LIMIT 1",
+    [agentId],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
-  return taskQueries.getByStatus().all(status).map(rowToAgentTask);
+export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE status = ? ORDER BY createdAt DESC",
+    [status],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -2142,16 +2100,15 @@ export function getTasksByStatus(status: AgentTaskStatus): AgentTask[] {
  * in `src/types.ts`. SQL strings can't import a TS const — if you add a
  * new terminal status, grep for `NOT IN ('completed'` across this file.
  */
-export function findTaskByVcs(vcsRepo: string, vcsNumber: number): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, number]>(
-      `SELECT * FROM agent_tasks
+export async function findTaskByVcs(vcsRepo: string, vcsNumber: number): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE vcsRepo = ? AND vcsNumber = ?
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(vcsRepo, vcsNumber);
+    [vcsRepo, vcsNumber],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2191,15 +2148,15 @@ export interface TaskFilters {
   includeHeartbeat?: boolean;
 }
 
-export function getAllTasks(filters?: TaskFilters): AgentTask[];
+export function getAllTasks(filters?: TaskFilters): Promise<AgentTask[]>;
 export function getAllTasks(
   filters: TaskFilters | undefined,
   opts: { slim: true },
-): AgentTaskSummary[];
-export function getAllTasks(
+): Promise<AgentTaskSummary[]>;
+export async function getAllTasks(
   filters?: TaskFilters,
   opts?: { slim?: boolean },
-): AgentTask[] | AgentTaskSummary[] {
+): Promise<AgentTask[] | AgentTaskSummary[]> {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -2311,9 +2268,7 @@ export function getAllTasks(
     FROM agent_tasks ${whereClause}
     ORDER BY ${orderBy} LIMIT ${limit} OFFSET ${offset}`;
 
-  const rows = getDb()
-    .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<AgentTaskRow>(query, params);
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
   // the slim row shapes carry `id` + `dependsOn`, so the same predicate works.
@@ -2337,7 +2292,9 @@ export function getAllTasks(
  * Get total count of tasks matching the given filters (ignoring limit).
  * Used alongside getAllTasks to display accurate total counts in UI.
  */
-export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">): number {
+export async function getTasksCount(
+  filters?: Omit<TaskFilters, "limit" | "readyOnly">,
+): Promise<number> {
   const conditions: string[] = [];
   const params: (string | AgentTaskStatus)[] = [];
 
@@ -2438,9 +2395,7 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT COUNT(*) as count FROM agent_tasks ${whereClause}`;
 
-  const result = getDb()
-    .prepare<{ count: number }, (string | AgentTaskStatus)[]>(query)
-    .get(...params);
+  const result = await getDbClient().get<{ count: number }>(query, params);
 
   return result?.count ?? 0;
 }
@@ -2449,7 +2404,7 @@ export function getTasksCount(filters?: Omit<TaskFilters, "limit" | "readyOnly">
  * Get task statistics (counts by status) without any limit.
  * This is more efficient than fetching all tasks for stats purposes.
  */
-export function getTaskStats(): {
+export async function getTaskStats(): Promise<{
   total: number;
   unassigned: number;
   offered: number;
@@ -2459,23 +2414,19 @@ export function getTaskStats(): {
   paused: number;
   completed: number;
   failed: number;
-} {
-  const row = getDb()
-    .prepare<
-      {
-        total: number;
-        unassigned: number;
-        offered: number;
-        reviewing: number;
-        pending: number;
-        in_progress: number;
-        paused: number;
-        completed: number;
-        failed: number;
-      },
-      []
-    >(
-      `SELECT
+}> {
+  const row = await getDbClient().get<{
+    total: number;
+    unassigned: number;
+    offered: number;
+    reviewing: number;
+    pending: number;
+    in_progress: number;
+    paused: number;
+    completed: number;
+    failed: number;
+  }>(
+    `SELECT
         COUNT(*) as total,
         SUM(CASE WHEN status = 'unassigned' THEN 1 ELSE 0 END) as unassigned,
         SUM(CASE WHEN status = 'offered' THEN 1 ELSE 0 END) as offered,
@@ -2486,8 +2437,7 @@ export function getTaskStats(): {
         SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
       FROM agent_tasks`,
-    )
-    .get();
+  );
 
   return (
     row ?? {
@@ -2504,50 +2454,46 @@ export function getTaskStats(): {
   );
 }
 
-export function getCompletedSlackTasks(): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, []>(
-      `SELECT * FROM agent_tasks
+export async function getCompletedSlackTasks(): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId IS NOT NULL
        AND status IN ('completed', 'failed')
        ORDER BY lastUpdatedAt DESC
        LIMIT 200`,
-    )
-    .all()
-    .map(rowToAgentTask);
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
  * Get tasks that were recently finished (completed/failed) by workers (non-lead agents).
  * Used by leads to know when workers complete tasks.
  */
-export function getRecentlyFinishedWorkerTasks(): AgentTask[] {
+export async function getRecentlyFinishedWorkerTasks(): Promise<AgentTask[]> {
   // Query for finished tasks that haven't been notified yet
-  return getDb()
-    .prepare<AgentTaskRow, []>(
-      `SELECT t.* FROM agent_tasks t
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.* FROM agent_tasks t
        LEFT JOIN agents a ON t.agentId = a.id
        WHERE t.status IN ('completed', 'failed')
        AND t.finishedAt IS NOT NULL
        AND t.notifiedAt IS NULL
        AND (a.isLead = 0 OR a.isLead IS NULL)
        ORDER BY t.finishedAt DESC LIMIT 50`,
-    )
-    .all()
-    .map(rowToAgentTask);
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
  * Atomically mark finished tasks as notified.
  * Sets notifiedAt timestamp to prevent returning them in future polls.
  */
-export function markTasksNotified(taskIds: string[]): number {
+export async function markTasksNotified(taskIds: string[]): Promise<number> {
   if (taskIds.length === 0) return 0;
 
   const now = new Date().toISOString();
   const placeholders = taskIds.map(() => "?").join(",");
 
-  const result = getDb().run(
+  const result = await getDbClient().run(
     `UPDATE agent_tasks SET notifiedAt = ?
      WHERE id IN (${placeholders}) AND notifiedAt IS NULL`,
     [now, ...taskIds],
@@ -2561,12 +2507,12 @@ export function markTasksNotified(taskIds: string[]): number {
  * Used when a trigger was consumed but the session that should process it failed.
  * This prevents permanent notification loss from the mark-before-process race.
  */
-export function resetTasksNotified(taskIds: string[]): number {
+export async function resetTasksNotified(taskIds: string[]): Promise<number> {
   if (taskIds.length === 0) return 0;
 
   const placeholders = taskIds.map(() => "?").join(",");
 
-  const result = getDb().run(
+  const result = await getDbClient().run(
     `UPDATE agent_tasks SET notifiedAt = NULL
      WHERE id IN (${placeholders}) AND notifiedAt IS NOT NULL`,
     taskIds,
@@ -2575,23 +2521,20 @@ export function resetTasksNotified(taskIds: string[]): number {
   return result.changes;
 }
 
-export function getInProgressSlackTasks(): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, []>(
-      `SELECT * FROM agent_tasks
+export async function getInProgressSlackTasks(): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId IS NOT NULL
        AND status = 'in_progress'
        ORDER BY lastUpdatedAt DESC
        LIMIT 200`,
-    )
-    .all()
-    .map(rowToAgentTask);
+  );
+  return rows.map(rowToAgentTask);
 }
 
-export function getSlackTasksMissingTree(): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, []>(
-      `SELECT task.* FROM agent_tasks task
+export async function getSlackTasksMissingTree(): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT task.* FROM agent_tasks task
        JOIN slack_render_v2_state state ON state.id = 1
        WHERE task.source = 'slack'
        AND task.slackChannelId IS NOT NULL
@@ -2613,9 +2556,8 @@ export function getSlackTasksMissingTree(): AgentTask[] {
        )
        ORDER BY task.lastUpdatedAt DESC
        LIMIT 200`,
-    )
-    .all()
-    .map(rowToAgentTask);
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -2701,30 +2643,30 @@ export function findExistingLinearTrackerContextWork(
   return null;
 }
 
-export function getLatestTaskByContextKey(contextKey: string): AgentTask | null {
+export async function getLatestTaskByContextKey(contextKey: string): Promise<AgentTask | null> {
   if (!contextKey) return null;
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(contextKey);
+    [contextKey],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getLatestScriptRunStepTaskByContextKey(contextKey: string): AgentTask | null {
+export async function getLatestScriptRunStepTaskByContextKey(
+  contextKey: string,
+): Promise<AgentTask | null> {
   if (!contextKey) return null;
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND taskType = 'script-run-step'
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    )
-    .get(contextKey);
+    [contextKey],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2734,17 +2676,19 @@ export function getLatestScriptRunStepTaskByContextKey(contextKey: string): Agen
  * This is intentional: follow-up messages should route to the same agent even after task completion.
  * Callers (e.g. assistant.ts) apply their own status checks (e.g. agent.status !== "offline").
  */
-export function getAgentWorkingOnThread(channelId: string, threadTs: string): Agent | null {
-  const taskRow = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT * FROM agent_tasks
+export async function getAgentWorkingOnThread(
+  channelId: string,
+  threadTs: string,
+): Promise<Agent | null> {
+  const taskRow = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE source = 'slack'
        AND slackChannelId = ?
        AND slackThreadTs = ?
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs);
+    [channelId, threadTs],
+  );
 
   if (taskRow?.agentId) return getAgentById(taskRow.agentId);
 
@@ -2755,18 +2699,20 @@ export function getAgentWorkingOnThread(channelId: string, threadTs: string): Ag
  * Find the latest active (in_progress or pending) task in a specific Slack thread.
  * Used for dependency chaining in additive Slack buffer.
  */
-export function getLatestActiveTaskInThread(channelId: string, threadTs: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT * FROM agent_tasks
+export async function getLatestActiveTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE source = 'slack'
        AND slackChannelId = ?
        AND slackThreadTs = ?
        AND status IN ('in_progress', 'pending')
        ORDER BY createdAt DESC, rowid DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs);
+    [channelId, threadTs],
+  );
 
   return row ? rowToAgentTask(row) : null;
 }
@@ -2776,10 +2722,12 @@ export function getLatestActiveTaskInThread(channelId: string, threadTs: string)
  * Source is deliberately restricted to Slack ingress so inherited worker-task
  * metadata cannot become the thread's steering target.
  */
-export function getLatestLeadTaskInThread(channelId: string, threadTs: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT t.*
+export async function getLatestLeadTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT t.*
        FROM agent_tasks t
        JOIN agents a ON a.id = t.agentId
        WHERE t.source = 'slack'
@@ -2788,8 +2736,8 @@ export function getLatestLeadTaskInThread(channelId: string, threadTs: string): 
          AND a.isLead = 1
        ORDER BY t.createdAt DESC, t.rowid DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs);
+    [channelId, threadTs],
+  );
 
   return row ? rowToAgentTask(row) : null;
 }
@@ -2799,36 +2747,37 @@ export function getLatestLeadTaskInThread(channelId: string, threadTs: string): 
  * Unlike getAgentWorkingOnThread (which filters source='slack'), this finds ALL tasks
  * including worker tasks that inherited Slack metadata via parentTaskId.
  */
-export function getMostRecentTaskInThread(channelId: string, threadTs: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT * FROM agent_tasks
+export async function getMostRecentTaskInThread(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs);
+    [channelId, threadTs],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
-export function findCompletedTaskInThread(
+export async function findCompletedTaskInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `SELECT * FROM agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
        AND status = 'completed'
        AND lastUpdatedAt > ?
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs, since);
+    [channelId, threadTs, since],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2845,15 +2794,14 @@ export function findCompletedTaskInThread(
  *     or "exit 130" or contains "cancelled" (the codex-adapter abort path
  *     emits `failureReason: "cancelled"` and exits 130).
  */
-export function findRecentCancelledTaskInThread(
+export async function findRecentCancelledTaskInThread(
   channelId: string,
   threadTs: string,
   windowMinutes: number,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `SELECT * FROM agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE slackChannelId = ?
        AND slackThreadTs = ?
        AND lastUpdatedAt > ?
@@ -2871,8 +2819,8 @@ export function findRecentCancelledTaskInThread(
        )
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    )
-    .get(channelId, threadTs, since);
+    [channelId, threadTs, since],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2888,11 +2836,19 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   }
 
   const finishedAt = new Date().toISOString();
-  let row = taskQueries.updateStatus().get("completed", finishedAt, id);
+  let row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
+    )
+    .get("completed", finishedAt, id);
   if (!row) return null;
 
   if (output) {
-    row = taskQueries.setOutput().get(scrubSecrets(output), id);
+    row = getDb()
+      .prepare<AgentTaskRow, [string, string]>(
+        "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+      )
+      .get(scrubSecrets(output), id);
   }
 
   if (row && oldTask) {
@@ -2959,7 +2915,12 @@ export function failTask(id: string, reason: string): AgentTask | null {
 
   const finishedAt = new Date().toISOString();
   const scrubbedReason = scrubSecrets(reason);
-  const row = taskQueries.setFailure().get(scrubbedReason, finishedAt, id);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(scrubbedReason, finishedAt, id);
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
       "failed",
@@ -3036,7 +2997,14 @@ export function overwriteTerminalTaskResultText(
     patch.failureReason !== undefined
       ? scrubSecrets(patch.failureReason)
       : (task.failureReason ?? null);
-  const row = taskQueries.setTerminalResultText().get(output, failureReason, id) ?? null;
+  const row =
+    getDb()
+      .prepare<AgentTaskRow, [string | null, string | null, string]>(
+        `UPDATE agent_tasks SET output = ?, failureReason = ?
+       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+       RETURNING *`,
+      )
+      .get(output, failureReason, id) ?? null;
 
   return row ? rowToAgentTask(row) : task;
 }
@@ -3052,7 +3020,12 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
 
   const finishedAt = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
-  const row = taskQueries.setCancelled().get(cancelReason, finishedAt, id);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string, string]>(
+      `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(cancelReason, finishedAt, id);
 
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
@@ -3124,10 +3097,10 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
  * creating the resume follow-up (via `createResumeFollowUp`) and passing the
  * resulting id as `resumeTaskId`.
  */
-export function supersedeTask(
+export async function supersedeTask(
   id: string,
   args: { reason: string; resumeTaskId: string | null },
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
@@ -3137,16 +3110,15 @@ export function supersedeTask(
   }
 
   const finishedAt = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
        SET status = 'superseded',
            finishedAt = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        RETURNING *`,
-    )
-    .get(finishedAt, id);
+    [finishedAt, id],
+  );
 
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
@@ -3202,16 +3174,18 @@ export function supersedeTask(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function backfillSupersedeTaskResumeTaskId(taskId: string, resumeTaskId: string): boolean {
-  const row = getDb()
-    .prepare<{ id: string; metadata: string | null }, [string]>(
-      `SELECT id, metadata
+export async function backfillSupersedeTaskResumeTaskId(
+  taskId: string,
+  resumeTaskId: string,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ id: string; metadata: string | null }>(
+    `SELECT id, metadata
        FROM agent_log
        WHERE taskId = ? AND eventType = 'task_superseded'
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(taskId);
+    [taskId],
+  );
   if (!row) return false;
 
   let metadata: Record<string, unknown> = {};
@@ -3224,9 +3198,10 @@ export function backfillSupersedeTaskResumeTaskId(taskId: string, resumeTaskId: 
   }
   metadata.resumeTaskId = resumeTaskId;
 
-  const result = getDb()
-    .prepare("UPDATE agent_log SET metadata = ? WHERE id = ?")
-    .run(JSON.stringify(metadata), row.id);
+  const result = await getDbClient().run("UPDATE agent_log SET metadata = ? WHERE id = ?", [
+    JSON.stringify(metadata),
+    row.id,
+  ]);
   return result.changes > 0;
 }
 
@@ -3235,7 +3210,7 @@ export function backfillSupersedeTaskResumeTaskId(taskId: string, resumeTaskId: 
  * Used during graceful shutdown to allow tasks to resume after container restart.
  * Unlike failTask, paused tasks retain their agent assignment and can be resumed.
  */
-export function pauseTask(id: string): AgentTask | null {
+export async function pauseTask(id: string): Promise<AgentTask | null> {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
@@ -3244,16 +3219,15 @@ export function pauseTask(id: string): AgentTask | null {
     return null;
   }
 
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `UPDATE agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
        SET status = 'paused',
            was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'in_progress'
        RETURNING *`,
-    )
-    .get(id);
+    [id],
+  );
 
   if (row && oldTask) {
     try {
@@ -3275,20 +3249,19 @@ export function pauseTask(id: string): AgentTask | null {
  * Resume a paused task - transitions it back to in_progress.
  * Called when worker restarts and picks up paused work.
  */
-export function resumeTask(taskId: string): AgentTask | null {
+export async function resumeTask(taskId: string): Promise<AgentTask | null> {
   const oldTask = getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `UPDATE agent_tasks
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
        SET status = 'in_progress',
            was_paused = 1,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status = 'paused'
        RETURNING *`,
-    )
-    .get(taskId);
+    [taskId],
+  );
 
   if (row && oldTask) {
     try {
@@ -3311,25 +3284,23 @@ export function resumeTask(taskId: string): AgentTask | null {
  * Used on startup to resume tasks that were interrupted by deployment.
  * Returns tasks ordered by creation time (oldest first for FIFO).
  */
-export function getPausedTasksForAgent(agentId: string): AgentTask[] {
-  const rows = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+export async function getPausedTasksForAgent(agentId: string): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE agentId = ? AND status = 'paused'
        ORDER BY createdAt ASC, rowid ASC`,
-    )
-    .all(agentId);
+    [agentId],
+  );
   return rows.map(rowToAgentTask);
 }
 
-export function getOrphanedInProgressTasksForAgent(
+export async function getOrphanedInProgressTasksForAgent(
   agentId: string,
   minAgeSeconds = 60,
-): AgentTask[] {
+): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT t.* FROM agent_tasks t
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.* FROM agent_tasks t
        LEFT JOIN active_sessions s ON s.taskId = t.id
        WHERE t.agentId = ?
          AND t.status = 'in_progress'
@@ -3338,19 +3309,18 @@ export function getOrphanedInProgressTasksForAgent(
          AND s.id IS NULL
          AND t.finishedAt IS NULL
        ORDER BY t.createdAt ASC, t.rowid ASC`,
-    )
-    .all(agentId, cutoff);
+    [agentId, cutoff],
+  );
   return rows.map(rowToAgentTask);
 }
 
-export function resetOrphanedInProgressTasksForAgent(
+export async function resetOrphanedInProgressTasksForAgent(
   agentId: string,
   minAgeSeconds = 60,
-): AgentTask[] {
+): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - minAgeSeconds * 1000).toISOString();
-  const rows = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `UPDATE agent_tasks
        SET status = 'pending',
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id IN (
@@ -3364,8 +3334,8 @@ export function resetOrphanedInProgressTasksForAgent(
            AND t.finishedAt IS NULL
        )
        RETURNING *`,
-    )
-    .all(agentId, cutoff);
+    [agentId, cutoff],
+  );
 
   for (const row of rows) {
     try {
@@ -3388,28 +3358,34 @@ export function resetOrphanedInProgressTasksForAgent(
  * Used by hooks to detect task cancellation and stop the worker loop.
  * Returns tasks cancelled within the last 5 minutes.
  */
-export function getRecentlyCancelledTasksForAgent(agentId: string): AgentTask[] {
+export async function getRecentlyCancelledTasksForAgent(agentId: string): Promise<AgentTask[]> {
   const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const rows = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `SELECT * FROM agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE agentId = ?
        AND status = 'cancelled'
        AND finishedAt > ?
        ORDER BY finishedAt DESC`,
-    )
-    .all(agentId, fiveMinutesAgo);
+    [agentId, fiveMinutesAgo],
+  );
   return rows.map(rowToAgentTask);
 }
 
-export function deleteTask(id: string): boolean {
-  const result = getDb().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
+export async function deleteTask(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
 export function updateTaskProgress(id: string, progress: string): AgentTask | null {
   const scrubbedProgress = scrubSecrets(progress);
-  const row = taskQueries.setProgress().get(scrubbedProgress, id);
+  const row = getDb()
+    .prepare<AgentTaskRow, [string, string]>(
+      `UPDATE agent_tasks SET progress = ?,
+       status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
+       lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? RETURNING *`,
+    )
+    .get(scrubbedProgress, id);
   if (row) {
     try {
       createLogEntry({

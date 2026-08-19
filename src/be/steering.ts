@@ -160,7 +160,7 @@ export function markSteeringUndeliverable(
 }
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
-export function requestSteering(args: RequestSteeringArgs): SteerResult {
+export async function requestSteering(args: RequestSteeringArgs): Promise<SteerResult> {
   if (!isSteeringEnabled()) {
     throw new SteeringRequestError(
       "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
@@ -190,7 +190,7 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
     );
   }
 
-  const activeTask = task.status === "paused" ? resumeTask(task.id) : task;
+  const activeTask = task.status === "paused" ? await resumeTask(task.id) : task;
   if (!activeTask) {
     throw new SteeringRequestError("Failed to resume paused task", 500);
   }

@@ -1359,7 +1359,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    markTaskSlackReplySent(ask.id);
+    await markTaskSlackReplySent(ask.id);
     completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -1427,7 +1427,7 @@ describe("Slack renderer v2", () => {
     completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
     // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
     const staleSnapshot = { ...getTaskById(ask.id)!, slackReplySent: false };
-    markTaskSlackReplySent(ask.id);
+    await markTaskSlackReplySent(ask.id);
     calls.length = 0;
 
     const outcome = await streamOutcomeCard(staleSnapshot, tree!);
@@ -1468,7 +1468,7 @@ describe("Slack renderer v2", () => {
     );
 
     // The agent's slack-reply lands after the stream started but before the retry.
-    markTaskSlackReplySent(ask.id);
+    await markTaskSlackReplySent(ask.id);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 

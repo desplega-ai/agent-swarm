@@ -230,7 +230,7 @@ describe("cascadeFailDependents", () => {
     expect(childAfter!.failureReason).toContain("was cancelled");
   });
 
-  test("supersedeTask cascades to dependents", () => {
+  test("supersedeTask cascades to dependents", async () => {
     const agent = createAgent({
       name: "cascade-worker-6",
       isLead: false,
@@ -245,7 +245,7 @@ describe("cascadeFailDependents", () => {
     });
 
     startTask(parent.id);
-    supersedeTask(parent.id, { reason: "context limit", resumeTaskId: null });
+    await supersedeTask(parent.id, { reason: "context limit", resumeTaskId: null });
 
     const childAfter = getTaskById(child.id);
     expect(childAfter!.status).toBe("failed");

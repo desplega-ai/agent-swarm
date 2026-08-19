@@ -212,7 +212,7 @@ export async function handleStats(
 
   if (getStats.match(req.method, pathSegments)) {
     const agents = getAllAgents();
-    const taskStats = getTaskStats();
+    const taskStats = await getTaskStats();
 
     const stats = {
       agents: {
@@ -273,7 +273,7 @@ export async function handleStats(
       workflowId: parsed.query.workflowId,
       scriptName: parsed.query.scriptName,
     });
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     listScheduledTasks.respond(res, 200, {
       scheduledTasks: withFavoriteFlags(scheduledTasks, { favoriteScope, itemType: "schedule" }),
     });

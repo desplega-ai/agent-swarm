@@ -64,7 +64,7 @@ export async function handleFavorites(
   if (listFavorites.match(req.method, pathSegments)) {
     const parsed = await listFavorites.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
     if (!owner) {
       jsonError(res, "Authenticated principal required to read favorites", 401);
       return true;
@@ -88,7 +88,7 @@ export async function handleFavorites(
   if (putFavorite.match(req.method, pathSegments)) {
     const parsed = await putFavorite.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
     if (!owner) {
       jsonError(res, "Authenticated principal required to update favorites", 401);
       return true;

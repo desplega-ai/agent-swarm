@@ -501,7 +501,7 @@ export async function handleWorkflows(
   if (listWorkflowsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const filters = {
       enabled: parsed.query.enabled,
       consecutiveErrorsMin: parsed.query.consecutiveErrorsMin,
@@ -540,7 +540,7 @@ export async function handleWorkflows(
       return true;
     }
 
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let key: string | undefined;
     try {
       key = parsed.body.key ? authorizeAssetKeyWrite(parsed.body.key, trustedUserId) : undefined;
@@ -565,7 +565,7 @@ export async function handleWorkflows(
         dir: parsed.body.dir,
         vcsRepo: parsed.body.vcsRepo,
         createdByAgentId: myAgentId ?? undefined,
-        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       },
       "api",
     );
@@ -584,7 +584,7 @@ export async function handleWorkflows(
     }
     // Include auto-generated edges for UI rendering
     const edges = generateEdges(workflow.definition);
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const [decorated] = withFavoriteFlags([workflow], { favoriteScope, itemType: "workflow" });
     getWorkflowRoute.respond(res, 200, { ...(decorated ?? workflow), edges });
     return true;
@@ -626,7 +626,7 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update
     }
 
-    const updatedBy0 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    const updatedBy0 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     const workflow = updateWorkflow(id, {
       definition: patchResult.definition,
       updatedBy: updatedBy0,
@@ -672,7 +672,7 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update
     }
 
-    const updatedBy1 = resolveHttpAuditUserId(req, myAgentId);
+    const updatedBy1 = await resolveHttpAuditUserId(req, myAgentId);
     const updateArgs: Parameters<typeof updateWorkflow>[1] = {
       definition: patchResult.definition,
     };
@@ -735,7 +735,7 @@ export async function handleWorkflows(
       // Snapshot failure should not block the update — log and continue
     }
 
-    const updatedBy2 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    const updatedBy2 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     let key: string | undefined;
     if (body.key !== undefined) {
       try {

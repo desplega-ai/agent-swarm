@@ -805,7 +805,7 @@ export async function processSlackRenderV2(): Promise<void> {
   if (!isSlackRenderV2Enabled()) return;
   const activatedAt = await ensureSlackRenderV2Activation();
 
-  for (const task of getSlackTasksMissingTree()) {
+  for (const task of await getSlackTasksMissingTree()) {
     if (!isSlackRenderV2Enabled()) return;
     if (!task.slackChannelId || !task.slackThreadTs) continue;
     try {

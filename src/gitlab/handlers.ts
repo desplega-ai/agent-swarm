@@ -200,7 +200,7 @@ export async function handleMergeRequest(
     case "close":
     case "merge": {
       // Cancel existing tasks for this MR
-      const existingTask = findTaskByVcs(repo, mr.iid);
+      const existingTask = await findTaskByVcs(repo, mr.iid);
       if (existingTask) {
         const reason = action === "merge" ? "MR was merged" : "MR was closed";
         console.log(`[GitLab] Cancelling task ${existingTask.id} — ${reason}`);
@@ -211,7 +211,7 @@ export async function handleMergeRequest(
 
     case "update": {
       // Check if there's an active task for this MR — if so, notify about the update
-      const task = findTaskByVcs(repo, mr.iid);
+      const task = await findTaskByVcs(repo, mr.iid);
       if (task) {
         console.log(`[GitLab] MR #${mr.iid} updated, active task exists: ${task.id}`);
         // Don't create a new task — the worker will see the changes
@@ -304,7 +304,7 @@ export async function handleIssue(
     }
 
     case "close": {
-      const existingTask = findTaskByVcs(repo, issue.iid);
+      const existingTask = await findTaskByVcs(repo, issue.iid);
       if (existingTask) {
         console.log(`[GitLab] Cancelling task ${existingTask.id} — issue closed`);
         failTask(existingTask.id, "Issue was closed");
@@ -361,7 +361,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   }
 
   // Check if there's already an active task for this entity
-  const existingTask = targetNumber ? findTaskByVcs(repo, targetNumber) : null;
+  const existingTask = targetNumber ? await findTaskByVcs(repo, targetNumber) : null;
 
   const existingTaskNote = existingTask
     ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._`
@@ -441,7 +441,7 @@ export async function handlePipeline(
   }
 
   // Only create task if there's already an active task for this MR
-  const existingTask = findTaskByVcs(repo, mrIid);
+  const existingTask = await findTaskByVcs(repo, mrIid);
   if (!existingTask) {
     return { created: false };
   }

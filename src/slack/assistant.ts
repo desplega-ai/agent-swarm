@@ -121,7 +121,7 @@ export function createAssistant(): Assistant {
           : undefined;
 
         // 1. Check if an agent is already working in this thread
-        const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
+        const workingAgent = await getAgentWorkingOnThread(channelId, threadTs);
 
         if (workingAgent && workingAgent.status !== "offline") {
           // Follow-up message → route to the same agent
@@ -139,7 +139,7 @@ export function createAssistant(): Assistant {
           }
 
           // Otherwise, create a follow-up task for the working agent
-          const latestTask = getMostRecentTaskInThread(channelId, threadTs);
+          const latestTask = await getMostRecentTaskInThread(channelId, threadTs);
           const task = createTaskWithSiblingAwareness(renderedMessageText, {
             agentId: workingAgent.id,
             source: "slack",

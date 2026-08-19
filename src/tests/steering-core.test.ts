@@ -142,7 +142,7 @@ describe("task steering core", () => {
     return started!;
   }
 
-  test("row lifecycle transitions pending -> delivered -> handled", () => {
+  test("row lifecycle transitions pending -> delivered -> handled", async () => {
     const task = runningTask("pi", "lifecycle");
     const created = createSteeringMessage({
       taskId: task.id,
@@ -171,7 +171,7 @@ describe("task steering core", () => {
     expect(markSteeringHandled(created.id)).toBeNull();
   });
 
-  test("cancels every pending row for a task", () => {
+  test("cancels every pending row for a task", async () => {
     const task = runningTask("pi", "cancel pending");
     for (const body of ["one", "two"]) {
       createSteeringMessage({
@@ -191,12 +191,12 @@ describe("task steering core", () => {
     ]);
   });
 
-  test("codex steer requests degrade to queue and stay pending for the hook", () => {
+  test("codex steer requests degrade to queue and stay pending for the hook", async () => {
     // Codex is queue-capable via harness-side hook delivery: the row must
     // stay `pending` (never promoted at request time, never dispatched by the
     // runner) until the codex-hook marks it delivered.
     const task = runningTask("codex", "codex parent");
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "continue with a safer approach",
       mode: "steer",
@@ -220,7 +220,7 @@ describe("task steering core", () => {
     ]);
   });
 
-  test("undeliverable promotion bypasses Linear tracker context dedup", () => {
+  test("undeliverable promotion bypasses Linear tracker context dedup", async () => {
     const parent = createTaskExtended("linear-backed codex parent", {
       agentId: agentIds.get("codex"),
       source: "linear",
@@ -228,7 +228,7 @@ describe("task steering core", () => {
     });
     expect(startTask(parent.id)?.status).toBe("in_progress");
 
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: parent.id,
       message: "promote this into distinct follow-up work",
       source: "api",
@@ -246,9 +246,9 @@ describe("task steering core", () => {
     });
   });
 
-  test("claude steer requests degrade to queue while preserving requested mode", () => {
+  test("claude steer requests degrade to queue while preserving requested mode", async () => {
     const task = runningTask("claude", "claude degrade");
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "please account for the new constraint",
       mode: "steer",
@@ -266,7 +266,7 @@ describe("task steering core", () => {
     ]);
   });
 
-  test("degradation follows the capability map, not a hardcoded provider list", () => {
+  test("degradation follows the capability map, not a hardcoded provider list", async () => {
     // Regression: the ladder used to special-case `provider === "claude"`, so
     // narrowing devin to queue-only left it reporting outcome "steered" for a
     // mode it cannot honor. Every queue-only provider must degrade identically.
@@ -281,7 +281,7 @@ describe("task steering core", () => {
     for (const provider of queueOnly) {
       const task = runningTask(provider, `${provider} degrade`);
       expect(
-        requestSteering({
+        await requestSteering({
           taskId: task.id,
           message: "please account for the new constraint",
           mode: "steer",
@@ -292,11 +292,11 @@ describe("task steering core", () => {
     }
   });
 
-  test("paused tasks auto-start before steering is queued", () => {
+  test("paused tasks auto-start before steering is queued", async () => {
     const task = runningTask("pi", "paused auto-start");
-    expect(pauseTask(task.id)?.status).toBe("paused");
+    expect((await pauseTask(task.id))?.status).toBe("paused");
 
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "resume with this context",
       source: "api",
@@ -307,14 +307,14 @@ describe("task steering core", () => {
     expect(getTaskById(task.id)?.status).toBe("in_progress");
   });
 
-  test("pending tasks queue steering for delivery once the session starts", () => {
+  test("pending tasks queue steering for delivery once the session starts", async () => {
     const task = createTaskExtended("pending queue target", {
       agentId: agentIds.get("pi"),
       source: "api",
     });
     expect(task.status).toBe("pending");
 
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "context before the session exists",
       source: "api",
@@ -328,13 +328,13 @@ describe("task steering core", () => {
     expect(getTaskById(task.id)?.status).toBe("pending");
   });
 
-  test("steer mode on a pending task degrades to queue (nothing to interrupt)", () => {
+  test("steer mode on a pending task degrades to queue (nothing to interrupt)", async () => {
     const task = createTaskExtended("pending steer target", {
       agentId: agentIds.get("pi"),
       source: "api",
     });
 
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "interrupt before start",
       mode: "steer",
@@ -350,13 +350,13 @@ describe("task steering core", () => {
     expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
   });
 
-  test("pending codex tasks queue for hook delivery once the session starts", () => {
+  test("pending codex tasks queue for hook delivery once the session starts", async () => {
     const task = createTaskExtended("pending codex target", {
       agentId: agentIds.get("codex"),
       source: "api",
     });
 
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "codex pre-start message",
       source: "api",
@@ -368,7 +368,7 @@ describe("task steering core", () => {
     expect(getSteeringMessageById(result.steeringMessageId)?.status).toBe("pending");
   });
 
-  test("latest lead task lookup excludes newer worker-assigned Slack tasks", () => {
+  test("latest lead task lookup excludes newer worker-assigned Slack tasks", async () => {
     const channelId = "C-STEERING";
     const threadTs = "1234.5678";
     const leadTask = createTaskExtended("lead thread task", {
@@ -384,16 +384,16 @@ describe("task steering core", () => {
       slackThreadTs: threadTs,
     });
 
-    expect(getLatestLeadTaskInThread(channelId, threadTs)?.id).toBe(leadTask.id);
+    expect((await getLatestLeadTaskInThread(channelId, threadTs))?.id).toBe(leadTask.id);
   });
 
-  test("scrubs secrets before persisting the steering body", () => {
+  test("scrubs secrets before persisting the steering body", async () => {
     const previous = process.env.OPENAI_API_KEY;
     const secret = "sk-proj-steering-secret-value-1234567890";
     process.env.OPENAI_API_KEY = secret;
     try {
       const task = runningTask("pi", "secret scrubbing");
-      requestSteering({
+      await requestSteering({
         taskId: task.id,
         message: `Use token ${secret} only for this request`,
         source: "api",
@@ -408,11 +408,11 @@ describe("task steering core", () => {
     }
   });
 
-  test('onUnsupported:"fail" returns 422 and creates no row', () => {
+  test('onUnsupported:"fail" returns 422 and creates no row', async () => {
     const task = runningTask("claude", "unsupported fail");
 
     try {
-      requestSteering({
+      await requestSteering({
         taskId: task.id,
         message: "must interrupt now",
         mode: "steer",
@@ -430,12 +430,12 @@ describe("task steering core", () => {
     expect(getSteeringMessagesForTask(task.id)).toEqual([]);
   });
 
-  test('onUnsupported:"fail" leaves a paused task paused and creates no row', () => {
+  test('onUnsupported:"fail" leaves a paused task paused and creates no row', async () => {
     const task = runningTask("claude", "paused unsupported fail");
-    expect(pauseTask(task.id)?.status).toBe("paused");
+    expect((await pauseTask(task.id))?.status).toBe("paused");
 
     try {
-      requestSteering({
+      await requestSteering({
         taskId: task.id,
         message: "must interrupt without resuming",
         mode: "steer",
@@ -453,7 +453,7 @@ describe("task steering core", () => {
     expect(getSteeringMessagesForTask(task.id)).toEqual([]);
   });
 
-  test("undeliverable service promotes once and is idempotent", () => {
+  test("undeliverable service promotes once and is idempotent", async () => {
     const task = runningTask("pi", "service undeliverable");
     const message = createSteeringMessage({
       taskId: task.id,
@@ -469,7 +469,7 @@ describe("task steering core", () => {
     expect(first.message.status).toBe("promoted");
     expect(first.promotedTaskId).toBeDefined();
     expect(second).toEqual(first);
-    expect(getChildTasks(task.id)).toHaveLength(1);
+    expect(await getChildTasks(task.id)).toHaveLength(1);
   });
 
   test("worker delivery routes enforce assignment and are idempotent", async () => {
@@ -568,12 +568,12 @@ describe("task steering core", () => {
     );
     expect(retried.status).toBe(200);
     expect(retried.body).toEqual(first.body);
-    expect(getChildTasks(task.id)).toHaveLength(1);
+    expect(await getChildTasks(task.id)).toHaveLength(1);
   });
 
-  test('onUnsupported defaults to "degrade" when omitted', () => {
+  test('onUnsupported defaults to "degrade" when omitted', async () => {
     const task = runningTask("claude", "unsupported default");
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId: task.id,
       message: "interrupt if possible",
       mode: "steer",
@@ -587,7 +587,7 @@ describe("task steering core", () => {
     });
   });
 
-  test("task read steering fields match provider capabilities", () => {
+  test("task read steering fields match provider capabilities", async () => {
     for (const provider of ["claude", "codex", "pi"] as const) {
       const task = createTaskExtended(`${provider} capability read`, {
         agentId: agentIds.get(provider),

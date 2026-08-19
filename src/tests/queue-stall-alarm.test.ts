@@ -127,11 +127,11 @@ describe("queue stall alarm", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  test("does not reset queue age when VCS metadata updates a claimable task", () => {
+  test("does not reset queue age when VCS metadata updates a claimable task", async () => {
     const task = createTaskExtended("Old task with new VCS metadata");
     setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
 
-    updateTaskVcs(task.id, {
+    await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "desplega-ai/agent-swarm",
       vcsNumber: 1177,
@@ -143,7 +143,7 @@ describe("queue stall alarm", () => {
     expect(isQueueStalled(snapshot)).toBe(true);
   });
 
-  test("does not reset claimable age when VCS metadata updates a completed dependency", () => {
+  test("does not reset claimable age when VCS metadata updates a completed dependency", async () => {
     const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
     const prerequisite = createTaskExtended("Completed prerequisite", { agentId: worker.id });
     const blocked = createTaskExtended("Waiting after prerequisite", {
@@ -156,7 +156,7 @@ describe("queue stall alarm", () => {
       ["2026-08-17T16:00:00.000Z", "2026-08-17T16:00:00.000Z", prerequisite.id],
     );
 
-    updateTaskVcs(prerequisite.id, {
+    await updateTaskVcs(prerequisite.id, {
       vcsProvider: "github",
       vcsRepo: "desplega-ai/agent-swarm",
       vcsNumber: 1177,

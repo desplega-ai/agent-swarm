@@ -275,7 +275,7 @@ export async function handleSchedules(
       parsed.query.fields === "full"
         ? getScheduledTasks(filters)
         : getScheduledTasks(filters, { slim: true });
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const decoratedSchedules = withFavoriteFlags(schedules, {
       favoriteScope,
       itemType: "schedule",
@@ -377,7 +377,7 @@ export async function handleSchedules(
     }
 
     try {
-      const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+      const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
       let key: string | undefined;
       try {
         key = body.key ? authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
@@ -425,7 +425,7 @@ export async function handleSchedules(
         workflowId: body.workflowId,
         scriptName: body.scriptName,
         scriptArgs: body.scriptArgs,
-        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       });
 
       createSchedule.respond(res, 201, schedule);
@@ -486,7 +486,7 @@ export async function handleSchedules(
       return true;
     }
 
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const [decorated] = withFavoriteFlags([schedule], { favoriteScope, itemType: "schedule" });
     getSchedule.respond(res, 200, decorated ?? schedule);
     return true;
@@ -504,7 +504,10 @@ export async function handleSchedules(
     const body = parsed.body as Record<string, unknown>;
     if (parsed.body.key !== undefined) {
       try {
-        body.key = authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId));
+        body.key = authorizeAssetKeyWrite(
+          parsed.body.key,
+          await resolveHttpAuditUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -647,7 +650,7 @@ export async function handleSchedules(
       }
     }
 
-    const updatedBy = resolveHttpAuditUserId(req, myAgentId);
+    const updatedBy = await resolveHttpAuditUserId(req, myAgentId);
     if (updatedBy !== null) body.updatedBy = updatedBy;
     const schedule = updateScheduledTask(parsed.params.id, body);
     routeHandle.respond(res, 200, schedule);

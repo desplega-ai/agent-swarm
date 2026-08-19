@@ -226,7 +226,7 @@ export async function handleActiveSessions(
       jsonError(res, "Can only recover orphaned tasks for the calling agent", 403);
       return true;
     }
-    const tasks = resetOrphanedInProgressTasksForAgent(
+    const tasks = await resetOrphanedInProgressTasksForAgent(
       parsed.body.agentId,
       parsed.body.minAgeSeconds ?? 60,
     );

@@ -241,8 +241,8 @@ export function setBeforeHeartbeatSupersedeForTests(
  * Quick check to determine if a full triage sweep is needed.
  * Returns true if something looks actionable, false to bail early.
  */
-export function preflightGate(): boolean {
-  const stats = getTaskStats();
+export async function preflightGate(): Promise<boolean> {
+  const stats = await getTaskStats();
   const agents = getAllAgents();
 
   const hasInProgressTasks = stats.in_progress > 0;
@@ -289,7 +289,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   };
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
-  detectAndRemediateStalledTasks(findings);
+  await detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
   checkWorkerHealth(findings);
@@ -311,7 +311,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
  * - Stale session heartbeat → worker likely crashed → auto-fail (15 min threshold)
  * - Fresh session heartbeat → worker alive but task stale → escalate to lead (30 min threshold)
  */
-function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
+async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Promise<void> {
   // Use the shortest threshold to catch all potentially stalled tasks
   const candidates = getStalledInProgressTasks(stallThresholdNoSessionMin());
 
@@ -340,7 +340,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
     if (!session) {
       // Case A: No active session — worker is dead
       if (taskAgeMs >= stallThresholdNoSessionMin() * 60 * 1000) {
-        remediateCrashedWorkerTask(findings, task, {
+        await remediateCrashedWorkerTask(findings, task, {
           supersedeReason:
             "Auto-superseded by heartbeat: worker session not found (no active session for task)",
           legacyFailReason:
@@ -355,7 +355,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
         if (taskAgeMs >= stallThresholdStaleHeartbeatMin() * 60 * 1000) {
-          remediateCrashedWorkerTask(findings, task, {
+          await remediateCrashedWorkerTask(findings, task, {
             supersedeReason:
               "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
             legacyFailReason:
@@ -384,7 +384,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
  *   - a non-terminal child already exists — a prior sweep already created a resume,
  *   - `createResumeFollowUp` returns `workflow-skip` — workflow engine owns retries.
  */
-function remediateCrashedWorkerTask(
+async function remediateCrashedWorkerTask(
   findings: HeartbeatFindings,
   task: AgentTask,
   opts: {
@@ -393,7 +393,7 @@ function remediateCrashedWorkerTask(
     shortLabel: string;
     cleanupActiveSession?: boolean;
   },
-): void {
+): Promise<void> {
   if (!task.agentId) return; // Type guard — caller already checked.
 
   const skipAutoResume = SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "");
@@ -408,7 +408,8 @@ function remediateCrashedWorkerTask(
   // any child task) because `send-task` auto-defaults `parentTaskId` to the
   // caller's current task, so a crashed worker with delegated subtasks
   // would otherwise be incorrectly skipped (PR #594 review).
-  const alreadyResumed = !skipAutoResume && !isWorkflowStep && hasNonTerminalResumeChild(task.id);
+  const alreadyResumed =
+    !skipAutoResume && !isWorkflowStep && (await hasNonTerminalResumeChild(task.id));
 
   if (isWorkflowStep) {
     const failed = failTask(task.id, "superseded_workflow_task");
@@ -469,7 +470,7 @@ function remediateCrashedWorkerTask(
 
   beforeHeartbeatSupersedeForTests?.(task);
 
-  const superseded = supersedeTask(task.id, {
+  const superseded = await supersedeTask(task.id, {
     reason: opts.supersedeReason,
     resumeTaskId: null,
   });
@@ -492,7 +493,7 @@ function remediateCrashedWorkerTask(
   const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
-    backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+    await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
 
     findings.autoResumedTasks.push({
       taskId: task.id,
@@ -1037,8 +1038,8 @@ export function isEffectivelyEmpty(content: string): boolean {
 /**
  * Gather current system status as a markdown string for the lead's checklist task.
  */
-export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string {
-  const stats = getTaskStats();
+export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): Promise<string> {
+  const stats = await getTaskStats();
   const stalledTasks = getStalledInProgressTasks(stallThresholdMinutes());
   const agents = getAllAgents();
   const idleWorkers = getIdleWorkersWithCapacity();
@@ -1166,7 +1167,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
     const orphanedTasks: AgentTask[] = [];
 
     for (const status of ["pending", "offered"] as const) {
-      const tasks = getTasksByStatus(status);
+      const tasks = await getTasksByStatus(status);
 
       for (const task of tasks) {
         if (!task.agentId) continue;
@@ -1222,7 +1223,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
     .get(lead.id);
   if (existing) return;
 
-  const systemStatus = gatherSystemStatus();
+  const systemStatus = await gatherSystemStatus();
 
   const result = resolveTemplate("heartbeat.checklist", {
     system_status: systemStatus,
@@ -1256,7 +1257,7 @@ export async function runHeartbeatSweep(): Promise<void> {
 
   try {
     // Tier 1: Preflight gate
-    if (!preflightGate()) {
+    if (!(await preflightGate())) {
       const cleanupOnlyFindings: HeartbeatFindings = {
         stalledTasks: [],
         autoFailedTasks: [],
@@ -1408,7 +1409,7 @@ export async function createBootTriageTask(): Promise<void> {
     .get(lead.id);
   if (existing) return;
 
-  const systemStatus = gatherSystemStatus({ isBootTriage: true });
+  const systemStatus = await gatherSystemStatus({ isBootTriage: true });
 
   const result = resolveTemplate("heartbeat.boot-triage", {
     system_status: systemStatus,

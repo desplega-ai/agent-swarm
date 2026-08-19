@@ -387,7 +387,7 @@ export async function handleApprovalRequests(
     const createdBy =
       auth?.kind === "user"
         ? auth.userId
-        : (resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId) ?? undefined);
+        : ((await resolveTaskAuditUserId(parsed.body.sourceTaskId, callerAgentId)) ?? undefined);
     const request = createApprovalRequest({
       id,
       title: parsed.body.title,

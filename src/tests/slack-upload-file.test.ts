@@ -79,7 +79,7 @@ describe("slack-upload-file", () => {
       slackThreadTs: "1783331585.399049",
       slackUserId: "U_UPLOAD",
     });
-    setSlackMessageTracking(task.id, {
+    await setSlackMessageTracking(task.id, {
       slackProgressMessageTs: "1783331590.000001",
       slackTreeRootMessageTs: "1783331590.000001",
     });
@@ -110,7 +110,7 @@ describe("slack-upload-file", () => {
       slackThreadTs: "1783332000.000001",
       slackUserId: "U_UPLOAD",
     });
-    setSlackMessageTracking(task.id, {
+    await setSlackMessageTracking(task.id, {
       slackProgressMessageTs: "1783332001.000001",
       slackTreeRootMessageTs: "1783332001.000001",
     });

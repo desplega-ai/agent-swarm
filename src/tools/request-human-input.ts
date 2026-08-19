@@ -69,7 +69,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
       // created (e.g. .mcp.json not found, session resumed, or lead agent on a non-task trigger).
       let sourceTaskId = requestInfo.sourceTaskId;
       if (!sourceTaskId && requestInfo.agentId) {
-        const currentTask = getAgentCurrentTask(requestInfo.agentId);
+        const currentTask = await getAgentCurrentTask(requestInfo.agentId);
         if (currentTask) {
           sourceTaskId = currentTask.id;
         }
@@ -83,7 +83,7 @@ export const registerRequestHumanInputTool = (server: McpServer) => {
         approvers: { policy: "any" },
         sourceTaskId: sourceTaskId ?? undefined,
         timeoutSeconds,
-        createdBy: resolveTaskAuditUserId(sourceTaskId, requestInfo.agentId) ?? undefined,
+        createdBy: (await resolveTaskAuditUserId(sourceTaskId, requestInfo.agentId)) ?? undefined,
       });
 
       const appUrl = getAppUrl();

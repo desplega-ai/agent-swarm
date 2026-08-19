@@ -24,12 +24,12 @@ export function hasOtherUserMention(text: string, botUserId: string): boolean {
  * - `swarm#all` → all non-lead agents
  * - Everything else → lead agent
  */
-export function routeMessage(
+export async function routeMessage(
   text: string,
   botUserId: string,
   botMentioned: boolean,
   threadContext?: ThreadContext,
-): AgentMatch[] {
+): Promise<AgentMatch[]> {
   const matches: AgentMatch[] = [];
   const requireMentionForThreadFollowup = isEnvFlagEnabled(
     "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
@@ -69,7 +69,10 @@ export function routeMessage(
       );
       return matches;
     }
-    const workingAgent = getAgentWorkingOnThread(threadContext.channelId, threadContext.threadTs);
+    const workingAgent = await getAgentWorkingOnThread(
+      threadContext.channelId,
+      threadContext.threadTs,
+    );
     if (workingAgent && workingAgent.status !== "offline") {
       console.log(
         `[Slack] Thread follow-up: routing to agent ${workingAgent.name} (${workingAgent.id}) in thread ${threadContext.threadTs}`,

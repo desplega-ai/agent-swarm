@@ -142,7 +142,10 @@ export const registerCreatePageTool = (server: McpServer) => {
 
       // Upsert. Look up existing row by (agentId, slug).
       const existing = getPageBySlug(requestInfo.agentId, finalSlug);
-      const trustedUserId = resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId);
+      const trustedUserId = await resolveTaskAuditUserId(
+        requestInfo.sourceTaskId,
+        requestInfo.agentId,
+      );
       let assetKey: string | undefined;
       try {
         if (input.key !== undefined || !existing) {

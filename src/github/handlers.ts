@@ -308,7 +308,7 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
+    const task = await findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
@@ -338,7 +338,7 @@ export async function handlePullRequest(
     }
 
     // Check if there's an existing active task for this PR — skip duplicate review tasks
-    const existingTask = findTaskByVcs(repository.full_name, pr.number);
+    const existingTask = await findTaskByVcs(repository.full_name, pr.number);
     if (existingTask) {
       console.log(
         `[GitHub] Skipping review task for PR #${pr.number} — active task ${existingTask.id} already exists`,
@@ -421,7 +421,7 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
+    const task = await findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
@@ -705,7 +705,7 @@ export async function handleIssue(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, issue.number);
+    const task = await findTaskByVcs(repository.full_name, issue.number);
     if (!task) {
       console.log(`[GitHub] No active task found for issue #${issue.number} to cancel`);
       return { created: false };
@@ -909,7 +909,9 @@ export async function handleComment(
   const targetUrl = target?.html_url ?? comment.html_url;
 
   // Check if there's an existing task for this PR/Issue
-  const existingTask = targetNumber ? findTaskByVcs(repository.full_name, targetNumber) : null;
+  const existingTask = targetNumber
+    ? await findTaskByVcs(repository.full_name, targetNumber)
+    : null;
 
   // Build task description
   const context = extractMentionContext(comment.body);
@@ -1195,7 +1197,7 @@ export async function handlePullRequestReview(
   }
 
   // Find any existing task for this PR
-  const existingTask = findTaskByVcs(repository.full_name, pr.number);
+  const existingTask = await findTaskByVcs(repository.full_name, pr.number);
 
   // Only notify for PRs where bot is creator or already has a task
   const isBotCreator = isBotAssignee(pr.user.login);
