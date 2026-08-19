@@ -27,7 +27,7 @@ import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
-import { findRoute, isPublicRoute } from "./route-def";
+import { findRoute, isPublicRoute, route } from "./route-def";
 import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from "./utils";
 
 /**
@@ -282,6 +282,51 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
+const RUNTIME_HEADER_DOC =
+  "Workers may send `X-Runtime-Instance-ID`, the per-boot identifier of the calling process. " +
+  "It is ignored unless MULTI_RUNTIME_ENABLED is set.";
+
+const pingRoute = route({
+  method: "post",
+  path: "/ping",
+  pattern: ["ping"],
+  summary: "Report agent liveness",
+  description:
+    `Refreshes the calling agent's status. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, ` +
+    "the header must identify a live runtime of this agent; an absent, unknown, offline, or " +
+    "foreign identifier makes the call a no-op instead of an error, so workers predating the " +
+    "flag keep running.",
+  tags: ["Core"],
+  auth: { apiKey: true, agentId: true },
+  rbac: { ungated: "self-scoped: an agent reports its own liveness" },
+  responses: {
+    204: { description: "Liveness recorded (or accepted as a no-op)" },
+    400: { description: "Missing X-Agent-ID header" },
+    404: { description: "Agent not found" },
+  },
+});
+
+const closeRoute = route({
+  method: "post",
+  path: "/close",
+  pattern: ["close"],
+  summary: "Mark an agent or runtime offline on shutdown",
+  description:
+    `Retires the calling process. ${RUNTIME_HEADER_DOC} With multi-runtime mode on, the header ` +
+    "is required and only that runtime is retired; the agent goes offline once no live runtime " +
+    "remains. With the flag off, the agent is marked offline as before.",
+  tags: ["Core"],
+  auth: { apiKey: true, agentId: true },
+  rbac: { ungated: "self-scoped: an agent retires its own runtime" },
+  responses: {
+    204: { description: "Runtime (and agent, when last) marked offline" },
+    400: {
+      description: "Missing X-Agent-ID, or missing X-Runtime-Instance-ID in multi-runtime mode",
+    },
+    404: { description: "Agent not found" },
+  },
+});
+
 export async function handleCore(
   req: IncomingMessage,
   res: ServerResponse,
@@ -482,7 +527,7 @@ export async function handleCore(
     return true;
   }
 
-  if (req.method === "POST" && req.url === "/ping") {
+  if (pingRoute.match(req.method, getPathSegments(req.url || ""))) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));
@@ -538,7 +583,7 @@ export async function handleCore(
     return true;
   }
 
-  if (req.method === "POST" && req.url === "/close") {
+  if (closeRoute.match(req.method, getPathSegments(req.url || ""))) {
     if (!myAgentId) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Missing X-Agent-ID header" }));

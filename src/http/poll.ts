@@ -268,8 +268,12 @@ export async function handlePoll(
         }
 
         // Check for offered tasks first (highest priority for both workers and leads)
-        // Atomically claim the task for review to prevent duplicate processing
-        const offeredTasks = getOfferedTasksForAgent(myAgentId);
+        // Atomically claim the task for review to prevent duplicate processing.
+        // Capacity is checked in the same transaction as the claim: with
+        // several runtimes serving one agent these polls run concurrently, and
+        // an unguarded claim here would let each of them take a task past the
+        // agent's logical limit.
+        const offeredTasks = hasCapacity(myAgentId) ? getOfferedTasksForAgent(myAgentId) : [];
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
           const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);

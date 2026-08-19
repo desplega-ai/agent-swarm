@@ -2462,6 +2462,7 @@ async function registerActiveSession(
         triggerType: session.triggerType,
         taskDescription: session.taskDescription,
         runnerSessionId: session.runnerSessionId,
+        runtimeInstanceId: config.runtimeInstanceId,
       }),
     });
   } catch {

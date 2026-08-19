@@ -1565,6 +1565,8 @@ export const ActiveSessionSchema = z
     taskDescription: z.string().nullable(),
     runnerSessionId: z.string().nullable(),
     providerSessionId: z.string().nullable(),
+    /** Runtime process that owns this session; null for single-runtime rows. */
+    runtimeInstanceId: z.string().nullable().optional(),
     startedAt: z.iso.datetime(),
     lastHeartbeatAt: z.iso.datetime(),
   })

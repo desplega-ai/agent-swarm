@@ -929,6 +929,15 @@ export function reconcileAgentMaxTasksPolicy(agentId: string): void {
  * and enforcement cannot diverge — including with no runtime connected.
  * Every other key passes straight through.
  */
+/**
+ * Reset the enforcement mirror when the policy row is deleted. Without this
+ * the deleted limit survives on `agents.maxTasks` and the next registration
+ * re-seeds the policy from it, making the delete a no-op.
+ */
+export function resetAgentMaxTasksMirror(agentId: string): void {
+  updateAgentMaxTasks(agentId, 1);
+}
+
 export function upsertSwarmConfigWithPolicyMirror(
   data: Parameters<typeof upsertSwarmConfig>[0],
 ): SwarmConfig {
@@ -1105,12 +1114,22 @@ export function deleteAgent(id: string): boolean {
  * Get the count of active (in_progress) tasks for an agent.
  * Used to determine current capacity usage.
  */
+/**
+ * Tasks occupying one of the agent's concurrency slots.
+ *
+ * `reviewing` counts: an offered task claimed for review is already held by
+ * the agent, and omitting it let a second concurrent poll claim another task
+ * past the limit. A claimed offer is tracked by `offeredTo` rather than
+ * `agentId` (the claim does not assign), so both columns are considered.
+ */
 export function getActiveTaskCount(agentId: string): number {
   const result = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
+    .prepare<{ count: number }, [string, string]>(
+      `SELECT COUNT(*) as count FROM agent_tasks
+       WHERE (agentId = ? AND status IN ('in_progress', 'reviewing'))
+          OR (offeredTo = ? AND status = 'reviewing')`,
     )
-    .get(agentId);
+    .get(agentId, agentId);
   return result?.count ?? 0;
 }
 
@@ -8699,6 +8718,7 @@ export function insertActiveSession(session: {
   inboxMessageId?: string;
   taskDescription?: string;
   runnerSessionId?: string;
+  runtimeInstanceId?: string;
 }): ActiveSession {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -8714,12 +8734,13 @@ export function insertActiveSession(session: {
         string | null,
         string | null,
         string | null,
+        string | null,
         string,
         string,
       ]
     >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     )
     .get(
@@ -8730,6 +8751,7 @@ export function insertActiveSession(session: {
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
       session.runnerSessionId ?? null,
+      session.runtimeInstanceId ?? null,
       now,
       now,
     );
@@ -8779,6 +8801,32 @@ export function cleanupStaleSessions(maxAgeMinutes = 30): number {
 
 export function cleanupAgentSessions(agentId: string): number {
   const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+  return result.changes;
+}
+
+/**
+ * Startup cleanup for one runtime: drop this agent's sessions that no live
+ * runtime owns, which is what a restarting process leaves behind (its
+ * previous boot used a different instance id).
+ *
+ * A live sibling's session must survive — deleting it would strand its task
+ * with no session row, and the orphan sweep would then requeue work that
+ * process is still executing.
+ */
+export function cleanupRuntimeSessions(agentId: string): number {
+  const result = getDb()
+    .prepare(
+      `DELETE FROM active_sessions
+       WHERE agentId = ?
+         AND (
+           runtimeInstanceId IS NULL
+           OR runtimeInstanceId NOT IN (
+             SELECT id FROM runtime_instances
+             WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?
+           )
+         )`,
+    )
+    .run(agentId, agentId, runtimeLivenessCutoff());
   return result.changes;
 }
 
@@ -8938,13 +8986,70 @@ export function markRuntimeInstanceOffline(id: string, agentId: string): Runtime
   return row ? rowToRuntimeInstance(row) : null;
 }
 
+/**
+ * Minutes without a ping before a runtime stops counting as live. The runner
+ * pings every poll iteration (~2s), so this is a wide margin that will not
+ * expire a healthy idle worker; it matches the "worker clearly dead" window
+ * the stalled-task classifier already uses.
+ */
+export function runtimeStaleThresholdMinutes(): number {
+  return Number(process.env.RUNTIME_STALE_THRESHOLD_MIN) || 5;
+}
+
+function runtimeLivenessCutoff(): string {
+  return new Date(Date.now() - runtimeStaleThresholdMinutes() * 60 * 1000).toISOString();
+}
+
+/**
+ * Runtimes currently serving an agent. A crashed process never reaches
+ * `/close`, so `active` alone would keep a dead runtime counted forever;
+ * liveness is therefore the conjunction of status and a fresh `last_seen_at`.
+ */
 export function countActiveRuntimeInstancesForAgent(agentId: string): number {
   const result = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM runtime_instances WHERE agent_id = ? AND status = 'active'",
+    .prepare<{ count: number }, [string, string]>(
+      `SELECT COUNT(*) as count FROM runtime_instances
+       WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
     )
-    .get(agentId);
+    .get(agentId, runtimeLivenessCutoff());
   return result?.count ?? 0;
+}
+
+/**
+ * Retire runtimes that stopped pinging and take their agents offline when
+ * nothing live remains. Runs in the heartbeat sweep; the per-agent
+ * reconciliation shares one transaction with the expiry so an agent is never
+ * observed with zero live runtimes but an available status.
+ */
+export function expireStaleRuntimeInstances(): { expired: number; agentsOffline: number } {
+  return getDb().transaction(() => {
+    const cutoff = runtimeLivenessCutoff();
+    const stale = getDb()
+      .prepare<{ agent_id: string }, [string]>(
+        `SELECT DISTINCT agent_id FROM runtime_instances
+         WHERE status = 'active' AND last_seen_at < ?`,
+      )
+      .all(cutoff);
+    if (stale.length === 0) return { expired: 0, agentsOffline: 0 };
+
+    const result = getDb()
+      .prepare(
+        `UPDATE runtime_instances
+         SET status = 'offline', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE status = 'active' AND last_seen_at < ?`,
+      )
+      .run(cutoff);
+
+    let agentsOffline = 0;
+    for (const { agent_id } of stale) {
+      if (countActiveRuntimeInstancesForAgent(agent_id) > 0) continue;
+      const agent = getAgentById(agent_id);
+      if (!agent || agent.status === "offline") continue;
+      updateAgentStatus(agent_id, "offline");
+      agentsOffline++;
+    }
+    return { expired: result.changes, agentsOffline };
+  })();
 }
 
 // ============================================================================

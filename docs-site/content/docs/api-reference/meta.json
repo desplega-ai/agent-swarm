@@ -13,6 +13,7 @@
     "assets",
     "budgets",
     "config",
+    "core",
     "debug",
     "ecosystem",
     "events",

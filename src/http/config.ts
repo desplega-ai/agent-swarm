@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
+  AGENT_MAX_TASKS_CONFIG_KEY,
   deleteSwarmConfig,
   getAgentById,
   getResolvedConfig,
@@ -8,6 +9,7 @@ import {
   getSwarmConfigLookupById,
   getSwarmConfigs,
   maskSecrets,
+  resetAgentMaxTasksMirror,
   upsertSwarmConfigWithPolicyMirror,
 } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
@@ -434,6 +436,13 @@ export async function handleConfig(
     }
     if (existing.scope === "global") {
       scheduleIntegrationsReload();
+    }
+    if (
+      existing.scope === "agent" &&
+      existing.scopeId &&
+      existing.key === AGENT_MAX_TASKS_CONFIG_KEY
+    ) {
+      resetAgentMaxTasksMirror(existing.scopeId);
     }
     deleteConfig.respond(res, 200, { success: true });
     return true;

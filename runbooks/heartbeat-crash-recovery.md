@@ -16,7 +16,7 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 flowchart TD
   tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> detect["detectAndRemediateStalledTasks()"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ expireStaleRuntimeInstances (§1a)<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress w/ no session<br/>OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
@@ -25,7 +25,36 @@ flowchart TD
 - **Reboot sweep liveness predicate** (`runRebootSweep`): a session is considered "live, skip" only if `lastHeartbeatAt >= bootEpoch - 5s` (boot epoch parsed from `globalThis.__runId` = `run_<epochMs>`). Sessions with pre-boot heartbeats are stale artifacts that survived the WAL-mode SQLite restart and are treated as absent → auto-fail + retry child. If `__runId` is missing/unparseable, falls back to the legacy behavior (session exists → skip) — never more aggressive than before. This is **concurrency-safe**: a worker with N concurrent tasks keeps fresh (post-boot) heartbeats on its live sessions; only genuinely stale ones get classified.
 - The **boot-triage seed script** (`src/be/seed-scripts/catalog/boot-triage.ts`) mirrors this logic: it flags `in_progress` tasks that are on an offline agent OR whose session's `lastHeartbeatAt` is older than `stuckMinutes` ago (no fresh session heartbeat).
 - `autoAssignPoolTasks` and `claimTask`/`assignUnassignedTaskPending` are gated by the **routing-affinity eligibility check** (§4, `isAgentEligibleForTask`) — a pooled task tagged with a `routingAffinity` snapshot (from a resume/retry, or an explicit `requiredCapabilities` on a fresh `send-task`) can only go to a role/capability-matching agent. Untagged tasks are unaffected — assignment stays open to any idle (non-lead) worker, exactly as before. `autoAssignPoolTasks` **does** skip idle workers whose `emptyPollCount >= MAX_EMPTY_POLLS` (the poll gate) — assigning to them would just have them exit on their next poll. The filter reads `emptyPollCount` off the rows `getIdleWorkersWithCapacity()` already returns (no per-worker re-query). Note the poll gate is cleared on a genuine `waiting_for_credentials -> ready` recovery (`updateAgentCredentialState`) and on re-register, but **not** by routine post-task `ready:true` credential reports.
-- `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). The **only** writer of `offline` is the graceful `POST /close` handler (`src/http/core.ts`); a hard-crashed (SIGKILL) worker is never auto-offlined.
+- `checkWorkerHealth` only flips `busy↔idle` (it pre-filters `offline`) and never sets `offline`. A successful `/api/poll` dispatch updates the agent to `busy` in the same transaction that starts a pre-assigned task or claims a pool task; the worker-only `poll-task` tool does the same for its direct pending-task path. The heartbeat sweep remains the reconciliation backstop for any other task-state transition that leaves `agents.status` stale. Leads can become `busy` while running a directly assigned task, but remain structurally excluded from pool assignment (`getIdleWorkersWithCapacity` and the pool dispatch query filter `isLead=0`). `offline` has two writers: the graceful `POST /close` handler (`src/http/core.ts`), and — only when `MULTI_RUNTIME_ENABLED` is set — the stale-runtime expiry in §1a. With the flag off (the default), a hard-crashed (SIGKILL) worker is still never auto-offlined.
+
+## 1a. Runtime liveness (`MULTI_RUNTIME_ENABLED` only)
+
+With multi-runtime mode enabled, one logical agent may be served by several
+worker processes, each recorded in `runtime_instances`. Every worker sends its
+per-boot `X-Runtime-Instance-ID` on `POST /ping` (the poll loop, ~2s), which
+refreshes that row's `last_seen_at`; `POST /close` retires just that row.
+
+A crashed, OOM-killed, or network-partitioned process never reaches `/close`,
+so status alone would leave it `active` forever and keep its agent falsely
+available. Liveness is therefore the conjunction of `status = 'active'` and a
+`last_seen_at` newer than `RUNTIME_STALE_THRESHOLD_MIN` (default 5 min — 150×
+the ping cadence, so an idle-but-healthy worker is never expired):
+
+- `countActiveRuntimeInstancesForAgent` counts only live rows, so a surviving
+  runtime's `/close` takes the agent offline immediately when its siblings are
+  already stale rather than waiting for a sweep.
+- `expireStaleRuntimeInstances` (in `cleanupStaleResources`) flips stale rows to
+  `offline` and, in the same transaction, marks any agent with no live runtime
+  left `offline`. An agent is never observable with zero live runtimes and an
+  available status.
+
+Registration is the only path that sets a runtime back to `active`, so a
+delayed ping from a retired or unknown runtime cannot resurrect it.
+
+Session cleanup is runtime-scoped in this mode: a starting worker clears only
+this agent's sessions that no live runtime owns (its own previous boot used a
+different instance id). A live sibling's session survives, so the orphan sweep
+does not requeue a task another process is still executing.
 
 ## 2. The stalled-task classifier (`detectAndRemediateStalledTasks`)
 
@@ -205,6 +234,7 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | Lead-escalation stall (Case C) | 30 min | `HEARTBEAT_STALL_THRESHOLD_MIN` |
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
+| Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |
 | Same-agent liveness window | 30s | `WORKER_LIVENESS_WINDOW_SECONDS` |
 | Resume-generation cap | 3 | `HEARTBEAT_MAX_RESUME_GENERATIONS` |
 | Resume-pin grace, reaper (`0` = off) | 10 min | `HEARTBEAT_RESUME_PIN_GRACE_MIN` |

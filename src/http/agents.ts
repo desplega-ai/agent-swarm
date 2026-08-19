@@ -459,11 +459,10 @@ export async function handleAgentRegister(
         description: parsed.body.description,
         role: parsed.body.role,
         capabilities: parsed.body.capabilities ?? [],
-        // A new agent starts at the default rather than the reporting
-        // runtime's capacity, so the initial policy doesn't depend on which
-        // runtime happened to register first. Operators raise it via
-        // AGENT_MAX_TASKS.
-        maxTasks: multiRuntime ? 1 : (parsed.body.maxTasks ?? 1),
+        // The first registration establishes the logical policy — including
+        // role defaults such as a lead's two concurrent tasks. Later
+        // registrations cannot change it; reconcile below only seeds.
+        maxTasks: parsed.body.maxTasks ?? 1,
         provider: parsed.body.provider,
         harnessProvider: parsed.body.harness_provider ?? null,
       });

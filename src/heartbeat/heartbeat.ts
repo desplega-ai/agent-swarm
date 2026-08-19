@@ -5,6 +5,7 @@ import {
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
+  expireStaleRuntimeInstances,
   failPendingResumeIfUnclaimed,
   failTask,
   getActiveSessionForTask,
@@ -212,6 +213,7 @@ export interface HeartbeatFindings {
     mentionProcessing: number;
     inboxProcessing: number;
     workflowRuns: number;
+    staleRuntimes: number;
   };
 }
 
@@ -285,6 +287,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       mentionProcessing: 0,
       inboxProcessing: 0,
       workflowRuns: 0,
+      staleRuntimes: 0,
     },
   };
 
@@ -964,6 +967,10 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
  */
 async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
   findings.staleCleanup.sessions = cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
+  // Retire runtimes that stopped pinging: a crashed process never reaches
+  // /close, so without this its agent would stay available with nothing
+  // serving it.
+  findings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
   findings.staleCleanup.reviewingTasks = releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
@@ -1271,6 +1278,7 @@ export async function runHeartbeatSweep(): Promise<void> {
           mentionProcessing: 0,
           inboxProcessing: 0,
           workflowRuns: 0,
+          staleRuntimes: 0,
         },
       };
       await cleanupStaleResources(cleanupOnlyFindings);

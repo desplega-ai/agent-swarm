@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   cleanupAgentSessions,
+  cleanupRuntimeSessions,
   cleanupStaleSessions,
   deleteActiveSession,
   deleteActiveSessionById,
@@ -12,6 +13,7 @@ import {
   updateActiveSessionProviderSessionId,
 } from "../be/db";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -47,6 +49,7 @@ const createActiveSession = route({
     inboxMessageId: z.string().optional(),
     taskDescription: z.string().optional(),
     runnerSessionId: z.string().optional(),
+    runtimeInstanceId: z.string().optional(),
   }),
   responses: {
     201: { description: "Session created", schema: z.object({ session: ActiveSessionSchema }) },
@@ -166,6 +169,7 @@ export async function handleActiveSessions(
       inboxMessageId: parsed.body.inboxMessageId,
       taskDescription: parsed.body.taskDescription,
       runnerSessionId: parsed.body.runnerSessionId,
+      runtimeInstanceId: parsed.body.runtimeInstanceId,
     });
     createActiveSession.respond(res, 201, { session });
     return true;
@@ -211,7 +215,11 @@ export async function handleActiveSessions(
     if (!parsed) return true;
     let cleaned = 0;
     if (parsed.body?.agentId) {
-      cleaned = cleanupAgentSessions(parsed.body.agentId);
+      // Multi-runtime: keep sessions owned by a live sibling runtime, which
+      // agent-wide cleanup would otherwise delete out from under it.
+      cleaned = isMultiRuntimeEnabled()
+        ? cleanupRuntimeSessions(parsed.body.agentId)
+        : cleanupAgentSessions(parsed.body.agentId);
     } else {
       cleaned = cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);
     }

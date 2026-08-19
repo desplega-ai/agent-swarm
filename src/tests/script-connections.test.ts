@@ -540,6 +540,8 @@ describe("script connections", () => {
       // which this migration-112-only fixture creates.
       markMigrationApplied(database, "129_asset_keys_apps_scripts.sql");
       markMigrationApplied(database, "130_scratch_script_retention_grace.sql");
+      // 132 alters active_sessions, which this partial fixture does not create.
+      markMigrationApplied(database, "132_active_session_runtime_instance.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
