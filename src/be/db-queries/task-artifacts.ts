@@ -17,21 +17,36 @@ function taskAlias(alias: string): string {
   return alias;
 }
 
+// ECMAScript whitespace plus prose wrappers that terminate URL-like tokens.
+const githubTokenDelimiterCodePoints = [
+  9, 10, 11, 12, 13, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202,
+  8232, 8233, 8239, 8287, 12288, 65279, 40, 41, 91, 93, 123, 125, 60, 62, 34, 39, 96,
+];
+
+function githubTokenDelimitersSql(): string {
+  return githubTokenDelimiterCodePoints.map((code, index) => `(${index + 1}, ${code})`).join(", ");
+}
+
 /** Keep aggregate SQL matching aligned with extractGitHubPullRequestUrls(). */
 function githubPullRequestExistsSql(value: string): string {
   return `EXISTS (
     WITH RECURSIVE
-    normalized(value) AS (
-      SELECT trim(
-        replace(replace(replace(replace(
-        replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
-          coalesce(${value}, ''), char(9), ' '), char(10), ' '), char(13), ' '),
-          '(', ' '), ')', ' '), '[', ' '), ']', ' '), '{', ' '), '}', ' '), '<', ' '),
-          '>', ' '), char(34), ' '), char(39), ' '), char(96), ' ')
-      )
+    token_delimiters(position, code_point) AS (
+      VALUES ${githubTokenDelimitersSql()}
+    ),
+    normalized(value, position) AS (
+      SELECT coalesce(${value}, ''), 0
+
+      UNION ALL
+
+      SELECT replace(value, char(code_point), ' '), normalized.position + 1
+      FROM normalized
+      JOIN token_delimiters ON token_delimiters.position = normalized.position + 1
     ),
     tokens(remaining, token) AS (
-      SELECT value || ' ', NULL FROM normalized
+      SELECT trim(value) || ' ', NULL
+      FROM normalized
+      WHERE position = (SELECT max(position) FROM token_delimiters)
 
       UNION ALL
 
@@ -75,6 +90,8 @@ function githubPullRequestExistsSql(value: string): string {
       FROM github_segments
       WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
         AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+        AND owner NOT IN ('.', '..')
+        AND repo NOT IN ('.', '..')
         AND lower(remainder) GLOB 'pull/[0-9]*'
 
       UNION ALL

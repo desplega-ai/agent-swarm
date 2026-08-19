@@ -12,26 +12,41 @@ candidate_tasks(task_id, agent_id, output) AS (
   WHERE output IS NOT NULL
     AND instr(lower(output), 'github.com/') > 0
 ),
-normalized(task_id, agent_id, value) AS (
+token_delimiters(position, code_point) AS (
+  VALUES
+    (1, 9), (2, 10), (3, 11), (4, 12), (5, 13), (6, 160), (7, 5760),
+    (8, 8192), (9, 8193), (10, 8194), (11, 8195), (12, 8196), (13, 8197),
+    (14, 8198), (15, 8199), (16, 8200), (17, 8201), (18, 8202), (19, 8232),
+    (20, 8233), (21, 8239), (22, 8287), (23, 12288), (24, 65279),
+    (25, 40), (26, 41), (27, 91), (28, 93), (29, 123), (30, 125),
+    (31, 60), (32, 62), (33, 34), (34, 39), (35, 96)
+),
+normalized(task_id, agent_id, value, position) AS (
   SELECT
     task_id,
     agent_id,
-    trim(
-      replace(replace(replace(replace(
-      replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
-        output, char(9), ' '), char(10), ' '), char(13), ' '),
-        '(', ' '), ')', ' '), '[', ' '), ']', ' '), '{', ' '), '}', ' '), '<', ' '),
-        '>', ' '), char(34), ' '), char(39), ' '), char(96), ' ')
-    )
+    output,
+    0
   FROM candidate_tasks
+
+  UNION ALL
+
+  SELECT
+    task_id,
+    agent_id,
+    replace(value, char(code_point), ' '),
+    normalized.position + 1
+  FROM normalized
+  JOIN token_delimiters ON token_delimiters.position = normalized.position + 1
 ),
 tokens(task_id, agent_id, remaining, token) AS (
   SELECT
     task_id,
     agent_id,
-    value || ' ',
+    trim(value) || ' ',
     NULL
   FROM normalized
+  WHERE position = (SELECT max(position) FROM token_delimiters)
 
   UNION ALL
 
@@ -91,6 +106,8 @@ digit_scan(task_id, agent_id, token, position) AS (
   FROM token_segments
   WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
     AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+    AND owner NOT IN ('.', '..')
+    AND repo NOT IN ('.', '..')
     AND lower(remainder) GLOB 'pull/[0-9]*'
 
   UNION ALL

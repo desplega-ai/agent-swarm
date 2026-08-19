@@ -17,6 +17,11 @@ import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 const TEST_DB_PATH = "./test-task-artifacts.sqlite";
 let agentId: string;
 
+const ECMASCRIPT_WHITESPACE_CODE_POINTS = [
+  9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201,
+  8202, 8232, 8233, 8239, 8287, 12288, 65279,
+];
+
 beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -74,6 +79,8 @@ describe("GitHub pull-request extraction", () => {
       "https://evil.example/github.com/o/r/pull/8",
       "https://github.com/o/r/pull/123.foo",
       "https://github.com/o/r/pull/123,abc",
+      "https://github.com/o/./pull/1",
+      "https://github.com/../r/pull/1",
     ]) {
       expect(extractGitHubPullRequestUrls(fixture)).toEqual([]);
     }
@@ -223,11 +230,16 @@ describe("attachment-first task shipping evidence", () => {
     "https://github.com/o/r/pull/123abc",
     "https://github.com/o/r/pull/123.foo",
     "https://github.com/o/r/pull/123,abc",
+    "https://github.com/o/./pull/1",
+    "https://github.com/../r/pull/1",
     "https://github.com/o/r/pull/123/files",
     "https://github.com/o/r/pull/8/files",
     "github.com/o/r/pull/8",
     "https://github.com/o/r/pull/123.",
     "Reject https://github.com/org/repo/tree/pull/123, then accept github.com/o/r/pull/8",
+    ...ECMASCRIPT_WHITESPACE_CODE_POINTS.map(
+      (codePoint) => `done${String.fromCodePoint(codePoint)}https://github.com/o/r/pull/8`,
+    ),
   ];
 
   test("falls back to legacy output even when a non-PR attachment exists", () => {

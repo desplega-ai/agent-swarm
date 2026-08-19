@@ -4,6 +4,10 @@ import { runMigrations } from "../be/migrations/runner";
 import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 
 const DB_PATH = "./test-task-pull-request-backfill-migration.sqlite";
+const ECMASCRIPT_WHITESPACE_CODE_POINTS = [
+  9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201,
+  8202, 8232, 8233, 8239, 8287, 12288, 65279,
+];
 
 async function removeDb(): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -193,6 +197,11 @@ describe("migration 135 task pull-request attachment backfill", () => {
         "https://github.com/o/r/pull/123abc",
         "https://github.com/o/r/pull/123.foo",
         "https://github.com/o/r/pull/123,abc",
+        "https://github.com/o/./pull/1",
+        "https://github.com/../r/pull/1",
+        ...ECMASCRIPT_WHITESPACE_CODE_POINTS.map(
+          (codePoint) => `done${String.fromCodePoint(codePoint)}https://github.com/o/r/pull/8`,
+        ),
       ];
       const now = new Date().toISOString();
       const insertTask = db.prepare(
