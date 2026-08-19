@@ -25,6 +25,7 @@ import {
   PageContentTypeSchema,
   PageSchema,
   type PageSummary,
+  PageThemeIdSchema,
   PageVersionSchema,
 } from "../types";
 import { getAppUrl, getPublicMcpBaseUrl } from "../utils/constants";
@@ -103,6 +104,7 @@ const createPageRoute = route({
     password: z.string().min(1).optional(),
     body: z.string(),
     needsCredentials: z.array(z.string()).optional(),
+    theme: PageThemeIdSchema.optional(),
   }),
   responses: {
     201: {
@@ -199,6 +201,7 @@ const updatePageRoute = route({
     password: z.string().min(1).nullable().optional(),
     body: z.string().optional(),
     needsCredentials: z.array(z.string()).nullable().optional(),
+    theme: PageThemeIdSchema.nullable().optional(),
   }),
   responses: {
     200: {
@@ -474,6 +477,7 @@ export async function handlePages(
         passwordHash,
         body: parsed.body.body,
         needsCredentials: parsed.body.needsCredentials,
+        theme: parsed.body.theme,
       });
       // First write has no prior snapshot — version 1 is implicit (the parent
       // IS v1). Subsequent edits land via PUT and bump the counter.
@@ -706,6 +710,7 @@ export async function handlePages(
       passwordHash: passwordHashUpdate,
       body: parsed.body.body,
       needsCredentials: parsed.body.needsCredentials ?? undefined,
+      theme: parsed.body.theme,
     });
     if (!updated) {
       res.writeHead(404);

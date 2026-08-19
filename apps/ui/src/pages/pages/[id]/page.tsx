@@ -394,7 +394,7 @@ export default function ArtifactPage() {
           <Braces className="size-3" />
           <span>JSON-rendered page</span>
         </div>
-        <JsonPageRenderer body={data.body} />
+        <JsonPageRenderer body={data.body} theme={data.theme} />
       </div>
     );
   } else {

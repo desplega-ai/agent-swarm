@@ -2059,6 +2059,23 @@ export type PageContentType = z.infer<typeof PageContentTypeSchema>;
 export const PageAuthModeSchema = z.enum(["public", "authed", "password"]);
 export type PageAuthMode = z.infer<typeof PageAuthModeSchema>;
 
+/**
+ * Preset theme id applied to a page's rendered surface — same slug shape as
+ * `AppThemeIdSchema` (`src/apps/definition.ts`), duplicated rather than
+ * imported: `apps/definition.ts` pulls in `../be/script-connections` and
+ * `./be/scripts/db`, so importing it here would drag DB-touching modules into
+ * `types.ts`, which worker-side code (`src/commands/`, `src/hooks/`,
+ * `src/providers/`) imports and which the DB-boundary check
+ * (`scripts/check-db-boundary.sh`) forbids from touching `src/be/db` /
+ * `bun:sqlite`. The preset catalog itself lives client-side
+ * (`apps/ui/src/lib/themes.ts`) — the server validates shape only, exactly
+ * like the app-definition field, and unknown ids resolve to the default theme
+ * at render time.
+ */
+export const PageThemeIdSchema = z.string().regex(/^[a-z][a-z0-9-]{0,39}$/, {
+  message: "must be a lowercase slug (letters, digits, dashes)",
+});
+
 // PageSnapshot captures the mutable content fields frozen per-version in
 // page_versions.snapshot. Omits id / agentId / slug / timestamps (these are
 // invariant across versions for a given page id; the slug is a parent-only
@@ -2089,6 +2106,8 @@ export const PageSchema = z
     passwordHash: z.string().optional(),
     body: z.string(),
     needsCredentials: z.array(z.string()).optional(),
+    /** Optional theme-preset id. Unset = inherit the viewer's own dashboard theme (today's behavior). */
+    theme: PageThemeIdSchema.optional(),
     viewCount: z.number().int().min(0).default(0),
     createdAt: z.string(),
     updatedAt: z.string(),

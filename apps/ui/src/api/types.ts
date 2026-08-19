@@ -2307,6 +2307,8 @@ export interface PageMetadata {
   contentType: PageContentType;
   authMode: PageAuthMode;
   body: string;
+  /** Optional theme-preset id (same catalog as app-definition `theme` — see `@/lib/themes`). */
+  theme?: string;
 }
 
 /**

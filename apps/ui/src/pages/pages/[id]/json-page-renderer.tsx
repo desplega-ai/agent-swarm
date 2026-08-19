@@ -35,6 +35,7 @@ import type React from "react";
 import { useMemo, useRef, useState } from "react";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { createSwarmActionHandlers, swarmCatalog, swarmComponents } from "@/lib/json-render";
+import { JsonRenderThemeProvider } from "@/lib/json-render/theme-scope";
 
 // Re-exported for backwards compatibility with existing importers of the
 // action schemas / catalog (they now live in `@/lib/json-render`).
@@ -46,6 +47,15 @@ export interface JsonPageRendererProps {
   body: string;
   /** Test-injection: override `fetch` so swarm.call/swarm.sdk dispatch is mockable. */
   fetchImpl?: typeof fetch;
+  /**
+   * Optional theme-preset id (`page.theme`). Same mechanism app-surface.tsx
+   * uses to scope a swarm-app's canvas: the preset CSS itself is already
+   * injected once, globally, by `useTheme()` (`app/providers.tsx`) — every
+   * `[data-theme="<id>"]` block for every preset always exists in the
+   * document. Applying a theme to a *page* is therefore just stamping the
+   * attribute; no page-specific CSS is generated or loaded.
+   */
+  theme?: string;
 }
 
 interface ActionState {
@@ -53,7 +63,7 @@ interface ActionState {
   actionError: string | null;
 }
 
-export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
+export function JsonPageRenderer({ body, fetchImpl, theme }: JsonPageRendererProps) {
   const [state, setState] = useState<ActionState>({
     lastResponse: undefined,
     actionError: null,
@@ -151,18 +161,26 @@ export function JsonPageRenderer({ body, fetchImpl }: JsonPageRendererProps) {
     );
   }
 
+  // `data-theme` scopes the page's CSS custom properties (mirrors
+  // app-surface.tsx's `appThemeAttr` wrapper); `JsonRenderThemeProvider`
+  // makes the same id available to portal-rendering catalog components
+  // (Select dropdowns, Drawer, confirm dialogs) so THEIR portalled content —
+  // mounted on `<body>`, outside this wrapper — picks up the theme too
+  // instead of silently falling back to the viewer's dashboard theme.
   return (
-    <div className="space-y-4" data-testid="json-page-renderer">
+    <div className="space-y-4" data-testid="json-page-renderer" data-theme={theme || undefined}>
       {state.actionError && (
         <AlertCallout tone="error" icon={AlertCircle} title="Action failed">
           {state.actionError}
         </AlertCallout>
       )}
-      <StateProvider>
-        <VisibilityProvider>
-          <ActionProvider handlers={handlers}>{renderedSpec}</ActionProvider>
-        </VisibilityProvider>
-      </StateProvider>
+      <JsonRenderThemeProvider value={theme ?? null}>
+        <StateProvider>
+          <VisibilityProvider>
+            <ActionProvider handlers={handlers}>{renderedSpec}</ActionProvider>
+          </VisibilityProvider>
+        </StateProvider>
+      </JsonRenderThemeProvider>
       {state.lastResponse !== undefined && (
         <details className="rounded-md border border-border bg-muted/40 p-3 text-xs">
           <summary className="cursor-pointer text-muted-foreground">Last action response</summary>

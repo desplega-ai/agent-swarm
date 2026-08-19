@@ -44,6 +44,7 @@ const PublicPageJsonSchema = PageSchema.pick({
   contentType: true,
   authMode: true,
   body: true,
+  theme: true,
 }).extend({
   version: z.literal(1),
 });
@@ -578,6 +579,7 @@ export async function handlePagesPublic(
       contentType: page.contentType,
       authMode: page.authMode,
       body: page.body,
+      theme: page.theme,
     });
     bumpViewCount(page.id);
     return true;

@@ -9815,6 +9815,7 @@ type PageRow = {
   passwordHash: string | null;
   body: string;
   needsCredentials: string | null;
+  theme: string | null;
   createdAt: string;
   updatedAt: string;
   view_count: number;
@@ -9835,6 +9836,7 @@ function rowToPage(row: PageRow): Page {
     needsCredentials: row.needsCredentials
       ? (JSON.parse(row.needsCredentials) as string[])
       : undefined,
+    theme: row.theme ?? undefined,
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -9852,14 +9854,15 @@ export function createPage(data: {
   passwordHash?: string;
   body: string;
   needsCredentials?: string[];
+  theme?: string;
 }): Page {
   // Match the historical SQL default ID shape while making the value
   // available before insert so the default namespace can include it.
   const id = crypto.randomUUID().replace(/-/g, "");
   const row = getDb()
     .prepare<PageRow, (string | null)[]>(
-      `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      `INSERT INTO pages (id, "key", agentId, slug, title, description, contentType, authMode, passwordHash, body, needsCredentials, theme)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     )
     .get(
       id,
@@ -9873,6 +9876,7 @@ export function createPage(data: {
       data.passwordHash ?? null,
       data.body,
       data.needsCredentials ? JSON.stringify(data.needsCredentials) : null,
+      data.theme ?? null,
     );
   if (!row) throw new Error("Failed to create page");
   return rowToPage(row);
@@ -9917,6 +9921,7 @@ function rowToPageSummary(row: PageRow): PageSummary {
     needsCredentials: row.needsCredentials
       ? (JSON.parse(row.needsCredentials) as string[])
       : undefined,
+    theme: row.theme ?? undefined,
     viewCount: typeof row.view_count === "number" ? row.view_count : 0,
     createdAt: normalizeDateRequired(row.createdAt),
     updatedAt: normalizeDateRequired(row.updatedAt),
@@ -10058,6 +10063,7 @@ export function updatePage(
     body?: string;
     needsCredentials?: string[] | null;
     slug?: string;
+    theme?: string | null;
   },
 ): Page | null {
   const updates: string[] = [];
@@ -10097,6 +10103,10 @@ export function updatePage(
   if (data.slug !== undefined) {
     updates.push("slug = ?");
     params.push(data.slug);
+  }
+  if (data.theme !== undefined) {
+    updates.push("theme = ?");
+    params.push(data.theme ?? null);
   }
   if (updates.length === 0) return getPage(id);
   updates.push("updatedAt = ?");
