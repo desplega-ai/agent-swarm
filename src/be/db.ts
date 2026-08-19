@@ -13191,6 +13191,9 @@ export function deleteUser(id: string, replacementUserId?: string): boolean {
 
     // Preserve rows that carry user attribution but lack ON DELETE semantics.
     // Schema discovery keeps this correct as new nullable user audit columns are added.
+    // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
+    // recreating that table, so discover those two known logical references as
+    // well until the table is next rebuilt with its original constraints.
     const references = database
       .prepare<UserReferenceRow, []>(
         `SELECT tables.name AS tableName, foreign_keys."from" AS columnName
@@ -13201,7 +13204,18 @@ export function deleteUser(id: string, replacementUserId?: string): boolean {
          WHERE tables.type = 'table'
            AND foreign_keys."table" = 'users'
            AND foreign_keys.on_delete IN ('NO ACTION', 'RESTRICT')
-           AND columns."notnull" = 0`,
+           AND columns."notnull" = 0
+         UNION ALL
+         SELECT 'scheduled_tasks' AS tableName, columns.name AS columnName
+         FROM pragma_table_info('scheduled_tasks') AS columns
+         WHERE columns.name IN ('created_by', 'updated_by')
+           AND columns."notnull" = 0
+           AND NOT EXISTS (
+             SELECT 1
+             FROM pragma_foreign_key_list('scheduled_tasks') AS foreign_keys
+             WHERE foreign_keys."from" = columns.name
+               AND foreign_keys."table" = 'users'
+           )`,
       )
       .all();
     const replacement = replacementUserId ?? null;
@@ -13213,6 +13227,29 @@ export function deleteUser(id: string, replacementUserId?: string): boolean {
           `UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`,
         )
         .run(replacement, id);
+    }
+
+    // Workflow context is persisted JSON rather than a relational column, but
+    // it exposes the same requester identity to downstream interpolation. Keep
+    // it consistent with workflow_runs.created_by inside this transaction.
+    if (replacementUserId) {
+      database
+        .prepare<unknown, [string, string]>(
+          `UPDATE workflow_runs
+           SET context = json_set(context, '$.swarm.requestedByUserId', ?)
+           WHERE json_valid(context)
+             AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        )
+        .run(replacementUserId, id);
+    } else {
+      database
+        .prepare<unknown, [string]>(
+          `UPDATE workflow_runs
+           SET context = json_remove(context, '$.swarm.requestedByUserId')
+           WHERE json_valid(context)
+             AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        )
+        .run(id);
     }
 
     const result = database.prepare("DELETE FROM users WHERE id = ?").run(id);

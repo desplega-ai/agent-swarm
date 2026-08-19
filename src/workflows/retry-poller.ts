@@ -99,6 +99,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             nodeId: step.nodeId,
             workflowId: workflow.id,
             dryRun: false,
+            requestedByUserId: run.createdBy,
             inputCtx,
           };
 

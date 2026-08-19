@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { z } from "zod";
 import {
   closeDb,
+  createUser,
   createWorkflow,
   createWorkflowRun,
   createWorkflowRunStep,
@@ -15,7 +16,7 @@ import {
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
-import type { RetryPolicy, Workflow, WorkflowDefinition } from "../types";
+import type { ExecutorMeta, RetryPolicy, Workflow, WorkflowDefinition } from "../types";
 import { startWorkflowExecution } from "../workflows/engine";
 import { workflowEventBus } from "../workflows/event-bus";
 import {
@@ -33,6 +34,7 @@ const TEST_DB_PATH = "./test-workflow-retry-v2.sqlite";
 // ─── Test Executors ──────────────────────────────────────────
 
 let failCounter = 0;
+const failExecutorMeta: ExecutorMeta[] = [];
 
 class FailOnceExecutor extends BaseExecutor<
   typeof FailOnceExecutor.schema,
@@ -48,7 +50,10 @@ class FailOnceExecutor extends BaseExecutor<
 
   protected async execute(
     config: z.infer<typeof FailOnceExecutor.schema>,
+    _context: Readonly<Record<string, unknown>>,
+    meta: ExecutorMeta,
   ): Promise<ExecutorResult<z.infer<typeof FailOnceExecutor.outSchema>>> {
+    failExecutorMeta.push(meta);
     failCounter++;
     if (failCounter <= config.failUntilAttempt) {
       return { status: "failed", error: `Intentional failure #${failCounter}` };
@@ -219,6 +224,45 @@ describe("Workflow Retry v2 (Phase 4)", () => {
   });
 
   describe("Retry Poller", () => {
+    test("rehydrates requester attribution before retrying an executor", async () => {
+      const user = createUser({ name: "Retry Requester" });
+      const workflow = makeWorkflow({
+        nodes: [
+          {
+            id: "attributed-retry",
+            type: "fail-once",
+            config: { failUntilAttempt: 1 },
+            retry: {
+              strategy: "static",
+              maxRetries: 2,
+              baseDelayMs: 10,
+              maxDelayMs: 10,
+            },
+          },
+        ],
+      });
+
+      failCounter = 0;
+      failExecutorMeta.length = 0;
+      const runId = await startWorkflowExecution(workflow, {}, registry, {
+        requestedByUserId: user.id,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      try {
+        startRetryPoller(registry, 10);
+        for (let i = 0; i < 20 && getWorkflowRun(runId)?.status !== "completed"; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      } finally {
+        stopRetryPoller();
+      }
+
+      expect(getWorkflowRun(runId)?.status).toBe("completed");
+      expect(failExecutorMeta).toHaveLength(2);
+      expect(failExecutorMeta[1]?.requestedByUserId).toBe(user.id);
+    });
+
     test("poller picks up failed steps past nextRetryAt", async () => {
       // Reset fail counter so the executor succeeds on the "retry" attempt
       failCounter = 0;
