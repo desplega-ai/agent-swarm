@@ -980,6 +980,10 @@ describe("Session Costs API", () => {
         taskType: "heartbeat-checklist",
         requestedByUserId: user.id,
       });
+      const legacyHeartbeat = createTaskExtended("Legacy heartbeat", {
+        taskType: "heartbeat",
+        requestedByUserId: user.id,
+      });
       const scheduled = createTaskExtended("Scheduled run", { source: "schedule" });
 
       createSessionCost({
@@ -1001,6 +1005,15 @@ describe("Session Costs API", () => {
         model: "opus",
       });
       createSessionCost({
+        sessionId: "denom-legacy-heartbeat",
+        taskId: legacyHeartbeat.id,
+        agentId: agent.id,
+        totalCostUsd: 4.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
+      createSessionCost({
         sessionId: "denom-scheduled",
         taskId: scheduled.id,
         agentId: agent.id,
@@ -1012,15 +1025,16 @@ describe("Session Costs API", () => {
 
       const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "day" });
 
-      expect(summary.totals.totalCostUsd).toBeCloseTo(6.0, 5);
+      expect(summary.totals.totalCostUsd).toBeCloseTo(10.0, 5);
       // Only the human-requested task counts as attributed — the heartbeat
       // task's stale requester doesn't count, because it's excluded entirely.
       expect(summary.totals.attributedCostUsd).toBeCloseTo(1.0, 5);
-      // Denominator drops the heartbeat + scheduled cost (2.0 + 3.0), leaving
-      // only the population that could plausibly carry a human requester.
+      // Denominator drops both heartbeat variants + scheduled cost
+      // (2.0 + 4.0 + 3.0), leaving only the population that could plausibly
+      // carry a human requester.
       expect(summary.totals.attributableCostUsd).toBeCloseTo(1.0, 5);
-      expect(summary.totals.excludedCostUsd).toBeCloseTo(5.0, 5);
-      expect(summary.totals.excludedTaskCount).toBe(2);
+      expect(summary.totals.excludedCostUsd).toBeCloseTo(9.0, 5);
+      expect(summary.totals.excludedTaskCount).toBe(3);
     });
   });
 
@@ -1153,6 +1167,10 @@ describe("Session Costs API", () => {
       createTaskExtended("Heartbeat noise", {
         requestedByUserId: user.id,
         taskType: "heartbeat-checklist",
+      });
+      createTaskExtended("Legacy heartbeat noise", {
+        requestedByUserId: user.id,
+        taskType: "heartbeat",
       });
 
       const rows = getAttributionByPerson({});

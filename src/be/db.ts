@@ -6970,10 +6970,8 @@ export function getSessionCostSummary(opts: {
   // against SQLite's NULL-propagates-through-OR trap: an unguarded
   // `t.taskType IN (...)` on a NULL taskType makes the whole boolean NULL,
   // not FALSE, silently dropping the row from both sides of the partition.
-  // Verified against the live DB 2026-08-19: this predicate reproduces the
-  // Usage-page-adjacent audit's 2,193/5,093-task exclusion count exactly.
   const HUMAN_FREE_SQL = `(
-        COALESCE(t.taskType, '') IN ('heartbeat-checklist', 'boot-triage')
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
         OR COALESCE(t.source, '') = 'schedule'
         OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
       )`;
@@ -7178,7 +7176,7 @@ export function getAttributionByPerson(opts: {
   // tree, where a `source='system'` follow-up of THEIR OWN human-attributed
   // work is legitimate reach, not something to exclude.
   const humanFreeSql = `(
-        COALESCE(t.taskType, '') IN ('heartbeat-checklist', 'boot-triage')
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
         OR COALESCE(t.source, '') = 'schedule'
       )`;
 

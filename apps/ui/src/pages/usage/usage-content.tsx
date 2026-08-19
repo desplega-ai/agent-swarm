@@ -1,3 +1,4 @@
+import type { ColDef } from "ag-grid-community";
 import { useCallback, useMemo } from "react";
 import {
   Bar,
@@ -12,6 +13,7 @@ import {
 import { useAgents } from "@/api/hooks/use-agents";
 import { useAttributionByPerson, useUsageSummary } from "@/api/hooks/use-costs";
 import { useUsers } from "@/api/hooks/use-users";
+import { DataGrid } from "@/components/shared/data-grid";
 import { UsageSummary } from "@/components/shared/usage-summary";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -68,6 +70,10 @@ export function UsageContent() {
   const startDate = getStartDateISO(dateRange);
   const agentId = agentFilter !== "all" ? agentFilter : undefined;
   const userId = userFilter !== "all" ? userFilter : undefined;
+  // The per-person report is task-attribution based and does not implement
+  // the session-cost agent/requester filters. Hide it rather than showing a
+  // global report under filters that visibly scope the rest of the page.
+  const showAttributionByPerson = !agentId && !userId;
 
   const { data: summary, isLoading } = useUsageSummary({
     startDate,
@@ -142,6 +148,50 @@ export function UsageContent() {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [attributionRows, userMap]);
+
+  const attributionColumns = useMemo<ColDef<(typeof attributionData)[number]>[]>(
+    () => [
+      {
+        field: "name",
+        headerName: "Person",
+        flex: 1,
+        minWidth: 160,
+      },
+      {
+        field: "problemsInitiated",
+        headerName: "Problems Initiated",
+        flex: 1,
+        minWidth: 170,
+      },
+      {
+        field: "problemsShipped",
+        headerName: "Problems Shipped",
+        flex: 1,
+        minWidth: 170,
+        valueFormatter: ({ data, value }) => {
+          if (!data || !data.problemsInitiated) return String(value ?? 0);
+          return `${value ?? 0} (${(((value ?? 0) / data.problemsInitiated) * 100).toFixed(0)}%)`;
+        },
+      },
+      {
+        headerName: "Reach",
+        flex: 2,
+        minWidth: 280,
+        valueGetter: ({ data }) =>
+          data
+            ? `${data.agentsReached} agents · ${data.reposReached} repos · ${data.surfacesReached} surfaces`
+            : "",
+      },
+      {
+        headerName: "First-Pass Yield",
+        flex: 1,
+        minWidth: 180,
+        valueGetter: () => "not yet computed",
+        sortable: false,
+      },
+    ],
+    [],
+  );
 
   if (isLoading) {
     return (
@@ -361,70 +411,20 @@ export function UsageContent() {
       )}
 
       {/* By Person — four metrics, side by side, never summed into one score. */}
-      {attributionData.length > 0 && (
+      {showAttributionByPerson && attributionData.length > 0 && (
         <div className="rounded-lg border border-border p-4">
           <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">By Person</p>
           <p className="text-xs text-muted-foreground mb-3">
             Reported side by side on purpose — do not rank on any single column. Raw task count
             (Problems Initiated) is the most trivially gamed number here.
           </p>
-          <div className="overflow-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-muted-foreground border-b border-border">
-                  <th className="text-left py-2 font-medium">Person</th>
-                  <th
-                    className="text-right py-2 font-medium"
-                    title="Root tasks only (no parent). Counting fan-out children would let whoever triggers the biggest decomposition win by accident."
-                  >
-                    Problems Initiated
-                  </th>
-                  <th
-                    className="text-right py-2 font-medium"
-                    title="Root tasks that completed with shippable evidence: a task_attachments row (a merged-PR URL or a published page), falling back to a PR-URL match in the task output. Does not yet detect a closed ticket — no issue-tracker state is stored locally."
-                  >
-                    Problems Shipped
-                  </th>
-                  <th
-                    className="text-right py-2 font-medium"
-                    title="Distinct agents / repos / surfaces engaged across this person's entire task tree, not just root tasks."
-                  >
-                    Reach
-                  </th>
-                  <th
-                    className="text-right py-2 font-medium"
-                    title="Share of root tasks completed without a re-dispatch or a human correction. Not yet computed: distinguishing a correction-driven re-dispatch from normal multi-agent delegation isn't derivable from a single query pass, and a task-count proxy would misclassify the latter as rework."
-                  >
-                    First-Pass Yield
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {attributionData.map((row) => (
-                  <tr key={row.userId} className="border-b border-border/50">
-                    <td className="py-2 font-medium">{row.name}</td>
-                    <td className="py-2 text-right font-mono">{row.problemsInitiated}</td>
-                    <td className="py-2 text-right font-mono">
-                      {row.problemsShipped}
-                      {row.problemsInitiated > 0 && (
-                        <span className="text-muted-foreground">
-                          {" "}
-                          ({((row.problemsShipped / row.problemsInitiated) * 100).toFixed(0)}%)
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 text-right font-mono">
-                      {row.agentsReached} agents · {row.reposReached} repos · {row.surfacesReached}{" "}
-                      surfaces
-                    </td>
-                    <td className="py-2 text-right font-mono text-muted-foreground italic">
-                      not yet computed
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataGrid
+            rowData={attributionData}
+            columnDefs={attributionColumns}
+            domLayout="autoHeight"
+            columnSizing="flex"
+            pagination={false}
+          />
         </div>
       )}
     </div>
