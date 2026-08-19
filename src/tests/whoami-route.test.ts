@@ -114,7 +114,7 @@ describe("GET /api/whoami", () => {
   test("suspended user's token is rejected at auth (401)", async () => {
     const user = createUser({ name: "Suspended User" });
     const { plaintext } = mintToken(user.id, "rest", ACTOR);
-    updateUser(user.id, { status: "suspended" });
+    await updateUser(user.id, { status: "suspended" });
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);

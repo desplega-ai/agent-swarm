@@ -21,7 +21,7 @@ export const registerSkillGetFileTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo, _meta) => {
-      const skill = getSkillById(args.skillId);
+      const skill = await getSkillById(args.skillId);
       if (!skill) {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }

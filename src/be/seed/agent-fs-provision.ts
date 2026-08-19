@@ -64,7 +64,7 @@ export const agentFsProvisionSeeder: Seeder<AgentFsSeedItem> = {
     if (!apiUrl) return [];
 
     const registerEmail = await resolveRegisterEmail();
-    const invites = resolveInviteTargets();
+    const invites = await resolveInviteTargets();
     const contentHash = provisionHash({ apiUrl, registerEmail, invites });
     return [{ key: ITEM_KEY, contentHash, apiUrl, registerEmail, invites }];
   },
@@ -450,10 +450,10 @@ async function resolveRegisterEmail(): Promise<string> {
   return `agent-fs-admin-${slugEmailPart(installId)}@${domain}`;
 }
 
-function resolveInviteTargets(): InviteTarget[] {
+async function resolveInviteTargets(): Promise<InviteTarget[]> {
   const targets = new Map<string, InviteTarget>();
 
-  for (const user of getAllUsers()) {
+  for (const user of await getAllUsers()) {
     if (!user.email) continue;
     const role = isExplicitViewerRole(user.role) ? "viewer" : "editor";
     targets.set(user.email.toLowerCase(), { email: user.email, role });
@@ -470,7 +470,7 @@ async function provisionHashFromCurrentState(): Promise<string> {
   return provisionHash({
     apiUrl: await resolveApiUrl(),
     registerEmail: await resolveRegisterEmail(),
-    invites: resolveInviteTargets(),
+    invites: await resolveInviteTargets(),
   });
 }
 

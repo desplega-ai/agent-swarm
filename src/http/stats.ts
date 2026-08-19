@@ -275,7 +275,10 @@ export async function handleStats(
     });
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     listScheduledTasks.respond(res, 200, {
-      scheduledTasks: withFavoriteFlags(scheduledTasks, { favoriteScope, itemType: "schedule" }),
+      scheduledTasks: await withFavoriteFlags(scheduledTasks, {
+        favoriteScope,
+        itemType: "schedule",
+      }),
     });
     return true;
   }

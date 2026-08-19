@@ -584,7 +584,7 @@ export async function taskActionHandler(
       context: BudgetRefusalContext;
       inserted: boolean;
     };
-    emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
+    await emitBudgetRefusalSideEffects(sideEffects.context, sideEffects.inserted);
   }
 
   return taskActionResult(result, agentId);

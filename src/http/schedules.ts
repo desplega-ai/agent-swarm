@@ -276,7 +276,7 @@ export async function handleSchedules(
         ? await getScheduledTasks(filters)
         : await getScheduledTasks(filters, { slim: true });
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const decoratedSchedules = withFavoriteFlags(schedules, {
+    const decoratedSchedules = await withFavoriteFlags(schedules, {
       favoriteScope,
       itemType: "schedule",
     });
@@ -487,7 +487,10 @@ export async function handleSchedules(
     }
 
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const [decorated] = withFavoriteFlags([schedule], { favoriteScope, itemType: "schedule" });
+    const [decorated] = await withFavoriteFlags([schedule], {
+      favoriteScope,
+      itemType: "schedule",
+    });
     getSchedule.respond(res, 200, decorated ?? schedule);
     return true;
   }

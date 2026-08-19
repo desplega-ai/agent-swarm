@@ -19,7 +19,6 @@ import {
   getTaskAttachments,
   getTaskById,
   getUnassignedTaskIdsForAgent,
-  getUserById,
   hasCapacity,
   recordBudgetRefusalNotification,
   startTask,
@@ -367,8 +366,29 @@ export async function handlePoll(
             // no requestedByUserId, render the explicit UNKNOWN sentinel
             // instead of silently omitting the section — never a substituted
             // human (Rule 33 / provenance-or-silence).
-            const requestedByUser = pendingTask.requestedByUserId
-              ? getUserById(pendingTask.requestedByUserId)
+            // NOTE: inline sync lookup (not the async `getUserById`) — this
+            // block runs inside a raw synchronous `db.transaction()`, which
+            // cannot await. Only the name/email/role/notes columns are needed.
+            const requestedByUserRow = pendingTask.requestedByUserId
+              ? getDb()
+                  .prepare<
+                    {
+                      name: string;
+                      email: string | null;
+                      role: string | null;
+                      notes: string | null;
+                    },
+                    [string]
+                  >("SELECT name, email, role, notes FROM users WHERE id = ?")
+                  .get(pendingTask.requestedByUserId)
+              : undefined;
+            const requestedByUser = requestedByUserRow
+              ? {
+                  name: requestedByUserRow.name,
+                  email: requestedByUserRow.email ?? undefined,
+                  role: requestedByUserRow.role ?? undefined,
+                  notes: requestedByUserRow.notes ?? undefined,
+                }
               : undefined;
             const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
             const requestedByUnknownName =
@@ -543,7 +563,7 @@ export async function handlePoll(
     // follow-up + workflow event bus). Errors here are logged inside the
     // helper; we never let them affect the response the worker sees.
     if (result.refusalSideEffects) {
-      emitBudgetRefusalSideEffects(
+      await emitBudgetRefusalSideEffects(
         result.refusalSideEffects.context,
         result.refusalSideEffects.inserted,
       );

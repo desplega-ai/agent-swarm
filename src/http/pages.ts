@@ -538,7 +538,7 @@ export async function handlePages(
       return true;
     }
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
+    const [decorated] = await withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     resolvePageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }
@@ -573,7 +573,7 @@ export async function handlePages(
       total = await countAllPages(keyFilters);
     }
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const decoratedPages = withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
+    const decoratedPages = await withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
     listPagesRoute.respond(res, 200, {
       pages: decoratedPages.map(withShareUrls),
       // Filter-aware total (real row count, not the current page's length) so
@@ -646,7 +646,7 @@ export async function handlePages(
       return true;
     }
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
+    const [decorated] = await withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     getPageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }

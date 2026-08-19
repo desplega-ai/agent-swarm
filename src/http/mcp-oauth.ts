@@ -209,11 +209,11 @@ async function discoverForMcp(resourceUrl: string): Promise<DiscoveryResult | nu
   };
 }
 
-function getMcpOrError(
+async function getMcpOrError(
   res: ServerResponse,
   mcpServerId: string,
-): ReturnType<typeof getMcpServerById> | null {
-  const server = getMcpServerById(mcpServerId);
+): Promise<Awaited<ReturnType<typeof getMcpServerById>> | null> {
+  const server = await getMcpServerById(mcpServerId);
   if (!server) {
     jsonError(res, "MCP server not found", 404);
     return null;
@@ -447,7 +447,7 @@ async function withAuthorizeFlowLock<T>(key: string, fn: () => Promise<T>): Prom
 async function prepareAuthorizeFlow(
   res: ServerResponse,
   mcpServerId: string,
-  server: NonNullable<ReturnType<typeof getMcpServerById>>,
+  server: NonNullable<Awaited<ReturnType<typeof getMcpServerById>>>,
   q: AuthorizeFlowQuery,
 ): Promise<string | null> {
   const userId = q.userId ?? null;
@@ -459,7 +459,7 @@ async function prepareAuthorizeFlow(
 async function runAuthorizeFlow(
   res: ServerResponse,
   mcpServerId: string,
-  server: NonNullable<ReturnType<typeof getMcpServerById>>,
+  server: NonNullable<Awaited<ReturnType<typeof getMcpServerById>>>,
   q: AuthorizeFlowQuery,
   userId: string | null,
 ): Promise<string | null> {
@@ -809,7 +809,7 @@ export async function handleMcpOAuth(
     const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpServerById(parsed.params.mcpServerId);
+    const server = await getMcpServerById(parsed.params.mcpServerId);
     if (!server) {
       jsonError(res, "MCP server not found", 404);
       return true;
@@ -848,7 +848,7 @@ export async function handleMcpOAuth(
     const parsed = await metadataRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -870,7 +870,7 @@ export async function handleMcpOAuth(
     const parsed = await authorizeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -896,7 +896,7 @@ export async function handleMcpOAuth(
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -1004,7 +1004,7 @@ export async function handleMcpOAuth(
     const parsed = await manualClientRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {

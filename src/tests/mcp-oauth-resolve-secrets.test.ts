@@ -78,7 +78,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
@@ -119,7 +119,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
@@ -158,7 +158,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
@@ -194,7 +194,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
 
     const result = await agentMcpServers(agent.id);
@@ -218,7 +218,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
@@ -258,7 +258,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
       headerConfigKeys: JSON.stringify({ Authorization: "STATIC_BEARER" }),
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
     setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
@@ -292,7 +292,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       scope: "agent",
       ownerAgentId: agent.id,
     });
-    installMcpServer(agent.id, mcp.id);
+    await installMcpServer(agent.id, mcp.id);
 
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);

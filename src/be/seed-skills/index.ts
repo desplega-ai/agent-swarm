@@ -474,8 +474,8 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     }));
   },
 
-  upstreamHash(item): string | null {
-    const existing = getSkillByName(item.key, "swarm");
+  async upstreamHash(item): Promise<string | null> {
+    const existing = await getSkillByName(item.key, "swarm");
     if (!existing) return null;
     // Hash the live bundled files too, so an edit to one is detected as drift
     // on the same footing as an edit to SKILL.md.
@@ -507,7 +507,14 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     const { skill } = item;
 
     getDb().transaction(() => {
-      const existing = getSkillByName(skill.name, "swarm");
+      // NOTE: inline sync lookup (not the async `getSkillByName`) — this
+      // callback is a raw synchronous `db.transaction()`, which cannot await.
+      // Only `existing.id` is needed here.
+      const existing = getDb()
+        .prepare<{ id: string }, [string, string, string]>(
+          "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+        )
+        .get(skill.name, "swarm", "");
 
       if (existing) {
         updateSkill(existing.id, {

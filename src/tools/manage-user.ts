@@ -131,7 +131,7 @@ export const registerManageUserTool = (server: McpServer) => {
 
       switch (input.action) {
         case "list": {
-          const users = getAllUsers();
+          const users = await getAllUsers();
           return toolOk(`Found ${users.length} user(s).`, {
             details: JSON.stringify(users, null, 2),
             data: { users },
@@ -142,7 +142,7 @@ export const registerManageUserTool = (server: McpServer) => {
           if (!input.userId) {
             return toolErr("userId is required for get action.");
           }
-          const user = getUserById(input.userId);
+          const user = await getUserById(input.userId);
           if (!user) {
             return toolErr(`User ${input.userId} not found.`);
           }
@@ -157,7 +157,7 @@ export const registerManageUserTool = (server: McpServer) => {
             return toolErr("name is required for create action.");
           }
           try {
-            const user = createUser({
+            const user = await createUser({
               name: input.name,
               email: input.email,
               role: input.role,
@@ -187,12 +187,12 @@ export const registerManageUserTool = (server: McpServer) => {
             return toolErr("userId is required for update action.");
           }
           try {
-            const before = getUserById(input.userId);
+            const before = await getUserById(input.userId);
             if (!before) {
               return toolErr(`User ${input.userId} not found.`);
             }
 
-            const user = updateUser(input.userId, {
+            const user = await updateUser(input.userId, {
               name: input.name,
               email: input.email,
               role: input.role,
@@ -251,7 +251,7 @@ export const registerManageUserTool = (server: McpServer) => {
           if (!input.userId) {
             return toolErr("userId is required for delete action.");
           }
-          const deleted = deleteUser(input.userId);
+          const deleted = await deleteUser(input.userId);
           return deleted
             ? toolOk(`User ${input.userId} deleted.`)
             : toolErr(`User ${input.userId} not found.`);

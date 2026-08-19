@@ -109,7 +109,7 @@ export async function handleContext(
       return true;
     }
 
-    const snapshot = createContextSnapshot({
+    const snapshot = await createContextSnapshot({
       taskId: parsed.params.id,
       agentId: myAgentId,
       sessionId: parsed.body.sessionId,
@@ -138,8 +138,8 @@ export async function handleContext(
       return true;
     }
 
-    const snapshots = getContextSnapshotsByTaskId(parsed.params.id, parsed.query.limit);
-    const summary = getContextSummaryByTaskId(parsed.params.id);
+    const snapshots = await getContextSnapshotsByTaskId(parsed.params.id, parsed.query.limit);
+    const summary = await getContextSummaryByTaskId(parsed.params.id);
 
     getContext.respond(res, 200, { snapshots, summary });
     return true;

@@ -178,17 +178,17 @@ describe("agent-fs provisioning seeder", () => {
     process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
     process.env.AGENT_FS_EMAIL_DOMAIN = "agents.example.test";
 
-    createUser({
+    await createUser({
       name: "Designer User",
       email: `designer-${suffix}@example.test`,
       role: "Customer",
     });
-    createUser({
+    await createUser({
       name: "Operator User",
       email: `operator-${suffix}@example.test`,
       role: "Operator",
     });
-    createUser({
+    await createUser({
       name: "Explicit Viewer User",
       email: `viewer-${suffix}@example.test`,
       role: "read-only contractor",
@@ -261,22 +261,22 @@ describe("agent-fs provisioning seeder", () => {
       value: "shared-drive",
     });
 
-    createUser({
+    await createUser({
       name: "Taras Founder",
       email: `taras-founder-${suffix}@example.test`,
       role: "co-founder, CTO",
     });
-    createUser({
+    await createUser({
       name: "Eze Founder",
       email: `eze-founder-${suffix}@example.test`,
       role: "co-founder, CEO",
     });
-    createUser({
+    await createUser({
       name: "Designer Human",
       email: `designer-${suffix}@example.test`,
       role: "designer",
     });
-    createUser({
+    await createUser({
       name: "Unknown Human",
       email: `whatever-${suffix}@example.test`,
       role: "whatever",
@@ -330,17 +330,17 @@ describe("agent-fs provisioning seeder", () => {
       value: "shared-drive",
     });
 
-    createUser({
+    await createUser({
       name: "Viewer Human",
       email: `viewer-${suffix}@example.test`,
       role: "Viewer",
     });
-    createUser({
+    await createUser({
       name: "Read Only Human",
       email: `read-only-${suffix}@example.test`,
       role: "read only",
     });
-    createUser({
+    await createUser({
       name: "Guest Human",
       email: `guest-${suffix}@example.test`,
       role: "guest",
@@ -394,10 +394,10 @@ describe("agent-fs provisioning seeder", () => {
       value: "shared-drive",
     });
 
-    createUser({ name: "Existing Admin", email: existingAdmin, role: "Customer" });
-    createUser({ name: "Existing Editor", email: existingEditor, role: "Designer" });
-    createUser({ name: "Existing Viewer", email: existingViewer, role: "Whatever" });
-    createUser({ name: "Explicit Viewer", email: explicitViewer, role: "Guest" });
+    await createUser({ name: "Existing Admin", email: existingAdmin, role: "Customer" });
+    await createUser({ name: "Existing Editor", email: existingEditor, role: "Designer" });
+    await createUser({ name: "Existing Viewer", email: existingViewer, role: "Whatever" });
+    await createUser({ name: "Explicit Viewer", email: explicitViewer, role: "Guest" });
 
     const records: RequestRecord[] = [];
     setAgentFsProvisionFetchForTests(

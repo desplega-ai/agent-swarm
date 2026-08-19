@@ -157,7 +157,7 @@ describe("delete-page MCP tool", () => {
       valueType: "json",
     });
     const user = createUser({ name: "Delete Page Favorite User" });
-    setUserFavorite({
+    await setUserFavorite({
       userId: user.id,
       itemType: "page",
       itemId: page.id,

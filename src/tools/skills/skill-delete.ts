@@ -26,7 +26,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const existing = getSkillById(args.skillId);
+      const existing = await getSkillById(args.skillId);
       if (!existing) {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
@@ -54,7 +54,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         });
       }
 
-      const deleted = deleteSkill(args.skillId);
+      const deleted = await deleteSkill(args.skillId);
       const message = deleted ? `Deleted skill "${existing.name}".` : "Delete failed.";
       return deleted
         ? toolOk(message, { data: { yourAgentId: requestInfo.agentId } })

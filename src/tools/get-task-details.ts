@@ -189,7 +189,9 @@ export async function getTaskDetailsHandler(
   const attachments = getTaskAttachments(taskId);
 
   // Resolve requesting user details if available
-  const requestedByUser = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
+  const requestedByUser = task.requestedByUserId
+    ? await getUserById(task.requestedByUserId)
+    : undefined;
   const requestedBy = requestedByUser
     ? { name: requestedByUser.name, email: requestedByUser.email }
     : undefined;

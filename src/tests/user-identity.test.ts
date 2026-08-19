@@ -81,8 +81,8 @@ afterAll(() => {
 // ─── User CRUD ────────────────────────────────────────────────────────────────
 
 describe("createUser", () => {
-  test("creates a user with required fields only — no identities yet", () => {
-    const user = createUser({ name: "Alice" });
+  test("creates a user with required fields only — no identities yet", async () => {
+    const user = await createUser({ name: "Alice" });
     expect(user.id).toBeDefined();
     expect(user.name).toBe("Alice");
     expect(user.email).toBeUndefined();
@@ -96,8 +96,8 @@ describe("createUser", () => {
     expect(getUserIdentities(user.id)).toEqual([]);
   });
 
-  test("links identities one-by-one via linkIdentity", () => {
-    const user = createUser({
+  test("links identities one-by-one via linkIdentity", async () => {
+    const user = await createUser({
       name: "Bob",
       email: "bob@example.com",
       role: "engineer",
@@ -122,8 +122,8 @@ describe("createUser", () => {
     expect(ids).toContainEqual({ kind: "gitlab", externalId: "bob-gl" });
   });
 
-  test("supports new Phase 064 fields", () => {
-    const user = createUser({
+  test("supports new Phase 064 fields", async () => {
+    const user = await createUser({
       name: "Budgeted",
       dailyBudgetUsd: 12.5,
       status: "invited",
@@ -136,21 +136,21 @@ describe("createUser", () => {
 });
 
 describe("linkIdentity", () => {
-  test("rejects duplicate (kind, externalId) — PK collision", () => {
-    const u1 = createUser({ name: "Dup1" });
-    const u2 = createUser({ name: "Dup2" });
+  test("rejects duplicate (kind, externalId) — PK collision", async () => {
+    const u1 = await createUser({ name: "Dup1" });
+    const u2 = await createUser({ name: "Dup2" });
     linkIdentity(u1.id, "slack", "U_DUP", SYSTEM_ACTOR);
     expect(() => linkIdentity(u2.id, "slack", "U_DUP", SYSTEM_ACTOR)).toThrow();
   });
 
-  test("rejects duplicate (kind, externalId) — same user, second call", () => {
-    const u = createUser({ name: "SelfDup" });
+  test("rejects duplicate (kind, externalId) — same user, second call", async () => {
+    const u = await createUser({ name: "SelfDup" });
     linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR);
     expect(() => linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR)).toThrow();
   });
 
-  test("emits identity_added event in the same transaction", () => {
-    const u = createUser({ name: "EventLink" });
+  test("emits identity_added event in the same transaction", async () => {
+    const u = await createUser({ name: "EventLink" });
     linkIdentity(u.id, "slack", "U_EVENTLINK", SYSTEM_ACTOR);
     const events = eventsFor(u.id);
     expect(events.length).toBe(1);
@@ -164,8 +164,8 @@ describe("linkIdentity", () => {
 });
 
 describe("unlinkIdentity", () => {
-  test("removes the mapping and emits identity_removed", () => {
-    const u = createUser({ name: "Unlink" });
+  test("removes the mapping and emits identity_removed", async () => {
+    const u = await createUser({ name: "Unlink" });
     linkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_UNLINK")).not.toBeNull();
 
@@ -183,9 +183,9 @@ describe("unlinkIdentity", () => {
 });
 
 describe("getUserById / getUserIdentities", () => {
-  test("returns user by ID", () => {
-    const created = createUser({ name: "GetById" });
-    const fetched = getUserById(created.id);
+  test("returns user by ID", async () => {
+    const created = await createUser({ name: "GetById" });
+    const fetched = await getUserById(created.id);
     expect(fetched).toBeDefined();
     expect(fetched!.name).toBe("GetById");
     expect(fetched!.id).toBe(created.id);
@@ -195,8 +195,8 @@ describe("getUserById / getUserIdentities", () => {
     expect(findUserById("nonexistent")).toBeNull();
   });
 
-  test("getUserIdentities returns sorted (kind, externalId) tuples", () => {
-    const u = createUser({ name: "IdList" });
+  test("getUserIdentities returns sorted (kind, externalId) tuples", async () => {
+    const u = await createUser({ name: "IdList" });
     linkIdentity(u.id, "slack", "U_LIST", SYSTEM_ACTOR);
     linkIdentity(u.id, "github", "list-gh", SYSTEM_ACTOR);
     const list = getUserIdentities(u.id);
@@ -209,31 +209,33 @@ describe("getUserById / getUserIdentities", () => {
 });
 
 describe("getAllUsers", () => {
-  test("returns all users", () => {
-    const users = getAllUsers();
+  test("returns all users", async () => {
+    const users = await getAllUsers();
     expect(users.length).toBeGreaterThan(0);
   });
 });
 
 describe("updateUser", () => {
-  test("updates specific fields", () => {
-    const user = createUser({ name: "UpdateMe", role: "intern" });
-    const updated = updateUser(user.id, { role: "senior", email: "updated@test.com" });
+  test("updates specific fields", async () => {
+    const user = await createUser({ name: "UpdateMe", role: "intern" });
+    const updated = await updateUser(user.id, { role: "senior", email: "updated@test.com" });
     expect(updated).toBeDefined();
     expect(updated!.role).toBe("senior");
     expect(updated!.email).toBe("updated@test.com");
     expect(updated!.name).toBe("UpdateMe"); // unchanged
   });
 
-  test("updates emailAliases", () => {
-    const user = createUser({ name: "AliasUser" });
-    const updated = updateUser(user.id, { emailAliases: ["alias1@test.com", "alias2@test.com"] });
+  test("updates emailAliases", async () => {
+    const user = await createUser({ name: "AliasUser" });
+    const updated = await updateUser(user.id, {
+      emailAliases: ["alias1@test.com", "alias2@test.com"],
+    });
     expect(updated!.emailAliases).toEqual(["alias1@test.com", "alias2@test.com"]);
   });
 
-  test("updates new Phase 064 fields", () => {
-    const user = createUser({ name: "BudgetUser" });
-    const updated = updateUser(user.id, {
+  test("updates new Phase 064 fields", async () => {
+    const user = await createUser({ name: "BudgetUser" });
+    const updated = await updateUser(user.id, {
       dailyBudgetUsd: 25.0,
       status: "suspended",
       metadata: { reason: "test" },
@@ -243,31 +245,31 @@ describe("updateUser", () => {
     expect(updated!.metadata).toEqual({ reason: "test" });
   });
 
-  test("returns null for non-existent user", () => {
-    expect(updateUser("nonexistent", { name: "Nope" })).toBeNull();
+  test("returns null for non-existent user", async () => {
+    expect(await updateUser("nonexistent", { name: "Nope" })).toBeNull();
   });
 
-  test("returns unchanged user when no updates provided", () => {
-    const user = createUser({ name: "NoChange" });
-    const result = updateUser(user.id, {});
+  test("returns unchanged user when no updates provided", async () => {
+    const user = await createUser({ name: "NoChange" });
+    const result = await updateUser(user.id, {});
     expect(result).toBeDefined();
     expect(result!.name).toBe("NoChange");
   });
 });
 
 describe("deleteUser", () => {
-  test("deletes existing user", () => {
-    const user = createUser({ name: "DeleteMe" });
-    expect(deleteUser(user.id)).toBe(true);
-    expect(getUserById(user.id)).toBeNull();
+  test("deletes existing user", async () => {
+    const user = await createUser({ name: "DeleteMe" });
+    expect(await deleteUser(user.id)).toBe(true);
+    expect(await getUserById(user.id)).toBeNull();
   });
 
-  test("returns false for non-existent user", () => {
-    expect(deleteUser("nonexistent")).toBe(false);
+  test("returns false for non-existent user", async () => {
+    expect(await deleteUser("nonexistent")).toBe(false);
   });
 
-  test("clears requestedByUserId on tasks AND cascades user_external_ids", () => {
-    const user = createUser({ name: "TaskOwner" });
+  test("clears requestedByUserId on tasks AND cascades user_external_ids", async () => {
+    const user = await createUser({ name: "TaskOwner" });
     linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
 
@@ -278,7 +280,7 @@ describe("deleteUser", () => {
     });
     expect(getTaskById(task.id)!.requestedByUserId).toBe(user.id);
 
-    deleteUser(user.id);
+    await deleteUser(user.id);
     expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
     expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
@@ -288,10 +290,10 @@ describe("deleteUser", () => {
 // ─── findUserByExternalId ─────────────────────────────────────────────────────
 
 describe("findUserByExternalId", () => {
-  let testUser: ReturnType<typeof createUser>;
+  let testUser: Awaited<ReturnType<typeof createUser>>;
 
-  beforeAll(() => {
-    testUser = createUser({
+  beforeAll(async () => {
+    testUser = await createUser({
       name: "Resolve TestUser",
       email: "resolve-test@example.com",
     });
@@ -335,8 +337,8 @@ describe("findUserByExternalId", () => {
 // ─── findUserByEmail ──────────────────────────────────────────────────────────
 
 describe("findUserByEmail", () => {
-  test("matches primary email (case-insensitive)", () => {
-    const user = createUser({
+  test("matches primary email (case-insensitive)", async () => {
+    const user = await createUser({
       name: "EmailPrimary",
       email: "primary@example.com",
     });
@@ -344,8 +346,8 @@ describe("findUserByEmail", () => {
     expect(findUserByEmail("PRIMARY@example.com")!.id).toBe(user.id);
   });
 
-  test("matches an emailAlias (case-insensitive)", () => {
-    const user = createUser({
+  test("matches an emailAlias (case-insensitive)", async () => {
+    const user = await createUser({
       name: "EmailAlias",
       email: "main@example.com",
       emailAliases: ["alt@example.com", "other@example.com"],
@@ -408,8 +410,8 @@ describe("findOrCreateUserByEmail", () => {
 // ─── Tokens ───────────────────────────────────────────────────────────────────
 
 describe("mintToken / revokeToken / resolveUserByToken", () => {
-  test("mintToken returns aswt_-prefixed plaintext and stores hash + 4-char preview", () => {
-    const user = createUser({ name: "TokenUser" });
+  test("mintToken returns aswt_-prefixed plaintext and stores hash + 4-char preview", async () => {
+    const user = await createUser({ name: "TokenUser" });
     const { tokenId, plaintext } = mintToken(user.id, "CI test", OPERATOR_ACTOR);
 
     expect(plaintext.startsWith("aswt_")).toBe(true);
@@ -435,8 +437,8 @@ describe("mintToken / revokeToken / resolveUserByToken", () => {
     );
   });
 
-  test("resolveUserByToken returns the owning user and bumps lastUsedAt", () => {
-    const user = createUser({ name: "ResolveTokenUser" });
+  test("resolveUserByToken returns the owning user and bumps lastUsedAt", async () => {
+    const user = await createUser({ name: "ResolveTokenUser" });
     const { tokenId, plaintext } = mintToken(user.id, null, OPERATOR_ACTOR);
 
     const resolved = resolveUserByToken(plaintext);
@@ -451,8 +453,8 @@ describe("mintToken / revokeToken / resolveUserByToken", () => {
     expect(row!.lastUsedAt).not.toBeNull();
   });
 
-  test("revokeToken sets revokedAt + emits token_revoked + resolveUserByToken returns null", () => {
-    const user = createUser({ name: "RevokeUser" });
+  test("revokeToken sets revokedAt + emits token_revoked + resolveUserByToken returns null", async () => {
+    const user = await createUser({ name: "RevokeUser" });
     const { tokenId, plaintext } = mintToken(user.id, "to-revoke", OPERATOR_ACTOR);
     revokeToken(tokenId, OPERATOR_ACTOR);
 
@@ -490,8 +492,8 @@ describe("fingerprintApiKey", () => {
 // ─── recordIdentityEvent (direct API) ─────────────────────────────────────────
 
 describe("recordIdentityEvent", () => {
-  test("can emit budget_changed / status_changed / email_* directly", () => {
-    const user = createUser({ name: "EventDirect" });
+  test("can emit budget_changed / status_changed / email_* directly", async () => {
+    const user = await createUser({ name: "EventDirect" });
     recordIdentityEvent(user.id, "budget_changed", OPERATOR_ACTOR, null, { dailyBudgetUsd: 10 });
     recordIdentityEvent(
       user.id,
@@ -518,8 +520,8 @@ describe("recordIdentityEvent", () => {
 // ─── requestedByUserId on tasks ───────────────────────────────────────────────
 
 describe("requestedByUserId in tasks", () => {
-  test("createTaskExtended stores requestedByUserId", () => {
-    const user = createUser({ name: "Requester" });
+  test("createTaskExtended stores requestedByUserId", async () => {
+    const user = await createUser({ name: "Requester" });
     const task = createTaskExtended("task with requester", {
       agentId: workerAgent.id,
       source: "slack",
@@ -527,11 +529,11 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetched = getTaskById(task.id);
     expect(fetched!.requestedByUserId).toBe(user.id);
-    deleteUser(user.id);
+    await deleteUser(user.id);
   });
 
-  test("requestedByUserId inherits from parent task", () => {
-    const user = createUser({ name: "ParentRequester" });
+  test("requestedByUserId inherits from parent task", async () => {
+    const user = await createUser({ name: "ParentRequester" });
     const parent = createTaskExtended("parent task", {
       agentId: leadAgent.id,
       source: "slack",
@@ -544,12 +546,12 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetchedChild = getTaskById(child.id);
     expect(fetchedChild!.requestedByUserId).toBe(user.id);
-    deleteUser(user.id);
+    await deleteUser(user.id);
   });
 
-  test("explicit requestedByUserId overrides parent inheritance", () => {
-    const user1 = createUser({ name: "User1" });
-    const user2 = createUser({ name: "User2" });
+  test("explicit requestedByUserId overrides parent inheritance", async () => {
+    const user1 = await createUser({ name: "User1" });
+    const user2 = await createUser({ name: "User2" });
     const parent = createTaskExtended("parent", {
       agentId: leadAgent.id,
       source: "slack",
@@ -562,8 +564,8 @@ describe("requestedByUserId in tasks", () => {
       requestedByUserId: user2.id,
     });
     expect(getTaskById(child.id)!.requestedByUserId).toBe(user2.id);
-    deleteUser(user1.id);
-    deleteUser(user2.id);
+    await deleteUser(user1.id);
+    await deleteUser(user2.id);
   });
 
   test("task without requestedByUserId has undefined", () => {

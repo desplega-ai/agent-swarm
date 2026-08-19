@@ -84,7 +84,7 @@ describe("system-default skills", () => {
     expect(defaults).not.toContain("taste-skill");
   });
 
-  test("existing agents see system-default skills through the self-healing view", () => {
+  test("existing agents see system-default skills through the self-healing view", async () => {
     const existingAgent = createAgent({
       name: "Existing Default Skill Worker",
       description: "Created after seeded defaults",
@@ -104,12 +104,12 @@ describe("system-default skills", () => {
       systemDefault: true,
     });
 
-    const skills = getAgentSkills(existingAgent.id);
+    const skills = await getAgentSkills(existingAgent.id);
     expect(skills.map((skill) => skill.name)).toContain("manual-system-default");
     expect(skills.find((skill) => skill.id === manualDefault.id)?.isActive).toBe(true);
   });
 
-  test("existing agents see swarm-scope skills without explicit install rows", () => {
+  test("existing agents see swarm-scope skills without explicit install rows", async () => {
     const existingAgent = createAgent({
       name: "Existing Swarm Skill Worker",
       description: "Created before a swarm-scope skill",
@@ -141,7 +141,7 @@ describe("system-default skills", () => {
 
     expect(installRow?.count ?? 0).toBe(0);
 
-    const skills = getAgentSkills(existingAgent.id);
+    const skills = await getAgentSkills(existingAgent.id);
     expect(skills.map((skill) => skill.name)).toContain("manual-swarm-scope-skill");
     expect(skills.find((skill) => skill.id === swarmSkill.id)?.isActive).toBe(true);
   });
@@ -169,7 +169,7 @@ describe("system-default skills", () => {
     expect(row?.count ?? 0).toBeGreaterThan(0);
   });
 
-  test("system-default skills remain visible even if an install row is toggled inactive", () => {
+  test("system-default skills remain visible even if an install row is toggled inactive", async () => {
     const agent = createAgent({
       name: "Inactive Default Worker",
       description: "Tests self-healing union",
@@ -182,8 +182,8 @@ describe("system-default skills", () => {
     const skill = getSystemDefaultSkills().find((entry) => entry.name === "swarm-scripts");
     expect(skill).toBeDefined();
 
-    toggleAgentSkill(agent.id, skill!.id, false);
-    const skills = getAgentSkills(agent.id);
+    await toggleAgentSkill(agent.id, skill!.id, false);
+    const skills = await getAgentSkills(agent.id);
 
     expect(skills.find((entry) => entry.id === skill!.id)?.isActive).toBe(true);
   });

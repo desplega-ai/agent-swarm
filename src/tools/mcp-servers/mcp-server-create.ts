@@ -88,7 +88,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           }
         }
 
-        const created = createMcpServer({
+        const created = await createMcpServer({
           name: args.name,
           description: args.description,
           transport: args.transport,
@@ -104,7 +104,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         });
 
         // Auto-install for the creating agent
-        installMcpServer(requestInfo.agentId, created.id);
+        await installMcpServer(requestInfo.agentId, created.id);
 
         return toolOk(`Created and installed MCP server "${created.name}" (${created.id}).`, {
           data: { yourAgentId: requestInfo.agentId, server: created },

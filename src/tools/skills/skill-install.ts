@@ -50,7 +50,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
         }
       }
 
-      const skill = getSkillById(args.skillId);
+      const skill = await getSkillById(args.skillId);
       if (!skill) {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }

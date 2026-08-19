@@ -514,13 +514,16 @@ export async function handleWorkflows(
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(await listWorkflows(filters), { favoriteScope, itemType: "workflow" }),
+        await withFavoriteFlags(await listWorkflows(filters), {
+          favoriteScope,
+          itemType: "workflow",
+        }),
       );
     } else {
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(await listWorkflows(filters, { slim: true }), {
+        await withFavoriteFlags(await listWorkflows(filters, { slim: true }), {
           favoriteScope,
           itemType: "workflow",
         }),
@@ -585,7 +588,10 @@ export async function handleWorkflows(
     // Include auto-generated edges for UI rendering
     const edges = generateEdges(workflow.definition);
     const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
-    const [decorated] = withFavoriteFlags([workflow], { favoriteScope, itemType: "workflow" });
+    const [decorated] = await withFavoriteFlags([workflow], {
+      favoriteScope,
+      itemType: "workflow",
+    });
     getWorkflowRoute.respond(res, 200, { ...(decorated ?? workflow), edges });
     return true;
   }

@@ -42,7 +42,7 @@ export const registerSkillUpdateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getSkillById(args.skillId);
+        const existing = await getSkillById(args.skillId);
         if (!existing) {
           return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
         }

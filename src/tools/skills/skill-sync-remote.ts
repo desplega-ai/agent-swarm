@@ -38,11 +38,11 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
     async (args, requestInfo, _meta) => {
       try {
         const skills = args.skillId
-          ? (() => {
-              const skill = getSkillById(args.skillId!);
+          ? await (async () => {
+              const skill = await getSkillById(args.skillId!);
               return skill && skill.type === "remote" ? [skill] : [];
             })()
-          : listSkills({ type: "remote" });
+          : await listSkills({ type: "remote" });
 
         let updated = 0;
         const errors: string[] = [];

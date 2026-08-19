@@ -23,7 +23,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const existing = getMcpServerById(args.id);
+      const existing = await getMcpServerById(args.id);
       if (!existing) {
         return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }

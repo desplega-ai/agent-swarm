@@ -155,8 +155,8 @@ export async function handleSessions(
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
     const sessions =
       parsed.query.fields === "full"
-        ? listRecentSessions(baseOpts)
-        : listRecentSessions({ ...baseOpts, slim: true });
+        ? await listRecentSessions(baseOpts)
+        : await listRecentSessions({ ...baseOpts, slim: true });
     // Filter-aware total: same `source`/`q`/`requestedByUserId` WHERE as the
     // list query, so the UI pager reflects the filtered result set.
     const total = countSessions({
@@ -181,7 +181,7 @@ export async function handleSessions(
       jsonError(res, "Root task not found", 404);
       return true;
     }
-    const chain = getRootTaskChain(parsed.params.rootTaskId);
+    const chain = await getRootTaskChain(parsed.params.rootTaskId);
     getSession.respond(res, 200, {
       root: { ...root, ...getTaskSteeringFields(root) },
       chain: chain.map((task) => ({ ...task, ...getTaskSteeringFields(task) })),

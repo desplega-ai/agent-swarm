@@ -61,8 +61,8 @@ import { jsonError } from "./utils";
  * token summaries + the last N identity events. `recentEventLimit` defaults
  * to 5 to keep the list-view response bounded.
  */
-function composeUser(userId: string, recentEventLimit = 5) {
-  const user = getUserById(userId);
+async function composeUser(userId: string, recentEventLimit = 5) {
+  const user = await getUserById(userId);
   if (!user) return null;
   return {
     ...user,
@@ -541,7 +541,8 @@ export async function handleUsers(
     const parsed = await listUsers.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const recentLimit = parsed.query.recentEvents ?? 5;
-    const users = getAllUsers().map((u) => composeUser(u.id, recentLimit));
+    const allUsers = await getAllUsers();
+    const users = await Promise.all(allUsers.map((u) => composeUser(u.id, recentLimit)));
     listUsers.respond(res, 200, { users });
     return true;
   }
@@ -555,7 +556,7 @@ export async function handleUsers(
 
     try {
       const { identities, ...userFields } = parsed.body;
-      const user = createUser(userFields);
+      const user = await createUser(userFields);
       syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
       for (const ident of identities ?? []) {
         linkIdentity(user.id, ident.kind, ident.externalId, actor);
@@ -565,7 +566,7 @@ export async function handleUsers(
           dailyBudgetUsd: userFields.dailyBudgetUsd,
         });
       }
-      const composed = composeUser(user.id);
+      const composed = await composeUser(user.id);
       createUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to create user", 500);
@@ -607,14 +608,14 @@ export async function handleUsers(
     try {
       let targetUserId: string;
       if ("userId" in parsed.body) {
-        const existing = getUserById(parsed.body.userId);
+        const existing = await getUserById(parsed.body.userId);
         if (!existing) {
           jsonError(res, "Target user not found", 404);
           return true;
         }
         targetUserId = existing.id;
       } else {
-        const created = createUser({
+        const created = await createUser({
           name: parsed.body.name,
           email: parsed.body.email,
           notes: parsed.body.notes,
@@ -626,7 +627,7 @@ export async function handleUsers(
       const ns = `integration:unmapped:${kind}`;
       deleteKv(ns, `${externalId}:meta`);
       deleteKv(ns, `${externalId}:count`);
-      const user = composeUser(targetUserId);
+      const user = await composeUser(targetUserId);
       resolveUnmapped.respond(res, 200, { user });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to resolve unmapped", 500);
@@ -638,7 +639,7 @@ export async function handleUsers(
   if (listEventsRoute.match(req.method, pathSegments)) {
     const parsed = await listEventsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getUserById(parsed.params.id)) {
+    if (!(await getUserById(parsed.params.id))) {
       jsonError(res, "User not found", 404);
       return true;
     }
@@ -656,7 +657,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
-    if (!getUserById(parsed.params.id)) {
+    if (!(await getUserById(parsed.params.id))) {
       jsonError(res, "User not found", 404);
       return true;
     }
@@ -667,7 +668,7 @@ export async function handleUsers(
       mintUserMcpTokenRoute.respond(res, 200, {
         plaintext,
         token,
-        user: composeUser(parsed.params.id),
+        user: await composeUser(parsed.params.id),
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to mint token", 500);
@@ -681,7 +682,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
-    if (!getUserById(parsed.params.id)) {
+    if (!(await getUserById(parsed.params.id))) {
       jsonError(res, "User not found", 404);
       return true;
     }
@@ -696,7 +697,7 @@ export async function handleUsers(
 
     try {
       revokeToken(parsed.params.tokenId, actor);
-      revokeUserMcpTokenRoute.respond(res, 200, { user: composeUser(parsed.params.id) });
+      revokeUserMcpTokenRoute.respond(res, 200, { user: await composeUser(parsed.params.id) });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to revoke token";
       if (message.includes("Token not found")) {
@@ -714,7 +715,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
-    if (!getUserById(parsed.params.id)) {
+    if (!(await getUserById(parsed.params.id))) {
       jsonError(res, "User not found", 404);
       return true;
     }
@@ -733,7 +734,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
-    if (!getUserById(parsed.params.id)) {
+    if (!(await getUserById(parsed.params.id))) {
       jsonError(res, "User not found", 404);
       return true;
     }
@@ -764,8 +765,8 @@ export async function handleUsers(
       jsonError(res, "Cannot merge a user into itself", 400);
       return true;
     }
-    const targetBefore = composeUser(targetId);
-    const sourceBefore = composeUser(sourceId);
+    const targetBefore = await composeUser(targetId);
+    const sourceBefore = await composeUser(sourceId);
     if (!targetBefore) {
       jsonError(res, "Target user not found", 404);
       return true;
@@ -803,7 +804,7 @@ export async function handleUsers(
       }
       if (newAliases.length > 0) {
         const merged = [...(targetBefore.emailAliases ?? []), ...newAliases];
-        updateUser(targetId, { emailAliases: merged });
+        await updateUser(targetId, { emailAliases: merged });
         for (const alias of newAliases) {
           recordIdentityEvent(targetId, "email_added", actor, null, { email: alias });
         }
@@ -811,13 +812,13 @@ export async function handleUsers(
 
       // Delete source — CASCADE cleans up any leftover external_ids row that
       // we may have missed (and clears tasks.requestedByUserId pointers).
-      deleteUser(sourceId);
+      await deleteUser(sourceId);
 
       // Single manual_merge event on target capturing the before/after rows.
       // The source row is deleted above, so carry a minimal snapshot of the
       // source user ({id, name, email}) inside the `after` payload under
       // `source` — this lets the UI render "Merged manually from X → Y".
-      const targetAfter = composeUser(targetId);
+      const targetAfter = await composeUser(targetId);
       recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
         ...targetAfter,
         source: {
@@ -829,7 +830,7 @@ export async function handleUsers(
 
       // Re-compose AFTER the event so the response surfaces the merge event in
       // recentEvents (otherwise the timeline is missing the event we just wrote).
-      mergeUsersRoute.respond(res, 200, { user: composeUser(targetId) });
+      mergeUsersRoute.respond(res, 200, { user: await composeUser(targetId) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to merge users", 500);
     }
@@ -840,7 +841,7 @@ export async function handleUsers(
   if (getUserRoute.match(req.method, pathSegments)) {
     const parsed = await getUserRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const composed = composeUser(parsed.params.id, parsed.query.recentEvents ?? 50);
+    const composed = await composeUser(parsed.params.id, parsed.query.recentEvents ?? 50);
     if (!composed) {
       jsonError(res, "User not found", 404);
       return true;
@@ -856,7 +857,7 @@ export async function handleUsers(
     const actor = getOperatorActor(req, res);
     if (!actor) return true;
 
-    const before = getUserById(parsed.params.id);
+    const before = await getUserById(parsed.params.id);
     if (!before) {
       jsonError(res, "User not found", 404);
       return true;
@@ -869,7 +870,7 @@ export async function handleUsers(
       if (metadata !== undefined) {
         update.metadata = metadata as Record<string, unknown> | null;
       }
-      const updated = updateUser(parsed.params.id, update);
+      const updated = await updateUser(parsed.params.id, update);
       if (!updated) {
         jsonError(res, "User not found", 404);
         return true;
@@ -962,7 +963,7 @@ export async function handleUsers(
         }
       }
 
-      const composed = composeUser(parsed.params.id);
+      const composed = await composeUser(parsed.params.id);
       updateUserRoute.respond(res, 200, { user: composed });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to update user", 500);

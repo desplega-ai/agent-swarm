@@ -81,7 +81,10 @@ function formatSpendSummary(ctx: BudgetRefusalContext): string {
  * (operator query against the dedup table) but a thrown error here would be
  * useless noise on the API server.
  */
-export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted: boolean): void {
+export async function emitBudgetRefusalSideEffects(
+  ctx: BudgetRefusalContext,
+  inserted: boolean,
+): Promise<void> {
   // 1. Lead-facing follow-up task (first refusal of the day only).
   if (inserted) {
     try {
@@ -90,7 +93,7 @@ export function emitBudgetRefusalSideEffects(ctx: BudgetRefusalContext, inserted
         const refusingAgent = getAgentById(ctx.agentId);
         const agentName = refusingAgent?.name || ctx.agentId.slice(0, 8);
         const userName = ctx.task.requestedByUserId
-          ? (getUserById(ctx.task.requestedByUserId)?.name ??
+          ? ((await getUserById(ctx.task.requestedByUserId))?.name ??
             ctx.task.requestedByUserId.slice(0, 8))
           : undefined;
         const taskDesc = ctx.task.task.slice(0, 200);

@@ -91,7 +91,7 @@ async function createMcpServerClient(
   serverId: string,
   context: { agentId?: string; repoId?: string; timeoutMs?: number } = {},
 ): Promise<McpHttpClient> {
-  const server = getMcpServerById(serverId);
+  const server = await getMcpServerById(serverId);
   if (!server) throw new Error("MCP server not found");
   if (!server.isEnabled) throw new Error("MCP server is disabled");
   if (server.transport === "sse") {

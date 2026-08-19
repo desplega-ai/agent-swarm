@@ -438,7 +438,7 @@ describe("mcp-server tool gates (characterization)", () => {
       ownerAgentId: LEAD_ID,
       command: "echo",
     });
-    installMcpServer(OTHER_WORKER_ID, mcpServer.id);
+    await installMcpServer(OTHER_WORKER_ID, mcpServer.id);
 
     const result = await callTool("mcp-server-uninstall", LEAD_ID, {
       mcpServerId: mcpServer.id,
