@@ -1,7 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
-  AGENT_MAX_TASKS_CONFIG_KEY,
   deleteSwarmConfig,
   getAgentById,
   getResolvedConfig,
@@ -9,9 +8,12 @@ import {
   getSwarmConfigLookupById,
   getSwarmConfigs,
   maskSecrets,
+} from "../be/db";
+import {
+  AGENT_MAX_TASKS_CONFIG_KEY,
   resetAgentMaxTasksMirror,
   upsertSwarmConfigWithPolicyMirror,
-} from "../be/db";
+} from "../be/multi-runtime";
 import { getUserGrant } from "../be/rbac-roles";
 import {
   isReservedConfigKey,

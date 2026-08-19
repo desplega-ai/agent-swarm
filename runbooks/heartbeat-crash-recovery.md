@@ -14,9 +14,10 @@ Queue-pickup liveness alarm: `src/queue-stall-alarm.ts`.
 
 ```mermaid
 flowchart TD
-  tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> detect["detectAndRemediateStalledTasks()"]
+  tick["Heartbeat tick (~90s)<br/>codeLevelTriage()"] --> expire["expireStaleRuntimeInstances() (§1a)<br/>multi-runtime only"]
+  expire --> detect["detectAndRemediateStalledTasks()"]
   detect --> health["checkWorkerHealth()<br/>busy ↔ idle (skips offline)"]
-  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ expireStaleRuntimeInstances (§1a)<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
+  health --> cleanup["cleanupStaleResources()<br/>stale sessions (30m), reviewing,<br/>inbox, mentions, workflow runs,<br/>+ reaper: escalate unreclaimed pinned resumes (§3)<br/>+ escalateStarvedPoolTasks: zero-eligible-agent pool tasks (§4)"]
   cleanup --> assign["autoAssignPoolTasks()<br/>per-task: first idle worker satisfying<br/>isAgentEligibleForTask (§4) — else leave queued"]
 
   boot["Server boot (once)"] --> reboot["runRebootSweep()<br/>in_progress w/ no session<br/>OR pre-boot stale session<br/>→ failTask + retry child<br/>(pinned to original agent when recoverable, §4)"]
@@ -43,10 +44,23 @@ the ping cadence, so an idle-but-healthy worker is never expired):
 - `countActiveRuntimeInstancesForAgent` counts only live rows, so a surviving
   runtime's `/close` takes the agent offline immediately when its siblings are
   already stale rather than waiting for a sweep.
-- `expireStaleRuntimeInstances` (in `cleanupStaleResources`) flips stale rows to
-  `offline` and, in the same transaction, marks any agent with no live runtime
-  left `offline`. An agent is never observable with zero live runtimes and an
-  available status.
+- `expireStaleRuntimeInstances` runs **first in the sweep**, before
+  `autoAssignPoolTasks`. Assigning before expiry would hand a pool task to an
+  agent the same sweep is about to mark offline, stranding it — nothing would
+  be left to poll for it. `autoAssignPoolTasks` additionally skips agents that
+  have runtime rows but none live.
+- Expiry retires stale runtimes and, in the same transaction, deletes the
+  sessions they owned and marks any agent with no live runtime left `offline`.
+  Removing the sessions matters: a crashed process would otherwise leave one
+  behind as false evidence it is still running, and the orphan sweep would
+  never reclaim its task. Once the session is gone the task follows the normal
+  orphan/stall recovery paths (§2).
+- Retired rows are **deleted, not kept**. Runtime identity is per boot, so
+  retaining them would add one row per boot per agent indefinitely; nothing
+  reads a runtime once it stops being live.
+- The whole mechanism is inert while the flag is off. After a rollback workers
+  stop refreshing their rows, and expiring them would offline agents that are
+  running fine under legacy semantics.
 
 Registration is the only path that sets a runtime back to `active`, so a
 delayed ping from a retired or unknown runtime cannot resurrect it.

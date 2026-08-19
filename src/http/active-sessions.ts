@@ -2,7 +2,6 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   cleanupAgentSessions,
-  cleanupRuntimeSessions,
   cleanupStaleSessions,
   deleteActiveSession,
   deleteActiveSessionById,
@@ -12,6 +11,7 @@ import {
   resetOrphanedInProgressTasksForAgent,
   updateActiveSessionProviderSessionId,
 } from "../be/db";
+import { cleanupRuntimeSessions } from "../be/multi-runtime";
 import { ActiveSessionSchema, AgentTaskSchema } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";

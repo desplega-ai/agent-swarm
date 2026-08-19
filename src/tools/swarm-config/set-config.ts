@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { getAgentById, maskSecrets, upsertSwarmConfigWithPolicyMirror } from "@/be/db";
+import { getAgentById, maskSecrets } from "@/be/db";
+import { upsertSwarmConfigWithPolicyMirror } from "@/be/multi-runtime";
 import {
   isReservedConfigKey,
   reservedKeyError,

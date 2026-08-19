@@ -5,7 +5,6 @@ import {
   cleanupStaleSessions,
   createTaskExtended,
   deleteActiveSession,
-  expireStaleRuntimeInstances,
   failPendingResumeIfUnclaimed,
   failTask,
   getActiveSessionForTask,
@@ -37,6 +36,7 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import { agentsWithoutLiveRuntime, expireStaleRuntimeInstances } from "../be/multi-runtime";
 import { promotePendingSteeringForTask } from "../be/steering";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -290,6 +290,11 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       staleRuntimes: 0,
     },
   };
+
+  // 0. Retire runtimes that stopped pinging, before anything reasons about
+  // which workers are alive — otherwise auto-assignment below can hand a task
+  // to an agent this same sweep is about to mark offline, stranding it.
+  findings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   detectAndRemediateStalledTasks(findings);
@@ -763,8 +768,12 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
     // re-querying per worker via shouldBlockPolling().
+    // A multi-runtime agent whose runtimes have all died still reads as idle
+    // until its rows expire; assigning to it would strand the task, since
+    // nothing is left to poll for it.
+    const withoutRuntime = agentsWithoutLiveRuntime();
     const idleWorkers = getIdleWorkersWithCapacity().filter(
-      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
+      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS && !withoutRuntime.has(w.id),
     );
     if (idleWorkers.length === 0) return;
 
@@ -967,10 +976,6 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
  */
 async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
   findings.staleCleanup.sessions = cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
-  // Retire runtimes that stopped pinging: a crashed process never reaches
-  // /close, so without this its agent would stay available with nothing
-  // serving it.
-  findings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
   findings.staleCleanup.reviewingTasks = releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );

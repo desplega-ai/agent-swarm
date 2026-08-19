@@ -10,9 +10,7 @@ import {
   getAllAgents,
   getAllAgentsWithTasks,
   getDb,
-  getRuntimeInstanceById,
   getSwarmConfigs,
-  reconcileAgentMaxTasksPolicy,
   resetEmptyPollCount,
   setAgentHarnessProvider,
   updateAgentActivity,
@@ -23,10 +21,14 @@ import {
   updateAgentProfile,
   updateAgentProvider,
   updateAgentStatus,
-  upsertRuntimeInstance,
   upsertSwarmConfig,
 } from "../be/db";
 import { createEvent } from "../be/events";
+import {
+  getRuntimeInstanceById,
+  reconcileAgentMaxTasksPolicy,
+  upsertRuntimeInstance,
+} from "../be/multi-runtime";
 import { reasoningCapability } from "../providers/reasoning-effort";
 import { ALL_CAPABILITIES, getEnabledCapabilities } from "../server";
 import { telemetry } from "../telemetry";

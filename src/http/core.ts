@@ -1,18 +1,20 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
-  countActiveRuntimeInstancesForAgent,
   getAgentById,
   getDb,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
   getTaskById,
-  markRuntimeInstanceOffline,
   shouldBlockPolling,
-  touchRuntimeInstance,
   updateAgentStatus,
 } from "../be/db";
+import {
+  countActiveRuntimeInstancesForAgent,
+  markRuntimeInstanceOffline,
+  touchRuntimeInstance,
+} from "../be/multi-runtime";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
 import { getUserGrant } from "../be/rbac-roles";
 import { initGitHub, resetGitHub } from "../github";

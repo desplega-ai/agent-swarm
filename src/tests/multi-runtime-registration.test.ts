@@ -7,20 +7,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
-  AGENT_MAX_TASKS_CONFIG_KEY,
   closeDb,
   completeTask,
-  countActiveRuntimeInstancesForAgent,
   createAgent,
   createTaskExtended,
-  expireStaleRuntimeInstances,
   getActiveSessionForTask,
   getActiveTaskCount,
   getAgentById,
-  getAgentMaxTasksConfig,
   getDb,
-  getRuntimeInstanceById,
-  getRuntimeInstancesForAgent,
   getSwarmConfigs,
   getTaskById,
   hasCapacity,
@@ -28,6 +22,14 @@ import {
   startTask,
   upsertSwarmConfig,
 } from "../be/db";
+import {
+  AGENT_MAX_TASKS_CONFIG_KEY,
+  countActiveRuntimeInstancesForAgent,
+  expireStaleRuntimeInstances,
+  getAgentMaxTasksConfig,
+  getRuntimeInstanceById,
+} from "../be/multi-runtime";
+import { runHeartbeatSweep } from "../heartbeat/heartbeat";
 import { handleActiveSessions } from "../http/active-sessions";
 import { handleAgentRegister } from "../http/agents";
 import { handleConfig } from "../http/config";
@@ -177,6 +179,36 @@ function makeAgent(maxTasks: number): string {
   return id;
 }
 
+/** Runtime rows for an agent, ordered as created (test-local: no production reader). */
+function runtimeInstancesFor(agentId: string) {
+  return getDb()
+    .prepare<{ id: string; status: string; reported_slots: number }, [string]>(
+      "SELECT id, status, reported_slots FROM runtime_instances WHERE agent_id = ? ORDER BY created_at ASC, id ASC",
+    )
+    .all(agentId)
+    .map((r) => ({ id: r.id, status: r.status, reportedSlots: r.reported_slots }));
+}
+
+async function startSessionFor(agentId: string, taskId: string, runtimeInstanceId: string) {
+  const res = await fetch(`${baseUrl}/api/active-sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
+    body: JSON.stringify({ agentId, taskId, triggerType: "task_assigned", runtimeInstanceId }),
+  });
+  await res.text();
+  return res.status;
+}
+
+async function startupCleanupFor(agentId: string) {
+  const res = await fetch(`${baseUrl}/api/active-sessions/cleanup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
+    body: JSON.stringify({ agentId }),
+  });
+  await res.text();
+  return res.status;
+}
+
 /** Backdate a runtime's last ping so liveness checks treat it as stale. */
 function makeRuntimeStale(runtimeInstanceId: string, minutesAgo = 30): void {
   const when = new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
@@ -290,7 +322,7 @@ describe("legacy mode (flag off)", () => {
     const id = crypto.randomUUID();
     await register(id, { maxTasks: 2, runtimeInstanceId: crypto.randomUUID() });
     await register(id, { maxTasks: 4, runtimeInstanceId: crypto.randomUUID() });
-    expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
+    expect(runtimeInstancesFor(id)).toHaveLength(0);
     expect(getAgentMaxTasksConfig(id)).toBeNull();
     expect(getAgentById(id)?.maxTasks).toBe(4);
   });
@@ -466,13 +498,12 @@ describe("runtime instances", () => {
     await register(id, { maxTasks: 2, runtimeInstanceId: r1 });
     await register(id, { maxTasks: 6, runtimeInstanceId: r2 });
 
-    const instances = getRuntimeInstancesForAgent(id);
+    const instances = runtimeInstancesFor(id);
     expect(instances).toHaveLength(2);
     const byId = new Map(instances.map((i) => [i.id, i]));
     expect(byId.get(r1)?.reportedSlots).toBe(2);
     expect(byId.get(r2)?.reportedSlots).toBe(6);
     for (const instance of instances) {
-      expect(instance.agentId).toBe(id);
       expect(instance.status).toBe("active");
     }
   });
@@ -484,7 +515,7 @@ describe("runtime instances", () => {
     await register(id, { maxTasks: 2, runtimeInstanceId: rt });
     await register(id, { maxTasks: 4, runtimeInstanceId: rt });
 
-    const instances = getRuntimeInstancesForAgent(id);
+    const instances = runtimeInstancesFor(id);
     expect(instances).toHaveLength(1);
     expect(instances[0]?.id).toBe(rt);
     expect(instances[0]?.reportedSlots).toBe(4);
@@ -518,7 +549,7 @@ describe("runtime instances", () => {
     const instance = getRuntimeInstanceById(rt);
     expect(instance?.agentId).toBe(owner);
     expect(instance?.reportedSlots).toBe(2);
-    expect(getRuntimeInstancesForAgent(other)).toHaveLength(0);
+    expect(runtimeInstancesFor(other)).toHaveLength(0);
   });
 
   test("registration without a runtimeInstanceId is rejected with 400 when the flag is on", async () => {
@@ -528,7 +559,7 @@ describe("runtime instances", () => {
     expect(status).toBe(400);
     expect(getAgentById(id)?.maxTasks).toBe(3);
     expect(getAgentMaxTasksConfig(id)).toBeNull();
-    expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
+    expect(runtimeInstancesFor(id)).toHaveLength(0);
   });
 
   test("an unknown agent registering without a runtimeInstanceId is rejected and never created", async () => {
@@ -622,7 +653,7 @@ describe("runtime-aware close", () => {
     expect(await closeRuntime(id)).toBe(400);
     expect(getAgentById(id)?.status).toBe("idle");
     expect(getAgentById(id)?.maxTasks).toBe(3);
-    expect(getRuntimeInstancesForAgent(id)).toHaveLength(0);
+    expect(runtimeInstancesFor(id)).toHaveLength(0);
   });
 
   test("transition: a pre-enablement worker's id-less close cannot take the agent offline", async () => {
@@ -759,7 +790,7 @@ describe("runtime liveness via ping", () => {
 
     expect(await pingAgent(id, crypto.randomUUID())).toBe(204);
     expect(getAgentById(id)?.status).toBe("offline");
-    expect(getRuntimeInstancesForAgent(id)).toHaveLength(1);
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
   });
 
   test("a foreign runtime id cannot drive the presenting agent's status", async () => {
@@ -889,7 +920,8 @@ describe("stale runtime liveness", () => {
     const result = expireStaleRuntimeInstances();
     expect(result.expired).toBe(1);
     expect(result.agentsOffline).toBe(1);
-    expect(getRuntimeInstanceById(rA)?.status).toBe("offline");
+    // Retired runtimes are pruned rather than accumulating one row per boot.
+    expect(getRuntimeInstanceById(rA)).toBeNull();
     expect(getAgentById(id)?.status).toBe("offline");
   });
 
@@ -1007,30 +1039,8 @@ describe("logical policy seeding", () => {
 });
 
 describe("sibling runtime session safety", () => {
-  async function startSession(agentId: string, taskId: string, runtimeInstanceId: string) {
-    const res = await fetch(`${baseUrl}/api/active-sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
-      body: JSON.stringify({
-        agentId,
-        taskId,
-        triggerType: "task_assigned",
-        runtimeInstanceId,
-      }),
-    });
-    await res.text();
-    return res.status;
-  }
-
-  async function startupCleanup(agentId: string) {
-    const res = await fetch(`${baseUrl}/api/active-sessions/cleanup`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Agent-ID": agentId },
-      body: JSON.stringify({ agentId }),
-    });
-    await res.text();
-    return res.status;
-  }
+  const startSession = startSessionFor;
+  const startupCleanup = startupCleanupFor;
 
   test("starting a second runtime leaves the first runtime's live session and task alone", async () => {
     const id = makeAgent(3);
@@ -1079,5 +1089,125 @@ describe("sibling runtime session safety", () => {
 
     expect(await startupCleanup(id)).toBe(200);
     expect(getActiveSessionForTask(task.id)).toBeNull();
+  });
+});
+
+describe("rollback to legacy mode", () => {
+  test("stale runtime state is inert while the flag is off", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rA = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rA });
+
+    // Operator rolls back; workers stop refreshing their rows.
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rA);
+
+    const result = expireStaleRuntimeInstances();
+    expect(result.expired).toBe(0);
+    expect(getRuntimeInstanceById(rA)).not.toBeNull();
+    // The agent keeps running under legacy semantics.
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("a legacy agent with leftover runtime rows stays assignable", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rA = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rA });
+
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rA);
+    expireStaleRuntimeInstances();
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+});
+
+describe("runtime expiry releases what the runtime held", () => {
+  test("an expired runtime's session is removed while a sibling's is kept", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const crashed = crypto.randomUUID();
+    const live = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: crashed });
+    await register(id, { maxTasks: 1, runtimeInstanceId: live });
+
+    const crashedTask = createTaskExtended("crashed-work", { agentId: id });
+    startTask(crashedTask.id);
+    await startSessionFor(id, crashedTask.id, crashed);
+
+    const liveTask = createTaskExtended("live-work", { agentId: id });
+    startTask(liveTask.id);
+    await startSessionFor(id, liveTask.id, live);
+
+    // A replacement booting before the crash is noticed must not drop either.
+    expect(await startupCleanupFor(id)).toBe(200);
+    expect(getActiveSessionForTask(crashedTask.id)).not.toBeNull();
+    expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
+
+    makeRuntimeStale(crashed);
+    const result = expireStaleRuntimeInstances();
+    expect(result.sessionsCleaned).toBe(1);
+
+    // Only the dead runtime's session goes; its task is now visible to the
+    // normal orphan/stall recovery paths.
+    expect(getActiveSessionForTask(crashedTask.id)).toBeNull();
+    expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
+    expect(getTaskById(liveTask.id)?.status).toBe("in_progress");
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+});
+
+describe("runtime row retention", () => {
+  test("repeated boot/retire cycles do not accumulate rows", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+
+    for (let boot = 0; boot < 5; boot++) {
+      const rt = crypto.randomUUID();
+      await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+      await closeRuntime(id, rt);
+      makeRuntimeStale(rt);
+      expireStaleRuntimeInstances();
+    }
+
+    expect(runtimeInstancesFor(id)).toHaveLength(0);
+  });
+
+  test("a gracefully closed runtime is pruned once it goes stale", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await closeRuntime(id, rt);
+    // Closed rows linger only until they age out of the liveness window.
+    expect(getRuntimeInstanceById(rt)).not.toBeNull();
+
+    makeRuntimeStale(rt);
+    expireStaleRuntimeInstances();
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+  });
+});
+
+describe("heartbeat ordering vs auto-assignment", () => {
+  test("a dead runtime's agent is retired before pool assignment, leaving the task queued", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+
+    // The worker dies without /close, so the agent still looks idle.
+    makeRuntimeStale(rt);
+    expect(getAgentById(id)?.status).toBe("idle");
+
+    const task = createTaskExtended("pool-work");
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+
+    await runHeartbeatSweep();
+
+    // Expiry ran first, so the sweep never handed the task to a dead agent.
+    expect(getAgentById(id)?.status).toBe("offline");
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+    expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
   });
 });
