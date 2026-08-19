@@ -139,6 +139,15 @@ describe("automatic task pull-request attachments", () => {
 });
 
 describe("attachment-first task shipping evidence", () => {
+  const pullRequestFixtures = [
+    "https://github.com/desplega-ai/agent-swarm/pull/1207",
+    "github.com/desplega-ai/docs/pull/9/files",
+    "https://github.com/org/repo/tree/pull/123",
+    "https://github.com/org/repo/issues/1/pull/2",
+    "https://notgithub.com/o/r/pull/8",
+    "Reject https://github.com/org/repo/tree/pull/123, then accept github.com/o/r/pull/8",
+  ];
+
   test("falls back to legacy output even when a non-PR attachment exists", () => {
     const task = createTaskExtended("legacy output fallback", { agentId, source: "api" });
     insertTaskAttachment({
@@ -244,5 +253,38 @@ describe("attachment-first task shipping evidence", () => {
 
     expect(row?.hasPullRequest).toBe(0);
     expect(getTaskShippingEvidence(task.id)?.hasPullRequest).toBe(false);
+  });
+
+  test("keeps aggregate SQL and TypeScript extraction aligned for URL shapes", () => {
+    const sql = taskShippingEvidenceSql("t");
+
+    for (const evidenceSource of ["output", "attachment"] as const) {
+      for (const fixture of pullRequestFixtures) {
+        const task = createTaskExtended(`${evidenceSource} fixture: ${fixture}`, {
+          agentId,
+          source: "api",
+        });
+        if (evidenceSource === "output") {
+          getDb().prepare("UPDATE agent_tasks SET output = ? WHERE id = ?").run(fixture, task.id);
+        } else {
+          insertTaskAttachment({
+            taskId: task.id,
+            agentId,
+            name: "Fixture URL",
+            kind: "url",
+            url: fixture,
+          });
+        }
+        const aggregate = getDb()
+          .prepare<{ hasPullRequest: number }, [string]>(
+            `SELECT ${sql.hasPullRequest} AS hasPullRequest FROM agent_tasks t WHERE t.id = ?`,
+          )
+          .get(task.id);
+        const expected = extractGitHubPullRequestUrls(fixture).length > 0;
+
+        expect(Boolean(aggregate?.hasPullRequest)).toBe(expected);
+        expect(getTaskShippingEvidence(task.id)?.hasPullRequest).toBe(expected);
+      }
+    }
   });
 });

@@ -10,7 +10,7 @@ candidate_tasks(task_id, agent_id, remaining) AS (
   SELECT id, agentId, output
   FROM agent_tasks
   WHERE output IS NOT NULL
-    AND lower(output) GLOB '*github.com/*/*/pull/[0-9]*'
+    AND instr(lower(output), 'github.com/') > 0
 ),
 occurrences(task_id, agent_id, url_tail, remaining, valid_boundary) AS (
   SELECT task_id, agent_id, NULL, remaining, 0
@@ -71,6 +71,33 @@ tokens(task_id, agent_id, token) AS (
       AND valid_boundary
   )
 ),
+token_paths(task_id, agent_id, token, path) AS (
+  SELECT
+    task_id,
+    agent_id,
+    token,
+    substr(token, length('github.com/') + 1)
+  FROM tokens
+),
+token_segments(task_id, agent_id, token, owner, repo, remainder) AS (
+  SELECT
+    task_id,
+    agent_id,
+    token,
+    substr(path, 1, instr(path, '/') - 1),
+    substr(
+      substr(path, instr(path, '/') + 1),
+      1,
+      instr(substr(path, instr(path, '/') + 1), '/') - 1
+    ),
+    substr(
+      substr(path, instr(path, '/') + 1),
+      instr(substr(path, instr(path, '/') + 1), '/') + 1
+    )
+  FROM token_paths
+  WHERE instr(path, '/') > 1
+    AND instr(substr(path, instr(path, '/') + 1), '/') > 1
+),
 digit_scan(task_id, agent_id, token, position) AS (
   SELECT
     task_id,
@@ -80,8 +107,10 @@ digit_scan(task_id, agent_id, token, position) AS (
       lower('https://github.com/' || substr(token, length('github.com/') + 1)),
       '/pull/'
     ) + length('/pull/')
-  FROM tokens
-  WHERE lower(token) GLOB 'github.com/*/*/pull/[0-9]*'
+  FROM token_segments
+  WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
+    AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+    AND lower(remainder) GLOB 'pull/[0-9]*'
 
   UNION ALL
 
@@ -128,8 +157,7 @@ SELECT
   'Pull request shipped by this task',
   0
 FROM canonical_pull_requests candidate
-WHERE candidate.url GLOB 'https://github.com/*/*/pull/[0-9]*'
-  AND NOT EXISTS (
+WHERE NOT EXISTS (
     SELECT 1
     FROM task_attachments existing
     WHERE existing.task_id = candidate.task_id

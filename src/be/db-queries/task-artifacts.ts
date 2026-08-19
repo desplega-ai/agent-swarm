@@ -17,6 +17,54 @@ function taskAlias(alias: string): string {
   return alias;
 }
 
+/** Keep aggregate SQL matching aligned with extractGitHubPullRequestUrls(). */
+function githubPullRequestExistsSql(value: string): string {
+  return `EXISTS (
+    WITH RECURSIVE
+    github_occurrences(remaining, tail, valid_boundary) AS (
+      SELECT coalesce(${value}, ''), NULL, 0
+
+      UNION ALL
+
+      SELECT
+        substr(remaining, instr(lower(remaining), 'github.com/') + length('github.com/')),
+        substr(remaining, instr(lower(remaining), 'github.com/')),
+        instr(lower(remaining), 'github.com/') = 1
+          OR substr(remaining, instr(lower(remaining), 'github.com/') - 1, 1)
+            NOT GLOB '[A-Za-z0-9._-]'
+      FROM github_occurrences
+      WHERE instr(lower(remaining), 'github.com/') > 0
+    ),
+    github_paths(path) AS (
+      SELECT substr(tail, length('github.com/') + 1)
+      FROM github_occurrences
+      WHERE tail IS NOT NULL AND valid_boundary
+    ),
+    github_segments(owner, repo, remainder) AS (
+      SELECT
+        substr(path, 1, instr(path, '/') - 1),
+        substr(
+          substr(path, instr(path, '/') + 1),
+          1,
+          instr(substr(path, instr(path, '/') + 1), '/') - 1
+        ),
+        substr(
+          substr(path, instr(path, '/') + 1),
+          instr(substr(path, instr(path, '/') + 1), '/') + 1
+        )
+      FROM github_paths
+      WHERE instr(path, '/') > 1
+        AND instr(substr(path, instr(path, '/') + 1), '/') > 1
+    )
+    SELECT 1
+    FROM github_segments
+    WHERE owner NOT GLOB '*[^A-Za-z0-9._-]*'
+      AND repo NOT GLOB '*[^A-Za-z0-9._-]*'
+      AND lower(remainder) GLOB 'pull/[0-9]*'
+    LIMIT 1
+  )`;
+}
+
 /**
  * SQL expressions for aggregate task-reporting queries. Attachment rows are
  * authoritative; output matching remains a compatibility fallback while old
@@ -27,10 +75,7 @@ export function taskShippingEvidenceSql(alias = "t"): {
   hasPullRequest: string;
 } {
   const t = taskAlias(alias);
-  const outputHasPullRequest = `(
-    lower(${t}.output) GLOB 'github.com/*/*/pull/[0-9]*'
-    OR lower(${t}.output) GLOB '*[^a-z0-9._-]github.com/*/*/pull/[0-9]*'
-  )`;
+  const outputHasPullRequest = githubPullRequestExistsSql(`${t}.output`);
   const hasAnyAttachment = `EXISTS (
     SELECT 1 FROM task_attachments ta WHERE ta.task_id = ${t}.id
   )`;
@@ -38,11 +83,7 @@ export function taskShippingEvidenceSql(alias = "t"): {
     SELECT 1 FROM task_attachments ta
     WHERE ta.task_id = ${t}.id
       AND ta.kind = 'url'
-      AND (
-        lower(ta.url) GLOB 'https://github.com/*/*/pull/[0-9]*'
-        OR lower(ta.url) GLOB 'http://github.com/*/*/pull/[0-9]*'
-        OR lower(ta.url) GLOB 'github.com/*/*/pull/[0-9]*'
-      )
+      AND ${githubPullRequestExistsSql("ta.url")}
   )`;
 
   return {
