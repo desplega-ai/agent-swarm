@@ -112,7 +112,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.233
+ARG CLAUDE_CODE_VERSION=2.1.235
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -138,7 +138,7 @@ ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
 # Pinned version must match @openai/codex-sdk in package.json — enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
-ARG CODEX_VERSION=0.147.0
+ARG CODEX_VERSION=0.148.0
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @openai/codex@${CODEX_VERSION} \
