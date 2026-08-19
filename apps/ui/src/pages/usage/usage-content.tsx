@@ -414,8 +414,8 @@ export function UsageContent() {
                       )}
                     </td>
                     <td className="py-2 text-right font-mono">
-                      {row.agentsReached} agents · {row.reposReached} repos ·{" "}
-                      {row.surfacesReached} surfaces
+                      {row.agentsReached} agents · {row.reposReached} repos · {row.surfacesReached}{" "}
+                      surfaces
                     </td>
                     <td className="py-2 text-right font-mono text-muted-foreground italic">
                       not yet computed
