@@ -11,6 +11,7 @@ import {
   getAllSessionCosts,
   getAttributionByPerson,
   getDashboardCostSummary,
+  getDb,
   getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
@@ -984,6 +985,10 @@ describe("Session Costs API", () => {
         taskType: "heartbeat",
         requestedByUserId: user.id,
       });
+      const tagOnlyHeartbeat = createTaskExtended("Tag-only heartbeat", {
+        tags: ["heartbeat"],
+        requestedByUserId: user.id,
+      });
       const scheduled = createTaskExtended("Scheduled run", { source: "schedule" });
 
       createSessionCost({
@@ -1022,19 +1027,28 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
+      createSessionCost({
+        sessionId: "denom-tag-only-heartbeat",
+        taskId: tagOnlyHeartbeat.id,
+        agentId: agent.id,
+        totalCostUsd: 5.0,
+        durationMs: 1000,
+        numTurns: 1,
+        model: "opus",
+      });
 
       const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "day" });
 
-      expect(summary.totals.totalCostUsd).toBeCloseTo(10.0, 5);
+      expect(summary.totals.totalCostUsd).toBeCloseTo(15.0, 5);
       // Only the human-requested task counts as attributed — the heartbeat
       // task's stale requester doesn't count, because it's excluded entirely.
       expect(summary.totals.attributedCostUsd).toBeCloseTo(1.0, 5);
-      // Denominator drops both heartbeat variants + scheduled cost
-      // (2.0 + 4.0 + 3.0), leaving only the population that could plausibly
-      // carry a human requester.
+      // Denominator drops both heartbeat task types, the tag-only legacy
+      // representation, and scheduled cost (2.0 + 4.0 + 5.0 + 3.0), leaving
+      // only the population that could plausibly carry a human requester.
       expect(summary.totals.attributableCostUsd).toBeCloseTo(1.0, 5);
-      expect(summary.totals.excludedCostUsd).toBeCloseTo(9.0, 5);
-      expect(summary.totals.excludedTaskCount).toBe(3);
+      expect(summary.totals.excludedCostUsd).toBeCloseTo(14.0, 5);
+      expect(summary.totals.excludedTaskCount).toBe(4);
     });
   });
 
@@ -1172,6 +1186,10 @@ describe("Session Costs API", () => {
         requestedByUserId: user.id,
         taskType: "heartbeat",
       });
+      createTaskExtended("Tag-only heartbeat noise", {
+        requestedByUserId: user.id,
+        tags: ["heartbeat"],
+      });
 
       const rows = getAttributionByPerson({});
       const mine = rows.find((r) => r.userId === user.id);
@@ -1189,8 +1207,12 @@ describe("Session Costs API", () => {
       const shippedViaAttachment = createTaskExtended("Shipped via attachment", {
         requestedByUserId: user.id,
       });
+      const attachmentChild = createTaskExtended("Child with shipping evidence", {
+        parentTaskId: shippedViaAttachment.id,
+        requestedByUserId: user.id,
+      });
       insertTaskAttachment({
-        taskId: shippedViaAttachment.id,
+        taskId: attachmentChild.id,
         agentId: agent.id,
         name: "PR",
         kind: "url",
@@ -1217,12 +1239,18 @@ describe("Session Costs API", () => {
 
     test("respects the date range filter", () => {
       const user = createUser({ name: "Date Range Requester" });
-      createTaskExtended("In range", { requestedByUserId: user.id });
+      const inRange = createTaskExtended("In range", { requestedByUserId: user.id });
+      getDb()
+        .prepare("UPDATE agent_tasks SET createdAt = ? WHERE id = ?")
+        .run("2026-08-19T23:59:59.000Z", inRange.id);
 
-      const past = getAttributionByPerson({ endDate: "2000-01-01" });
+      const past = getAttributionByPerson({ endDate: "2026-08-18" });
       expect(past.find((r) => r.userId === user.id)).toBeUndefined();
 
-      const present = getAttributionByPerson({ startDate: "2000-01-01" });
+      const present = getAttributionByPerson({
+        startDate: "2026-08-19",
+        endDate: "2026-08-19",
+      });
       expect(present.find((r) => r.userId === user.id)?.problemsInitiated).toBe(1);
     });
   });

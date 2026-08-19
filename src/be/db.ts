@@ -6972,6 +6972,7 @@ export function getSessionCostSummary(opts: {
   // not FALSE, silently dropping the row from both sides of the partition.
   const HUMAN_FREE_SQL = `(
         COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
         OR COALESCE(t.source, '') = 'schedule'
         OR (COALESCE(t.source, '') = 'system' AND p.id IS NOT NULL AND p.requestedByUserId IS NULL)
       )`;
@@ -7147,12 +7148,12 @@ export interface AttributionByPersonRow {
  * requester (see `HUMAN_FREE_SQL` in `getSessionCostSummary`) are excluded —
  * neither belongs to a person.
  *
- * "Problems shipped" detection: prefers a `task_attachments` row (`kind='url'`
- * matching a GitHub PR URL, or `kind='page'` for a published artifact),
- * falling back to a PR-URL string match on `output` when no attachment row
- * exists. This does NOT detect a closed ticket (no Linear/Jira issue-state
- * table exists locally) — "shipped" undercounts ticket-only outcomes until
- * the real artifacts join (tracked separately, not in this pass) lands.
+ * "Problems shipped" detection walks each root's full task tree, preferring a
+ * `task_attachments` row (`kind='url'` matching a GitHub PR URL, or
+ * `kind='page'` for a published artifact) and falling back to a PR-URL string
+ * match on any task output. This does NOT detect a closed ticket (no
+ * Linear/Jira issue-state table exists locally) — "shipped" undercounts
+ * ticket-only outcomes until the real artifacts join lands.
  */
 export function getAttributionByPerson(opts: {
   startDate?: string;
@@ -7165,8 +7166,23 @@ export function getAttributionByPerson(opts: {
     params.push(opts.startDate);
   }
   if (opts.endDate) {
-    conditions.push("t.createdAt <= ?");
-    params.push(opts.endDate);
+    // A date-only value represents the whole UTC day. Preserve inclusive
+    // timestamp semantics for callers that provide an exact instant.
+    const dateOnlyEnd = /^\d{4}-\d{2}-\d{2}$/.test(opts.endDate)
+      ? new Date(`${opts.endDate}T00:00:00.000Z`)
+      : null;
+    if (
+      dateOnlyEnd &&
+      !Number.isNaN(dateOnlyEnd.getTime()) &&
+      dateOnlyEnd.toISOString().slice(0, 10) === opts.endDate
+    ) {
+      dateOnlyEnd.setUTCDate(dateOnlyEnd.getUTCDate() + 1);
+      conditions.push("t.createdAt < ?");
+      params.push(dateOnlyEnd.toISOString());
+    } else {
+      conditions.push("t.createdAt <= ?");
+      params.push(opts.endDate);
+    }
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
 
@@ -7177,24 +7193,45 @@ export function getAttributionByPerson(opts: {
   // work is legitimate reach, not something to exclude.
   const humanFreeSql = `(
         COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
         OR COALESCE(t.source, '') = 'schedule'
       )`;
 
   type RootRow = { userId: string; initiated: number; shipped: number };
   const rootRows = getDb()
     .prepare<RootRow, string[]>(
-      `SELECT
+      `WITH RECURSIVE task_tree(rootId, taskId, output) AS (
+        SELECT id, id, output
+        FROM agent_tasks
+        WHERE parentTaskId IS NULL
+
+        UNION ALL
+
+        SELECT tree.rootId, child.id, child.output
+        FROM agent_tasks child
+        JOIN task_tree tree ON child.parentTaskId = tree.taskId
+      )
+      SELECT
         t.requestedByUserId as userId,
         COUNT(*) as initiated,
         SUM(CASE WHEN t.status = 'completed' AND (
           EXISTS (
-            SELECT 1 FROM task_attachments ta
-            WHERE ta.task_id = t.id AND ta.kind = 'url' AND ta.url LIKE '%github.com/%/pull/%'
+            SELECT 1
+            FROM task_tree tree
+            JOIN task_attachments ta ON ta.task_id = tree.taskId
+            WHERE tree.rootId = t.id
+              AND ta.kind = 'url'
+              AND ta.url LIKE '%github.com/%/pull/%'
           )
           OR EXISTS (
-            SELECT 1 FROM task_attachments ta2 WHERE ta2.task_id = t.id AND ta2.kind = 'page'
+            SELECT 1 FROM task_attachments ta
+            JOIN task_tree tree ON tree.taskId = ta.task_id
+            WHERE tree.rootId = t.id AND ta.kind = 'page'
           )
-          OR t.output LIKE '%github.com/%/pull/%'
+          OR EXISTS (
+            SELECT 1 FROM task_tree tree
+            WHERE tree.rootId = t.id AND tree.output LIKE '%github.com/%/pull/%'
+          )
         ) THEN 1 ELSE 0 END) as shipped
       FROM agent_tasks t
       ${where} AND t.parentTaskId IS NULL AND NOT ${humanFreeSql}
