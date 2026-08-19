@@ -360,7 +360,7 @@ export async function handleSchedules(
         jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
         return true;
       }
-      if (!getWorkflow(body.workflowId)) {
+      if (!(await getWorkflow(body.workflowId))) {
         jsonError(res, `Workflow not found: ${body.workflowId}`, 400);
         return true;
       }
@@ -592,7 +592,7 @@ export async function handleSchedules(
         jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
         return true;
       }
-      if (!getWorkflow(mergedWorkflowId)) {
+      if (!(await getWorkflow(mergedWorkflowId))) {
         jsonError(res, `Workflow not found: ${mergedWorkflowId}`, 400);
         return true;
       }

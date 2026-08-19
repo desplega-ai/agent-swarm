@@ -30,7 +30,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
     },
     async ({ id, triggerData }) => {
       try {
-        const workflow = getWorkflow(id);
+        const workflow = await getWorkflow(id);
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
         }
@@ -62,7 +62,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         if (err instanceof TriggerSchemaError) {
           // Re-fetch workflow so we can echo its triggerSchema for self-correction.
           // (Workflow existence was already proven above; this is best-effort.)
-          const workflow = getWorkflow(id);
+          const workflow = await getWorkflow(id);
           const bulleted = err.validationErrors.map((e) => `- ${e}`).join("\n");
           const schemaBlock = workflow?.triggerSchema
             ? `\n\nExpected triggerSchema:\n\`\`\`json\n${JSON.stringify(workflow.triggerSchema, null, 2)}\n\`\`\``

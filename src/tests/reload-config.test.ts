@@ -74,7 +74,7 @@ function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/internal/reload-config") {
       try {
-        const updated = loadGlobalConfigsIntoEnv(true);
+        const updated = await loadGlobalConfigsIntoEnv(true);
 
         const integrations: string[] = [];
 
@@ -141,71 +141,71 @@ describe("reload-config", () => {
     expect(body.keysUpdated).toEqual([]);
   });
 
-  test("loadGlobalConfigsIntoEnv loads DB configs into process.env", () => {
+  test("loadGlobalConfigsIntoEnv loads DB configs into process.env", async () => {
     const testKey = `__TEST_RELOAD_KEY_${Date.now()}`;
     envKeysToClean.push(testKey);
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "test-value-123",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(false);
+    const updated = await loadGlobalConfigsIntoEnv(false);
     expect(updated).toContain(testKey);
     expect(process.env[testKey]).toBe("test-value-123");
   });
 
-  test("loadGlobalConfigsIntoEnv does not override existing env vars when override=false", () => {
+  test("loadGlobalConfigsIntoEnv does not override existing env vars when override=false", async () => {
     const testKey = `__TEST_NO_OVERRIDE_${Date.now()}`;
     envKeysToClean.push(testKey);
 
     process.env[testKey] = "original-value";
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "db-value",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(false);
+    const updated = await loadGlobalConfigsIntoEnv(false);
     expect(updated).not.toContain(testKey);
     expect(process.env[testKey]).toBe("original-value");
   });
 
-  test("loadGlobalConfigsIntoEnv overrides existing env vars when override=true", () => {
+  test("loadGlobalConfigsIntoEnv overrides existing env vars when override=true", async () => {
     const testKey = `__TEST_OVERRIDE_${Date.now()}`;
     envKeysToClean.push(testKey);
 
     process.env[testKey] = "original-value";
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "new-db-value",
     });
 
-    const updated = loadGlobalConfigsIntoEnv(true);
+    const updated = await loadGlobalConfigsIntoEnv(true);
     expect(updated).toContain(testKey);
     expect(process.env[testKey]).toBe("new-db-value");
   });
 
-  test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", () => {
+  test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", async () => {
     insertLegacyReservedRow("API_KEY", "legacy-api-key");
 
     delete process.env.API_KEY;
-    const updated = loadGlobalConfigsIntoEnv(true);
+    const updated = await loadGlobalConfigsIntoEnv(true);
 
     expect(updated).not.toContain("API_KEY");
     expect(process.env.API_KEY).toBeUndefined();
   });
 
-  test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", () => {
+  test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", async () => {
     const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 
     try {
       delete process.env.SECRETS_ENCRYPTION_KEY;
-      const updated = loadGlobalConfigsIntoEnv(true);
+      const updated = await loadGlobalConfigsIntoEnv(true);
       expect(updated).not.toContain("SECRETS_ENCRYPTION_KEY");
       expect(process.env.SECRETS_ENCRYPTION_KEY).toBeUndefined();
     } finally {
@@ -217,7 +217,7 @@ describe("reload-config", () => {
     const testKey = `__TEST_RELOAD_ENDPOINT_${Date.now()}`;
     envKeysToClean.push(testKey);
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "endpoint-test-value",
@@ -240,23 +240,23 @@ describe("reload-config", () => {
   // Regression: injection used to be one-way. Deleting a global row left the
   // previously-injected value live in process.env until the process restarted,
   // so "reset to default" in the dashboard silently did nothing.
-  test("deleting a global row un-injects it from process.env on reload", () => {
+  test("deleting a global row un-injects it from process.env on reload", async () => {
     const testKey = `__TEST_UNINJECT_${Date.now()}`;
     envKeysToClean.push(testKey);
     __resetInjectedEnvTracking();
     delete process.env[testKey];
 
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "from-db",
       isSecret: false,
     });
-    loadGlobalConfigsIntoEnv(true);
+    await loadGlobalConfigsIntoEnv(true);
     expect(process.env[testKey]).toBe("from-db");
 
-    deleteSwarmConfig(config.id);
-    const updated = loadGlobalConfigsIntoEnv(true);
+    await deleteSwarmConfig(config.id);
+    const updated = await loadGlobalConfigsIntoEnv(true);
 
     // Key was absent before injection → it must be absent again, and the
     // un-injection must be reported so the UI can show what changed.
@@ -264,47 +264,47 @@ describe("reload-config", () => {
     expect(updated).toContain(testKey);
   });
 
-  test("un-injection restores the pre-existing deployment env value", () => {
+  test("un-injection restores the pre-existing deployment env value", async () => {
     const testKey = `__TEST_UNINJECT_RESTORE_${Date.now()}`;
     envKeysToClean.push(testKey);
     __resetInjectedEnvTracking();
     process.env[testKey] = "from-deploy-env";
 
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "from-db",
       isSecret: false,
     });
     // override=true mirrors the reload path, where the DB wins over env.
-    loadGlobalConfigsIntoEnv(true);
+    await loadGlobalConfigsIntoEnv(true);
     expect(process.env[testKey]).toBe("from-db");
 
-    deleteSwarmConfig(config.id);
-    loadGlobalConfigsIntoEnv(true);
+    await deleteSwarmConfig(config.id);
+    await loadGlobalConfigsIntoEnv(true);
 
     expect(process.env[testKey]).toBe("from-deploy-env");
   });
 
-  test("repeated reloads keep the original pre-injection value, not the injected one", () => {
+  test("repeated reloads keep the original pre-injection value, not the injected one", async () => {
     const testKey = `__TEST_UNINJECT_STABLE_${Date.now()}`;
     envKeysToClean.push(testKey);
     __resetInjectedEnvTracking();
     process.env[testKey] = "original";
 
-    const config = upsertSwarmConfig({
+    const config = await upsertSwarmConfig({
       scope: "global",
       key: testKey,
       value: "v1",
       isSecret: false,
     });
-    loadGlobalConfigsIntoEnv(true);
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "v2", isSecret: false });
-    loadGlobalConfigsIntoEnv(true);
+    await loadGlobalConfigsIntoEnv(true);
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "v2", isSecret: false });
+    await loadGlobalConfigsIntoEnv(true);
     expect(process.env[testKey]).toBe("v2");
 
-    deleteSwarmConfig(config.id);
-    loadGlobalConfigsIntoEnv(true);
+    await deleteSwarmConfig(config.id);
+    await loadGlobalConfigsIntoEnv(true);
 
     // Must fall back to "original", NOT to the intermediate injected "v1".
     expect(process.env[testKey]).toBe("original");
@@ -329,7 +329,7 @@ describe("auto-reload debouncer", () => {
 
   test("scheduleIntegrationsReload runs reload after the debounce window", async () => {
     const testKey = `__TEST_AUTO_RELOAD_RUNS_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "fresh" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "fresh" });
     delete process.env[testKey];
 
     scheduleIntegrationsReload(50);
@@ -345,7 +345,7 @@ describe("auto-reload debouncer", () => {
 
   test("rapid scheduleIntegrationsReload calls coalesce into one reload", async () => {
     const testKey = `__TEST_COALESCE_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "v1" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "v1" });
 
     scheduleIntegrationsReload(100);
     scheduleIntegrationsReload(100);
@@ -363,7 +363,7 @@ describe("auto-reload debouncer", () => {
 
   test("schedule during in-flight reload triggers exactly one rerun", async () => {
     const testKey = `__TEST_RERUN_${Date.now()}`;
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "first" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "first" });
 
     scheduleIntegrationsReload(20);
     // Wait just past the debounce so the first reload is in-flight, then
@@ -392,7 +392,7 @@ describe("auto-reload debouncer", () => {
     delete process.env[testKey];
 
     // Simulate the upsert path's behavior: write the row, then schedule.
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "live-update" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "live-update" });
     scheduleIntegrationsReload(20);
 
     await flushPendingIntegrationsReload();
@@ -406,7 +406,7 @@ describe("auto-reload debouncer", () => {
     process.env[testKey] = "shipped-by-deploy";
 
     // Pre-existing env should win at startup, but reload uses override=true.
-    upsertSwarmConfig({ scope: "global", key: testKey, value: "from-config" });
+    await upsertSwarmConfig({ scope: "global", key: testKey, value: "from-config" });
     scheduleIntegrationsReload(20);
 
     await flushPendingIntegrationsReload();
@@ -420,12 +420,16 @@ describe("auto-reload debouncer", () => {
     delete process.env[testKey];
     __resetInjectedEnvTracking();
 
-    const config = upsertSwarmConfig({ scope: "global", key: testKey, value: "to-be-deleted" });
+    const config = await upsertSwarmConfig({
+      scope: "global",
+      key: testKey,
+      value: "to-be-deleted",
+    });
     scheduleIntegrationsReload(20);
     await flushPendingIntegrationsReload();
     expect(process.env[testKey]).toBe("to-be-deleted");
 
-    deleteSwarmConfig(config.id);
+    await deleteSwarmConfig(config.id);
     // Mimic the delete handler in src/http/config.ts.
     scheduleIntegrationsReload(20);
     await flushPendingIntegrationsReload();

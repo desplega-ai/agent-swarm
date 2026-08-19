@@ -54,9 +54,9 @@ function scriptApiReferencedScriptIds(): Set<string> {
  * `scope: "global"` nodes can never resolve an agent-scoped scratch candidate and
  * are skipped.
  */
-function workflowReferencedAgentScriptKeys(): Set<string> {
+async function workflowReferencedAgentScriptKeys(): Promise<Set<string>> {
   const keys = new Set<string>();
-  for (const workflow of listWorkflows()) {
+  for (const workflow of await listWorkflows()) {
     if (!workflow.createdByAgentId) continue;
     for (const node of workflow.definition.nodes) {
       if (node.type !== "swarm-script") continue;
@@ -80,9 +80,9 @@ function workflowReferencedAgentScriptKeys(): Set<string> {
  * the only sound static signal available; `scope: "global"` nodes are skipped for
  * the same reason as the owner-keyed variant above.
  */
-function workflowReferencedScratchNamesForOwnerlessWorkflows(): Set<string> {
+async function workflowReferencedScratchNamesForOwnerlessWorkflows(): Promise<Set<string>> {
   const names = new Set<string>();
-  for (const workflow of listWorkflows()) {
+  for (const workflow of await listWorkflows()) {
     if (workflow.createdByAgentId) continue;
     for (const node of workflow.definition.nodes) {
       if (node.type !== "swarm-script") continue;
@@ -96,7 +96,7 @@ function workflowReferencedScratchNamesForOwnerlessWorkflows(): Set<string> {
 }
 
 /** Delete auto-saved scratch scripts that have not run within the retention window. */
-export function purgeExpiredScratchScripts(now = new Date()): number {
+export async function purgeExpiredScratchScripts(now = new Date()): Promise<number> {
   const cutoff = new Date(
     now.getTime() - SCRATCH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
@@ -119,8 +119,9 @@ export function purgeExpiredScratchScripts(now = new Date()): number {
   // durable reference kinds that guard doesn't cover either.
   const referenced = appReferencedScriptIds(candidates.map((row) => row.id));
   const apiReferenced = scriptApiReferencedScriptIds();
-  const workflowReferenced = workflowReferencedAgentScriptKeys();
-  const ownerlessWorkflowReferencedNames = workflowReferencedScratchNamesForOwnerlessWorkflows();
+  const workflowReferenced = await workflowReferencedAgentScriptKeys();
+  const ownerlessWorkflowReferencedNames =
+    await workflowReferencedScratchNamesForOwnerlessWorkflows();
   const idsToDelete = candidates
     .filter((row) => !referenced.has(row.id))
     .filter((row) => !apiReferenced.has(row.id))
@@ -140,9 +141,9 @@ export function purgeExpiredScratchScripts(now = new Date()): number {
   );
 }
 
-function runScratchScriptGc(label: "Initial" | "Periodic"): void {
+async function runScratchScriptGc(label: "Initial" | "Periodic"): Promise<void> {
   try {
-    const purged = purgeExpiredScratchScripts();
+    const purged = await purgeExpiredScratchScripts();
     console.log(`[scratch-script-gc] ${label} purge removed ${purged} scratch script row(s)`);
   } catch (err) {
     console.error(`[scratch-script-gc] ${label} purge failed:`, (err as Error).message);
@@ -152,8 +153,8 @@ function runScratchScriptGc(label: "Initial" | "Periodic"): void {
 /** Start the scratch-script retention GC (daily tick, immediate first run). */
 export function startScratchScriptGc(intervalMs = SCRATCH_GC_INTERVAL_MS): void {
   if (scratchGcTimer) return;
-  runScratchScriptGc("Initial");
-  scratchGcTimer = setInterval(() => runScratchScriptGc("Periodic"), intervalMs);
+  void runScratchScriptGc("Initial");
+  scratchGcTimer = setInterval(() => void runScratchScriptGc("Periodic"), intervalMs);
   if (typeof scratchGcTimer.unref === "function") scratchGcTimer.unref();
 }
 

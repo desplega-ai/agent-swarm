@@ -167,7 +167,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     await new Promise<void>((resolve) => server.close(() => resolve()));
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }

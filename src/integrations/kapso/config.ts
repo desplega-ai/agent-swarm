@@ -43,8 +43,8 @@ export interface KapsoConfig {
  * Read a swarm-config value (global scope) by key, falling back to the process
  * env. Decryption happens inside `getSwarmConfigs`.
  */
-function readConfigValue(key: string): string | undefined {
-  const found = getSwarmConfigs({ scope: "global", key }).find(
+async function readConfigValue(key: string): Promise<string | undefined> {
+  const found = (await getSwarmConfigs({ scope: "global", key })).find(
     (c) => typeof c.value === "string" && c.value.length > 0,
   );
   if (found) return found.value;
@@ -53,13 +53,13 @@ function readConfigValue(key: string): string | undefined {
 }
 
 /** Resolve the Kapso integration config from swarm config (env fallback). */
-export function getKapsoConfig(): KapsoConfig {
-  const base = readConfigValue("KAPSO_API_BASE_URL") ?? DEFAULT_KAPSO_API_BASE_URL;
+export async function getKapsoConfig(): Promise<KapsoConfig> {
+  const base = (await readConfigValue("KAPSO_API_BASE_URL")) ?? DEFAULT_KAPSO_API_BASE_URL;
   return {
-    apiKey: readConfigValue("KAPSO_API_KEY"),
+    apiKey: await readConfigValue("KAPSO_API_KEY"),
     apiBaseUrl: base.replace(/\/+$/, ""),
-    webhookHmacSecret: readConfigValue("KAPSO_WEBHOOK_HMAC_SECRET"),
-    phoneNumberId: readConfigValue("KAPSO_PHONE_NUMBER_ID"),
+    webhookHmacSecret: await readConfigValue("KAPSO_WEBHOOK_HMAC_SECRET"),
+    phoneNumberId: await readConfigValue("KAPSO_PHONE_NUMBER_ID"),
   };
 }
 

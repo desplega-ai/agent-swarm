@@ -295,7 +295,7 @@ export async function handleMcpServers(
         return true;
       }
 
-      const configs = getResolvedConfig(parsed.params.id);
+      const configs = await getResolvedConfig(parsed.params.id);
       const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
       const serversWithSecrets = await Promise.all(

@@ -15,7 +15,7 @@ async function main() {
   // createServer() initializes the DB, so this standalone stdio transport OWNS
   // the database and serves the same gated tools as src/http — wire the RBAC
   // permission-audit sink here too (DES-445 Phase 6; plan "stdio blind spot").
-  const server = createServer();
+  const server = await createServer();
   setAuditSink(enqueueAuditRow);
   startAuditWriter();
   startAuditGc();

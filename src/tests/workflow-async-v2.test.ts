@@ -108,7 +108,7 @@ afterAll(async () => {
   // Cleanup workflows
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {}
   }
   closeDb();

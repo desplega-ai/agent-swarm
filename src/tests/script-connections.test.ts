@@ -259,7 +259,7 @@ beforeEach(() => {
   setOpenapiSpecFetchForTesting(fixtureOpenapiFetch);
 });
 
-afterEach(() => {
+afterEach(async () => {
   setOpenapiSpecFetchForTesting(null);
   openapiSpecFixtures.clear();
   globalThis.fetch = originalFetch;
@@ -278,7 +278,7 @@ afterEach(() => {
     db.run("DELETE FROM script_credential_bindings WHERE id = ?", id);
   }
   for (const id of createdConfigIds.splice(0)) {
-    deleteSwarmConfig(id);
+    await deleteSwarmConfig(id);
   }
   removeDbFiles(MIGRATION_REBUILD_DB_PATH);
 });

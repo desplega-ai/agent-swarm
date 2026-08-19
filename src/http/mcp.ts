@@ -161,10 +161,10 @@ export async function handleMcp(
         }
       };
 
-      const configValue = getResolvedConfig(agentId).find(
+      const configValue = (await getResolvedConfig(agentId)).find(
         (config) => config.key === "SCRIPTS_ONLY_MCP",
       )?.value;
-      const server = createServer({
+      const server = await createServer({
         scriptsOnly: resolveScriptsOnlyMode({
           env: process.env.SCRIPTS_ONLY_MCP,
           configValue,

@@ -198,25 +198,28 @@ const MINIMAL_DEFINITION = {
 };
 
 describe("updateWorkflow — updated_by column", () => {
-  test("direct db call: sets updated_by when provided", () => {
-    const wf = createWorkflow({
+  test("direct db call: sets updated_by when provided", async () => {
+    const wf = await createWorkflow({
       name: `audit-wf-direct-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
     expect(wf.updatedBy).toBeUndefined();
 
-    const updated = updateWorkflow(wf.id, { description: "patched", updatedBy: humanUserId });
+    const updated = await updateWorkflow(wf.id, {
+      description: "patched",
+      updatedBy: humanUserId,
+    });
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", () => {
-    const wf = createWorkflow({
+  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", async () => {
+    const wf = await createWorkflow({
       name: `audit-wf-noclobber-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
 
-    updateWorkflow(wf.id, { description: "first edit", updatedBy: humanUserId });
-    const after = updateWorkflow(wf.id, { description: "automation edit" });
+    await updateWorkflow(wf.id, { description: "first edit", updatedBy: humanUserId });
+    const after = await updateWorkflow(wf.id, { description: "automation edit" });
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -252,7 +255,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
       name: `audit-wf-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
     const automationTask = createTaskExtended("automation wf task", { agentId });
 
@@ -304,7 +307,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
       name: `audit-patch-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
     const automationTask = createTaskExtended("automation patch task", { agentId });
 
@@ -583,7 +586,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
       name: `audit-patchnode-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
     const automationTask = createTaskExtended("automation patchnode task", { agentId });
 
@@ -608,7 +611,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
       name: `audit-patchnode-foreign-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
     const otherAgent = createAgent({
       name: `audit-patchnode-other-${Date.now()}`,

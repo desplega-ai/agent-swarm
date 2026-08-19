@@ -105,7 +105,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
     ) => {
       try {
         // Check workflow exists
-        const existing = getWorkflow(id);
+        const existing = await getWorkflow(id);
         if (!existing) {
           return toolErr(`Workflow not found: ${id}`);
         }
@@ -121,13 +121,13 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
         }
 
         // Create version snapshot before applying update
-        const version = snapshotWorkflow(id, requestInfo.agentId);
+        const version = await snapshotWorkflow(id, requestInfo.agentId);
 
         const updatedBy =
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
           undefined;
         const assetKey = key === undefined ? undefined : authorizeAssetKeyWrite(key, updatedBy);
-        const workflow = updateWorkflow(id, {
+        const workflow = await updateWorkflow(id, {
           key: assetKey,
           name,
           description,

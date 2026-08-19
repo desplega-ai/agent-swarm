@@ -54,8 +54,8 @@ function buildGithubContextKey(
  * Absent key / any value other than "false" → true (cancel, current behavior).
  * Value "false" → false (skip cancel, leave task untouched).
  */
-function cancelFlagEnabled(key: string): boolean {
-  const row = getSwarmConfigs({ scope: "global", key })[0];
+async function cancelFlagEnabled(key: string): Promise<boolean> {
+  const row = (await getSwarmConfigs({ scope: "global", key }))[0];
   return row?.value !== "false";
 }
 const cancelOnUnassignEnabled = () => cancelFlagEnabled("github.cancelOnUnassign");
@@ -300,7 +300,7 @@ export async function handlePullRequest(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnUnassignEnabled()) {
+    if (!(await cancelOnUnassignEnabled())) {
       console.log(
         `[GitHub] unassign cancel disabled by config — leaving task untouched (PR #${pr.number})`,
       );
@@ -413,7 +413,7 @@ export async function handlePullRequest(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnReviewRequestRemovedEnabled()) {
+    if (!(await cancelOnReviewRequestRemovedEnabled())) {
       console.log(
         `[GitHub] review-request-removed cancel disabled by config — leaving task untouched (PR #${pr.number})`,
       );
@@ -697,7 +697,7 @@ export async function handleIssue(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnUnassignEnabled()) {
+    if (!(await cancelOnUnassignEnabled())) {
       console.log(
         `[GitHub] unassign cancel disabled by config — leaving task untouched (issue #${issue.number})`,
       );

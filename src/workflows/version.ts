@@ -10,8 +10,11 @@ import type { WorkflowSnapshot, WorkflowVersion } from "../types";
  * 2. Get max version number for this workflow
  * 3. Insert workflow_versions row with version+1 and full snapshot
  */
-export function snapshotWorkflow(workflowId: string, changedByAgentId?: string): WorkflowVersion {
-  const workflow = getWorkflow(workflowId);
+export async function snapshotWorkflow(
+  workflowId: string,
+  changedByAgentId?: string,
+): Promise<WorkflowVersion> {
+  const workflow = await getWorkflow(workflowId);
   if (!workflow) {
     throw new Error(`Workflow ${workflowId} not found — cannot create snapshot`);
   }

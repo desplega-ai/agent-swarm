@@ -106,7 +106,7 @@ export async function startWorkflowExecution(
 
   if (workflow.input) {
     try {
-      const resolved = resolveInputs(workflow.input);
+      const resolved = await resolveInputs(workflow.input);
       Object.assign(ctx, { input: resolved });
     } catch (err) {
       updateWorkflowRun(runId, {

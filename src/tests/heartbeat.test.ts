@@ -142,24 +142,24 @@ describe("Heartbeat Triage", () => {
   });
 
   describe("getActiveSessionForTask", () => {
-    test("returns active session for task", () => {
+    test("returns active session for task", async () => {
       const agent = createAgent({ name: "worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Task", { agentId: agent.id });
       startTask(task.id);
 
-      insertActiveSession({
+      await insertActiveSession({
         agentId: agent.id,
         taskId: task.id,
         triggerType: "task_assigned",
       });
 
-      const session = getActiveSessionForTask(task.id);
+      const session = await getActiveSessionForTask(task.id);
       expect(session).not.toBeNull();
       expect(session!.taskId).toBe(task.id);
     });
 
-    test("returns null when no session exists", () => {
-      const session = getActiveSessionForTask("non-existent-task-id");
+    test("returns null when no session exists", async () => {
+      const session = await getActiveSessionForTask("non-existent-task-id");
       expect(session).toBeNull();
     });
   });
@@ -184,7 +184,7 @@ describe("Heartbeat Triage", () => {
       expect(getPendingTaskForAgent(agent.id)?.id).toBe(task.id);
     });
 
-    test("does not reset tasks with active session, provider session, or fresh update", () => {
+    test("does not reset tasks with active session, provider session, or fresh update", async () => {
       const agent = createAgent({ name: "live-worker", isLead: false, status: "idle" });
       const withActiveSession = createTaskExtended("Live session task", { agentId: agent.id });
       const withProviderSession = createTaskExtended("Provider session task", {
@@ -202,7 +202,7 @@ describe("Heartbeat Triage", () => {
         withActiveSession.id,
         withProviderSession.id,
       ]);
-      insertActiveSession({
+      await insertActiveSession({
         agentId: agent.id,
         taskId: withActiveSession.id,
         triggerType: "task_assigned",
@@ -300,7 +300,7 @@ describe("Heartbeat Triage", () => {
       startTask(task.id);
 
       // Create an active session with stale heartbeat
-      insertActiveSession({
+      await insertActiveSession({
         agentId: agent.id,
         taskId: task.id,
         triggerType: "task_assigned",
@@ -338,7 +338,7 @@ describe("Heartbeat Triage", () => {
       startTask(task.id);
 
       // Create an active session with fresh heartbeat
-      insertActiveSession({
+      await insertActiveSession({
         agentId: agent.id,
         taskId: task.id,
         triggerType: "task_assigned",
@@ -619,7 +619,11 @@ describe("Heartbeat Triage", () => {
       // look recoverable and must fall to the affinity-gated pool.
       const other = createTaskExtended("Other in-progress task", { agentId: agent.id });
       startTask(other.id);
-      insertActiveSession({ agentId: agent.id, taskId: other.id, triggerType: "task_assigned" });
+      await insertActiveSession({
+        agentId: agent.id,
+        taskId: other.id,
+        triggerType: "task_assigned",
+      });
 
       const past = new Date(Date.now() - 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
@@ -652,7 +656,7 @@ describe("Heartbeat Triage", () => {
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
       // Create an active session — worker is still alive
-      insertActiveSession({
+      await insertActiveSession({
         agentId: agent.id,
         taskId: task.id,
         triggerType: "task_assigned",
@@ -863,7 +867,7 @@ describe("Heartbeat Triage", () => {
         getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
         // Session with pre-boot heartbeat (stale)
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: task.id,
           triggerType: "task_assigned",
@@ -905,7 +909,7 @@ describe("Heartbeat Triage", () => {
         getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
         // Session with post-boot heartbeat (fresh)
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: task.id,
           triggerType: "task_assigned",
@@ -949,7 +953,7 @@ describe("Heartbeat Triage", () => {
         getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, liveTask.id]);
 
         // Stale task: session heartbeated before boot
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: staleTask.id,
           triggerType: "task_assigned",
@@ -961,7 +965,7 @@ describe("Heartbeat Triage", () => {
         ]);
 
         // Live task: session heartbeated after boot
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: liveTask.id,
           triggerType: "task_assigned",
@@ -1004,7 +1008,7 @@ describe("Heartbeat Triage", () => {
         getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
         // Session exists but heartbeated long ago — should still be skipped in legacy mode
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: task.id,
           triggerType: "task_assigned",
@@ -1037,7 +1041,7 @@ describe("Heartbeat Triage", () => {
         const past = new Date(Date.now() - 60_000).toISOString();
         getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
 
-        insertActiveSession({
+        await insertActiveSession({
           agentId: agent.id,
           taskId: task.id,
           triggerType: "task_assigned",

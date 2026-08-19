@@ -42,8 +42,8 @@ export const registerListWorkflowsTool = (server: McpServer) => {
       try {
         const filters = { enabled, key, keyPrefix, consecutiveErrorsMin, lastRunStatus };
         const workflows = includeFull
-          ? listWorkflows(filters)
-          : listWorkflows(filters, { slim: true });
+          ? await listWorkflows(filters)
+          : await listWorkflows(filters, { slim: true });
         return toolOk(`Found ${workflows.length} workflow(s).`, { data: { workflows } });
       } catch (err) {
         return toolErr(String(err), { data: { workflows: [] } });

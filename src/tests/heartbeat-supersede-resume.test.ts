@@ -295,7 +295,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     const parent = createTaskExtended("Crashed worker's task", { agentId: agent.id });
     startTask(parent.id);
 
-    insertActiveSession({
+    await insertActiveSession({
       agentId: agent.id,
       taskId: parent.id,
       triggerType: "task_assigned",
@@ -430,7 +430,11 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     const parent = createTaskExtended("Crashed worker work (Case B)", { agentId: agent.id });
     startTask(parent.id);
 
-    insertActiveSession({ agentId: agent.id, taskId: parent.id, triggerType: "task_assigned" });
+    await insertActiveSession({
+      agentId: agent.id,
+      taskId: parent.id,
+      triggerType: "task_assigned",
+    });
 
     const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);

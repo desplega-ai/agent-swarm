@@ -85,7 +85,7 @@ function resolveSecrets(
 describe("MCP server resolvedEnv key mapping", () => {
   const agentId = crypto.randomUUID();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     createAgent({
       id: agentId,
       name: "test-agent",
@@ -94,21 +94,21 @@ describe("MCP server resolvedEnv key mapping", () => {
     });
 
     // Store config values for the agent
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agentId,
       key: "KEY_A",
       value: "value_a",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agentId,
       key: "KEY_B",
       value: "value_b",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agentId,
       key: "HEADER_X",

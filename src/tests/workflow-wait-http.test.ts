@@ -60,7 +60,7 @@ afterAll(async () => {
   await new Promise<void>((r) => server.close(() => r()));
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {}
   }
   closeDb();

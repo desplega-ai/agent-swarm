@@ -87,7 +87,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
     },
     async ({ id, key, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
       try {
-        const existing = getWorkflow(id);
+        const existing = await getWorkflow(id);
         if (!existing) {
           return toolErr(`Workflow not found: ${id}`);
         }
@@ -110,7 +110,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
         }
 
-        const version = snapshotWorkflow(id, requestInfo.agentId);
+        const version = await snapshotWorkflow(id, requestInfo.agentId);
 
         const updatedBy =
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
@@ -127,7 +127,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
         if (updatedBy !== undefined) {
           updateArgs.updatedBy = updatedBy;
         }
-        const workflow = updateWorkflow(id, updateArgs);
+        const workflow = await updateWorkflow(id, updateArgs);
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
         }

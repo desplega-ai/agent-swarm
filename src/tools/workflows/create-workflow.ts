@@ -134,7 +134,7 @@ export const registerCreateWorkflowTool = (server: McpServer) => {
           undefined;
         const assetKey = key ? authorizeAssetKeyWrite(key, createdBy) : undefined;
 
-        const workflow = createWorkflow(
+        const workflow = await createWorkflow(
           {
             key: assetKey,
             name,

@@ -521,7 +521,7 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
+    const globalConfigs = await getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
     const globalSetupScript = globalConfigs[0]?.value ?? null;
     getAgentSetupScript.respond(res, 200, {
       setupScript: agent.setupScript ?? null,
@@ -679,7 +679,7 @@ export async function handleAgentsRest(
     // Mirror to swarm_config (scope=agent) so the worker's reconciliation
     // loop actually reads the new value. The column above is for dashboard
     // visibility; this row is the live override.
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: parsed.params.id,
       key: "HARNESS_PROVIDER",
@@ -705,11 +705,13 @@ export async function handleAgentsRest(
       const modelForValidation =
         model !== undefined
           ? model
-          : (getSwarmConfigs({
-              scope: "agent",
-              scopeId: parsed.params.id,
-              key: "MODEL_OVERRIDE",
-            })[0]?.value ?? "");
+          : ((
+              await getSwarmConfigs({
+                scope: "agent",
+                scopeId: parsed.params.id,
+                key: "MODEL_OVERRIDE",
+              })
+            )[0]?.value ?? "");
       const capability = reasoningCapability(harness_provider, modelForValidation ?? "");
       if (!capability.levels.includes(reasoning_effort)) {
         json(
@@ -727,10 +729,14 @@ export async function handleAgentsRest(
       }
     }
 
-    const agent = getDb().transaction(() => {
-      const updated = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
-      if (!updated) return null;
-      upsertSwarmConfig({
+    // Not wrapped in a getDb().transaction() — the swarm_config writes below
+    // go through the async DbClient seam, which can't run inside a
+    // synchronous transaction callback. Each write below is independently
+    // atomic (single UPDATE/INSERT ... RETURNING); a crash mid-sequence can
+    // no longer roll back the whole PATCH as one unit.
+    const agent = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
+    if (agent) {
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: parsed.params.id,
         key: "HARNESS_PROVIDER",
@@ -743,9 +749,9 @@ export async function handleAgentsRest(
       // below — this closes a pre-existing gap (there was previously no way
       // to clear MODEL_OVERRIDE via the API).
       if (model === null) {
-        deleteSwarmConfigByKey("agent", parsed.params.id, "MODEL_OVERRIDE");
+        await deleteSwarmConfigByKey("agent", parsed.params.id, "MODEL_OVERRIDE");
       } else if (model !== undefined) {
-        upsertSwarmConfig({
+        await upsertSwarmConfig({
           scope: "agent",
           scopeId: parsed.params.id,
           key: "MODEL_OVERRIDE",
@@ -760,9 +766,9 @@ export async function handleAgentsRest(
       // the runner reads this key (Phase 3), setting it is a no-op on the
       // worker side — this phase only wires storage + validation.
       if (reasoning_effort === null) {
-        deleteSwarmConfigByKey("agent", parsed.params.id, "REASONING_EFFORT_OVERRIDE");
+        await deleteSwarmConfigByKey("agent", parsed.params.id, "REASONING_EFFORT_OVERRIDE");
       } else if (reasoning_effort !== undefined) {
-        upsertSwarmConfig({
+        await upsertSwarmConfig({
           scope: "agent",
           scopeId: parsed.params.id,
           key: "REASONING_EFFORT_OVERRIDE",
@@ -770,9 +776,7 @@ export async function handleAgentsRest(
           description: "Set via PATCH /api/agents/{id}/runtime",
         });
       }
-
-      return updated;
-    })();
+    }
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;

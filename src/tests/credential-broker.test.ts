@@ -297,7 +297,7 @@ describe("credential broker", () => {
       );
     } finally {
       getDb().run("DELETE FROM script_credential_bindings WHERE id = ?", [binding.id]);
-      deleteSwarmConfig(secretConfig.id);
+      await deleteSwarmConfig(secretConfig.id);
     }
   });
 

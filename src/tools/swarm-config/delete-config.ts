@@ -48,14 +48,14 @@ export const registerDeleteConfigTool = (server: McpServer) => {
 
       try {
         // Check if config exists first for a better error message
-        const existing = getSwarmConfigLookupById(id);
+        const existing = await getSwarmConfigLookupById(id);
         if (!existing) {
           return toolErr(`Config entry "${id}" not found.`, {
             data: { yourAgentId: requestInfo.agentId },
           });
         }
 
-        const deleted = deleteSwarmConfig(id);
+        const deleted = await deleteSwarmConfig(id);
         if (!deleted) {
           return toolErr(`Failed to delete config entry "${id}".`, {
             data: { yourAgentId: requestInfo.agentId },

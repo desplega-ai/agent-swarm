@@ -243,7 +243,7 @@ describe("validateConfigValue", () => {
 // ─── getResolvedConfig — scope precedence for HARNESS_PROVIDER ───────────────
 
 describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
-  test("agent scope wins over global scope", () => {
+  test("agent scope wins over global scope", async () => {
     const a = createAgent({
       name: "scope-test-1",
       isLead: false,
@@ -251,20 +251,20 @@ describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
       capabilities: [],
     });
 
-    upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "claude" });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "claude" });
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: a.id,
       key: "HARNESS_PROVIDER",
       value: "codex",
     });
 
-    const resolved = getResolvedConfig(a.id);
+    const resolved = await getResolvedConfig(a.id);
     const harness = resolved.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("codex");
   });
 
-  test("global scope applies when no agent-scoped row exists", () => {
+  test("global scope applies when no agent-scoped row exists", async () => {
     const a = createAgent({
       name: "scope-test-2",
       isLead: false,
@@ -272,9 +272,9 @@ describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
       capabilities: [],
     });
 
-    upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "pi" });
+    await upsertSwarmConfig({ scope: "global", key: "HARNESS_PROVIDER", value: "pi" });
 
-    const resolved = getResolvedConfig(a.id);
+    const resolved = await getResolvedConfig(a.id);
     const harness = resolved.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("pi");
   });

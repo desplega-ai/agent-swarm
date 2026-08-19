@@ -87,7 +87,7 @@ export class SwarmScriptExecutor extends BaseExecutor<
       };
     }
 
-    const workflow = this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
     const agentId = workflow?.createdByAgentId ?? agentIdFromContext(context);
     const resolved = resolveScriptSource(config, agentId);
 

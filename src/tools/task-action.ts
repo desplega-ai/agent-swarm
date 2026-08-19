@@ -333,21 +333,10 @@ export async function taskActionHandler(
           };
         }
 
-        // Reassociate session logs from pool trigger's random UUID to real task ID
-        const sessions = getActiveSessions(agentId);
-        const activeSession = sessions.find((s) => s.runnerSessionId);
-        if (activeSession?.runnerSessionId) {
-          const count = reassociateSessionLogs(activeSession.runnerSessionId, taskId);
-          if (count > 0) {
-            console.log(
-              `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
-            );
-          }
-          // Propagate provider session ID (e.g. claudeSessionId) to the task
-          if (activeSession.providerSessionId) {
-            updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
-          }
-        }
+        // Session-log reassociation is async (getActiveSessions/reassociateSessionLogs
+        // now go through the async DbClient seam) and this whole switch runs inside a
+        // synchronous getDb().transaction() callback, so it happens after txn() commits
+        // below instead of here.
 
         return {
           success: true,
@@ -561,6 +550,27 @@ export async function taskActionHandler(
   });
 
   const result = txn();
+
+  if (action === "claim" && result.success && taskId) {
+    // Reassociate session logs from pool trigger's random UUID to real task ID.
+    // Runs after the atomic claim transaction commits above — getActiveSessions/
+    // reassociateSessionLogs are async and the claim itself must stay inside the
+    // synchronous transaction.
+    const sessions = await getActiveSessions(agentId);
+    const activeSession = sessions.find((s) => s.runnerSessionId);
+    if (activeSession?.runnerSessionId) {
+      const count = await reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+      if (count > 0) {
+        console.log(
+          `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
+        );
+      }
+      // Propagate provider session ID (e.g. claudeSessionId) to the task
+      if (activeSession.providerSessionId) {
+        updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
+      }
+    }
+  }
 
   // Phase 5: when the accept gate refused, run after-commit side
   // effects (lead follow-up + workflow bus). The dedup row was recorded

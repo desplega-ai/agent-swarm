@@ -236,12 +236,12 @@ describe("store-progress handler — attachments insert path", () => {
 
     test("missing orgId/driveId fills in from global swarm config", async () => {
       clearSwarmConfig();
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
@@ -279,23 +279,23 @@ describe("store-progress handler — attachments insert path", () => {
 
     test("agent-scoped config wins over global (scope precedence)", async () => {
       clearSwarmConfig();
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: agentId,
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "agent-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: agentId,
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
@@ -365,12 +365,12 @@ describe("store-progress handler — attachments insert path", () => {
 
     test("per-row IDs always win — config defaults never overwrite explicit values", async () => {
       clearSwarmConfig();
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",
@@ -409,12 +409,12 @@ describe("store-progress handler — attachments insert path", () => {
 
     test("partial row IDs are preserved instead of mixing with config defaults", async () => {
       clearSwarmConfig();
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
         value: "global-org",
       });
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_DRIVE_ID",
         value: "global-drive",

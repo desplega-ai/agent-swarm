@@ -127,7 +127,7 @@ describe("Workflow Convergence & Active Edge Tracking (Phase 2)", () => {
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }

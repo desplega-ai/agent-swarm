@@ -236,7 +236,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
     // Clean up created workflows
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }

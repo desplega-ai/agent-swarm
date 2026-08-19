@@ -85,5 +85,5 @@ export function initWorkflows(): void {
 
   // 7. Inventory (non-blocking, informational) which enabled workflows expose
   // an open — intentionally unsigned — webhook trigger.
-  logOpenWebhookTriggers();
+  void logOpenWebhookTriggers();
 }

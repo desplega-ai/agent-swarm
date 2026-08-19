@@ -126,7 +126,7 @@ export async function dispatchScheduleTarget(
       if (!schedule.workflowId) {
         throw new Error(`Schedule "${schedule.name}" has no workflowId (targetType=workflow)`);
       }
-      const workflow = getWorkflow(schedule.workflowId);
+      const workflow = await getWorkflow(schedule.workflowId);
       if (!workflow) {
         throw new Error(`Workflow ${schedule.workflowId} not found`);
       }

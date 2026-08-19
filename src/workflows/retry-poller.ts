@@ -38,7 +38,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           const run = getWorkflowRun(step.runId);
           if (!run) continue;
 
-          const workflow = getWorkflow(run.workflowId);
+          const workflow = await getWorkflow(run.workflowId);
           if (!workflow) continue;
 
           // Find the node definition for this step

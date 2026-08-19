@@ -351,7 +351,7 @@ describe("handleWebhookTrigger", () => {
       triggers: [{ type: "webhook" }],
     });
     // Disable the workflow
-    updateWorkflow(workflow.id, { enabled: false });
+    await updateWorkflow(workflow.id, { enabled: false });
 
     try {
       await handleWebhookTrigger(workflow.id, "{}", {}, registry);
@@ -644,7 +644,7 @@ describe("handleWebhookTrigger — hmacSecret references", () => {
 
   test("hmacSecret as secret.NAME ref resolves and verifies", async () => {
     const SECRET_VALUE = "resolved-kapso-hmac-value";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "TEST_KAPSO_WEBHOOK_HMAC_SECRET",
       value: SECRET_VALUE,
@@ -862,11 +862,11 @@ describe("TriggerConfigSchema", () => {
 // ─── Boot-time open-webhook inventory ────────────────────────
 
 describe("logOpenWebhookTriggers", () => {
-  test("never throws, even with a mix of open/signed/disabled workflows", () => {
+  test("never throws, even with a mix of open/signed/disabled workflows", async () => {
     makeWorkflow({ triggers: [{ type: "webhook" }] });
     makeWorkflow({ triggers: [{ type: "webhook", hmacSecret: "s" }] });
     const disabled = makeWorkflow({ triggers: [{ type: "webhook" }] });
-    updateWorkflow(disabled.id, { enabled: false });
+    await updateWorkflow(disabled.id, { enabled: false });
 
     expect(() => logOpenWebhookTriggers()).not.toThrow();
   });

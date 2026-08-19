@@ -85,7 +85,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
         // Default the routing target to the lead when no agent/workflow is given.
         const ownerAgentId = agentId ?? (workflowId ? undefined : getLeadAgent()?.id);
 
-        const config = getKapsoConfig();
+        const config = await getKapsoConfig();
         const webhookUrl = nativeWebhookUrl();
 
         // Best-effort: point the Kapso webhook at our native handler. The KV

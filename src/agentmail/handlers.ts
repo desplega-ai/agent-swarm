@@ -207,7 +207,7 @@ export async function handleMessageReceived(
   });
 
   // Check for thread continuity - find existing task for this thread
-  const existingTask = findTaskByAgentMailThread(thread_id);
+  const existingTask = await findTaskByAgentMailThread(thread_id);
   if (existingTask) {
     const contextKey = agentmailContextKey({ threadId: thread_id });
     const siblingInFlight = ACTIVE_TASK_STATUSES.has(existingTask.status);
@@ -266,7 +266,7 @@ export async function handleMessageReceived(
   }
 
   // Look up agent from inbox mapping
-  const mapping = getAgentMailInboxMapping(inbox_id);
+  const mapping = await getAgentMailInboxMapping(inbox_id);
 
   if (mapping) {
     const agent = getAgentById(mapping.agentId);

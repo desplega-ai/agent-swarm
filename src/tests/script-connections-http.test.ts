@@ -251,7 +251,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("list returns connections without secrets", async () => {
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "VENDOR_TOKEN",
       value: SECRET_VALUE,
@@ -473,7 +473,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("detail returns operations and generated types without secrets", async () => {
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "VENDOR_TOKEN",
       value: SECRET_VALUE,

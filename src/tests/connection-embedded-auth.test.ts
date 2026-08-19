@@ -51,14 +51,14 @@ beforeEach(() => {
   process.env.MCP_BASE_URL = "http://localhost:3013";
 });
 
-afterEach(() => {
+afterEach(async () => {
   const db = getDb();
   for (const id of createdConnectionIds.splice(0)) {
     db.run("DELETE FROM script_connections WHERE id = ?", id);
   }
   db.run("DELETE FROM script_credential_bindings WHERE source = 'connection'");
   for (const key of createdConfigKeys.splice(0)) {
-    for (const row of getSwarmConfigs({ key })) deleteSwarmConfig(row.id);
+    for (const row of await getSwarmConfigs({ key })) await deleteSwarmConfig(row.id);
   }
   db.run("DELETE FROM swarm_config WHERE key = 'SCRIPT_CREDENTIAL_BINDINGS'");
   clearVolatileSecretsForTesting();
@@ -584,8 +584,8 @@ describe("embedded connection auth", () => {
     ).rejects.toThrow(/MCP connections resolve auth/);
   });
 
-  test("legacy SCRIPT_CREDENTIAL_BINDINGS blob migrates once and is idempotent", () => {
-    upsertSwarmConfig({
+  test("legacy SCRIPT_CREDENTIAL_BINDINGS blob migrates once and is idempotent", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "SCRIPT_CREDENTIAL_BINDINGS",
       value: JSON.stringify({
@@ -614,11 +614,11 @@ describe("embedded connection auth", () => {
     getDb().run("DELETE FROM script_credential_bindings WHERE config_key = 'BLOB_VENDOR_KEY'");
   });
 
-  test("agent-scoped blob entries that omit scope inherit the config row scope (no leak)", () => {
+  test("agent-scoped blob entries that omit scope inherit the config row scope (no leak)", async () => {
     // Legacy blob stored under an agent-scoped swarm_config row. The first entry
     // omits its own scope (must inherit "agent"); the second pins "global"
     // explicitly (must stay global).
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: "agent-scope-owner",
       key: "SCRIPT_CREDENTIAL_BINDINGS",

@@ -7872,11 +7872,11 @@ function writeEnvFile(configs: SwarmConfig[]): void {
 /**
  * List config entries with optional filters.
  */
-export function getSwarmConfigs(filters?: {
+export async function getSwarmConfigs(filters?: {
   scope?: string;
   scopeId?: string;
   key?: string;
-}): SwarmConfig[] {
+}): Promise<SwarmConfig[]> {
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -7896,10 +7896,8 @@ export function getSwarmConfigs(filters?: {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT * FROM swarm_config ${whereClause} ORDER BY key ASC`;
 
-  return getDb()
-    .prepare<SwarmConfigRow, string[]>(query)
-    .all(...params)
-    .map(rowToSwarmConfig);
+  const rows = await getDbClient().query<SwarmConfigRow>(query, params);
+  return rows.map(rowToSwarmConfig);
 }
 
 /**
@@ -7907,25 +7905,23 @@ export function getSwarmConfigs(filters?: {
  * Reserved env-only keys are filtered in SQL before decryption so a corrupted
  * legacy reserved row cannot block startup or reload.
  */
-export function getInjectableGlobalConfigs(): SwarmConfig[] {
-  return getDb()
-    .prepare<SwarmConfigRow, []>(
-      `SELECT * FROM swarm_config
+export async function getInjectableGlobalConfigs(): Promise<SwarmConfig[]> {
+  const rows = await getDbClient().query<SwarmConfigRow>(
+    `SELECT * FROM swarm_config
        WHERE scope = 'global'
          AND UPPER(key) NOT IN ('API_KEY', 'SECRETS_ENCRYPTION_KEY')
        ORDER BY key ASC`,
-    )
-    .all()
-    .map(rowToSwarmConfig);
+  );
+  return rows.map(rowToSwarmConfig);
 }
 
 /**
  * Get a single config entry by ID.
  */
-export function getSwarmConfigById(id: string): SwarmConfig | null {
-  const row = getDb()
-    .prepare<SwarmConfigRow, [string]>("SELECT * FROM swarm_config WHERE id = ?")
-    .get(id);
+export async function getSwarmConfigById(id: string): Promise<SwarmConfig | null> {
+  const row = await getDbClient().get<SwarmConfigRow>("SELECT * FROM swarm_config WHERE id = ?", [
+    id,
+  ]);
   return row ? rowToSwarmConfig(row) : null;
 }
 
@@ -7933,19 +7929,18 @@ export function getSwarmConfigById(id: string): SwarmConfig | null {
  * Get config metadata by ID without decrypting the value. Used by cleanup
  * paths so unreadable secret rows can still be inspected and removed.
  */
-export function getSwarmConfigLookupById(id: string): {
+export async function getSwarmConfigLookupById(id: string): Promise<{
   id: string;
   scope: "global" | "agent" | "repo";
   scopeId: string | null;
   key: string;
   isSecret: boolean;
   encrypted: boolean;
-} | null {
-  const row = getDb()
-    .prepare<SwarmConfigLookupRow, [string]>(
-      "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
-    )
-    .get(id);
+} | null> {
+  const row = await getDbClient().get<SwarmConfigLookupRow>(
+    "SELECT id, scope, scopeId, key, isSecret, encrypted FROM swarm_config WHERE id = ?",
+    [id],
+  );
   if (!row) return null;
   return {
     id: row.id,
@@ -7960,7 +7955,7 @@ export function getSwarmConfigLookupById(id: string): {
 /**
  * Upsert a config entry. Inserts or updates by (scope, scopeId, key) unique constraint.
  */
-export function upsertSwarmConfig(data: {
+export async function upsertSwarmConfig(data: {
   scope: "global" | "agent" | "repo";
   scopeId?: string | null;
   key: string;
@@ -7968,7 +7963,7 @@ export function upsertSwarmConfig(data: {
   isSecret?: boolean;
   envPath?: string | null;
   description?: string | null;
-}): SwarmConfig {
+}): Promise<SwarmConfig> {
   if (isReservedConfigKey(data.key)) {
     throw reservedKeyError(data.key);
   }
@@ -7988,52 +7983,29 @@ export function upsertSwarmConfig(data: {
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
   const existing =
     scopeId === null
-      ? getDb()
-          .prepare<{ id: string }, [string, string]>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-          )
-          .get(data.scope, data.key)
-      : getDb()
-          .prepare<{ id: string }, [string, string, string]>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-          )
-          .get(data.scope, scopeId, data.key);
+      ? await getDbClient().get<{ id: string }>(
+          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+          [data.scope, data.key],
+        )
+      : await getDbClient().get<{ id: string }>(
+          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+          [data.scope, scopeId, data.key],
+        );
 
   let row: SwarmConfigRow | null;
 
   if (existing) {
-    row = getDb()
-      .prepare<
-        SwarmConfigRow,
-        [string, number, string | null, string | null, number, string, string]
-      >(
-        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
+    row = await getDbClient().get<SwarmConfigRow>(
+      `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
-      )
-      .get(storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id);
+      [storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id],
+    );
   } else {
     const id = crypto.randomUUID();
-    row = getDb()
-      .prepare<
-        SwarmConfigRow,
-        [
-          string,
-          string,
-          string | null,
-          string,
-          string,
-          number,
-          string | null,
-          string | null,
-          string,
-          string,
-          number,
-        ]
-      >(
-        `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
+    row = await getDbClient().get<SwarmConfigRow>(
+      `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      )
-      .get(
+      [
         id,
         data.scope,
         scopeId,
@@ -8045,7 +8017,8 @@ export function upsertSwarmConfig(data: {
         now,
         now,
         encryptedFlag,
-      );
+      ],
+    );
   }
 
   if (!row) throw new Error("Failed to upsert swarm config");
@@ -8072,8 +8045,8 @@ export function upsertSwarmConfig(data: {
  * Intentionally does not decrypt or block reserved keys. Legacy rows that
  * predate hardening must remain removable through remediation paths.
  */
-export function deleteSwarmConfig(id: string): boolean {
-  const result = getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+export async function deleteSwarmConfig(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM swarm_config WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -8086,26 +8059,24 @@ export function deleteSwarmConfig(id: string): boolean {
  * NULL-safe existing-row lookup (SQLite's UNIQUE constraint treats NULL !=
  * NULL, so a plain `scopeId = ?` comparison never matches global scope).
  */
-export function deleteSwarmConfigByKey(
+export async function deleteSwarmConfigByKey(
   scope: "global" | "agent" | "repo",
   scopeId: string | null,
   key: string,
-): boolean {
+): Promise<boolean> {
   const resolvedScopeId = scope === "global" ? null : scopeId;
   const existing =
     resolvedScopeId === null
-      ? getDb()
-          .prepare<{ id: string }, [string, string]>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-          )
-          .get(scope, key)
-      : getDb()
-          .prepare<{ id: string }, [string, string, string]>(
-            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-          )
-          .get(scope, resolvedScopeId, key);
+      ? await getDbClient().get<{ id: string }>(
+          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+          [scope, key],
+        )
+      : await getDbClient().get<{ id: string }>(
+          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+          [scope, resolvedScopeId, key],
+        );
   if (!existing) return false;
-  return deleteSwarmConfig(existing.id);
+  return await deleteSwarmConfig(existing.id);
 }
 
 /**
@@ -8113,18 +8084,18 @@ export function deleteSwarmConfigByKey(
  * Scope resolution: repo > agent > global (most-specific wins).
  * Returns one entry per unique key with the most-specific scope winning.
  */
-export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfig[] {
+export async function getResolvedConfig(agentId?: string, repoId?: string): Promise<SwarmConfig[]> {
   // Start with global configs
   const configMap = new Map<string, SwarmConfig>();
 
-  const globalConfigs = getSwarmConfigs({ scope: "global" });
+  const globalConfigs = await getSwarmConfigs({ scope: "global" });
   for (const config of globalConfigs) {
     configMap.set(config.key, config);
   }
 
   // Overlay agent configs (agent wins over global)
   if (agentId) {
-    const agentConfigs = getSwarmConfigs({ scope: "agent", scopeId: agentId });
+    const agentConfigs = await getSwarmConfigs({ scope: "agent", scopeId: agentId });
     for (const config of agentConfigs) {
       configMap.set(config.key, config);
     }
@@ -8132,7 +8103,7 @@ export function getResolvedConfig(agentId?: string, repoId?: string): SwarmConfi
 
   // Overlay repo configs (repo wins over agent and global)
   if (repoId) {
-    const repoConfigs = getSwarmConfigs({ scope: "repo", scopeId: repoId });
+    const repoConfigs = await getSwarmConfigs({ scope: "repo", scopeId: repoId });
     for (const config of repoConfigs) {
       configMap.set(config.key, config);
     }
@@ -8173,7 +8144,10 @@ function rowToSwarmRepo(row: SwarmRepoRow): SwarmRepo {
   };
 }
 
-export function getSwarmRepos(filters?: { autoClone?: boolean; name?: string }): SwarmRepo[] {
+export async function getSwarmRepos(filters?: {
+  autoClone?: boolean;
+  name?: string;
+}): Promise<SwarmRepo[]> {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -8189,34 +8163,30 @@ export function getSwarmRepos(filters?: { autoClone?: boolean; name?: string }):
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const query = `SELECT * FROM swarm_repos ${whereClause} ORDER BY name ASC`;
 
-  return getDb()
-    .prepare<SwarmRepoRow, (string | number)[]>(query)
-    .all(...params)
-    .map(rowToSwarmRepo);
+  const rows = await getDbClient().query<SwarmRepoRow>(query, params);
+  return rows.map(rowToSwarmRepo);
 }
 
-export function getSwarmRepoById(id: string): SwarmRepo | null {
-  const row = getDb()
-    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE id = ?")
-    .get(id);
+export async function getSwarmRepoById(id: string): Promise<SwarmRepo | null> {
+  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE id = ?", [id]);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function getSwarmRepoByName(name: string): SwarmRepo | null {
-  const row = getDb()
-    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE name = ?")
-    .get(name);
+export async function getSwarmRepoByName(name: string): Promise<SwarmRepo | null> {
+  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE name = ?", [
+    name,
+  ]);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function getSwarmRepoByUrl(url: string): SwarmRepo | null {
-  const row = getDb()
-    .prepare<SwarmRepoRow, [string]>("SELECT * FROM swarm_repos WHERE url = ?")
-    .get(url);
+export async function getSwarmRepoByUrl(url: string): Promise<SwarmRepo | null> {
+  const row = await getDbClient().get<SwarmRepoRow>("SELECT * FROM swarm_repos WHERE url = ?", [
+    url,
+  ]);
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function createSwarmRepo(data: {
+export async function createSwarmRepo(data: {
   url: string;
   name: string;
   clonePath?: string;
@@ -8224,22 +8194,17 @@ export function createSwarmRepo(data: {
   autoClone?: boolean;
   hooks?: { enabled: boolean };
   guidelines?: RepoGuidelines | null;
-}): SwarmRepo {
+}): Promise<SwarmRepo> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const clonePath = data.clonePath || `/workspace/personal/repos/${data.name}`;
   const hooksJson = JSON.stringify(data.hooks ?? { enabled: true });
   const guidelinesJson = data.guidelines ? JSON.stringify(data.guidelines) : null;
 
-  const row = getDb()
-    .prepare<
-      SwarmRepoRow,
-      [string, string, string, string, string, number, string | null, string | null, string, string]
-    >(
-      `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
+  const row = await getDbClient().get<SwarmRepoRow>(
+    `INSERT INTO swarm_repos (id, url, name, clonePath, defaultBranch, autoClone, hooks, guidelines, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       data.url,
       data.name,
@@ -8250,13 +8215,14 @@ export function createSwarmRepo(data: {
       guidelinesJson,
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create repo");
   return rowToSwarmRepo(row);
 }
 
-export function updateSwarmRepo(
+export async function updateSwarmRepo(
   id: string,
   updates: Partial<{
     url: string;
@@ -8267,7 +8233,7 @@ export function updateSwarmRepo(
     hooks: { enabled: boolean } | null;
     guidelines: RepoGuidelines | null;
   }>,
-): SwarmRepo | null {
+): Promise<SwarmRepo | null> {
   const setClauses: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -8291,23 +8257,22 @@ export function updateSwarmRepo(
     params.push(updates.guidelines ? JSON.stringify(updates.guidelines) : null);
   }
 
-  if (setClauses.length === 0) return getSwarmRepoById(id);
+  if (setClauses.length === 0) return await getSwarmRepoById(id);
 
   setClauses.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
 
-  const row = getDb()
-    .prepare<SwarmRepoRow, (string | number | null)[]>(
-      `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<SwarmRepoRow>(
+    `UPDATE swarm_repos SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
 
   return row ? rowToSwarmRepo(row) : null;
 }
 
-export function deleteSwarmRepo(id: string): boolean {
-  const result = getDb().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
+export async function deleteSwarmRepo(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM swarm_repos WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
@@ -8323,57 +8288,56 @@ export interface AgentMailInboxMapping {
   createdAt: string;
 }
 
-export function getAgentMailInboxMapping(inboxId: string): AgentMailInboxMapping | null {
+export async function getAgentMailInboxMapping(
+  inboxId: string,
+): Promise<AgentMailInboxMapping | null> {
   return (
-    getDb()
-      .prepare<AgentMailInboxMapping, [string]>(
-        "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
-      )
-      .get(inboxId) ?? null
+    (await getDbClient().get<AgentMailInboxMapping>(
+      "SELECT * FROM agentmail_inbox_mappings WHERE inboxId = ?",
+      [inboxId],
+    )) ?? null
   );
 }
 
-export function getAgentMailInboxMappingsByAgent(agentId: string): AgentMailInboxMapping[] {
-  return getDb()
-    .prepare<AgentMailInboxMapping, [string]>(
-      "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
-    )
-    .all(agentId);
+export async function getAgentMailInboxMappingsByAgent(
+  agentId: string,
+): Promise<AgentMailInboxMapping[]> {
+  return await getDbClient().query<AgentMailInboxMapping>(
+    "SELECT * FROM agentmail_inbox_mappings WHERE agentId = ? ORDER BY createdAt DESC",
+    [agentId],
+  );
 }
 
-export function getAllAgentMailInboxMappings(): AgentMailInboxMapping[] {
-  return getDb()
-    .prepare<AgentMailInboxMapping, []>(
-      "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
-    )
-    .all();
+export async function getAllAgentMailInboxMappings(): Promise<AgentMailInboxMapping[]> {
+  return await getDbClient().query<AgentMailInboxMapping>(
+    "SELECT * FROM agentmail_inbox_mappings ORDER BY createdAt DESC",
+  );
 }
 
-export function createAgentMailInboxMapping(
+export async function createAgentMailInboxMapping(
   inboxId: string,
   agentId: string,
   inboxEmail?: string,
-): AgentMailInboxMapping {
+): Promise<AgentMailInboxMapping> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<AgentMailInboxMapping, [string, string, string, string | null, string]>(
-      `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
+  const row = await getDbClient().get<AgentMailInboxMapping>(
+    `INSERT INTO agentmail_inbox_mappings (id, inboxId, agentId, inboxEmail, createdAt)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(inboxId) DO UPDATE SET agentId = excluded.agentId, inboxEmail = excluded.inboxEmail
        RETURNING *`,
-    )
-    .get(id, inboxId, agentId, inboxEmail ?? null, now);
+    [id, inboxId, agentId, inboxEmail ?? null, now],
+  );
 
   if (!row) throw new Error("Failed to create AgentMail inbox mapping");
   return row;
 }
 
-export function deleteAgentMailInboxMapping(inboxId: string): boolean {
-  const result = getDb()
-    .prepare("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?")
-    .run(inboxId);
+export async function deleteAgentMailInboxMapping(inboxId: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM agentmail_inbox_mappings WHERE inboxId = ?", [
+    inboxId,
+  ]);
   return result.changes > 0;
 }
 
@@ -8381,15 +8345,16 @@ export function deleteAgentMailInboxMapping(inboxId: string): boolean {
  * Find the most recent task by AgentMail thread ID
  * Includes completed/failed tasks to maintain thread continuity via parentTaskId
  */
-export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask | null {
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+export async function findTaskByAgentMailThread(
+  agentmailThreadId: string,
+): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE agentmailThreadId = ?
        ORDER BY createdAt DESC
        LIMIT 1`,
-    )
-    .get(agentmailThreadId);
+    [agentmailThreadId],
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -8397,37 +8362,22 @@ export function findTaskByAgentMailThread(agentmailThreadId: string): AgentTask 
 // Active Sessions (runner session tracking for concurrency awareness)
 // ============================================================================
 
-export function insertActiveSession(session: {
+export async function insertActiveSession(session: {
   agentId: string;
   taskId?: string;
   triggerType: string;
   inboxMessageId?: string;
   taskDescription?: string;
   runnerSessionId?: string;
-}): ActiveSession {
+}): Promise<ActiveSession> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<
-      ActiveSession,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string,
-        string,
-      ]
-    >(
-      `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
+  const row = await getDbClient().get<ActiveSession>(
+    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       id,
       session.agentId,
       session.taskId ?? null,
@@ -8437,64 +8387,68 @@ export function insertActiveSession(session: {
       session.runnerSessionId ?? null,
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to insert active session");
   return row;
 }
 
-export function deleteActiveSession(taskId: string): boolean {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE taskId = ?").run(taskId);
+export async function deleteActiveSession(taskId: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM active_sessions WHERE taskId = ?", [taskId]);
   return result.changes > 0;
 }
 
-export function deleteActiveSessionById(id: string): boolean {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE id = ?").run(id);
+export async function deleteActiveSessionById(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM active_sessions WHERE id = ?", [id]);
   return result.changes > 0;
 }
 
-export function getActiveSessions(agentId?: string): ActiveSession[] {
+export async function getActiveSessions(agentId?: string): Promise<ActiveSession[]> {
   if (agentId) {
-    return getDb()
-      .prepare<ActiveSession, [string]>(
-        "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
-      )
-      .all(agentId);
+    return await getDbClient().query<ActiveSession>(
+      "SELECT * FROM active_sessions WHERE agentId = ? ORDER BY startedAt DESC",
+      [agentId],
+    );
   }
-  return getDb()
-    .prepare<ActiveSession, []>("SELECT * FROM active_sessions ORDER BY startedAt DESC")
-    .all();
+  return await getDbClient().query<ActiveSession>(
+    "SELECT * FROM active_sessions ORDER BY startedAt DESC",
+  );
 }
 
-export function heartbeatActiveSession(taskId: string): boolean {
+export async function heartbeatActiveSession(taskId: string): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = getDb()
-    .prepare("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?")
-    .run(now, taskId);
+  const result = await getDbClient().run(
+    "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
+    [now, taskId],
+  );
   return result.changes > 0;
 }
 
-export function cleanupStaleSessions(maxAgeMinutes = 30): number {
+export async function cleanupStaleSessions(maxAgeMinutes = 30): Promise<number> {
   const cutoff = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
-  const result = getDb()
-    .prepare("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?")
-    .run(cutoff);
+  const result = await getDbClient().run("DELETE FROM active_sessions WHERE lastHeartbeatAt < ?", [
+    cutoff,
+  ]);
   return result.changes;
 }
 
-export function cleanupAgentSessions(agentId: string): number {
-  const result = getDb().prepare("DELETE FROM active_sessions WHERE agentId = ?").run(agentId);
+export async function cleanupAgentSessions(agentId: string): Promise<number> {
+  const result = await getDbClient().run("DELETE FROM active_sessions WHERE agentId = ?", [
+    agentId,
+  ]);
   return result.changes;
 }
 
 /** Update providerSessionId on an active session identified by taskId */
-export function updateActiveSessionProviderSessionId(
+export async function updateActiveSessionProviderSessionId(
   taskId: string,
   providerSessionId: string,
-): boolean {
-  const result = getDb()
-    .prepare("UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?")
-    .run(providerSessionId, taskId);
+): Promise<boolean> {
+  const result = await getDbClient().run(
+    "UPDATE active_sessions SET providerSessionId = ? WHERE taskId = ?",
+    [providerSessionId, taskId],
+  );
   return result.changes > 0;
 }
 
@@ -8502,11 +8456,12 @@ export function updateActiveSessionProviderSessionId(
  * Get the active session for a specific task.
  * Used by the heartbeat to cross-reference stalled tasks with worker sessions.
  */
-export function getActiveSessionForTask(taskId: string): ActiveSession | null {
+export async function getActiveSessionForTask(taskId: string): Promise<ActiveSession | null> {
   return (
-    getDb()
-      .prepare<ActiveSession, [string]>("SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1")
-      .get(taskId) ?? null
+    (await getDbClient().get<ActiveSession>(
+      "SELECT * FROM active_sessions WHERE taskId = ? LIMIT 1",
+      [taskId],
+    )) ?? null
   );
 }
 
@@ -8516,10 +8471,14 @@ export function getActiveSessionForTask(taskId: string): ActiveSession | null {
  * this updates them to use the real task ID.
  * Idempotent — safe to call multiple times.
  */
-export function reassociateSessionLogs(runnerSessionId: string, realTaskId: string): number {
-  const result = getDb()
-    .prepare("UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?")
-    .run(realTaskId, runnerSessionId, realTaskId);
+export async function reassociateSessionLogs(
+  runnerSessionId: string,
+  realTaskId: string,
+): Promise<number> {
+  const result = await getDbClient().run(
+    "UPDATE session_logs SET taskId = ? WHERE sessionId = ? AND taskId != ?",
+    [realTaskId, runnerSessionId, realTaskId],
+  );
   return result.changes;
 }
 
@@ -8531,16 +8490,17 @@ export function reassociateSessionLogs(runnerSessionId: string, realTaskId: stri
  * Get in_progress tasks that haven't been updated within the given threshold.
  * Used by the heartbeat to detect potentially stalled tasks.
  */
-export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentTask[] {
+export async function getStalledInProgressTasks(
+  thresholdMinutes: number = 30,
+): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000).toISOString();
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE status = 'in_progress' AND lastUpdatedAt < ?
        ORDER BY lastUpdatedAt ASC`,
-    )
-    .all(cutoff)
-    .map(rowToAgentTask);
+    [cutoff],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -8575,11 +8535,10 @@ export function getStalledInProgressTasks(thresholdMinutes: number = 30): AgentT
  * Keys only on reboot-durable columns, so a pending pin survives a server reboot
  * and is caught on the first post-reboot sweep.
  */
-export function getStalePinnedResumes(graceMin: number): AgentTask[] {
+export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask[]> {
   const cutoff = new Date(Date.now() - graceMin * 60 * 1000).toISOString();
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE status = 'pending'
          AND (
            (taskType = 'resume' AND (tags LIKE '%"crash-recovery-pin"%' OR tags LIKE '%"graceful-shutdown-pin"%'))
@@ -8587,9 +8546,9 @@ export function getStalePinnedResumes(graceMin: number): AgentTask[] {
          )
          AND createdAt < ?
        ORDER BY createdAt ASC`,
-    )
-    .all(cutoff)
-    .map(rowToAgentTask);
+    [cutoff],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -8679,50 +8638,46 @@ export function getUnassignedPoolTasks(limit: number = 10, offset: number = 0): 
  * MUST separately confirm zero registered agents satisfy
  * `isAgentEligibleForTask` before escalating; this only narrows by tag age.
  */
-export function getStaleUnassignedAffinityTasks(cutoffIso: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+export async function getStaleUnassignedAffinityTasks(cutoffIso: string): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE status = 'unassigned' AND routingAffinity IS NOT NULL AND createdAt < ?
        ORDER BY createdAt ASC`,
-    )
-    .all(cutoffIso)
-    .map(rowToAgentTask);
+    [cutoffIso],
+  );
+  return rows.map(rowToAgentTask);
 }
 
-export function getRecentFailedTasks(hours: number = 6): AgentTask[] {
+export async function getRecentFailedTasks(hours: number = 6): Promise<AgentTask[]> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE status = 'failed'
          AND finishedAt > ?
        ORDER BY finishedAt DESC
        LIMIT 20`,
-    )
-    .all(since)
-    .map(rowToAgentTask);
+    [since],
+  );
+  return rows.map(rowToAgentTask);
 }
 
-export function getRecentCompletedCount(hours: number = 24): number {
+export async function getRecentCompletedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = getDb()
-    .prepare<{ count: number }, [string]>(
-      `SELECT COUNT(*) as count FROM agent_tasks
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM agent_tasks
        WHERE status = 'completed' AND finishedAt > ?`,
-    )
-    .get(since);
+    [since],
+  );
   return row?.count ?? 0;
 }
 
-export function getRecentFailedCount(hours: number = 24): number {
+export async function getRecentFailedCount(hours: number = 24): Promise<number> {
   const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-  const row = getDb()
-    .prepare<{ count: number }, [string]>(
-      `SELECT COUNT(*) as count FROM agent_tasks
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM agent_tasks
        WHERE status = 'failed' AND finishedAt > ?`,
-    )
-    .get(since);
+    [since],
+  );
   return row?.count ?? 0;
 }
 
@@ -8774,7 +8729,7 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
   };
 }
 
-export function createWorkflow(
+export async function createWorkflow(
   data: {
     key?: string;
     name: string;
@@ -8790,14 +8745,12 @@ export function createWorkflow(
     createdBy?: string;
   },
   source?: "api" | "mcp",
-): Workflow {
+): Promise<Workflow> {
   const id = crypto.randomUUID();
-  const row = getDb()
-    .prepare<WorkflowRow, (string | null)[]>(
-      `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+  const row = await getDbClient().get<WorkflowRow>(
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
       data.name,
@@ -8812,7 +8765,8 @@ export function createWorkflow(
       data.createdByAgentId ?? null,
       data.createdBy ?? null,
       data.createdBy ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create workflow");
   const workflow = rowToWorkflow(row);
   telemetry.workflow("created", {
@@ -8823,10 +8777,8 @@ export function createWorkflow(
   return workflow;
 }
 
-export function getWorkflow(id: string): Workflow | null {
-  const row = getDb()
-    .prepare<WorkflowRow, [string]>("SELECT * FROM workflows WHERE id = ?")
-    .get(id);
+export async function getWorkflow(id: string): Promise<Workflow | null> {
+  const row = await getDbClient().get<WorkflowRow>("SELECT * FROM workflows WHERE id = ?", [id]);
   return row ? rowToWorkflow(row) : null;
 }
 
@@ -8867,15 +8819,15 @@ export interface WorkflowFilters {
   keyPrefix?: string;
 }
 
-export function listWorkflows(filters?: WorkflowFilters): Workflow[];
+export function listWorkflows(filters?: WorkflowFilters): Promise<Workflow[]>;
 export function listWorkflows(
   filters: WorkflowFilters | undefined,
   opts: { slim: true },
-): WorkflowSummary[];
-export function listWorkflows(
+): Promise<WorkflowSummary[]>;
+export async function listWorkflows(
   filters?: WorkflowFilters,
   opts?: { slim?: boolean },
-): Workflow[] | WorkflowSummary[] {
+): Promise<Workflow[] | WorkflowSummary[]> {
   let query = "SELECT * FROM workflows WHERE 1=1";
   const params: (string | number)[] = [];
   if (filters?.enabled !== undefined) {
@@ -8911,13 +8863,11 @@ export function listWorkflows(
     params.push(filters.consecutiveErrorsMin);
   }
   query += " ORDER BY lastUpdatedAt DESC";
-  const rows = getDb()
-    .prepare<WorkflowRow, (string | number)[]>(query)
-    .all(...params);
+  const rows = await getDbClient().query<WorkflowRow>(query, params);
   return opts?.slim ? rows.map(rowToWorkflowSummary) : rows.map(rowToWorkflow);
 }
 
-export function updateWorkflow(
+export async function updateWorkflow(
   id: string,
   data: {
     key?: string;
@@ -8933,7 +8883,7 @@ export function updateWorkflow(
     vcsRepo?: string | null;
     updatedBy?: string;
   },
-): Workflow | null {
+): Promise<Workflow | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.key !== undefined) {
@@ -8984,35 +8934,34 @@ export function updateWorkflow(
     updates.push("updated_by = ?");
     params.push(data.updatedBy);
   }
-  if (updates.length === 0) return getWorkflow(id);
+  if (updates.length === 0) return await getWorkflow(id);
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
-    .prepare<WorkflowRow, (string | number | null)[]>(
-      `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<WorkflowRow>(
+    `UPDATE workflows SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   return row ? rowToWorkflow(row) : null;
 }
 
-export function deleteWorkflow(id: string, source?: "api" | "mcp"): boolean {
-  const db = getDb();
+export async function deleteWorkflow(id: string, source?: "api" | "mcp"): Promise<boolean> {
+  const client = getDbClient();
   // Cascade delete in FK-safe order:
   // 1. Unlink agent_tasks (they reference steps and runs)
-  db.run(
+  await client.run(
     `UPDATE agent_tasks SET workflowRunId = NULL, workflowRunStepId = NULL WHERE workflowRunId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],
   );
   // 2. Delete steps (they reference runs)
-  db.run(
+  await client.run(
     `DELETE FROM workflow_run_steps WHERE runId IN (SELECT id FROM workflow_runs WHERE workflowId = ?)`,
     [id],
   );
   // 3. Delete runs (they reference workflow)
-  db.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
+  await client.run("DELETE FROM workflow_runs WHERE workflowId = ?", [id]);
   // 4. Delete workflow
-  const result = db.run("DELETE FROM workflows WHERE id = ?", [id]);
+  const result = await client.run("DELETE FROM workflows WHERE id = ?", [id]);
   const deleted = result.changes > 0;
   if (deleted) {
     telemetry.workflow("deleted", {
@@ -9027,15 +8976,14 @@ export function deleteWorkflow(id: string, source?: "api" | "mcp"): boolean {
  * Find enabled workflows that have a schedule trigger matching the given scheduleId.
  * Uses SQLite JSON functions to query into the triggers JSON array.
  */
-export function getWorkflowsByScheduleId(scheduleId: string): Workflow[] {
-  const rows = getDb()
-    .prepare<WorkflowRow, [string]>(
-      `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
+export async function getWorkflowsByScheduleId(scheduleId: string): Promise<Workflow[]> {
+  const rows = await getDbClient().query<WorkflowRow>(
+    `SELECT w.* FROM workflows w, json_each(w.triggers) AS t
        WHERE w.enabled = 1
          AND json_extract(t.value, '$.type') = 'schedule'
          AND json_extract(t.value, '$.scheduleId') = ?`,
-    )
-    .all(scheduleId);
+    [scheduleId],
+  );
   return rows.map(rowToWorkflow);
 }
 

@@ -66,7 +66,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       const run = getWorkflowRun(runId);
       if (!run || run.status !== "running") continue;
 
-      const workflow = getWorkflow(run.workflowId);
+      const workflow = await getWorkflow(run.workflowId);
       if (!workflow) continue;
 
       const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
@@ -113,7 +113,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
   for (const stuck of stuckRuns) {
     try {
       const run = getWorkflowRun(stuck.runId);
-      const workflow = getWorkflow(stuck.workflowId);
+      const workflow = await getWorkflow(stuck.workflowId);
       if (!run || run.status !== "waiting" || !workflow) continue;
 
       const taskCompleted = stuck.taskStatus === "completed";
@@ -203,7 +203,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
   for (const stuck of stuckRuns) {
     try {
       const run = getWorkflowRun(stuck.runId);
-      const workflow = getWorkflow(stuck.workflowId);
+      const workflow = await getWorkflow(stuck.workflowId);
       if (!run || !workflow) continue;
 
       let approvalStatus = stuck.approvalStatus;

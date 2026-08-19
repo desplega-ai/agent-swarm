@@ -111,7 +111,7 @@ async function resumeFromTaskCompletion(
   if (!step || step.status !== "waiting") return;
   if (isStaleTaskEvent(step.id, event)) return;
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
   // Checkpoint: atomic step completion + context update
@@ -196,7 +196,7 @@ async function handleTaskFailure(
   if (!step || step.status !== "waiting") return;
   if (isStaleTaskEvent(step.id, event)) return;
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
   const onFailure = workflow.definition.onNodeFailure ?? "fail";
@@ -277,7 +277,7 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const run = getWorkflowRun(runId);
   if (!run || run.status !== "failed") throw new Error("Run is not in failed state");
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) throw new Error("Workflow not found");
 
   // Find the failed step
@@ -366,7 +366,7 @@ async function resumeFromApprovalResolution(
   const step = getWorkflowRunStep(event.workflowRunStepId!);
   if (!step || step.status !== "waiting") return;
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
   const ctx = (run.context ?? {}) as Record<string, unknown>;
@@ -454,7 +454,7 @@ export async function resumeWaitState(
   const step = getWorkflowRunStep(waitRow.workflowRunStepId);
   if (!step || step.status !== "waiting") return;
 
-  const workflow = getWorkflow(run.workflowId);
+  const workflow = await getWorkflow(run.workflowId);
   if (!workflow) return;
 
   // 3. Pick the output port.

@@ -129,17 +129,17 @@ describe("pagination metrics", () => {
     expect(countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
   });
 
-  test("getSwarmMetrics returns coherent aggregate counts", () => {
-    createWorkflow({
+  test("getSwarmMetrics returns coherent aggregate counts", async () => {
+    await createWorkflow({
       name: "PM Workflow A",
       definition: { nodes: [{ id: "n1", type: "raw-llm", config: {} }], onNodeFailure: "fail" },
     });
-    createWorkflow({
+    await createWorkflow({
       name: "PM Workflow B",
       definition: { nodes: [{ id: "n1", type: "raw-llm", config: {} }], onNodeFailure: "fail" },
     });
     createSkill({ name: "pm-skill", description: "test skill", content: "body" });
-    insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
+    await insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
 
     const m = getSwarmMetrics();
 

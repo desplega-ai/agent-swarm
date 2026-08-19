@@ -110,7 +110,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
 
-        const config = upsertSwarmConfig({
+        const config = await upsertSwarmConfig({
           scope,
           scopeId: scope === "global" ? null : scopeId,
           key,

@@ -57,7 +57,7 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
         }
 
         if (action === "list") {
-          const mappings = getAgentMailInboxMappingsByAgent(requestInfo.agentId);
+          const mappings = await getAgentMailInboxMappingsByAgent(requestInfo.agentId);
           const text =
             mappings.length === 0
               ? "No AgentMail inbox mappings registered."
@@ -75,7 +75,11 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
         }
 
         if (action === "register") {
-          const mapping = createAgentMailInboxMapping(inboxId, requestInfo.agentId, inboxEmail);
+          const mapping = await createAgentMailInboxMapping(
+            inboxId,
+            requestInfo.agentId,
+            inboxEmail,
+          );
           const text = `Registered inbox ${inboxId} → agent ${agent.name} (${requestInfo.agentId})`;
           return toolOk(text, {
             data: { yourAgentId: requestInfo.agentId, mappings: [mapping] },
@@ -84,14 +88,14 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
 
         if (action === "unregister") {
           // Check ownership before allowing unregister
-          const existing = getAgentMailInboxMapping(inboxId);
+          const existing = await getAgentMailInboxMapping(inboxId);
           if (existing && existing.agentId !== requestInfo.agentId) {
             return toolErr(`Cannot unregister inbox ${inboxId}: owned by another agent`, {
               data: { yourAgentId: requestInfo.agentId },
             });
           }
 
-          const deleted = deleteAgentMailInboxMapping(inboxId);
+          const deleted = await deleteAgentMailInboxMapping(inboxId);
           const text = deleted
             ? `Unregistered inbox ${inboxId}`
             : `No mapping found for inbox ${inboxId}`;

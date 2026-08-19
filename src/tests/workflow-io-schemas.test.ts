@@ -129,7 +129,7 @@ describe("Workflow I/O Schemas (Phase 3)", () => {
   afterAll(async () => {
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }

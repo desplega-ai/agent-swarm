@@ -209,7 +209,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         if (!mergedWorkflowId) {
           return toolErr("workflowId is required when targetType is 'workflow'.");
         }
-        if (!getWorkflow(mergedWorkflowId)) {
+        if (!(await getWorkflow(mergedWorkflowId))) {
           return toolErr(`Workflow not found: ${mergedWorkflowId}`);
         }
       }

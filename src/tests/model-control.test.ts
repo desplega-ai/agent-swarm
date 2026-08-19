@@ -306,51 +306,51 @@ describe("Model Control - Schedule to Task Propagation", () => {
 });
 
 describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
-  test("should resolve global MODEL_OVERRIDE config", () => {
-    upsertSwarmConfig({
+  test("should resolve global MODEL_OVERRIDE config", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "sonnet",
     });
 
-    const configs = getResolvedConfig();
+    const configs = await getResolvedConfig();
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride).toBeDefined();
     expect(modelOverride?.value).toBe("sonnet");
   });
 
-  test("agent-scoped MODEL_OVERRIDE should override global", () => {
+  test("agent-scoped MODEL_OVERRIDE should override global", async () => {
     const agent = createAgent({ name: "config-agent", isLead: false, status: "idle" });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "opus",
     });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "MODEL_OVERRIDE",
       value: "haiku",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride?.value).toBe("haiku");
     expect(modelOverride?.scope).toBe("agent");
   });
 
-  test("should fallback to global when no agent-scoped config exists", () => {
+  test("should fallback to global when no agent-scoped config exists", async () => {
     const agent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "MODEL_OVERRIDE",
       value: "sonnet",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(modelOverride?.value).toBe("sonnet");
     expect(modelOverride?.scope).toBe("global");
@@ -384,17 +384,17 @@ function resolveReasoningEffortOverride(
 }
 
 describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
-  test("agent REASONING_EFFORT_OVERRIDE resolves into ProviderSessionConfig.reasoningEffort", () => {
+  test("agent REASONING_EFFORT_OVERRIDE resolves into ProviderSessionConfig.reasoningEffort", async () => {
     const agent = createAgent({ name: "reasoning-effort-agent", isLead: false, status: "idle" });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "REASONING_EFFORT_OVERRIDE",
       value: "high",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const reasoningOverride = configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE");
     expect(reasoningOverride?.value).toBe("high");
     expect(reasoningOverride?.scope).toBe("agent");
@@ -403,20 +403,20 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
     expect(resolveReasoningEffortOverride(configs)).toBe("high");
   });
 
-  test("modelTier and REASONING_EFFORT_OVERRIDE resolve independently on the same agent", () => {
+  test("modelTier and REASONING_EFFORT_OVERRIDE resolve independently on the same agent", async () => {
     const agent = createAgent({ name: "reasoning-tier-agent", isLead: false, status: "idle" });
 
     // Agent-scoped MODEL_OVERRIDE set explicitly (rather than relying on
     // whatever global MODEL_OVERRIDE earlier tests left behind) so this test
     // deterministically exercises both axes on the same agent regardless of
     // suite execution order.
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "MODEL_OVERRIDE",
       value: "haiku",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "REASONING_EFFORT_OVERRIDE",
@@ -438,35 +438,35 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
     // The reasoningEffort axis resolves through swarm_config independently:
     // both keys resolve to their own agent-scoped values, and neither leaks
     // into the other's resolution.
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     const modelOverride = configs.find((c) => c.key === "MODEL_OVERRIDE");
     expect(resolveReasoningEffortOverride(configs)).toBe("xhigh");
     expect(modelOverride?.value).toBe("haiku");
     expect(modelOverride?.scope).toBe("agent");
   });
 
-  test("task effort overrides the agent REASONING_EFFORT_OVERRIDE fallback", () => {
+  test("task effort overrides the agent REASONING_EFFORT_OVERRIDE fallback", async () => {
     const agent = createAgent({ name: "task-effort-agent", isLead: false, status: "idle" });
     const task = createTaskExtended("Task effort beats agent default", {
       agentId: agent.id,
       effort: "low",
     });
 
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "REASONING_EFFORT_OVERRIDE",
       value: "high",
     });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     expect(resolveReasoningEffortOverride(configs, task.effort)).toBe("low");
   });
 
-  test("no REASONING_EFFORT_OVERRIDE anywhere resolves to undefined", () => {
+  test("no REASONING_EFFORT_OVERRIDE anywhere resolves to undefined", async () => {
     const agent = createAgent({ name: "reasoning-unset-agent", isLead: false, status: "idle" });
 
-    const configs = getResolvedConfig(agent.id);
+    const configs = await getResolvedConfig(agent.id);
     expect(configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
     expect(resolveReasoningEffortOverride(configs)).toBeUndefined();
   });

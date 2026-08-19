@@ -94,7 +94,7 @@ export class ForeachExecutor extends BaseExecutor<
     // before any child is dispatched — but only when there IS a post-join walk: a
     // terminal foreach (no successors) just closes the join and finalizes, so an
     // exact-cap fan-out is allowed there.
-    const workflow = this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
     const hasSuccessors = workflow
       ? getSuccessors(workflow.definition, meta.nodeId).length > 0
       : true;

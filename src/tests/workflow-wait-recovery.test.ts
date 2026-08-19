@@ -51,7 +51,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {
       // already deleted
     }

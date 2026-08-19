@@ -78,7 +78,7 @@ describe("reassociateSessionLogs", () => {
     expect(second).toBe(0);
   });
 
-  test("does not affect logs from other sessions", () => {
+  test("does not affect logs from other sessions", async () => {
     const runnerSessionId = "runner-sess-3";
     const otherSessionId = "runner-sess-other";
     const randomUuid = crypto.randomUUID();
@@ -104,7 +104,7 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Reassociate only our session
-    reassociateSessionLogs(runnerSessionId, realTaskId);
+    await reassociateSessionLogs(runnerSessionId, realTaskId);
 
     // Other session's logs should be unchanged
     const otherLogs = getSessionLogsByTaskId(otherTaskId);
@@ -133,7 +133,7 @@ describe("pool task claim flow", () => {
     expect(found).toBeDefined();
   });
 
-  test("end-to-end: pool task logs are reassociated after claim", () => {
+  test("end-to-end: pool task logs are reassociated after claim", async () => {
     const agentId = crypto.randomUUID();
     const runnerSessionId = "runner-sess-e2e";
     const effectiveTaskId = crypto.randomUUID();
@@ -146,7 +146,7 @@ describe("pool task claim flow", () => {
     expect(task.agentId).toBeNull();
 
     // 2. Simulate runner creating active session with runnerSessionId
-    insertActiveSession({
+    await insertActiveSession({
       agentId,
       taskId: effectiveTaskId,
       triggerType: "pool_tasks_available",

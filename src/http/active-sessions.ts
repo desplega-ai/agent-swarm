@@ -151,7 +151,7 @@ export async function handleActiveSessions(
   if (listActiveSessions.match(req.method, pathSegments)) {
     const parsed = await listActiveSessions.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const sessions = getActiveSessions(parsed.query.agentId || undefined);
+    const sessions = await getActiveSessions(parsed.query.agentId || undefined);
     listActiveSessions.respond(res, 200, { sessions });
     return true;
   }
@@ -159,7 +159,7 @@ export async function handleActiveSessions(
   if (createActiveSession.match(req.method, pathSegments)) {
     const parsed = await createActiveSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const session = insertActiveSession({
+    const session = await insertActiveSession({
       agentId: parsed.body.agentId,
       taskId: parsed.body.taskId,
       triggerType: parsed.body.triggerType,
@@ -174,7 +174,7 @@ export async function handleActiveSessions(
   if (deleteSessionByTask.match(req.method, pathSegments)) {
     const parsed = await deleteSessionByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = deleteActiveSession(parsed.params.taskId);
+    const deleted = await deleteActiveSession(parsed.params.taskId);
     deleteSessionByTask.respond(res, 200, { deleted });
     return true;
   }
@@ -182,7 +182,7 @@ export async function handleActiveSessions(
   if (deleteSessionById.match(req.method, pathSegments)) {
     const parsed = await deleteSessionById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = deleteActiveSessionById(parsed.params.id);
+    const deleted = await deleteActiveSessionById(parsed.params.id);
     deleteSessionById.respond(res, 200, { deleted });
     return true;
   }
@@ -190,7 +190,7 @@ export async function handleActiveSessions(
   if (heartbeatSession.match(req.method, pathSegments)) {
     const parsed = await heartbeatSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const updated = heartbeatActiveSession(parsed.params.taskId);
+    const updated = await heartbeatActiveSession(parsed.params.taskId);
     heartbeatSession.respond(res, 200, { updated });
     return true;
   }
@@ -198,7 +198,7 @@ export async function handleActiveSessions(
   if (updateProviderSession.match(req.method, pathSegments)) {
     const parsed = await updateProviderSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const updated = updateActiveSessionProviderSessionId(
+    const updated = await updateActiveSessionProviderSessionId(
       parsed.params.taskId,
       parsed.body.providerSessionId,
     );
@@ -211,9 +211,9 @@ export async function handleActiveSessions(
     if (!parsed) return true;
     let cleaned = 0;
     if (parsed.body?.agentId) {
-      cleaned = cleanupAgentSessions(parsed.body.agentId);
+      cleaned = await cleanupAgentSessions(parsed.body.agentId);
     } else {
-      cleaned = cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);
+      cleaned = await cleanupStaleSessions(parsed.body?.maxAgeMinutes ?? 30);
     }
     cleanupSessions.respond(res, 200, { cleaned });
     return true;

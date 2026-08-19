@@ -273,7 +273,7 @@ describe("scripts-only MCP gating", () => {
       isLead: false,
       status: "idle",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: scriptsOnlyAgent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -286,14 +286,14 @@ describe("scripts-only MCP gating", () => {
 
   test("uses a global config row when the agent has no override", async () => {
     const agent = createAgent({ name: "global-scripts-only-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
+    await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
     expect(await listTools(agent.id)).toEqual(SCRIPT_TOOL_NAMES);
   });
 
   test("gives a non-empty environment override precedence over an agent row", async () => {
     const agent = createAgent({ name: "env-wins-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -304,7 +304,7 @@ describe("scripts-only MCP gating", () => {
 
   test("treats an empty environment value as unset", async () => {
     const agent = createAgent({ name: "empty-env-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -314,7 +314,7 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("keeps the scripts SDK bridge's explicit full surface", async () => {
-    upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
+    await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
     await withScriptsOnlyMcpEnv("true", () => {
       const tools = (

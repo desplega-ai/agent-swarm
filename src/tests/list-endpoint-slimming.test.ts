@@ -123,8 +123,8 @@ describe("list-endpoint slimming", () => {
     expect(getAgentById(agent.id)?.avatar).toBeNull();
   });
 
-  test("listWorkflows — slim drops definition, adds nodeCount", () => {
-    createWorkflow({
+  test("listWorkflows — slim drops definition, adds nodeCount", async () => {
+    await createWorkflow({
       name: "Slim Workflow",
       definition: {
         nodes: [
@@ -135,7 +135,7 @@ describe("list-endpoint slimming", () => {
       },
     });
 
-    const slim = listWorkflows(undefined, { slim: true });
+    const slim = await listWorkflows(undefined, { slim: true });
     expect(slim.length).toBeGreaterThan(0);
     const slimWf = slim.find((w) => w.name === "Slim Workflow");
     expect(slimWf).toBeDefined();

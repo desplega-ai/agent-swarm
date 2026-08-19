@@ -16,9 +16,9 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function clearCapabilitiesRows(): void {
-  for (const row of getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })) {
-    deleteSwarmConfig(row.id);
+async function clearCapabilitiesRows(): Promise<void> {
+  for (const row of await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })) {
+    await deleteSwarmConfig(row.id);
   }
 }
 
@@ -33,8 +33,8 @@ describe("seedLegacyCapabilitiesConfig", () => {
     await removeDbFiles();
   });
 
-  afterEach(() => {
-    clearCapabilitiesRows();
+  afterEach(async () => {
+    await clearCapabilitiesRows();
     if (originalCapabilities === undefined) delete process.env.CAPABILITIES;
     else process.env.CAPABILITIES = originalCapabilities;
   });
@@ -72,9 +72,9 @@ describe("seedLegacyCapabilitiesConfig", () => {
     expect(process.env.CAPABILITIES).toBe(rows[0]!.value);
   });
 
-  test("existing global row → never touched", () => {
+  test("existing global row → never touched", async () => {
     process.env.CAPABILITIES = "core,task-pool";
-    upsertSwarmConfig({ scope: "global", key: "CAPABILITIES", value: "core" });
+    await upsertSwarmConfig({ scope: "global", key: "CAPABILITIES", value: "core" });
     const result = seedLegacyCapabilitiesConfig();
     expect(result.seeded).toBe(false);
     const rows = getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });

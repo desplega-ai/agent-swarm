@@ -50,8 +50,8 @@ import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from 
  */
 const injectedEnvOriginals = new Map<string, { original: string | undefined; injected: string }>();
 
-export function loadGlobalConfigsIntoEnv(override = false): string[] {
-  const globalConfigs = getInjectableGlobalConfigs();
+export async function loadGlobalConfigsIntoEnv(override = false): Promise<string[]> {
+  const globalConfigs = await getInjectableGlobalConfigs();
   const updated: string[] = [];
   const liveKeys = new Set<string>();
 
@@ -120,7 +120,7 @@ export type ReloadConfigResult = {
  * pick up the new values without requiring a process restart.
  */
 export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
-  const updated = loadGlobalConfigsIntoEnv(true);
+  const updated = await loadGlobalConfigsIntoEnv(true);
 
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late

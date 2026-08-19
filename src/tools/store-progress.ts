@@ -123,6 +123,27 @@ export const registerStoreProgressTool = (server: McpServer) => {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
 
+      // Resolve agent-fs default org/drive IDs from swarm config lazily —
+      // only if at least one `agent-fs` row arrives with missing IDs. Resolved
+      // BEFORE the transaction below (which must stay fully synchronous) so the
+      // attachment loop inside it can consume a plain, already-resolved value.
+      // Scope precedence is `getResolvedConfig`'s usual repo > agent > global;
+      // we pass the calling agent's id so agent-scoped overrides win. Defaults
+      // apply only when a row has neither ID: filling one missing ID would
+      // create a mismatched pair and a potentially wrong live-host URL.
+      // Env-var fallback in `constants.ts` remains the secondary path for
+      // self-hosters who deploy without a config DB.
+      let agentFsDefaults: { orgId?: string; driveId?: string } | undefined;
+      if (attachments?.some((a) => a.kind === "agent-fs" && !a.orgId && !a.driveId)) {
+        const configs = await getResolvedConfig(requestInfo.agentId ?? undefined);
+        const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
+        const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
+        agentFsDefaults = {
+          orgId: orgId && orgId.length > 0 ? orgId : undefined,
+          driveId: driveId && driveId.length > 0 ? driveId : undefined,
+        };
+      }
+
       const txn = getDb().transaction(() => {
         const agent = getAgentById(requestInfo.agentId ?? "");
 
@@ -156,34 +177,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // attachment writes don't change task state, so they're safe to
         // accept on any status.
         if (attachments && attachments.length > 0) {
-          // Resolve agent-fs default org/drive IDs from swarm config lazily —
-          // only if at least one `agent-fs` row arrives with missing IDs.
-          // Scope precedence is `getResolvedConfig`'s usual repo > agent >
-          // global; we pass the calling agent's id so agent-scoped overrides
-          // win. Defaults apply only when a row has neither ID: filling one
-          // missing ID would create a mismatched pair and a potentially wrong
-          // live-host URL. Env-var fallback in `constants.ts` remains the
-          // secondary path for self-hosters who deploy without a config DB.
-          let agentFsDefaults: { orgId?: string; driveId?: string } | null = null;
-          const resolveAgentFsDefaults = (): { orgId?: string; driveId?: string } => {
-            if (agentFsDefaults !== null) return agentFsDefaults;
-            const configs = getResolvedConfig(requestInfo.agentId ?? undefined);
-            const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
-            const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
-            agentFsDefaults = {
-              orgId: orgId && orgId.length > 0 ? orgId : undefined,
-              driveId: driveId && driveId.length > 0 ? driveId : undefined,
-            };
-            return agentFsDefaults;
-          };
-
           for (const a of attachments) {
             let orgId = a.kind === "agent-fs" ? a.orgId : undefined;
             let driveId = a.kind === "agent-fs" ? a.driveId : undefined;
             if (a.kind === "agent-fs" && !orgId && !driveId) {
-              const defaults = resolveAgentFsDefaults();
-              orgId = orgId || defaults.orgId;
-              driveId = driveId || defaults.driveId;
+              orgId = orgId || agentFsDefaults?.orgId;
+              driveId = driveId || agentFsDefaults?.driveId;
             }
 
             insertTaskAttachment({

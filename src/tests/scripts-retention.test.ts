@@ -169,7 +169,7 @@ describe("scratch script retention", () => {
     expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
   });
 
-  test("a stale scratch script referenced by an agent-scoped workflow swarm-script node survives the sweep", () => {
+  test("a stale scratch script referenced by an agent-scoped workflow swarm-script node survives the sweep", async () => {
     const wired = addScript("scratch-wf-wired-a1b2c3d4", true);
     const unwired = addScript("scratch-wf-unwired-a1b2c3d4", true);
     const wrongOwner = addScript("scratch-wf-wrongowner-a1b2c3d4", true);
@@ -221,12 +221,12 @@ describe("scratch script retention", () => {
       expect(getScript({ name: wrongOwner.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
       expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
     } finally {
-      deleteWorkflow(workflow.id);
-      deleteWorkflow(otherOwnerWorkflow.id);
+      await deleteWorkflow(workflow.id);
+      await deleteWorkflow(otherOwnerWorkflow.id);
     }
   });
 
-  test("a stale scratch script referenced by an ownerless workflow's swarm-script node survives by name alone", () => {
+  test("a stale scratch script referenced by an ownerless workflow's swarm-script node survives by name alone", async () => {
     const wired = addScript("scratch-wf-ownerless-wired-a1b2c3d4", true);
     const unwired = addScript("scratch-wf-ownerless-unwired-a1b2c3d4", true);
     const globalNode = addScript("scratch-wf-ownerless-global-a1b2c3d4", true);
@@ -263,7 +263,7 @@ describe("scratch script retention", () => {
       expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
       expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
     } finally {
-      deleteWorkflow(workflow.id);
+      await deleteWorkflow(workflow.id);
     }
   });
 

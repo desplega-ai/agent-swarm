@@ -116,10 +116,10 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(config.encrypted).toBe(false);
   });
 
-  test("roundtrip via getResolvedConfig", () => {
+  test("roundtrip via getResolvedConfig", async () => {
     const key = uniqueKey("RESOLVED_SECRET");
-    upsertSwarmConfig({ scope: "global", key, value: "resolved-plaintext", isSecret: true });
-    const resolved = getResolvedConfig();
+    await upsertSwarmConfig({ scope: "global", key, value: "resolved-plaintext", isSecret: true });
+    const resolved = await getResolvedConfig();
     const found = resolved.find((c) => c.key === key);
     expect(found).toBeDefined();
     expect(found?.value).toBe("resolved-plaintext");
@@ -173,12 +173,12 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     expect(raw?.value).not.toBe("now-secret");
   });
 
-  test("writeEnvFile writes plaintext to disk, not ciphertext", () => {
+  test("writeEnvFile writes plaintext to disk, not ciphertext", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "swarm-config-encryption-"));
     const envPath = join(tmpDir, "test.env");
     try {
       const key = uniqueKey("ENV_FILE_SECRET");
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key,
         value: "env-file-plaintext",
@@ -195,16 +195,16 @@ describe("swarm_config encryption (Phase 4) — template fast-path", () => {
     }
   });
 
-  test("loadGlobalConfigsIntoEnv-style roundtrip injects plaintext into process.env", () => {
+  test("loadGlobalConfigsIntoEnv-style roundtrip injects plaintext into process.env", async () => {
     const key = uniqueKey("ENV_INJECT_SECRET");
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key,
       value: "env-inject-plaintext",
       isSecret: true,
     });
     // Mirror of loadGlobalConfigsIntoEnv in src/http/core.ts
-    const resolved = getResolvedConfig();
+    const resolved = await getResolvedConfig();
     for (const c of resolved) {
       if (c.key === key) {
         process.env[c.key] = c.value;
@@ -285,7 +285,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     expect(rowsStillPlain?.c).toBe(0);
   });
 
-  test("tamper: corrupting a ciphertext byte produces a clear, key-named error", () => {
+  test("tamper: corrupting a ciphertext byte produces a clear, key-named error", async () => {
     const config = upsertSwarmConfig({
       scope: "global",
       key: "TAMPER_TARGET",
@@ -306,7 +306,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
     expect(() => getSwarmConfigById(config.id)).toThrow(/Failed to decrypt config 'TAMPER_TARGET'/);
 
     // Clean up so subsequent tests don't trip over this row.
-    deleteSwarmConfig(config.id);
+    await deleteSwarmConfig(config.id);
   });
 
   test("wrong key: rotating key without re-encryption produces clear error on read", () => {
@@ -352,7 +352,7 @@ describe("swarm_config encryption (Phase 4) — raw SQL tampering", () => {
       process.env.SECRETS_ENCRYPTION_KEY = FIXTURE_KEY_B64;
       initDb(dbPath);
 
-      upsertSwarmConfig({
+      await upsertSwarmConfig({
         scope: "global",
         key: "EXISTING_SECRET_BEFORE_RESTART",
         value: "should-require-original-key",

@@ -487,7 +487,7 @@ export async function handleWorkflows(
   if (listWorkflowVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -514,13 +514,13 @@ export async function handleWorkflows(
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(listWorkflows(filters), { favoriteScope, itemType: "workflow" }),
+        withFavoriteFlags(await listWorkflows(filters), { favoriteScope, itemType: "workflow" }),
       );
     } else {
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(listWorkflows(filters, { slim: true }), {
+        withFavoriteFlags(await listWorkflows(filters, { slim: true }), {
           favoriteScope,
           itemType: "workflow",
         }),
@@ -552,7 +552,7 @@ export async function handleWorkflows(
       throw error;
     }
 
-    const workflow = createWorkflow(
+    const workflow = await createWorkflow(
       {
         key,
         name: parsed.body.name,
@@ -576,7 +576,7 @@ export async function handleWorkflows(
   if (getWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -596,7 +596,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
 
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -621,13 +621,13 @@ export async function handleWorkflows(
     }
 
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update
     }
 
     const updatedBy0 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
-    const workflow = updateWorkflow(id, {
+    const workflow = await updateWorkflow(id, {
       definition: patchResult.definition,
       updatedBy: updatedBy0,
     });
@@ -645,7 +645,7 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id } = parsed.params;
 
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -667,7 +667,7 @@ export async function handleWorkflows(
     }
 
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update
     }
@@ -693,7 +693,7 @@ export async function handleWorkflows(
     if (updatedBy1 !== null) {
       updateArgs.updatedBy = updatedBy1;
     }
-    const workflow = updateWorkflow(id, updateArgs);
+    const workflow = await updateWorkflow(id, updateArgs);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -710,7 +710,7 @@ export async function handleWorkflows(
     const body = parsed.body;
 
     // Check workflow exists before snapshotting
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -730,7 +730,7 @@ export async function handleWorkflows(
 
     // Create version snapshot before applying update
     try {
-      snapshotWorkflow(id, myAgentId);
+      await snapshotWorkflow(id, myAgentId);
     } catch {
       // Snapshot failure should not block the update — log and continue
     }
@@ -748,7 +748,7 @@ export async function handleWorkflows(
         throw error;
       }
     }
-    const workflow = updateWorkflow(id, {
+    const workflow = await updateWorkflow(id, {
       key,
       name: body.name,
       description: body.description,
@@ -775,7 +775,7 @@ export async function handleWorkflows(
     const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const deleted = deleteWorkflow(parsed.params.id, "api");
+      const deleted = await deleteWorkflow(parsed.params.id, "api");
       res.writeHead(deleted ? 204 : 404);
     } catch (err) {
       jsonError(res, String(err), 500);
@@ -788,7 +788,7 @@ export async function handleWorkflows(
   if (validateTriggerRoute.match(req.method, pathSegments)) {
     const parsed = await validateTriggerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -816,7 +816,7 @@ export async function handleWorkflows(
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();

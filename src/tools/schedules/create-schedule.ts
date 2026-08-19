@@ -239,7 +239,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         if (!workflowId) {
           return toolErr("workflowId is required when targetType is 'workflow'.");
         }
-        if (!getWorkflow(workflowId)) {
+        if (!(await getWorkflow(workflowId))) {
           return toolErr(`Workflow not found: ${workflowId}`);
         }
       }

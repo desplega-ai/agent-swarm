@@ -152,10 +152,10 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
     CaptureExecutor.lastTokenSeen = undefined;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (workflowId) {
       try {
-        deleteWorkflow(workflowId);
+        await deleteWorkflow(workflowId);
       } catch {
         // ignore
       }
@@ -166,7 +166,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
   test("ctx.input[secretKey] is redacted in workflow_run_steps but real value reaches the executor", async () => {
     // Seed swarm config with a "secret" value
     const SECRET_VALUE = "ghp_supersecret_token_value_abc123";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "TEST_REDACTION_GITHUB_TOKEN",
       value: SECRET_VALUE,

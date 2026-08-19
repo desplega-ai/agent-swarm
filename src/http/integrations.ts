@@ -88,8 +88,8 @@ const mcpUserConfigRoute = route({
  *
  * Returns the trimmed value or `null` if unset/empty.
  */
-function resolveConfigValue(key: string): string | null {
-  const configs = getResolvedConfig();
+async function resolveConfigValue(key: string): Promise<string | null> {
+  const configs = await getResolvedConfig();
   // The setup CLI persists keys in lowercase (e.g. `managed_agent_id`) while
   // the docker-entrypoint hydrates env vars in uppercase (`MANAGED_AGENT_ID`).
   // Look up both variants so this endpoint works against either shape.
@@ -107,13 +107,13 @@ function resolveConfigValue(key: string): string | null {
   return null;
 }
 
-function resolveMcpBaseUrl(): string {
+async function resolveMcpBaseUrl(): Promise<string> {
   // Browser-facing connect URLs: prefer the public ingress origin
   // (PUBLIC_MCP_BASE_URL) over the internal MCP_BASE_URL so split deployments
   // (Helm) surface a host the user's browser can actually reach. Both honor the
   // swarm_config → env resolution order. Falls back to the localhost dev base.
   const configured =
-    resolveConfigValue("PUBLIC_MCP_BASE_URL") ?? resolveConfigValue("MCP_BASE_URL");
+    (await resolveConfigValue("PUBLIC_MCP_BASE_URL")) ?? (await resolveConfigValue("MCP_BASE_URL"));
   const fallback = `http://localhost:${process.env.PORT || "3013"}`;
   return (configured || fallback).replace(/\/+$/, "");
 }
@@ -135,14 +135,14 @@ export function createIntegrationsHandler(deps: TestConnectionDeps = {}) {
     pathSegments: string[],
   ): Promise<boolean> {
     if (mcpUserConfigRoute.match(req.method, pathSegments)) {
-      const mcpBaseUrl = resolveMcpBaseUrl();
+      const mcpBaseUrl = await resolveMcpBaseUrl();
       mcpUserConfigRoute.respond(res, 200, { mcpBaseUrl, mcpUserUrl: `${mcpBaseUrl}/mcp-user` });
       return true;
     }
 
     if (claudeManagedTestRoute.match(req.method, pathSegments)) {
-      const apiKey = resolveConfigValue("ANTHROPIC_API_KEY");
-      const agentId = resolveConfigValue("MANAGED_AGENT_ID");
+      const apiKey = await resolveConfigValue("ANTHROPIC_API_KEY");
+      const agentId = await resolveConfigValue("MANAGED_AGENT_ID");
 
       if (!apiKey || !agentId) {
         const missing: string[] = [];

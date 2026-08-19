@@ -622,14 +622,14 @@ describe("deleteSwarmConfigByKey", () => {
     expect(result).toBe(false);
   });
 
-  test("removes an existing row and returns true", () => {
+  test("removes an existing row and returns true", async () => {
     const a = createAgent({
       name: "delete-by-key-target",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: a.id,
       key: "REASONING_EFFORT_OVERRIDE",
@@ -652,8 +652,8 @@ describe("deleteSwarmConfigByKey", () => {
     ).toBeUndefined();
   });
 
-  test("global scope: removes a row looked up with scopeId ignored (NULL-safe)", () => {
-    upsertSwarmConfig({
+  test("global scope: removes a row looked up with scopeId ignored (NULL-safe)", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "GLOBAL_TEST_DELETE_BY_KEY",
       value: "x",
