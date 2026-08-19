@@ -60,11 +60,17 @@ is never expired):
   busy/idle from active work. Task remediation follows the same rule — it never
   returns an agent to idle while no runtime is serving it.
 - Expiry retires stale runtimes and, in the same transaction, deletes the
-  sessions they owned and marks any agent with no live runtime left `offline`.
-  Removing the sessions matters: a crashed process would otherwise leave one
-  behind as false evidence it is still running, and the orphan sweep would
-  never reclaim its task. Once the session is gone the task follows the normal
-  orphan/stall recovery paths (§2).
+  sessions they owned **whose own heartbeat is also stale** (same cutoff as
+  the startup cleanup), and marks any agent with no live runtime left
+  `offline`. Removing dead sessions matters: a crashed process would otherwise
+  leave one behind as false evidence it is still running, and the orphan sweep
+  would never reclaim its task. Once the session is gone the task follows the
+  normal orphan/stall recovery paths (§2). The heartbeat guard matters in the
+  other direction: runtime rows freeze while the flag is off, so re-enabling
+  it past the stale window must not read every healthy worker as crashed — a
+  still-heartbeating session survives its frozen runtime row being pruned, and
+  the in-flight task is not handed to stalled-task recovery. The worker's next
+  periodic re-registration restores the runtime row.
 - Retired rows are **deleted, not kept**. Runtime identity is per boot, so
   retaining them would add one row per boot per agent indefinitely; nothing
   reads a runtime once it stops being live.

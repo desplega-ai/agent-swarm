@@ -389,10 +389,13 @@ export function cleanupRuntimeSessions(agentId: string): number {
  *
  * Deleting the retired rows rather than keeping them is deliberate. Runtime
  * identity is per boot, so retaining them would grow the table once per boot
- * per agent forever; nothing reads a runtime after it stops being live. Their
- * sessions are removed in the same transaction, so a crashed process cannot
- * leave a session behind as false evidence that it is still running — the
- * task it held then reaches the normal orphan/stall recovery paths.
+ * per agent forever; nothing reads a runtime after it stops being live. The
+ * sessions a retired runtime owned are removed in the same transaction — but
+ * only those whose own heartbeat has also gone stale. A crashed process stops
+ * both signals, so its session cannot pose as alive and its task reaches the
+ * normal orphan/stall recovery paths; a frozen runtime row alone (the flag
+ * was off, so nothing refreshed it) is not evidence its still-heartbeating
+ * session is dead.
  */
 export function expireStaleRuntimeInstances(): {
   expired: number;
@@ -417,10 +420,14 @@ export function expireStaleRuntimeInstances(): {
 
     let sessionsCleaned = 0;
     if (stale.length > 0) {
+      // Same session-staleness cutoff as cleanupRuntimeSessions. Runtime rows
+      // freeze while the flag is off, so re-enabling it past the window would
+      // otherwise read every healthy worker as crashed and hand its in-flight
+      // task to stalled-task recovery beside the process still executing it.
       const deleteSessions = getDb().prepare(
-        "DELETE FROM active_sessions WHERE runtimeInstanceId = ?",
+        "DELETE FROM active_sessions WHERE runtimeInstanceId = ? AND lastHeartbeatAt < ?",
       );
-      for (const { id } of stale) sessionsCleaned += deleteSessions.run(id).changes;
+      for (const { id } of stale) sessionsCleaned += deleteSessions.run(id, cutoff).changes;
     }
 
     // Prune every row past the window, closed ones included. Runtime identity

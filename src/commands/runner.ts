@@ -4977,6 +4977,19 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       throw err;
     }
 
+    // Re-register before reporting readiness or doing any work. A worker
+    // blocked on credentials is not usable execution capacity, so its runtime
+    // is allowed to expire during the wait rather than being kept alive
+    // artificially — but once it can work again the server has to know, or
+    // its pings and polls would reference a runtime that no longer exists
+    // until the periodic refresh (up to 5 min later) happened to fix it.
+    // Same per-boot runtime id, so this refreshes the original row instead of
+    // creating a second one. Ordering matters: a readiness report sent while
+    // the row is still stale is dropped (only a live runtime may report), and
+    // the revival preserves credential_ready — reporting first would leave
+    // the agent parked on waiting_for_credentials forever.
+    await reregisterAgent();
+
     // Migration 055: build the full snapshot (presence + live test) once
     // creds are ready and POST it to the agent row. Status endpoint reads
     // this instead of running predicates server-side. Always uses the
@@ -4988,15 +5001,6 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       // Non-fatal — worker proceeds even if reporting fails.
       console.warn(`[${role}] cred_status boot report failed (non-fatal): ${err}`);
     }
-
-    // Re-register before doing any work. A worker blocked on credentials is
-    // not usable execution capacity, so its runtime is allowed to expire
-    // during the wait rather than being kept alive artificially — but once
-    // it can work again the server has to know, or its pings and polls would
-    // reference a runtime that no longer exists until the periodic refresh
-    // (up to 5 min later) happened to fix it. Same per-boot runtime id, so
-    // this refreshes the original row instead of creating a second one.
-    await reregisterAgent();
   }
 
   // Clean up any stale active sessions from previous runs (crash recovery)

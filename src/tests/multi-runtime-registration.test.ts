@@ -1189,7 +1189,10 @@ describe("runtime expiry releases what the runtime held", () => {
     expect(getActiveSessionForTask(crashedTask.id)).not.toBeNull();
     expect(getActiveSessionForTask(liveTask.id)).not.toBeNull();
 
+    // A genuinely crashed process stops both its runtime ping and its
+    // session heartbeat.
     makeRuntimeStale(crashed);
+    makeSessionStale(crashedTask.id);
     const result = expireStaleRuntimeInstances();
     expect(result.sessionsCleaned).toBe(1);
 
@@ -1200,6 +1203,78 @@ describe("runtime expiry releases what the runtime held", () => {
     expect(getTaskById(liveTask.id)?.status).toBe("in_progress");
     // Reconciled from the survivors: live runtime + active work.
     expect(getAgentById(id)?.status).toBe("busy");
+  });
+});
+
+describe("flag re-enable cycle preserves live sessions", () => {
+  test("a frozen runtime row does not kill a still-heartbeating session on re-enable", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("in-flight-work", { agentId: id });
+    startTask(task.id);
+    await startSessionFor(id, task.id, rt);
+
+    // Operator disables the flag: nothing refreshes runtime rows, but the
+    // worker keeps executing and heartbeating its session.
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+
+    // Re-enable past the stale window; the first sweep runs expiry.
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await runHeartbeatSweep();
+
+    // The frozen row is retired, but the live session and its task survive —
+    // no supersede, no requeue, no duplicate execution.
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
+    const after = getTaskById(task.id);
+    expect(after?.status).toBe("in_progress");
+    expect(after?.agentId).toBe(id);
+    // The agent needs its next re-registration before it gets NEW work —
+    // safety over availability; registration is the runtime revival path.
+    expect(getAgentById(id)?.status).toBe("offline");
+  });
+
+  test("a genuinely dead worker is still cleaned across the same cycle", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("dead-work", { agentId: id });
+    startTask(task.id);
+    await startSessionFor(id, task.id, rt);
+
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+    // The process died: its session heartbeat went stale too.
+    makeSessionStale(task.id);
+
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const result = expireStaleRuntimeInstances();
+
+    expect(result.sessionsCleaned).toBe(1);
+    expect(getActiveSessionForTask(task.id)).toBeNull();
+    expect(getRuntimeInstanceById(rt)).toBeNull();
+  });
+
+  test("while the flag stays off, expiry touches neither row nor session", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    const task = createTaskExtended("legacy-work", { agentId: id });
+    startTask(task.id);
+    await startSessionFor(id, task.id, rt);
+
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    makeRuntimeStale(rt);
+
+    const result = expireStaleRuntimeInstances();
+    expect(result.expired).toBe(0);
+    expect(getRuntimeInstanceById(rt)).not.toBeNull();
+    expect(getActiveSessionForTask(task.id)).not.toBeNull();
   });
 });
 
@@ -1431,6 +1506,63 @@ describe("readiness after a credential wait", () => {
     expect((await pollAgent(id, rt))?.trigger?.type).toBe("task_offered");
   });
 
+  test("re-register then report recovers readiness on a runtime that went stale waiting", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    expect(await reportReady(id, rt, false)).toBe(200);
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+
+    // The credential wait outlives the stale window; the sweep has not
+    // pruned the row yet.
+    makeRuntimeStale(rt);
+
+    // The runner's post-wait sequence: revive the same per-boot identity
+    // FIRST, then report readiness against the now-live row.
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    expect(await reportReady(id, rt, true)).toBe(200);
+
+    expect(runtimeInstancesFor(id)).toHaveLength(1);
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(true);
+    expect(getAgentById(id)?.status).toBe("idle");
+  });
+
+  test("the recovered agent reports busy when it still holds active work", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    const task = createTaskExtended("held-work", { agentId: id });
+    startTask(task.id);
+    makeRuntimeStale(rt);
+
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, true);
+
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(true);
+    expect(getAgentById(id)?.status).toBe("busy");
+  });
+
+  test("a ready report against a stale row is dropped and revival preserves the waiting state", async () => {
+    // Pins the server contract behind the runner's ordering: reporting
+    // BEFORE re-registering loses the recovery.
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await reportReady(id, rt, false);
+    makeRuntimeStale(rt);
+
+    // Wrong order: the report matches no live row and drops silently.
+    await reportReady(id, rt, true);
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+
+    expect(getRuntimeInstanceById(rt)?.credentialReady).toBe(false);
+    expect(getAgentById(id)?.status).toBe("waiting_for_credentials");
+  });
+
   test("re-registering before any expiry is idempotent and adds no second row", async () => {
     const id = makeAgent(2);
     process.env.MULTI_RUNTIME_ENABLED = "true";
@@ -1614,7 +1746,9 @@ describe("remediation respects runtime liveness", () => {
     getDb()
       .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
       .run(new Date(Date.now() - 30 * 60000).toISOString(), task.id);
+    // A crashed process stops both its runtime ping and its session heartbeat.
     makeRuntimeStale(rt);
+    makeSessionStale(task.id);
 
     await runHeartbeatSweep();
 
@@ -1637,7 +1771,9 @@ describe("remediation respects runtime liveness", () => {
     getDb()
       .prepare("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?")
       .run(new Date(Date.now() - 30 * 60000).toISOString(), task.id);
+    // A crashed process stops both its runtime ping and its session heartbeat.
     makeRuntimeStale(dead);
+    makeSessionStale(task.id);
 
     await runHeartbeatSweep();
     expect(getAgentById(id)?.status).not.toBe("offline");
