@@ -1,13 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
+  countActiveRuntimeInstancesForAgent,
   getAgentById,
   getDb,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
   getTaskById,
+  markRuntimeInstanceOffline,
   shouldBlockPolling,
+  touchRuntimeInstance,
   updateAgentStatus,
 } from "../be/db";
 import { enqueueAdmissionRow } from "../be/rbac-audit";
@@ -19,6 +22,7 @@ import { initLinear, resetLinear } from "../linear";
 import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
@@ -273,6 +277,11 @@ export function _resetAutoReloadForTests(): void {
   autoReloadInvocations = 0;
 }
 
+function singleHeader(req: IncomingMessage, name: string): string | undefined {
+  const raw = req.headers[name];
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
 export async function handleCore(
   req: IncomingMessage,
   res: ServerResponse,
@@ -480,6 +489,10 @@ export async function handleCore(
       return true;
     }
 
+    const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
+    // Read once per request so one mode applies consistently, as in /close.
+    const multiRuntime = isMultiRuntimeEnabled();
+
     const tx = getDb().transaction(() => {
       const agent = getAgentById(myAgentId);
 
@@ -487,6 +500,16 @@ export async function handleCore(
         res.writeHead(404, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
+      }
+
+      // An anonymous ping while the mode is on is a no-op rather than a 400:
+      // ping is non-destructive and rejecting it would break old workers on
+      // rollout. It must stay a true no-op, though — the status ladder below
+      // resolves `offline` to `idle`, so letting it run would let a
+      // pre-enablement worker revive a logical agent whose last identified
+      // runtime already closed.
+      if (multiRuntime && !runtimeInstanceId) {
+        return true;
       }
 
       let status: AgentStatus = "idle";
@@ -501,6 +524,15 @@ export async function handleCore(
       }
 
       updateAgentStatus(agent.id, status);
+
+      // Multi-runtime liveness: the runner sends its per-boot instance id on
+      // the same ping cadence, so last_seen_at tracks actual runtime liveness
+      // rather than registration freshness. Refreshes only that one row
+      // (agent-scoped); never creates or resurrects an instance. Inert when
+      // the flag is off.
+      if (multiRuntime && runtimeInstanceId) {
+        touchRuntimeInstance(runtimeInstanceId, agent.id);
+      }
 
       return true;
     });
@@ -521,6 +553,26 @@ export async function handleCore(
       return true;
     }
 
+    const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
+    // Read once per request so one mode applies consistently, mirroring
+    // registration.
+    const multiRuntime = isMultiRuntimeEnabled();
+
+    // Close is destructive, so it fails closed — the same identity
+    // requirement registration enforces. An id-less close while the mode is
+    // on could come from a pre-enablement worker whose logical agent is also
+    // served by a live runtime; falling back to the legacy agent-wide close
+    // would take that runtime's agent offline. Rejected before any mutation.
+    if (multiRuntime && !runtimeInstanceId) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          error: "X-Runtime-Instance-ID is required when multi-runtime mode is enabled",
+        }),
+      );
+      return true;
+    }
+
     const tx = getDb().transaction(() => {
       const agent = getAgentById(myAgentId);
 
@@ -530,7 +582,20 @@ export async function handleCore(
         return false;
       }
 
-      updateAgentStatus(agent.id, "offline");
+      if (multiRuntime && runtimeInstanceId) {
+        // Multi-runtime close: one process exiting takes down only its own
+        // runtime instance. The logical agent goes offline only when no
+        // active runtime remains — a sibling runtime keeps the agent
+        // available for dispatch. /close stays the sole writer of `offline`.
+        markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
+        if (countActiveRuntimeInstancesForAgent(agent.id) === 0) {
+          updateAgentStatus(agent.id, "offline");
+        }
+      } else {
+        // Legacy close (flag off): today's behavior, byte for byte, whether
+        // or not the worker sent a runtime header.
+        updateAgentStatus(agent.id, "offline");
+      }
 
       return true;
     });

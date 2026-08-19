@@ -8,7 +8,7 @@ import {
   getSwarmConfigLookupById,
   getSwarmConfigs,
   maskSecrets,
-  upsertSwarmConfig,
+  upsertSwarmConfigWithPolicyMirror,
 } from "../be/db";
 import { getUserGrant } from "../be/rbac-roles";
 import {
@@ -394,7 +394,10 @@ export async function handleConfig(
 
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
-      const config = upsertSwarmConfig({
+      // Policy-mirror variant: an agent-scoped AGENT_MAX_TASKS write also
+      // updates the agents.maxTasks enforcement mirror atomically, so an
+      // operator update takes effect even with no runtime connected.
+      const config = upsertSwarmConfigWithPolicyMirror({
         scope,
         scopeId: scopeId || null,
         key,

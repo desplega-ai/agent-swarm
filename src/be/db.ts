@@ -868,6 +868,94 @@ export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null 
   return row ? rowToAgent(row) : null;
 }
 
+/**
+ * Agent-scoped swarm_config key holding the authoritative logical maxTasks
+ * policy in multi-runtime mode. `agents.maxTasks` stays the enforcement
+ * mirror that hasCapacity()/getRemainingCapacity() read; the config row is
+ * what operators edit (PUT /api/config, set-config). Same column-vs-config
+ * split as HARNESS_PROVIDER (see PATCH /api/agents/{id}/runtime).
+ */
+export const AGENT_MAX_TASKS_CONFIG_KEY = "AGENT_MAX_TASKS";
+
+/**
+ * Bounds mirror AgentSchema.maxTasks (src/types.ts) and the AGENT_MAX_TASKS
+ * validator (swarm-config-guard.ts) — a mirrored write outside them would
+ * make the agents row schema-invalid.
+ */
+function parseAgentMaxTasksValue(raw: string): number | null {
+  const str = raw.trim();
+  if (!/^\d+$/.test(str)) return null;
+  const value = Number(str);
+  return value >= 1 && value <= 100 ? value : null;
+}
+
+export function getAgentMaxTasksConfig(agentId: string): SwarmConfig | null {
+  return (
+    getSwarmConfigs({ scope: "agent", scopeId: agentId, key: AGENT_MAX_TASKS_CONFIG_KEY })[0] ??
+    null
+  );
+}
+
+/**
+ * Multi-runtime registration hook: make the AGENT_MAX_TASKS config row and
+ * its agents.maxTasks mirror agree without ever consuming the
+ * runtime-reported concurrency.
+ *
+ * - No config row yet (first registration after enablement): seed it from the
+ *   currently persisted agents.maxTasks — the value the system is already
+ *   enforcing. Never from the registering runtime, its env, or a template.
+ * - Config row exists: it is authoritative; repair the mirror if it drifted
+ *   (e.g. the row was written before the agent existed, or a legacy-mode
+ *   registration overwrote the column while the flag was off).
+ *
+ * Must run inside the registration transaction so two runtimes registering
+ * concurrently serialize: the first seeds, the second sees the row and leaves
+ * it untouched.
+ */
+export function reconcileAgentMaxTasksPolicy(agentId: string): void {
+  const agent = getAgentById(agentId);
+  if (!agent) return;
+  const existing = getAgentMaxTasksConfig(agentId);
+  if (existing) {
+    const authoritative = parseAgentMaxTasksValue(existing.value);
+    if (authoritative !== null && authoritative !== (agent.maxTasks ?? 1)) {
+      updateAgentMaxTasks(agentId, authoritative);
+    }
+    return;
+  }
+  upsertSwarmConfig({
+    scope: "agent",
+    scopeId: agentId,
+    key: AGENT_MAX_TASKS_CONFIG_KEY,
+    value: String(agent.maxTasks ?? 1),
+    description:
+      "Logical agent max-tasks policy (seeded from agents.maxTasks at first multi-runtime registration)",
+  });
+}
+
+/**
+ * Upsert wrapper for config writes: when the row is an agent-scoped
+ * AGENT_MAX_TASKS policy, the agents.maxTasks enforcement mirror updates in
+ * the same transaction so policy and enforcement cannot diverge — including
+ * when no runtime is currently connected. Every other row passes straight
+ * through to upsertSwarmConfig.
+ */
+export function upsertSwarmConfigWithPolicyMirror(
+  data: Parameters<typeof upsertSwarmConfig>[0],
+): SwarmConfig {
+  const scopeId = data.scope === "agent" ? data.scopeId : null;
+  if (!scopeId || data.key !== AGENT_MAX_TASKS_CONFIG_KEY) {
+    return upsertSwarmConfig(data);
+  }
+  return getDb().transaction(() => {
+    const row = upsertSwarmConfig(data);
+    // Guard, not validation — both write paths already ran validateConfigValue.
+    const value = parseAgentMaxTasksValue(data.value);
+    if (value !== null) updateAgentMaxTasks(scopeId, value);
+    return row;
+  })();
+}
+
 export function updateAgentProvider(id: string, provider: ProviderName): Agent | null {
   const row = getDb()
     .prepare<AgentRow, [string, string]>(

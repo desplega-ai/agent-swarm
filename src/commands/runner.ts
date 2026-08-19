@@ -482,6 +482,14 @@ export interface ApiConfig {
   apiUrl: string;
   apiKey: string;
   agentId: string;
+  /**
+   * Per-boot runtime-instance identity (see runAgent). Sent as the
+   * X-Runtime-Instance-ID header on ping/close so a multi-runtime server can
+   * track this process's liveness and close only this runtime. Optional so
+   * auxiliary ApiConfig constructions stay valid; servers ignore it unless
+   * MULTI_RUNTIME_ENABLED.
+   */
+  runtimeInstanceId?: string;
 }
 
 export interface SteeringDispatchState {
@@ -590,6 +598,9 @@ async function pingServer(config: ApiConfig, _role: string): Promise<void> {
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
   }
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
+  }
 
   try {
     await fetch(`${config.apiUrl}/ping`, {
@@ -608,6 +619,9 @@ async function closeAgent(config: ApiConfig, role: string): Promise<void> {
   };
   if (config.apiKey) {
     headers.Authorization = `Bearer ${config.apiKey}`;
+  }
+  if (config.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = config.runtimeInstanceId;
   }
 
   try {
@@ -2624,6 +2638,13 @@ async function registerAgent(opts: {
    * haven't migrated to passing it explicitly.
    */
   harnessProvider?: ProviderName;
+  /**
+   * Per-boot runtime-instance identity. AGENT_ID stays the logical agent;
+   * this distinguishes the worker PROCESS so servers running in multi-runtime
+   * mode can tell two runtimes serving the same agent apart. Servers ignore
+   * it unless MULTI_RUNTIME_ENABLED.
+   */
+  runtimeInstanceId?: string;
 }): Promise<{ serverCapabilities?: string[] }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -2655,6 +2676,7 @@ async function registerAgent(opts: {
       maxTasks: opts.maxTasks,
       provider,
       harness_provider: harnessProvider,
+      runtimeInstanceId: opts.runtimeInstanceId,
     }),
   });
 
@@ -4710,8 +4732,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   let lastBedrockRefreshAt = 0;
   const BEDROCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
+  // Fresh per boot, shared by registration, ping, and close: a restarted
+  // process is a new runtime instance, but one process must present one
+  // identity so multi-runtime servers track a single row for it.
+  const runtimeInstanceId = crypto.randomUUID();
+
   // Create API config for ping/close
-  const apiConfig: ApiConfig = { apiUrl, apiKey, agentId };
+  const apiConfig: ApiConfig = { apiUrl, apiKey, agentId, runtimeInstanceId };
 
   // Setup graceful shutdown handlers with API config and runner state access
   setupShutdownHandlers(role, apiConfig, () => state);
@@ -4845,6 +4872,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         capabilities,
         maxTasks: state.maxConcurrent,
         harnessProvider: state.harnessProvider,
+        runtimeInstanceId,
       });
       lastServerCapsRefreshAt = Date.now();
       await applyServerCapabilities(reg.serverCapabilities);
@@ -4863,6 +4891,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
       capabilities,
       maxTasks: maxConcurrent,
       harnessProvider: bootProvider,
+      runtimeInstanceId,
     });
     lastServerCapsRefreshAt = Date.now();
     // Rebuilds the prompt immediately: the initial build above ran before

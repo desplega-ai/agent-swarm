@@ -8452,6 +8452,10 @@
                       "claude-managed",
                       "opencode"
                     ]
+                  },
+                  "runtimeInstanceId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [

@@ -2054,6 +2054,7 @@ export interface paths {
                         provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
                         /** @enum {string} */
                         harness_provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+                        runtimeInstanceId?: string;
                     };
                 };
             };
