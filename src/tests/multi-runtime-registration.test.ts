@@ -154,10 +154,16 @@ async function closeRuntime(agentId: string, runtimeInstanceId?: string): Promis
   return res.status;
 }
 
-async function pollAgent(agentId: string): Promise<{ trigger?: { type?: string } } | null> {
-  const res = await fetch(`${baseUrl}/api/poll`, {
-    headers: { "X-Agent-ID": agentId, Authorization: `Bearer ${API_KEY}` },
-  });
+async function pollAgent(
+  agentId: string,
+  runtimeInstanceId?: string,
+): Promise<{ trigger?: { type?: string } } | null> {
+  const headers: Record<string, string> = {
+    "X-Agent-ID": agentId,
+    Authorization: `Bearer ${API_KEY}`,
+  };
+  if (runtimeInstanceId) headers["X-Runtime-Instance-ID"] = runtimeInstanceId;
+  const res = await fetch(`${baseUrl}/api/poll`, { headers });
   const text = await res.text();
   try {
     return JSON.parse(text) as { trigger?: { type?: string } };
@@ -978,11 +984,15 @@ describe("logical capacity across runtimes", () => {
   test("maxTasks=1 admits only one of two concurrent polls", async () => {
     const id = makeAgent(1);
     process.env.MULTI_RUNTIME_ENABLED = "true";
-    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    const rtA = crypto.randomUUID();
+    const rtB = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtA });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtB });
     createTaskExtended("offered-1", { offeredTo: id });
     createTaskExtended("offered-2", { offeredTo: id });
 
-    const [a, b] = await Promise.all([pollAgent(id), pollAgent(id)]);
+    // Two runtimes of the same agent polling at once.
+    const [a, b] = await Promise.all([pollAgent(id, rtA), pollAgent(id, rtB)]);
     const admitted = [a, b].filter((t) => t?.trigger?.type === "task_offered");
     expect(admitted).toHaveLength(1);
     expect(getActiveTaskCount(id)).toBe(1);
@@ -991,11 +1001,14 @@ describe("logical capacity across runtimes", () => {
   test("maxTasks=2 admits two concurrent polls", async () => {
     const id = makeAgent(2);
     process.env.MULTI_RUNTIME_ENABLED = "true";
-    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    const rtA = crypto.randomUUID();
+    const rtB = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtA });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rtB });
     createTaskExtended("offered-1", { offeredTo: id });
     createTaskExtended("offered-2", { offeredTo: id });
 
-    const [a, b] = await Promise.all([pollAgent(id), pollAgent(id)]);
+    const [a, b] = await Promise.all([pollAgent(id, rtA), pollAgent(id, rtB)]);
     const admitted = [a, b].filter((t) => t?.trigger?.type === "task_offered");
     expect(admitted).toHaveLength(2);
   });
@@ -1278,5 +1291,54 @@ describe("enabling the flag while workers are running", () => {
 
     expect(getActiveSessionForTask(task.id)).not.toBeNull();
     expect(getTaskById(task.id)?.status).toBe("in_progress");
+  });
+});
+
+describe("dispatch requires a live runtime", () => {
+  test("a retired runtime is given no work while its replacement is", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const retired = crypto.randomUUID();
+    const live = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: retired });
+    await register(id, { maxTasks: 1, runtimeInstanceId: live });
+    createTaskExtended("dispatch-work", { offeredTo: id });
+
+    // The retired process reconnects after its row aged out.
+    makeRuntimeStale(retired);
+    const stalePoll = await pollAgent(id, retired);
+    expect(stalePoll?.trigger ?? null).toBeNull();
+
+    // Its replacement still gets the work.
+    const livePoll = await pollAgent(id, live);
+    expect(livePoll?.trigger?.type).toBe("task_offered");
+  });
+
+  test("polling without a runtime identity yields no work while the flag is on", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    await register(id, { maxTasks: 1, runtimeInstanceId: crypto.randomUUID() });
+    createTaskExtended("dispatch-work", { offeredTo: id });
+
+    expect((await pollAgent(id))?.trigger ?? null).toBeNull();
+  });
+});
+
+describe("capacity attribution for offers", () => {
+  test("a lead's own capacity is not consumed by offers it created for a worker", () => {
+    const lead = makeAgent(2);
+    getDb().prepare("UPDATE agents SET isLead = 1 WHERE id = ?").run(lead);
+    const worker = makeAgent(1);
+
+    // POST /api/tasks records the creating lead in agentId while offering to
+    // the worker; the review must count against the worker only.
+    const task = createTaskExtended("offer", { offeredTo: worker });
+    getDb()
+      .prepare("UPDATE agent_tasks SET agentId = ?, status = 'reviewing' WHERE id = ?")
+      .run(lead, task.id);
+
+    expect(getActiveTaskCount(worker)).toBe(1);
+    expect(getActiveTaskCount(lead)).toBe(0);
+    expect(hasCapacity(lead)).toBe(true);
   });
 });

@@ -2596,6 +2596,8 @@ interface PollOptions {
   apiUrl: string;
   apiKey: string;
   agentId: string;
+  /** Identifies the polling process so a retired runtime is not given work. */
+  runtimeInstanceId?: string;
   pollInterval: number;
   pollTimeout: number;
   since?: string; // Optional: for filtering finished tasks
@@ -2719,6 +2721,9 @@ async function pollForTriggerOnce(opts: PollOptions): Promise<Trigger | null> {
   const headers: Record<string, string> = {
     "X-Agent-ID": opts.agentId,
   };
+  if (opts.runtimeInstanceId) {
+    headers["X-Runtime-Instance-ID"] = opts.runtimeInstanceId;
+  }
   if (opts.apiKey) {
     headers.Authorization = `Bearer ${opts.apiKey}`;
   }
@@ -5683,6 +5688,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         apiKey,
         agentId,
         pollInterval: PollIntervalMs,
+        runtimeInstanceId,
         pollTimeout: effectiveTimeout,
       });
 

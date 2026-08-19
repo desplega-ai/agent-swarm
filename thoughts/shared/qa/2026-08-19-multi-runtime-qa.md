@@ -13,8 +13,8 @@ sweeps all went over real HTTP; SQLite queries are used only to observe state.
 
 | Check | Result |
 |---|---|
-| `bun run test:root` | 7625 pass, 7 skip, 2 fail |
-| `src/tests/multi-runtime-registration.test.ts` | 62 pass |
+| `bun run test:root` | 7631 pass, 7 skip, 2 fail |
+| `src/tests/multi-runtime-registration.test.ts` | 68 pass |
 | `bun run lint` | pass (1 pre-existing warning) |
 | `bun run tsc:check` | pass |
 | `bash scripts/check-db-boundary.sh` | pass |
@@ -137,10 +137,14 @@ capacity, or assignment.
 
 ## Issues found during QA
 
-None during the live run. The QA pass ran after the review-driven fixes in
-`78c1a37c8`, which covered the problems found by review: flag-off expiry,
-sessions surviving their runtime's retirement, assignment running before
-expiry, unbounded runtime rows, and resetting a lead's task limit to one.
+None during the live run itself. Review of the pushed branch afterwards
+surfaced four more edge cases, all fixed and covered by tests: the
+cleanup-only heartbeat tick skipped expiry entirely; the runtime-based
+assignment filter needed the same flag guard as expiry; MCP `delete-config`
+did not reset the capacity mirror; and enabling the flag while workers were
+mid-task could delete a live session before its runtime re-registered.
+Dispatch is now also gated on a live runtime identity, so a retired process
+that reconnects is given no work.
 
 ## Known limitations
 

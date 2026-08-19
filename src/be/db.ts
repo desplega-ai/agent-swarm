@@ -1031,16 +1031,16 @@ export function deleteAgent(id: string): boolean {
 /**
  * Tasks occupying one of the agent's concurrency slots.
  *
- * `reviewing` counts: an offered task claimed for review is already held by
- * the agent, and omitting it let a second concurrent poll claim another task
- * past the limit. A claimed offer is tracked by `offeredTo` rather than
- * `agentId` (the claim does not assign), so both columns are considered.
+ * A claimed offer counts too — omitting it let a second concurrent poll take
+ * another task past the limit. It is counted only through `offeredTo`, the
+ * agent actually reviewing it: `agentId` on an offer may still be the lead
+ * that created it, which would otherwise consume the lead's own capacity.
  */
 export function getActiveTaskCount(agentId: string): number {
   const result = getDb()
     .prepare<{ count: number }, [string, string]>(
       `SELECT COUNT(*) as count FROM agent_tasks
-       WHERE (agentId = ? AND status IN ('in_progress', 'reviewing'))
+       WHERE (agentId = ? AND status = 'in_progress')
           OR (offeredTo = ? AND status = 'reviewing')`,
     )
     .get(agentId, agentId);

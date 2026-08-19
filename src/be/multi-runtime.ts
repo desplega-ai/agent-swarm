@@ -255,6 +255,22 @@ export function countActiveRuntimeInstancesForAgent(agentId: string): number {
   return result?.count ?? 0;
 }
 
+/**
+ * Whether this identity names a runtime of `agentId` that is still reporting.
+ * Dispatch uses it so a retired process cannot be handed work alongside its
+ * replacement; an absent identity is never live.
+ */
+export function isRuntimeInstanceLive(id: string | undefined, agentId: string): boolean {
+  if (!id) return false;
+  const row = getDb()
+    .prepare<{ c: number }, [string, string, string]>(
+      `SELECT COUNT(*) c FROM runtime_instances
+       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    )
+    .get(id, agentId, runtimeLivenessCutoff());
+  return (row?.c ?? 0) > 0;
+}
+
 /** Agents that currently have no live runtime, among those with any row. */
 export function agentsWithoutLiveRuntime(): Set<string> {
   const rows = getDb()

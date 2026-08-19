@@ -27,6 +27,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { isRuntimeInstanceLive } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
@@ -36,6 +37,7 @@ import {
   TaskAttachmentSchema,
   UserSchema,
 } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -224,6 +226,9 @@ export async function handlePoll(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
+    req.headers["x-runtime-instance-id"],
+  );
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
     const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
@@ -265,6 +270,14 @@ export async function handlePoll(
         const agent = getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
+        }
+
+        // A process whose runtime has been retired must not be handed work: it
+        // would execute alongside whatever replaced it. Dispatch is gated on a
+        // live runtime identity rather than on X-Agent-ID alone, which only
+        // names the logical agent.
+        if (isMultiRuntimeEnabled() && !isRuntimeInstanceLive(runtimeInstanceId, agent.id)) {
+          return { trigger: null };
         }
 
         // Check for offered tasks first (highest priority for both workers and leads)
