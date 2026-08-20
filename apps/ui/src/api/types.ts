@@ -353,8 +353,21 @@ export interface CreateUserInput {
 }
 
 /**
+ * Structured communication preferences stored under `users.metadata.comms`.
+ * Mirrors `UserCommsPrefsSchema` in the API's `src/types.ts`. All fields are
+ * free-form strings that agents read to adapt their replies to this person.
+ */
+export interface UserCommsPrefs {
+  tone?: string;
+  language?: string;
+  verbosity?: string;
+}
+
+/**
  * PATCH /api/users/:id body. Every field is optional (server requires
  * at least one). Passing `identities` replaces the user's identity set.
+ * `comms` is merged into `metadata.comms` server-side (siblings survive);
+ * `null` clears it.
  */
 export interface UpdateUserInput {
   name?: string;
@@ -368,6 +381,7 @@ export interface UpdateUserInput {
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
   metadata?: Record<string, unknown> | null;
+  comms?: UserCommsPrefs | null;
 }
 
 /**

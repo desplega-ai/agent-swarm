@@ -49,6 +49,14 @@ describe("runner requester profile prompt", () => {
     expect(prompt).not.toContain("Their stated notes");
   });
 
+  test("hints that learned preferences should be persisted via manage-user", async () => {
+    const prompt = await buildRequesterProfilePrompt({ name: "Taras", role: "CEO" });
+
+    expect(prompt).toContain(
+      "the lead updates `comms` (tone, language, verbosity) via `manage-user`",
+    );
+  });
+
   test("ignores empty comms object", async () => {
     await expect(buildRequesterProfilePrompt({ name: "Taras", comms: {} })).resolves.toBe("");
   });

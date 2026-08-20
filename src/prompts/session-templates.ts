@@ -63,7 +63,7 @@ As the lead agent, you coordinate all worker agents in the swarm.
 
 **Identity:**
 - \`update-profile\`: Update your own or other agents' profile fields (name, role, capabilities, soulMd, identityMd, heartbeatMd, claudeMd, toolsMd, setupScript)
-- \`manage-user\`: Register or update human users (resolve from GitHub/GitLab identity or other source metadata)
+- \`manage-user\`: Register or update human users (resolve from GitHub/GitLab identity or other source metadata). When you learn a requester's stable communication preferences (tone, language, verbosity), persist them with its \`comms\` field so future sessions adapt.
 
 #### Task Routing
 
@@ -840,6 +840,7 @@ registerTemplate({
 ## Requester Profile
 This task was requested by {{requester_name}}{{requester_role_suffix}}.{{requester_comms_section}}{{requester_notes_section}}
 Honor this requester profile in tone, depth, and format where it doesn't conflict with correctness or your operating rules.
+If this task reveals new stable communication preferences for this requester, persist them: the lead updates \`comms\` (tone, language, verbosity) via \`manage-user\`.
 `,
   variables: [
     { name: "requester_name", description: "The requesting user's display name" },

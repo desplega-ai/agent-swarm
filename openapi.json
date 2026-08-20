@@ -41524,6 +41524,24 @@
                     ],
                     "additionalProperties": {}
                   },
+                  "comms": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "properties": {
+                      "tone": {
+                        "type": "string"
+                      },
+                      "language": {
+                        "type": "string"
+                      },
+                      "verbosity": {
+                        "type": "string"
+                      }
+                    },
+                    "description": "Merges into metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob."
+                  },
                   "dailyBudgetUsd": {
                     "type": [
                       "number",

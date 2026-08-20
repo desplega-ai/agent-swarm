@@ -49,7 +49,7 @@ import {
   revokeToken,
   unlinkIdentity,
 } from "../be/users";
-import { UserSchema } from "../types";
+import { UserCommsPrefsSchema, UserSchema } from "../types";
 import { getRequestAuth } from "../utils/request-auth-context";
 import { getOperatorActor } from "./operator-actor";
 import { route } from "./route-def";
@@ -297,6 +297,11 @@ const updateUserRoute = route({
       preferredChannel: z.string().optional(),
       timezone: z.string().optional(),
       metadata: z.record(z.string(), z.unknown()).nullable().optional(),
+      comms: UserCommsPrefsSchema.nullable()
+        .optional()
+        .describe(
+          "Merges into metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob.",
+        ),
       dailyBudgetUsd: z.number().nullable().optional(),
       status: z.enum(["invited", "active", "suspended"]).optional(),
       // Complete-list diff: passing this replaces the user's identity set,
@@ -867,10 +872,23 @@ export async function handleUsers(
     }
 
     try {
-      const { identities, metadata, ...rest } = parsed.body;
+      const { identities, metadata, comms, ...rest } = parsed.body;
       // updateUser doesn't accept `metadata: null` directly — passthrough via cast.
       const update: Parameters<typeof updateUser>[1] = { ...rest };
-      if (metadata !== undefined) {
+      if (comms !== undefined) {
+        // Merge-safe write: metadata (if provided) is applied first and
+        // replaces the whole blob, then comms is merged into it so sibling
+        // metadata keys survive.
+        const base: Record<string, unknown> = {
+          ...(metadata !== undefined ? (metadata ?? {}) : (before.metadata ?? {})),
+        };
+        if (comms === null) {
+          delete base.comms;
+        } else {
+          base.comms = comms;
+        }
+        update.metadata = Object.keys(base).length > 0 ? base : null;
+      } else if (metadata !== undefined) {
         update.metadata = metadata as Record<string, unknown> | null;
       }
       const updated = updateUser(parsed.params.id, update);

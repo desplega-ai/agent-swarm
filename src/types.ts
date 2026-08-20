@@ -853,8 +853,9 @@ export type User = z.infer<typeof UserSchema>;
 
 /**
  * Structured communication preferences read from `users.metadata.comms`.
- * All fields are free-form strings — there is no write path or validation
- * layer yet; values render verbatim into the requester profile prompt.
+ * All fields are free-form strings; values render verbatim into the requester
+ * profile prompt. Written merge-safely via the `comms` field on
+ * PATCH /api/users/{id} and the manage-user tool.
  */
 export const UserCommsPrefsSchema = z
   .object({

@@ -342,6 +342,56 @@ describe("PATCH /api/users/:id", () => {
     expect(fields).toContain("name");
     expect(fields).not.toContain("role");
   });
+
+  test("comms merges into metadata.comms and preserves sibling metadata keys", async () => {
+    const u = createUser({ name: "CommsMerge", metadata: { customerId: "abc123" } });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        comms: { tone: "casual", verbosity: "short" },
+      }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({
+      customerId: "abc123",
+      comms: { tone: "casual", verbosity: "short" },
+    });
+  });
+
+  test("comms: null removes only the comms key", async () => {
+    const u = createUser({
+      name: "CommsRemove",
+      metadata: { customerId: "abc123", comms: { tone: "formal" } },
+    });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ comms: null }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({ customerId: "abc123" });
+  });
+
+  test("comms combined with metadata applies metadata first then comms", async () => {
+    const u = createUser({ name: "CommsWithMetadata", metadata: { customerId: "abc123" } });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        metadata: { region: "eu" },
+        comms: { tone: "formal" },
+      }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({
+      region: "eu",
+      comms: { tone: "formal" },
+    });
+  });
 });
 
 describe("identity link/unlink", () => {

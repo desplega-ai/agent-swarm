@@ -334,6 +334,9 @@ describe("Session templates — composite resolution", () => {
     // Contains register section
     expect(result.text).toContain("join-swarm");
 
+    // Lead is hinted to persist learned requester comms preferences
+    expect(result.text).toContain("persist them with its `comms` field");
+
     // Contains lead-specific section (not worker)
     expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");

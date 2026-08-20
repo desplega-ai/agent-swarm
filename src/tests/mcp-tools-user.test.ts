@@ -436,4 +436,38 @@ describe("manage-user MCP tool (identities array)", () => {
     const idents = getUserIdentities(userId);
     expect(idents).toHaveLength(0);
   });
+
+  test("update with comms merges into metadata.comms and preserves sibling metadata keys", async () => {
+    const created = createUser({ name: "Comms Merge", metadata: { customerId: "abc123" } });
+
+    const result = await callTool(server, "manage-user", {
+      action: "update",
+      userId: created.id,
+      comms: { tone: "casual", verbosity: "short" },
+    });
+
+    expect(result.isError).toBe(false);
+    const user = structuredOf(result).user as { metadata: Record<string, unknown> | null };
+    expect(user.metadata).toEqual({
+      customerId: "abc123",
+      comms: { tone: "casual", verbosity: "short" },
+    });
+  });
+
+  test("update with comms: null removes only the comms key", async () => {
+    const created = createUser({
+      name: "Comms Remove",
+      metadata: { customerId: "abc123", comms: { tone: "formal" } },
+    });
+
+    const result = await callTool(server, "manage-user", {
+      action: "update",
+      userId: created.id,
+      comms: null,
+    });
+
+    expect(result.isError).toBe(false);
+    const user = structuredOf(result).user as { metadata: Record<string, unknown> | null };
+    expect(user.metadata).toEqual({ customerId: "abc123" });
+  });
 });

@@ -17392,6 +17392,12 @@ export interface paths {
                         metadata?: {
                             [key: string]: unknown;
                         } | null;
+                        /** @description Merges into metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob. */
+                        comms?: {
+                            tone?: string;
+                            language?: string;
+                            verbosity?: string;
+                        } | null;
                         dailyBudgetUsd?: number | null;
                         /** @enum {string} */
                         status?: "invited" | "active" | "suspended";

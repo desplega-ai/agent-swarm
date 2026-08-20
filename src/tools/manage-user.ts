@@ -82,6 +82,17 @@ const InputSchema = z.object({
     .nullable()
     .optional()
     .describe("Free-form JSON metadata (null clears the field)"),
+  comms: z
+    .object({
+      tone: z.string().optional(),
+      language: z.string().optional(),
+      verbosity: z.string().optional(),
+    })
+    .nullable()
+    .optional()
+    .describe(
+      "Merge-safe write to metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob.",
+    ),
 });
 
 function diffAliases(prev: string[], next: string[]): { added: string[]; removed: string[] } {
@@ -99,7 +110,7 @@ export const registerManageUserTool = (server: McpServer) => {
     {
       title: "Manage user profiles",
       description:
-        "Create, update, delete, or list user profiles in the user registry. Identities are managed via an `identities: [{kind, externalId}]` array (declarative — update computes diff). Lead-only.",
+        "Create, update, delete, or list user profiles in the user registry. Identities are managed via an `identities: [{kind, externalId}]` array (declarative — update computes diff). comms is the merge-safe way to set communication preferences; metadata replaces the whole blob. Lead-only.",
       annotations: { readOnlyHint: false },
       inputSchema: InputSchema,
       outputSchema: swarmToolOutputSchema({
@@ -157,6 +168,10 @@ export const registerManageUserTool = (server: McpServer) => {
             return toolErr("name is required for create action.");
           }
           try {
+            const metadata =
+              input.comms != null
+                ? { ...(input.metadata ?? {}), comms: input.comms }
+                : (input.metadata ?? undefined);
             const user = createUser({
               name: input.name,
               email: input.email,
@@ -167,7 +182,7 @@ export const registerManageUserTool = (server: McpServer) => {
               timezone: input.timezone,
               dailyBudgetUsd: input.dailyBudgetUsd ?? undefined,
               status: input.status,
-              metadata: input.metadata ?? undefined,
+              metadata,
             });
             for (const ident of input.identities ?? []) {
               linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
@@ -192,6 +207,24 @@ export const registerManageUserTool = (server: McpServer) => {
               return toolErr(`User ${input.userId} not found.`);
             }
 
+            // Merge-safe write: metadata (if provided) is applied first and
+            // replaces the whole blob, then comms is merged into it so
+            // sibling metadata keys survive.
+            let metadata = input.metadata;
+            if (input.comms !== undefined) {
+              const base: Record<string, unknown> = {
+                ...(input.metadata !== undefined
+                  ? (input.metadata ?? {})
+                  : (before.metadata ?? {})),
+              };
+              if (input.comms === null) {
+                delete base.comms;
+              } else {
+                base.comms = input.comms;
+              }
+              metadata = Object.keys(base).length > 0 ? base : null;
+            }
+
             const user = updateUser(input.userId, {
               name: input.name,
               email: input.email,
@@ -202,7 +235,7 @@ export const registerManageUserTool = (server: McpServer) => {
               timezone: input.timezone,
               dailyBudgetUsd: input.dailyBudgetUsd,
               status: input.status,
-              metadata: input.metadata,
+              metadata,
             });
             if (!user) {
               return toolErr(`User ${input.userId} not found.`);
