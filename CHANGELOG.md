@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.133.0] - 2026-08-20
+
+### Added
+- **Multiple worker runtimes can serve one logical agent** (#1184) — opt-in runtime identities track per-process liveness, capacity, and credential readiness while preserving a shared agent-level task limit and the existing single-runtime default.
+- **Task attachments are authoritative evidence for shipped pull requests** (#1193) — completion and VCS discovery persist canonical GitHub PR attachments, historical valid PR output is backfilled additively, and aggregate reporting retains output matching only as a compatibility fallback.
+
+### Fixed
+- **Usage attribution reports the human-attributable population and per-person outcomes** (#1194) — autonomous work no longer dilutes coverage, while initiated and shipped problems plus agent, repository, and surface reach remain separate, non-ranked measures.
+- **Workflow runs preserve their triggering human through retries and recovery** (#1191) — MCP, authenticated HTTP, schedules, and resolved Kapso triggers carry canonical requester identity without assigning ownerless triggers to the workflow author.
+
 ## [1.132.0] - 2026-08-19
 
 ### Added

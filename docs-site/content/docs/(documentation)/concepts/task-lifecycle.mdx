@@ -157,6 +157,8 @@ Task results use first-call-wins semantics across both `store-progress` and `POS
 
 To correct result text deliberately, pass `force: true`. A forced correction changes only the explicitly provided `output` and/or `failureReason`; it does not change terminal status or replay events, memory writes, follow-up creation, business-use instrumentation, or capacity updates. Structured output is validated again before an overwrite is accepted.
 
+When terminal output or trusted VCS metadata identifies a GitHub pull request, the server also persists its canonical URL as a generated task attachment. Caller-provided attachments are preserved and duplicate URL forms are reconciled, including after a forced output correction. Shipping reports treat these attachments as authoritative evidence and retain output-string matching only as a compatibility fallback for older tasks.
+
 ## Graceful Shutdown & Resume
 
 When a worker container receives SIGTERM:

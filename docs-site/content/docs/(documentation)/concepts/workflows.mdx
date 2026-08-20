@@ -112,6 +112,8 @@ The `next` field supports three formats:
 | `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
 
+Workflow runs preserve the human who actually triggered them in `createdBy`. Authenticated HTTP and MCP triggers use the trusted caller context, schedules use their creator when present, and Kapso routing uses its resolved sender. Generic ownerless webhooks and creatorless schedules remain unattributed rather than inheriting the workflow author's identity. Retry, resume, and recovery paths rehydrate this requester from the run so agent tasks created later keep the same attribution.
+
 ### Webhook verification formats
 
 Webhook triggers verify signatures only when `hmacSecret` is set. The secret can be a literal, an environment reference such as `${WEBHOOK_SECRET}`, or a swarm secret reference such as `secret.SUPERAGENT_WEBHOOK_SECRET`.
