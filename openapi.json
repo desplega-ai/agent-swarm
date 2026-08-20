@@ -2225,6 +2225,24 @@
           "body"
         ]
       },
+      "PromptTemplateResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/PromptTemplate"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "defaultDrifted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "defaultDrifted"
+            ]
+          }
+        ]
+      },
       "PromptTemplate": {
         "type": "object",
         "properties": {
@@ -21903,7 +21921,7 @@
                           "type": "object",
                           "properties": {
                             "template": {
-                              "$ref": "#/components/schemas/PromptTemplate"
+                              "$ref": "#/components/schemas/PromptTemplateResponse"
                             }
                           },
                           "required": [
@@ -22300,7 +22318,7 @@
                   "type": "object",
                   "properties": {
                     "template": {
-                      "$ref": "#/components/schemas/PromptTemplate"
+                      "$ref": "#/components/schemas/PromptTemplateResponse"
                     }
                   },
                   "required": [
@@ -22363,7 +22381,7 @@
                   "type": "object",
                   "properties": {
                     "template": {
-                      "$ref": "#/components/schemas/PromptTemplate"
+                      "$ref": "#/components/schemas/PromptTemplateResponse"
                     }
                   },
                   "required": [
@@ -22416,7 +22434,7 @@
                   "type": "object",
                   "properties": {
                     "template": {
-                      "$ref": "#/components/schemas/PromptTemplate"
+                      "$ref": "#/components/schemas/PromptTemplateResponse"
                     },
                     "history": {
                       "type": "array",
@@ -22570,7 +22588,7 @@
                     "templates": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/PromptTemplate"
+                        "$ref": "#/components/schemas/PromptTemplateResponse"
                       }
                     }
                   },
@@ -22649,7 +22667,7 @@
                   "type": "object",
                   "properties": {
                     "template": {
-                      "$ref": "#/components/schemas/PromptTemplate"
+                      "$ref": "#/components/schemas/PromptTemplateResponse"
                     }
                   },
                   "required": [

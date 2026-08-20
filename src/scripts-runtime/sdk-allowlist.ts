@@ -69,6 +69,9 @@ export const SDK_TOOL_NAME_MAP = {
   slack_post: "slack-post", // external: sends to Slack
   slack_reply: "slack-reply", // external: sends to Slack
   slack_startThread: "slack-start-thread", // external: sends to Slack
+  slack_createChannel: "slack-create-channel", // external: mutates Slack
+  slack_inviteToChannel: "slack-invite-to-channel", // external: mutates Slack
+  slack_archiveChannel: "slack-archive-channel", // external: mutates Slack
   slack_uploadFile: "slack-upload-file", // external: sends to Slack
   slack_downloadFile: "slack-download-file",
   slack_delete: "slack-delete", // external: mutates Slack, destructive

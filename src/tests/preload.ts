@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDb, getDb, initDb } from "../be/db";
 import { getAllTemplateDefinitions } from "../prompts/registry";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
@@ -28,6 +29,7 @@ import { getAllTemplateDefinitions } from "../prompts/registry";
 const nativeResponse = globalThis.Response;
 const nativeRequest = globalThis.Request;
 afterEach(() => {
+  clearVolatileSecretsForTesting();
   if (globalThis.Response !== nativeResponse) {
     globalThis.Response = nativeResponse;
   }

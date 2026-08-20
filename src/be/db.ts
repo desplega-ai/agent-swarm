@@ -137,7 +137,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -290,7 +290,17 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   loadSqliteVec(database);
 
   // Run database migrations (schema creation + incremental changes)
-  runMigrations(database);
+  try {
+    runMigrations(database);
+  } catch (error) {
+    db = null;
+    try {
+      database.close();
+    } catch (closeError) {
+      console.error("[migrations] Failed to close database after migration failure:", closeError);
+    }
+    throw error;
+  }
 
   // Compatibility migration for legacy databases that predate profile fields
   ensureAgentProfileColumns(database);
@@ -8765,6 +8775,10 @@ export function upsertSwarmConfig(data: {
     } catch (e) {
       console.error(`Failed to write env file ${config.envPath}:`, e);
     }
+  }
+
+  if (config.isSecret) {
+    registerVolatileSecret(config.value, `config:${config.key}`);
   }
 
   return config;

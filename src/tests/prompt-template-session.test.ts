@@ -223,8 +223,15 @@ describe("Session templates — individual resolution", () => {
 
   test("system.agent.worker contains worker tools", () => {
     const result = resolveTemplate("system.agent.worker", {});
+    expect(result.text).toContain("Skills (CHECK BEFORE STARTING WORK)");
+    expect(result.text).toContain("researching");
+    expect(result.text).toContain("planning");
+    expect(result.text).toContain("code-reviewing");
     expect(result.text).toContain("store-progress");
     expect(result.text).toContain("task-action");
+    expect(result.text).toContain("Credential Hygiene");
+    expect(result.text).not.toContain("Slack Thread Updates");
+    expect(result.text).not.toContain("On start");
   });
 
   test("system.agent.register contains join-swarm", () => {

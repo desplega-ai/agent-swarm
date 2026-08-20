@@ -19,6 +19,7 @@ import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
 import { registerListConfigTool } from "../tools/swarm-config/list-config";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
 import { setRequestAuth } from "../utils/request-auth-context";
+import { clearVolatileSecretsForTesting, scrubSecrets } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-swarm-config-reserved-keys.sqlite";
@@ -125,6 +126,7 @@ describe("swarm-config reserved keys guard", () => {
   });
 
   afterAll(async () => {
+    clearVolatileSecretsForTesting();
     server.close();
     closeDb();
     await unlink(TEST_DB_PATH).catch(() => {});
@@ -279,6 +281,26 @@ describe("swarm-config reserved keys guard", () => {
       )) as { structuredContent: { success: boolean } };
 
       expect(result.structuredContent.success).toBe(true);
+    });
+
+    test("immediately redacts a newly set secret config value", async () => {
+      clearVolatileSecretsForTesting();
+      const handler = mcpServer.handlers.get("set-config");
+      const value = `rotated-directory-token-${crypto.randomUUID()}`;
+      const result = (await handler!(
+        {
+          scope: "global",
+          key: "AUTOINFRA_DIRECTORY_ACCESS_VALUE",
+          value,
+          isSecret: true,
+        },
+        makeRequestInfo(),
+      )) as { structuredContent: { success: boolean } };
+
+      expect(result.structuredContent.success).toBe(true);
+      expect(scrubSecrets(`https://example.test/downloads/${value}/artifact`)).toBe(
+        "https://example.test/downloads/[REDACTED:config:AUTOINFRA_DIRECTORY_ACCESS_VALUE]/artifact",
+      );
     });
 
     test("rejects arbitrary config writes from non-lead set-config callers", async () => {

@@ -1773,6 +1773,7 @@ export interface PromptTemplate {
   state: "enabled" | "default_prompt_fallback" | "skip_event";
   body: string;
   isDefault: boolean;
+  defaultDrifted: boolean;
   version: number;
   createdBy: string | null;
   createdAt: string;
