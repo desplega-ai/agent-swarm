@@ -1031,7 +1031,7 @@ export async function migrateAppSchema<T>(input: {
   migration?: AppMigration;
   forceElementBreak?: string[];
   snapshot: () => void | Promise<void>;
-  writeDefinition: () => T;
+  writeDefinition: () => T | Promise<T>;
 }): Promise<{ result: T; migration: AppMigrationReport }> {
   const migration = input.migration ?? {};
   const modelNames = affectedModelNames(input.previousDefinition, input.nextDefinition, migration);
@@ -1050,13 +1050,13 @@ export async function migrateAppSchema<T>(input: {
       await input.snapshot();
       for (const modelPlan of plan.models) {
         for (const row of modelPlan.changedRows) {
-          writeAppRowForMigrationUnlocked(input.appId, modelPlan.modelName, row);
+          await writeAppRowForMigrationUnlocked(input.appId, modelPlan.modelName, row);
         }
         const nextModel = Object.hasOwn(input.nextDefinition.models, modelPlan.modelName)
           ? input.nextDefinition.models[modelPlan.modelName]
           : undefined;
         for (const columnName of modelPlan.rebuildColumns) {
-          rebuildAppColumnIndexUnlocked(
+          await rebuildAppColumnIndexUnlocked(
             input.appId,
             modelPlan.modelName,
             columnName,
@@ -1065,10 +1065,14 @@ export async function migrateAppSchema<T>(input: {
           );
         }
       }
-      const written = input.writeDefinition();
+      const written = await input.writeDefinition();
       // The stored per-pair sync status describes the OLD configuration:
       // presenting it for a changed pair would claim a pass that never ran.
-      invalidateChangedSyncStatus(input.appId, input.previousDefinition, input.nextDefinition);
+      await invalidateChangedSyncStatus(
+        input.appId,
+        input.previousDefinition,
+        input.nextDefinition,
+      );
       return written;
     });
     return { result, migration: plan.report };

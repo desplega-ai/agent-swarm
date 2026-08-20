@@ -41,12 +41,12 @@ function extractText(message: NonNullable<KapsoWebhookPayload["message"]>): stri
   return `(non-text message — type: ${message.type ?? "unknown"})`;
 }
 
-function buildTaskDescription(payload: KapsoWebhookPayload): string {
+async function buildTaskDescription(payload: KapsoWebhookPayload): Promise<string> {
   const message = payload.message ?? {};
   const conversation = payload.conversation ?? {};
   const externalId = normalizeKapsoSender(payload);
   const contactDisplay = externalId
-    ? renderIdentity(resolveKapsoIdentity(externalId))
+    ? renderIdentity(await resolveKapsoIdentity(externalId))
     : "(unknown user)";
   return resolveTemplate("kapso.message.received", {
     conversation_id: conversation.id ?? "unknown",
@@ -70,10 +70,10 @@ function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
  * integration writes (`kapso`, `whatsapp` — see the dual-kind note on
  * `resolveKapsoRequestedByUserId`). Never a provider profile label.
  */
-function resolveKapsoIdentity(externalId: string): IdentityResolution {
-  const kapsoResolution = resolveIdentity(KAPSO_IDENTITY_KIND, externalId);
+async function resolveKapsoIdentity(externalId: string): Promise<IdentityResolution> {
+  const kapsoResolution = await resolveIdentity(KAPSO_IDENTITY_KIND, externalId);
   if (kapsoResolution.status === "resolved") return kapsoResolution;
-  const whatsappResolution = resolveIdentity(WHATSAPP_IDENTITY_KIND, externalId);
+  const whatsappResolution = await resolveIdentity(WHATSAPP_IDENTITY_KIND, externalId);
   if (whatsappResolution.status === "resolved") return whatsappResolution;
   // Both unknown — report under the `kapso` kind for consistency with
   // resolveKapsoRequestedByUserId's unmapped-tracker recording.
@@ -86,7 +86,7 @@ async function resolveKapsoRequestedByUserId(
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 
-  const resolution = resolveKapsoIdentity(externalId);
+  const resolution = await resolveKapsoIdentity(externalId);
   if (resolution.status === "resolved") return resolution.userId;
 
   await recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
@@ -152,7 +152,7 @@ export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<K
     return { kind: "workflow", workflowId: mapping.workflowId };
   }
 
-  const task = await createTaskWithSiblingAwareness(buildTaskDescription(payload), {
+  const task = await createTaskWithSiblingAwareness(await buildTaskDescription(payload), {
     agentId: mapping.agentId ?? null,
     source: "system",
     taskType: "kapso-inbound",

@@ -170,7 +170,7 @@ export async function handleEvents(
     if (!parsed) return true;
 
     try {
-      const event = createEvent(parsed.body);
+      const event = await createEvent(parsed.body);
       createEventRoute.respond(res, 201, { success: true, event });
     } catch (error) {
       console.error("[HTTP] Failed to create event:", error);

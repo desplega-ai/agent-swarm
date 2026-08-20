@@ -175,7 +175,7 @@ export async function deleteJiraWebhook(webhookId: number): Promise<void> {
   }
 
   // Remove the id from local metadata regardless of whether Atlassian had it.
-  const meta = getJiraMetadata();
+  const meta = await getJiraMetadata();
   const remaining = (meta.webhookIds ?? []).filter((entry) => entry.id !== webhookId);
 
   // updateJiraMetadata's id-keyed merge can't drop entries (it merges by id).
@@ -243,7 +243,7 @@ async function overwriteWebhookIds(
  * On 204 (no body), we treat the call as best-effort and log a warning.
  */
 export async function refreshJiraWebhooks(): Promise<void> {
-  const meta = getJiraMetadata();
+  const meta = await getJiraMetadata();
   const ids = (meta.webhookIds ?? []).map((entry) => entry.id);
 
   if (ids.length === 0) {
@@ -307,7 +307,7 @@ export async function refreshJiraWebhooks(): Promise<void> {
  */
 async function runKeepalive(): Promise<void> {
   try {
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     const entries = meta.webhookIds ?? [];
     if (entries.length === 0) {
       console.log("[Jira webhook keepalive] No webhooks registered, nothing to refresh");

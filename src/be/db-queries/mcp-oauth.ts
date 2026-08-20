@@ -1,7 +1,7 @@
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
-import { getDb, getDbClient } from "../db";
+import { getDbClient } from "../db";
 import {
   type OAuthAuthorizationStatus,
   updateAuthorizationTokens,
@@ -190,19 +190,21 @@ function decryptTokenRow(row: UnifiedMcpTokenRow): McpOAuthToken {
   };
 }
 
-function rawMcpToken(mcpServerId: string, userId: string | null): UnifiedMcpTokenRow | null {
-  return getDb()
-    .query(
-      `${tokenSelect(
-        userId == null
-          ? "a.mcpServerId = ? AND z.userId IS NULL"
-          : "a.mcpServerId = ? AND z.userId = ?",
-      )} ORDER BY z.createdAt ASC, z.id ASC LIMIT 1`,
-    )
-    .get(...(userId == null ? [mcpServerId] : [mcpServerId, userId])) as UnifiedMcpTokenRow | null;
+async function rawMcpToken(
+  mcpServerId: string,
+  userId: string | null,
+): Promise<UnifiedMcpTokenRow | null> {
+  return await getDbClient().get<UnifiedMcpTokenRow>(
+    `${tokenSelect(
+      userId == null
+        ? "a.mcpServerId = ? AND z.userId IS NULL"
+        : "a.mcpServerId = ? AND z.userId = ?",
+    )} ORDER BY z.createdAt ASC, z.id ASC LIMIT 1`,
+    userId == null ? [mcpServerId] : [mcpServerId, userId],
+  );
 }
 
-function upsertMcpApp(input: {
+async function upsertMcpApp(input: {
   appId?: string;
   mcpServerId: string;
   resourceUrl: string;
@@ -224,24 +226,23 @@ function upsertMcpApp(input: {
   tokenEndpointAuthMethod?: string | null;
   clientSource: McpOAuthClientSource;
   redirectUri?: string;
-}): string {
+}): Promise<string> {
   // An app is reused only through an existing authorization's or pending
   // attempt's exact appId. Looking up by mcpServerId alone would collapse
   // the dormant per-user dimension and let one user's client context
   // overwrite another's.
   const existing = input.appId
-    ? (getDb()
-        .query(
-          "SELECT id, clientId, clientSecret, metadata, redirectUri, scopes FROM oauth_apps WHERE id = ?",
-        )
-        .get(input.appId) as {
+    ? await getDbClient().get<{
         id: string;
         clientId: string;
         clientSecret: string | null;
         metadata: string;
         redirectUri: string;
         scopes: string;
-      } | null)
+      }>(
+        "SELECT id, clientId, clientSecret, metadata, redirectUri, scopes FROM oauth_apps WHERE id = ?",
+        [input.appId],
+      )
     : null;
   // A write means the client is currently in use / believed valid — clear
   // any stale `invalidated` flag left over from a prior provider rejection.
@@ -271,15 +272,13 @@ function upsertMcpApp(input: {
   const source = "dcr";
 
   if (existing) {
-    getDb()
-      .query(
-        `UPDATE oauth_apps SET
+    await getDbClient().run(
+      `UPDATE oauth_apps SET
            provider = ?, clientId = ?, clientSecret = ?, clientSecretEncrypted = 1,
            authorizeUrl = ?, tokenUrl = ?, revocationUrl = ?, redirectUri = ?, scopes = ?,
            source = ?, metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ?`,
-      )
-      .run(
+      [
         `mcp-${input.mcpServerId}`,
         input.dcrClientId ?? existing.clientId,
         encryptedClientSecret,
@@ -291,21 +290,20 @@ function upsertMcpApp(input: {
         source,
         metadata,
         existing.id,
-      );
+      ],
+    );
     return existing.id;
   }
 
   const id = crypto.randomUUID();
-  getDb()
-    .query(
-      `INSERT INTO oauth_apps (
+  await getDbClient().run(
+    `INSERT INTO oauth_apps (
          id, provider, clientId, clientSecret, clientSecretEncrypted,
          authorizeUrl, tokenUrl, revocationUrl, redirectUri, scopes,
          scopeSeparator, tokenAuthStyle, tokenBodyFormat,
          requiresRefreshTokenRotation, source, mcpServerId, metadata
        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ' ', 'body', 'form', 0, ?, ?, ?)`,
-    )
-    .run(
+    [
       id,
       `mcp-${input.mcpServerId}`,
       input.dcrClientId ?? "",
@@ -318,15 +316,16 @@ function upsertMcpApp(input: {
       source,
       input.mcpServerId,
       metadata,
-    );
+    ],
+  );
   return id;
 }
 
-export function getMcpOAuthToken(
+export async function getMcpOAuthToken(
   mcpServerId: string,
   userId: string | null = null,
-): McpOAuthToken | null {
-  const row = rawMcpToken(mcpServerId, userId);
+): Promise<McpOAuthToken | null> {
+  const row = await rawMcpToken(mcpServerId, userId);
   return row ? decryptTokenRow(row) : null;
 }
 
@@ -380,14 +379,13 @@ type RawAppRow = {
   metadata: string;
 };
 
-function readMcpOAuthApp(appId: string): StoredMcpOAuthClient | null {
-  const row = getDb()
-    .query(
-      `SELECT id, clientId, clientSecret, clientSecretEncrypted, authorizeUrl, tokenUrl,
+async function readMcpOAuthApp(appId: string): Promise<StoredMcpOAuthClient | null> {
+  const row = await getDbClient().get<RawAppRow>(
+    `SELECT id, clientId, clientSecret, clientSecretEncrypted, authorizeUrl, tokenUrl,
               revocationUrl, redirectUri, scopes, metadata
        FROM oauth_apps WHERE id = ?`,
-    )
-    .get(appId) as RawAppRow | null;
+    [appId],
+  );
   if (!row || !row.clientId) return null;
 
   const metadata = parseObject(row.metadata);
@@ -443,16 +441,18 @@ function readMcpOAuthApp(appId: string): StoredMcpOAuthClient | null {
   };
 }
 
-function rawPendingAppIdForUser(mcpServerId: string, userId: string | null): string | null {
-  const row = getDb()
-    .query(
-      `SELECT p.appId FROM oauth_pending p
+async function rawPendingAppIdForUser(
+  mcpServerId: string,
+  userId: string | null,
+): Promise<string | null> {
+  const row = await getDbClient().get<{ appId: string }>(
+    `SELECT p.appId FROM oauth_pending p
        JOIN oauth_apps a ON a.id = p.appId
        WHERE p.flow = 'mcp' AND a.mcpServerId = ?
          AND ${userId == null ? "p.userId IS NULL" : "p.userId = ?"}
        ORDER BY p.createdAt DESC LIMIT 1`,
-    )
-    .get(...(userId == null ? [mcpServerId] : [mcpServerId, userId])) as { appId: string } | null;
+    userId == null ? [mcpServerId] : [mcpServerId, userId],
+  );
   return row?.appId ?? null;
 }
 
@@ -466,18 +466,18 @@ function rawPendingAppIdForUser(mcpServerId: string, userId: string | null): str
  * (issuer/registrationEndpoint/redirectUri) against fresh discovery before
  * trusting the result — this only returns what's stored.
  */
-export function findReusableMcpOAuthClient(
+export async function findReusableMcpOAuthClient(
   mcpServerId: string,
   userId: string | null = null,
-): StoredMcpOAuthClient | null {
-  const tokenRow = rawMcpToken(mcpServerId, userId);
+): Promise<StoredMcpOAuthClient | null> {
+  const tokenRow = await rawMcpToken(mcpServerId, userId);
   if (tokenRow) {
-    const client = readMcpOAuthApp(tokenRow.appId);
+    const client = await readMcpOAuthApp(tokenRow.appId);
     if (client) return client;
   }
-  const pendingAppId = rawPendingAppIdForUser(mcpServerId, userId);
+  const pendingAppId = await rawPendingAppIdForUser(mcpServerId, userId);
   if (pendingAppId) {
-    const client = readMcpOAuthApp(pendingAppId);
+    const client = await readMcpOAuthApp(pendingAppId);
     if (client) return client;
   }
   return null;
@@ -519,8 +519,8 @@ export async function invalidateMcpOAuthClient(
   mcpServerId: string,
   userId: string | null = null,
 ): Promise<void> {
-  const tokenRow = rawMcpToken(mcpServerId, userId);
-  const appId = tokenRow?.appId ?? rawPendingAppIdForUser(mcpServerId, userId);
+  const tokenRow = await rawMcpToken(mcpServerId, userId);
+  const appId = tokenRow?.appId ?? (await rawPendingAppIdForUser(mcpServerId, userId));
   if (!appId) return;
   await invalidateMcpOAuthApp(appId);
 }
@@ -557,8 +557,8 @@ export interface UpsertMcpOAuthTokenInput {
 export async function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): Promise<void> {
   await getDbClient().transaction(async () => {
     const userId = input.userId ?? null;
-    const existing = rawMcpToken(input.mcpServerId, userId);
-    const appId = upsertMcpApp({
+    const existing = await rawMcpToken(input.mcpServerId, userId);
+    const appId = await upsertMcpApp({
       ...(existing ? { appId: existing.appId } : {}),
       mcpServerId: input.mcpServerId,
       resourceUrl: input.resourceUrl,
@@ -575,7 +575,7 @@ export async function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): Prom
       tokenEndpointAuthMethod: input.tokenEndpointAuthMethod,
       clientSource: input.clientSource,
     });
-    upsertAuthorization({
+    await upsertAuthorization({
       ...(existing ? { id: existing.id } : {}),
       appId,
       label: userId ? `user:${userId}` : "default",
@@ -637,7 +637,7 @@ export async function deleteMcpOAuthToken(
   mcpServerId: string,
   userId: string | null = null,
 ): Promise<boolean> {
-  const existing = rawMcpToken(mcpServerId, userId);
+  const existing = await rawMcpToken(mcpServerId, userId);
   if (!existing) return false;
   const result = await getDbClient().run(
     `UPDATE oauth_authorizations SET
@@ -692,7 +692,7 @@ export interface InsertMcpOAuthPendingInput {
 export async function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): Promise<void> {
   await getDbClient().transaction(async (tx) => {
     const userId = input.userId ?? null;
-    const existingToken = rawMcpToken(input.mcpServerId, userId);
+    const existingToken = await rawMcpToken(input.mcpServerId, userId);
     const clientSource = existingToken
       ? decryptTokenRow(existingToken).clientSource
       : input.dcrClientId
@@ -712,15 +712,15 @@ export async function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): 
     // layer) instead of always creating a new row; consume/GC removes it
     // once it's orphaned.
     const existingTokenAppValid = existingToken
-      ? readMcpOAuthApp(existingToken.appId) != null
+      ? (await readMcpOAuthApp(existingToken.appId)) != null
       : false;
     const reuseAppId = existingToken
       ? existingToken.appId
-      : rawPendingAppIdForUser(input.mcpServerId, userId);
+      : await rawPendingAppIdForUser(input.mcpServerId, userId);
     const appId =
       existingToken && existingTokenAppValid
         ? existingToken.appId
-        : upsertMcpApp({
+        : await upsertMcpApp({
             ...(reuseAppId ? { appId: reuseAppId } : {}),
             mcpServerId: input.mcpServerId,
             resourceUrl: input.resourceUrl,
@@ -793,37 +793,35 @@ type UnifiedPendingRow = {
   contextJson: string;
 };
 
-function rawPending(state: string): UnifiedPendingRow | null {
-  return getDb()
-    .query(
-      `SELECT p.state, a.mcpServerId, p.userId, p.codeVerifier, p.nonce,
+async function rawPending(state: string): Promise<UnifiedPendingRow | null> {
+  return await getDbClient().get<UnifiedPendingRow>(
+    `SELECT p.state, a.mcpServerId, p.userId, p.codeVerifier, p.nonce,
               p.redirectUri, p.finalRedirect, p.createdAt,
               p.appId, p.contextJson
        FROM oauth_pending p
        JOIN oauth_apps a ON a.id = p.appId
        WHERE p.state = ? AND p.flow = 'mcp'`,
-    )
-    .get(state) as UnifiedPendingRow | null;
+    [state],
+  );
 }
 
-function deleteOrphanMcpApp(appId: string): void {
-  getDb()
-    .query(
-      `DELETE FROM oauth_apps
+async function deleteOrphanMcpApp(appId: string): Promise<void> {
+  await getDbClient().run(
+    `DELETE FROM oauth_apps
        WHERE id = ? AND mcpServerId IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM oauth_authorizations WHERE appId = oauth_apps.id)
          AND NOT EXISTS (SELECT 1 FROM oauth_pending WHERE appId = oauth_apps.id)`,
-    )
-    .run(appId);
+    [appId],
+  );
 }
 
 export async function consumeMcpOAuthPending(state: string): Promise<McpOAuthPendingRow | null> {
   return await getDbClient().transaction(async (tx) => {
-    const row = rawPending(state);
+    const row = await rawPending(state);
     if (!row) return null;
     await tx.run("DELETE FROM oauth_pending WHERE state = ? AND flow = 'mcp'", [state]);
     const context = parseObject(row.contextJson);
-    deleteOrphanMcpApp(row.appId);
+    await deleteOrphanMcpApp(row.appId);
     const encryptedClientSecret =
       typeof context.dcrClientSecret === "string" ? context.dcrClientSecret : null;
     return {
@@ -871,7 +869,7 @@ export async function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): Promise<n
     const result = await tx.run("DELETE FROM oauth_pending WHERE flow = 'mcp' AND createdAt < ?", [
       cutoff,
     ]);
-    for (const { appId } of appIds) deleteOrphanMcpApp(appId);
+    for (const { appId } of appIds) await deleteOrphanMcpApp(appId);
     return result.changes;
   });
 }

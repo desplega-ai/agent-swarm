@@ -36,7 +36,7 @@ export const registerTrackerStatusTool = (server: McpServer) => {
       await Promise.all(providers.map((provider) => ensureToken(provider)));
       const trackers = await Promise.all(
         providers.map(async (provider) => {
-          const app = getOAuthApp(provider);
+          const app = await getOAuthApp(provider);
           const tokens = await getOAuthTokens(provider);
 
           return {

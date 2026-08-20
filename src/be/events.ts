@@ -1,5 +1,5 @@
 import type { EventCategory, EventName, EventSource, EventStatus, SwarmEvent } from "../types";
-import { getDb, getDbClient } from "./db";
+import { getDbClient } from "./db";
 
 // -- Events --
 
@@ -41,29 +41,6 @@ const INSERT_EVENT_SQL = `INSERT INTO events (id, category, event, status, sourc
        sessionId, parentEventId, numericValue, durationMs, data, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
-// `insert` stays on the raw synchronous handle: it backs `createEvent` below,
-// which is still synchronous.
-const eventQueries = {
-  insert: () =>
-    getDb().prepare<
-      null,
-      [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        number | null,
-        number | null,
-        string | null,
-      ]
-    >(INSERT_EVENT_SQL),
-};
-
 // ─── Create ─────────────────────────────────────────────────────────────────
 
 export interface CreateEventInput {
@@ -80,24 +57,22 @@ export interface CreateEventInput {
   data?: Record<string, unknown>;
 }
 
-export function createEvent(input: CreateEventInput): SwarmEvent {
+export async function createEvent(input: CreateEventInput): Promise<SwarmEvent> {
   const id = crypto.randomUUID();
-  eventQueries
-    .insert()
-    .run(
-      id,
-      input.category,
-      input.event,
-      input.status ?? "ok",
-      input.source,
-      input.agentId ?? null,
-      input.taskId ?? null,
-      input.sessionId ?? null,
-      input.parentEventId ?? null,
-      input.numericValue ?? null,
-      input.durationMs ?? null,
-      input.data ? JSON.stringify(input.data) : null,
-    );
+  await getDbClient().run(INSERT_EVENT_SQL, [
+    id,
+    input.category,
+    input.event,
+    input.status ?? "ok",
+    input.source,
+    input.agentId ?? null,
+    input.taskId ?? null,
+    input.sessionId ?? null,
+    input.parentEventId ?? null,
+    input.numericValue ?? null,
+    input.durationMs ?? null,
+    input.data ? JSON.stringify(input.data) : null,
+  ]);
   return {
     id,
     category: input.category,

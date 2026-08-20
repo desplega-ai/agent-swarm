@@ -178,7 +178,7 @@ async function resolveGitHubSender(
   sampleEventType: string,
   sampleContext: string,
 ): Promise<string | undefined> {
-  const existing = findUserByExternalId("github", login);
+  const existing = await findUserByExternalId("github", login);
   if (existing) return existing.id;
 
   // No mapping → unmapped tracker.
@@ -241,7 +241,7 @@ export async function handlePullRequest(
         pr_number: pr.number,
         pr_title: pr.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -354,7 +354,7 @@ export async function handlePullRequest(
         pr_number: pr.number,
         pr_title: pr.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -462,7 +462,7 @@ export async function handlePullRequest(
         pr_number: pr.number,
         pr_title: pr.title,
         label_name: labelName,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -556,7 +556,7 @@ export async function handlePullRequest(
     {
       pr_number: pr.number,
       pr_title: pr.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       head_ref: pr.head.ref,
       base_ref: pr.base.ref,
@@ -643,7 +643,7 @@ export async function handleIssue(
         issue_number: issue.number,
         issue_title: issue.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         issue_url: issue.html_url,
         context: issue.body || issue.title,
@@ -744,7 +744,7 @@ export async function handleIssue(
         issue_number: issue.number,
         issue_title: issue.title,
         label_name: labelName,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         issue_url: issue.html_url,
         context: issue.body || issue.title,
@@ -820,7 +820,7 @@ export async function handleIssue(
     {
       issue_number: issue.number,
       issue_title: issue.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       issue_url: issue.html_url,
       context,
@@ -929,7 +929,7 @@ export async function handleComment(
       target_type: targetType,
       target_number: targetNumber,
       target_title: targetTitle,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       comment_url: comment.html_url,
       context,
@@ -1242,7 +1242,7 @@ export async function handlePullRequestReview(
       pr_number: pr.number,
       review_label: label,
       pr_title: pr.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       review_url: review.html_url,
       review_body_section: reviewBodySection,

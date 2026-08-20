@@ -144,7 +144,7 @@ export const registerResolveUserTool = (server: McpServer) => {
     },
     async ({ kind, externalId, email, userId, name }) => {
       if (kind && externalId) {
-        const resolution = resolveIdentity(kind, externalId);
+        const resolution = await resolveIdentity(kind, externalId);
         if (resolution.status === "unknown") return unknownResult(kind, externalId);
         const user = await findUserById(resolution.userId);
         if (!user) return unknownResult(kind, externalId);
@@ -152,7 +152,7 @@ export const registerResolveUserTool = (server: McpServer) => {
       }
 
       if (email) {
-        const resolution = resolveIdentityByEmail(email);
+        const resolution = await resolveIdentityByEmail(email);
         if (resolution.status === "unknown") return unknownResult("email", email);
         const user = await findUserById(resolution.userId);
         if (!user) return unknownResult("email", email);

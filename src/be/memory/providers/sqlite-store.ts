@@ -181,15 +181,12 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  private getFtsTableSchema(): string | null {
+  private async getFtsTableSchema(): Promise<string | null> {
     try {
-      return (
-        getDb()
-          .prepare<{ sql: string | null }, []>(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'",
-          )
-          .get()?.sql ?? null
+      const row = await getDbClient().get<{ sql: string | null }>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'",
       );
+      return row?.sql ?? null;
     } catch {
       return null;
     }
@@ -218,16 +215,15 @@ export class SqliteMemoryStore implements MemoryStore {
     console.log(`[memory-fts] populate inserted=${inserted.changes}`);
   }
 
-  private syncFtsRow(memoryId: string, name: string, content: string): void {
-    if (!this.ftsInitialized && !this.getFtsTableSchema()) return;
-    const db = getDb();
+  private async syncFtsRow(memoryId: string, name: string, content: string): Promise<void> {
+    if (!this.ftsInitialized && !(await this.getFtsTableSchema())) return;
     try {
-      db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").run(memoryId);
-      db.prepare("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)").run(
+      await getDbClient().run("DELETE FROM memory_fts WHERE memory_id = ?", [memoryId]);
+      await getDbClient().run("INSERT INTO memory_fts(memory_id, name, content) VALUES (?, ?, ?)", [
         memoryId,
         name,
         content,
-      );
+      ]);
     } catch (err) {
       console.error(`[memory-fts] sync failed memory_id=${memoryId}: ${(err as Error).message}`);
     }
@@ -238,7 +234,7 @@ export class SqliteMemoryStore implements MemoryStore {
     // ftsInitialized — the flag can outlive a DB swap (tests reinit the DB
     // process-wide), and a stale `true` would make this DELETE throw
     // "no such table: memory_fts". Mirrors the vec guard in purgeByIds.
-    if (ids.length === 0 || !this.getFtsTableSchema()) return;
+    if (ids.length === 0 || !(await this.getFtsTableSchema())) return;
     const placeholders = ids.map(() => "?").join(",");
     await getDbClient().run(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`, ids);
   }
@@ -444,7 +440,7 @@ export class SqliteMemoryStore implements MemoryStore {
       return inserted;
     });
 
-    this.syncFtsRow(row.id, row.name, row.content);
+    await this.syncFtsRow(row.id, row.name, row.content);
     return rowToAgentMemory(row);
   }
 
@@ -492,7 +488,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isHybridSearchEnabled() &&
       options.queryText &&
       this.ftsInitialized &&
-      this.getFtsTableSchema() &&
+      (await this.getFtsTableSchema()) &&
       health.retrievalMode === "vec" &&
       embedding.length === EMBEDDING_DIMENSIONS
     ) {
@@ -521,7 +517,7 @@ export class SqliteMemoryStore implements MemoryStore {
       });
     }
 
-    if (options.queryText && this.ftsInitialized && this.getFtsTableSchema()) {
+    if (options.queryText && this.ftsInitialized && (await this.getFtsTableSchema())) {
       console.log(
         `[memory-search] retrieval_path=fts scope=${scope} limit=${limit} reason=${embedding.length !== EMBEDDING_DIMENSIONS ? "query_dimension_mismatch" : health.reasons.join("|") || "vec_unavailable"}`,
       );
@@ -955,7 +951,7 @@ export class SqliteMemoryStore implements MemoryStore {
     });
 
     if (ftsContent !== null) {
-      this.syncFtsRow(result.memory.id, result.memory.name, ftsContent);
+      await this.syncFtsRow(result.memory.id, result.memory.name, ftsContent);
     }
 
     return result;

@@ -21,7 +21,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { User } from "../types";
-import { getDb, getDbClient } from "./db";
+import { getDbClient } from "./db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -90,19 +90,14 @@ export async function findUserById(id: string): Promise<User | null> {
 /**
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
- *
- * DEFERRED (transaction rule): reached from `resolveIdentity` inside
- * `http/poll.ts`'s synchronous `getDb().transaction()` callback — stays on
- * the raw sync handle.
  */
-export function findUserByExternalId(kind: string, externalId: string): User | null {
-  const row = getDb()
-    .prepare<UserRow, [string, string]>(
-      `SELECT u.* FROM users u
+export async function findUserByExternalId(kind: string, externalId: string): Promise<User | null> {
+  const row = await getDbClient().get<UserRow>(
+    `SELECT u.* FROM users u
        INNER JOIN user_external_ids x ON x.userId = u.id
        WHERE x.kind = ? AND x.externalId = ?`,
-    )
-    .get(kind, externalId);
+    [kind, externalId],
+  );
   return row ? rowToUser(row) : null;
 }
 
@@ -113,26 +108,21 @@ export function findUserByExternalId(kind: string, externalId: string): User | n
  * NOTE: SQLite's `json_each` requires a non-null source; we filter on
  * `emailAliases != '[]'` in the alias branch so the rare row with NULL
  * aliases doesn't blow up the JOIN.
- *
- * DEFERRED (transaction rule): the synchronous `resolveIdentityByEmail`
- * identity primitive calls it without awaiting — stays on the raw sync handle.
  */
-export function findUserByEmail(email: string): User | null {
+export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
-  const db = getDb();
+  const db = getDbClient();
 
   // Primary email (case-insensitive)
-  const primary = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)")
-    .get(email);
+  const primary = await db.get<UserRow>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [
+    email,
+  ]);
   if (primary) return rowToUser(primary);
 
   // Alias array
-  const aliasRows = db
-    .prepare<UserRow, []>(
-      "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
-    )
-    .all();
+  const aliasRows = await db.query<UserRow>(
+    "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
+  );
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
     if (aliases.some((a) => a.toLowerCase() === lower)) {
@@ -292,12 +282,8 @@ export async function listUserTokens(userId: string): Promise<UserTokenSummary[]
  * tool / HTTP endpoint can emit `email_added` / `email_removed` /
  * `budget_changed` / `status_changed` directly (the mutating helpers below
  * already emit their own events in-transaction).
- *
- * Stays on the raw sync handle: the mutating helpers below call it from inside
- * their transaction callbacks, where the shared connection puts its INSERT in
- * the same open transaction.
  */
-export function recordIdentityEvent(
+export async function recordIdentityEvent(
   userId: string,
   eventType:
     | "auto_merge"
@@ -314,13 +300,11 @@ export function recordIdentityEvent(
   actor: IdentityActor,
   before: unknown | null,
   after: unknown | null,
-): void {
-  getDb()
-    .prepare(
-      `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
+): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       randomUUID().replace(/-/g, ""),
       userId,
       eventType,
@@ -328,7 +312,8 @@ export function recordIdentityEvent(
       before == null ? null : JSON.stringify(before),
       after == null ? null : JSON.stringify(after),
       new Date().toISOString(),
-    );
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -352,9 +337,9 @@ export async function findOrCreateUserByEmail(
   hints: { name?: string; role?: string; notes?: string; preferredChannel?: string },
   actor: IdentityActor,
 ): Promise<{ user: User; created: boolean }> {
-  const existing = findUserByEmail(email);
+  const existing = await findUserByEmail(email);
   if (existing) {
-    recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
+    await recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
     return { user: existing, created: false };
   }
 
@@ -381,7 +366,7 @@ export async function findOrCreateUserByEmail(
     );
     const row = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
     if (!row) throw new Error("Failed to create user");
-    recordIdentityEvent(id, "identity_added", actor, null, { email, name });
+    await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
   });
 
@@ -411,7 +396,7 @@ export async function linkIdentity(
       kind,
       externalId,
     ]);
-    recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
+    await recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
   });
 }
 
@@ -432,7 +417,7 @@ export async function unlinkIdentity(
       kind,
       externalId,
     ]);
-    recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
+    await recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
   });
 }
 
@@ -482,7 +467,7 @@ export async function mintToken(
        VALUES (?, ?, ?, ?, ?, ?)`,
       [tokenId, userId, label, hash, preview, now],
     );
-    recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
+    await recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
   });
 
   return { tokenId, plaintext };
@@ -505,7 +490,7 @@ export async function revokeToken(tokenId: string, actor: IdentityActor): Promis
       new Date().toISOString(),
       tokenId,
     ]);
-    recordIdentityEvent(
+    await recordIdentityEvent(
       row.userId,
       "token_revoked",
       actor,

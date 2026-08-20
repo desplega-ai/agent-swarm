@@ -63,7 +63,7 @@ async function resolveJiraActor(
 ): Promise<string | undefined> {
   if (!accountId) return undefined;
 
-  const existing = findUserByExternalId("jira", accountId);
+  const existing = await findUserByExternalId("jira", accountId);
   if (existing) return existing.id;
 
   const trimmedEmail = typeof email === "string" ? email.trim() : "";
@@ -94,9 +94,9 @@ async function resolveJiraActor(
  * back to a bare "(unknown user)" when the payload carries no `accountId` at
  * all (malformed/legacy webhook shape).
  */
-function renderJiraIdentity(accountId: string | undefined): string {
+async function renderJiraIdentity(accountId: string | undefined): Promise<string> {
   if (!accountId) return "(unknown user)";
-  return renderIdentity(resolveIdentity("jira", accountId));
+  return renderIdentity(await resolveIdentity("jira", accountId));
 }
 
 // ─── Bot identity (Atlassian accountId) ────────────────────────────────────
@@ -206,8 +206,8 @@ async function findLeadAgent(): Promise<Agent | null> {
 
 // ─── URL helpers ───────────────────────────────────────────────────────────
 
-function buildIssueUrl(issueKey: string): string {
-  const meta = getJiraMetadata();
+async function buildIssueUrl(issueKey: string): Promise<string> {
+  const meta = await getJiraMetadata();
   const siteUrl = (meta.siteUrl ?? "").replace(/\/+$/, "");
   if (!siteUrl) return "";
   return `${siteUrl}/browse/${issueKey}`;
@@ -295,7 +295,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
     `${issueKey}: ${summary}`,
   );
   const descriptionText = extractText(issue.fields?.description);
-  const issueUrl = buildIssueUrl(issueKey);
+  const issueUrl = await buildIssueUrl(issueKey);
 
   // Step 1: claim the sync row UNIQUE-gated. Pass empty swarmId placeholder;
   // we update it once the task is created.
@@ -430,7 +430,7 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
     "comment_created",
     `${issueKey}: ${commentText.slice(0, 80)}`,
   );
-  const issueUrl = buildIssueUrl(issueKey);
+  const issueUrl = await buildIssueUrl(issueKey);
 
   if (!existing) {
     // Comment-mention into existence.
@@ -505,7 +505,7 @@ async function routeCommentOnExistingSync(input: {
   }
 
   // Terminal or orphan sync row → follow-up.
-  const commentAuthorDisplay = renderJiraIdentity(input.commentAuthorAccountId);
+  const commentAuthorDisplay = await renderJiraIdentity(input.commentAuthorAccountId);
   await createInitialJiraTask({
     issueKey: input.issueKey,
     summary: input.summary,
@@ -570,7 +570,7 @@ async function createInitialJiraTask(input: {
         issue_key: input.issueKey,
         issue_summary: input.summary,
         issue_url: input.issueUrl,
-        reporter: renderJiraIdentity(input.reporterAccountId),
+        reporter: await renderJiraIdentity(input.reporterAccountId),
         description_section: descriptionSection,
       };
 
@@ -615,7 +615,7 @@ async function createCommentMentionTask(input: {
     issue_key: input.issueKey,
     issue_summary: input.summary,
     issue_url: input.issueUrl,
-    comment_author: renderJiraIdentity(input.commentAuthorAccountId),
+    comment_author: await renderJiraIdentity(input.commentAuthorAccountId),
     description_section: descriptionSection,
     comment_text: input.commentText,
   });

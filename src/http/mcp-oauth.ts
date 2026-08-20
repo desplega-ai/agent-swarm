@@ -463,7 +463,7 @@ async function runAuthorizeFlow(
   q: AuthorizeFlowQuery,
   userId: string | null,
 ): Promise<string | null> {
-  let client = manualClientFromToken(getMcpOAuthToken(mcpServerId, userId));
+  let client = manualClientFromToken(await getMcpOAuthToken(mcpServerId, userId));
   let discovery: DiscoveryResult | null = null;
   let registrationEndpoint: string | null = null;
   // Only set when THIS call freshly registers (or otherwise knows the true
@@ -478,7 +478,7 @@ async function runAuthorizeFlow(
     // attempt (retrying before it's completed/GC'd). Discovery is still run
     // (cheap metadata GET, not a mutating registration) to get the current
     // authorize/token URLs and to confirm the AS identity hasn't moved.
-    const reusable = findReusableMcpOAuthClient(mcpServerId, userId);
+    const reusable = await findReusableMcpOAuthClient(mcpServerId, userId);
     discovery = await discoverForMcp(server.url!);
     if (!discovery) {
       jsonError(res, "MCP server does not require OAuth", 400);
@@ -680,7 +680,7 @@ export async function completeMcpOAuthCallback(
     // orphaned pending row — a floor of 10 minutes, not a bound. Same
     // wrong-target guard as the exchange-failure path below.
     if (isInvalidClientError(query.error) || query.error === "unauthorized_client") {
-      const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+      const connected = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
         await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
@@ -715,7 +715,7 @@ export async function completeMcpOAuthCallback(
       codeVerifier: pending.codeVerifier,
       resource: pending.resourceUrl,
     });
-    const existing = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+    const existing = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
     const clientSource =
       existing?.clientSource ??
       (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
@@ -766,7 +766,7 @@ export async function completeMcpOAuthCallback(
       // registered client (AS identity, redirect URI, or scope set moved),
       // the connected app still holds a different, working client_id, and
       // invalidating it would corrupt a working connection.
-      const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+      const connected = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
         await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
@@ -816,7 +816,7 @@ export async function handleMcpOAuth(
     }
 
     const userId = parsed.query.userId ?? null;
-    const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const token = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
 
     statusRoute.respond(res, 200, {
       mcpServerId: server.id,
@@ -921,7 +921,7 @@ export async function handleMcpOAuth(
     if (!parsed) return true;
 
     const userId = parsed.body?.userId ?? null;
-    const existing = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const existing = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
     if (!existing || !existing.refreshToken) {
       jsonError(res, "No refresh token available for this MCP server", 404);
       return true;
@@ -968,7 +968,7 @@ export async function handleMcpOAuth(
     if (!parsed) return true;
 
     const userId = parsed.query.userId ?? null;
-    const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const token = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
     if (!token) {
       jsonError(res, "No token for this MCP server", 404);
       return true;

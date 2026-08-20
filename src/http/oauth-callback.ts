@@ -170,7 +170,7 @@ export async function completeGenericOAuthCallback(
   const pending = await consumeOAuthPending(state);
   if (!pending) return { handled: false };
 
-  const app = getOAuthAppById(pending.appId);
+  const app = await getOAuthAppById(pending.appId);
   if (!app) {
     if (pending.finalRedirect) {
       redirectWith(res, pending.finalRedirect, { oauth: "error", error: "app_not_found" });
@@ -220,7 +220,7 @@ export async function completeGenericOAuthCallback(
       ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
       : null;
 
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId: pending.appId,
       label: pending.label,
       accessToken: tokens.accessToken,

@@ -53,7 +53,7 @@ export const registerAppGetTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
       const syncStatus = await collectAppSyncStatus(app.id);
@@ -108,7 +108,7 @@ export const registerAppQueryTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       const query = app?.definition.queries?.[queryName];
       if (!app || !query) return toolErr(`App ${appId} or query "${queryName}" not found.`);
       const model = app.definition.models[query.model];

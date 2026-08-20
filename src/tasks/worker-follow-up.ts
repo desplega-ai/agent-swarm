@@ -385,7 +385,7 @@ export async function createResumeFollowUp(args: {
   //
   // Safe to call when no tracker_sync rows exist for this parent (no-op).
   // Covers all providers (Linear AND Jira) and entity types in one call.
-  const repointed = repointTrackerSyncBySwarmId(parent.id, created.id);
+  const repointed = await repointTrackerSyncBySwarmId(parent.id, created.id);
   if (repointed > 0) {
     console.log(
       `[ResumeFollowUp] Repointed ${repointed} tracker_sync row(s) from ${parent.id.slice(0, 8)} → ${created.id.slice(0, 8)}`,

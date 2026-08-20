@@ -418,8 +418,8 @@ function linearMilestone(): SetupMilestone {
   };
 }
 
-function jiraMilestone(): SetupMilestone {
-  const tokens = getOAuthTokens("jira");
+async function jiraMilestone(): Promise<SetupMilestone> {
+  const tokens = await getOAuthTokens("jira");
   if (!tokens) {
     return {
       id: "jira",
@@ -430,7 +430,7 @@ function jiraMilestone(): SetupMilestone {
     };
   }
   // Verify cloudId is in oauth_apps.metadata.
-  const app = getOAuthApp("jira");
+  const app = await getOAuthApp("jira");
   let hasCloudId = false;
   try {
     const meta = app?.metadata ? JSON.parse(app.metadata) : null;
@@ -520,7 +520,7 @@ async function buildSetup(): Promise<SetupMilestone[]> {
     slackMilestone(),
     githubMilestone(),
     linearMilestone(),
-    jiraMilestone(),
+    await jiraMilestone(),
     await workersMilestone(),
     await firstTaskMilestone(),
   ];

@@ -17,14 +17,18 @@ export function oauthAppToProviderConfig(app: OAuthApp): OAuthProviderConfig {
   return oauthAppRowToProviderConfig(app);
 }
 
-export function getOAuthProviderConfig(provider: string): OAuthProviderConfig | null {
-  const app = getOAuthApp(provider);
+export async function getOAuthProviderConfig(
+  provider: string,
+): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp(provider);
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
-export function getOAuthBindingTokenStatus(oauthAuthorizationId: string): OAuthBindingTokenStatus {
-  const authorization = getAuthorizationById(oauthAuthorizationId);
-  const app = authorization ? getOAuthAppById(authorization.appId) : null;
+export async function getOAuthBindingTokenStatus(
+  oauthAuthorizationId: string,
+): Promise<OAuthBindingTokenStatus> {
+  const authorization = await getAuthorizationById(oauthAuthorizationId);
+  const app = authorization ? await getOAuthAppById(authorization.appId) : null;
   if (!authorization || !app || app.mcpServerId !== null) {
     return "missing";
   }
@@ -51,13 +55,13 @@ export function getOAuthBindingTokenStatus(oauthAuthorizationId: string): OAuthB
 export async function resolveOAuthBindingToken(
   oauthAuthorizationId: string,
 ): Promise<string | undefined> {
-  const initial = getAuthorizationById(oauthAuthorizationId);
+  const initial = await getAuthorizationById(oauthAuthorizationId);
   if (!initial) return undefined;
-  const app = getOAuthAppById(initial.appId);
+  const app = await getOAuthAppById(initial.appId);
   if (!app || app.mcpServerId !== null) return undefined;
   if (initial.status === "revoked") return undefined;
 
-  const status = getOAuthBindingTokenStatus(oauthAuthorizationId);
+  const status = await getOAuthBindingTokenStatus(oauthAuthorizationId);
   if (status === "expiring" || status === "refresh-failed") {
     // Refresh (or retry a previously-failed refresh) against this specific
     // authorization. On success it flips back to `active`; on failure it
@@ -65,5 +69,5 @@ export async function resolveOAuthBindingToken(
     await ensureAuthorizationTokenOrThrow(oauthAuthorizationId, OAUTH_BINDING_REFRESH_BUFFER_MS);
   }
 
-  return getAuthorizationById(oauthAuthorizationId)?.accessToken;
+  return (await getAuthorizationById(oauthAuthorizationId))?.accessToken;
 }

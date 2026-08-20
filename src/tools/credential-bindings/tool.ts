@@ -199,16 +199,20 @@ function staticOAuthCallbackUri(): string {
   return `${getPublicMcpBaseUrl()}/api/oauth/callback`;
 }
 
-function decorateBindings(bindings: ScriptCredentialBindingRecord[]): BindingWithTokenStatus[] {
-  return bindings.map((binding) =>
-    binding.authKind === "oauth"
-      ? {
-          ...binding,
-          tokenStatus: binding.oauthAuthorizationId
-            ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
-            : "missing",
-        }
-      : binding,
+async function decorateBindings(
+  bindings: ScriptCredentialBindingRecord[],
+): Promise<BindingWithTokenStatus[]> {
+  return Promise.all(
+    bindings.map(async (binding) =>
+      binding.authKind === "oauth"
+        ? {
+            ...binding,
+            tokenStatus: binding.oauthAuthorizationId
+              ? await getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+              : "missing",
+          }
+        : binding,
+    ),
   );
 }
 
@@ -277,7 +281,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       const currentBindings = async () =>
-        decorateBindings(
+        await decorateBindings(
           await listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
         );
       const bindings = await currentBindings();
@@ -376,7 +380,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           });
         }
 
-        const config = getOAuthProviderConfig(args.provider);
+        const config = await getOAuthProviderConfig(args.provider);
         if (!config) {
           return toolErr(`OAuth app ${args.provider} is not configured.`, {
             data: { yourAgentId: requestInfo.agentId, provider: args.provider, bindings },
@@ -408,13 +412,13 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
             data: { yourAgentId: requestInfo.agentId, bindings },
           });
         }
-        const appId = getOAuthAppIdByProvider(args.provider);
+        const appId = await getOAuthAppIdByProvider(args.provider);
         if (!appId) {
           return toolErr(`OAuth app ${args.provider} is not configured.`, {
             data: { yourAgentId: requestInfo.agentId, provider: args.provider, bindings },
           });
         }
-        const authorizations = listAuthorizationsForApp(appId).map((authorization) => ({
+        const authorizations = (await listAuthorizationsForApp(appId)).map((authorization) => ({
           id: authorization.id,
           label: authorization.label,
           accountEmail: authorization.accountEmail,

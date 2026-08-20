@@ -70,14 +70,14 @@ export const registerAppUpsertTool = (server: McpServer) => {
 
       if (input.appId) {
         const appId = input.appId;
-        const existing = getApp(appId);
+        const existing = await getApp(appId);
         if (!existing) {
           return toolErr(`App ${appId} not found.`, {
             data: { appId, url: `/apps/${appId}` },
           });
         }
         return withAppDefinitionLock(appId, async () => {
-          const lockedExisting = getApp(appId);
+          const lockedExisting = await getApp(appId);
           if (!lockedExisting) {
             return toolErr(`App ${appId} not found.`, {
               data: { appId, url: `/apps/${appId}` },
@@ -95,7 +95,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
               data: { issues: parsed.issues },
             });
           }
-          let app: ReturnType<typeof updateApp>;
+          let app: Awaited<ReturnType<typeof updateApp>>;
           let migration: AppMigrationReport;
           try {
             const migrated = await migrateAppSchema({

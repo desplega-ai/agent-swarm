@@ -320,7 +320,7 @@ export async function handleAssets(
       }
     }
     if (parsed.params.entityType === "app") {
-      if (!getApp(parsed.params.id)) {
+      if (!(await getApp(parsed.params.id))) {
         jsonError(res, "Asset not found", 404);
         return true;
       }

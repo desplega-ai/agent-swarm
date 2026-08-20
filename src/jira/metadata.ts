@@ -9,8 +9,8 @@ import type { JiraOAuthAppMetadata } from "./types";
  * metadata column is unparseable JSON. We never throw on shape coercion —
  * the keys are all optional and downstream callers already null-check.
  */
-export function getJiraMetadata(): JiraOAuthAppMetadata {
-  const app = getOAuthApp("jira");
+export async function getJiraMetadata(): Promise<JiraOAuthAppMetadata> {
+  const app = await getOAuthApp("jira");
   if (!app) return {};
 
   let parsed: unknown;

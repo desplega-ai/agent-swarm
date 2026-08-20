@@ -64,7 +64,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
           return toolErr("Failed to delete schedule.");
         }
 
-        createEvent({
+        await createEvent({
           category: "system",
           event: "schedule.deleted",
           source: "api",

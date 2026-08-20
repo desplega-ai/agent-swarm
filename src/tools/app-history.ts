@@ -70,7 +70,7 @@ export const registerAppHistoryTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      if (!getApp(appId)) return toolErr(`App ${appId} not found.`);
+      if (!(await getApp(appId))) return toolErr(`App ${appId} not found.`);
 
       const allVersions = await getAppVersions(appId);
       const versions = limit === undefined ? allVersions : allVersions.slice(0, limit);

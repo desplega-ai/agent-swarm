@@ -82,7 +82,7 @@ export async function buildAuthorizationUrl(
   const codeVerifier = oauth.generateRandomCodeVerifier();
   const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
 
-  const appId = options.appId ?? getOAuthAppIdByProvider(config.provider);
+  const appId = options.appId ?? (await getOAuthAppIdByProvider(config.provider));
   if (!appId) {
     throw new Error(`OAuth app ${config.provider} is not configured`);
   }

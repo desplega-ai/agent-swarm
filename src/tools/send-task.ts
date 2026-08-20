@@ -180,7 +180,7 @@ async function transferTrackerSyncToResumeChild(args: {
   const parent = await getTaskById(args.parentTaskId);
   if (!parent || !TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES.has(parent.status)) return;
 
-  const repointed = repointTrackerSyncBySwarmId(parent.id, args.child.id);
+  const repointed = await repointTrackerSyncBySwarmId(parent.id, args.child.id);
   if (repointed > 0) {
     console.log(
       `[send-task] Repointed ${repointed} tracker_sync row(s) from terminal parent ${parent.id.slice(0, 8)} to resume child ${args.child.id.slice(0, 8)}`,

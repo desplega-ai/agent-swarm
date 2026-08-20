@@ -447,11 +447,11 @@ export async function upsertCredentialBinding(data: {
     throw new Error("oauthAuthorizationId is required for oauth credential bindings");
   }
   if (authKind === "oauth" && data.oauthAuthorizationId) {
-    const authorization = getAuthorizationById(data.oauthAuthorizationId);
+    const authorization = await getAuthorizationById(data.oauthAuthorizationId);
     if (!authorization) {
       throw new Error(`OAuth authorization ${data.oauthAuthorizationId} was not found`);
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       throw new Error(
         `OAuth authorization ${data.oauthAuthorizationId} is not a generic provider authorization`,
@@ -1065,7 +1065,7 @@ export class ConnectionAuthValidationError extends Error {
   }
 }
 
-function deriveConnectionBinding(
+async function deriveConnectionBinding(
   auth: ConnectionAuthInput,
   ctx: {
     slug: string;
@@ -1073,7 +1073,7 @@ function deriveConnectionBinding(
     scope: ScriptConnectionScope;
     scopeId: string | null;
   },
-): DerivedConnectionBinding | null {
+): Promise<DerivedConnectionBinding | null> {
   if (auth.type === "none") return null;
 
   let configKey: string;
@@ -1082,11 +1082,11 @@ function deriveConnectionBinding(
     if (!auth.authorizationId) {
       throw new Error("oauth connection auth requires an authorizationId.");
     }
-    const authorization = getAuthorizationById(auth.authorizationId);
+    const authorization = await getAuthorizationById(auth.authorizationId);
     if (!authorization) {
       throw new Error(`OAuth authorization ${auth.authorizationId} was not found.`);
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       throw new Error(
         `OAuth authorization ${auth.authorizationId} is not a generic provider authorization.`,
@@ -1678,7 +1678,7 @@ export async function upsertScriptConnection(data: {
       // generationError below — wrap them so the outer catch rethrows and the
       // upsert fails loudly instead of clearing the managed binding.
       try {
-        derived = deriveConnectionBinding(authIntent, {
+        derived = await deriveConnectionBinding(authIntent, {
           slug: normalizedSlug,
           baseUrl: effectiveBaseUrl,
           scope,
@@ -1745,7 +1745,7 @@ export async function upsertScriptConnection(data: {
     effectiveBaseUrl = data.baseUrl;
     baseUrlSource = "user";
     allowedHosts = data.allowedHosts;
-    derived = deriveConnectionBinding(authIntent, {
+    derived = await deriveConnectionBinding(authIntent, {
       slug: normalizedSlug,
       baseUrl: data.baseUrl,
       scope,

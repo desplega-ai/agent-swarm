@@ -1080,38 +1080,40 @@ async function ensureOAuthAuthorizationAdmin(
   );
 }
 
-function tokenStatusForBinding(
+async function tokenStatusForBinding(
   binding: ScriptCredentialBindingRecord,
-): OAuthBindingTokenStatus | undefined {
+): Promise<OAuthBindingTokenStatus | undefined> {
   if (binding.authKind !== "oauth") return undefined;
   return binding.oauthAuthorizationId
-    ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+    ? await getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
     : "missing";
 }
 
-function decorateBinding(binding: ScriptCredentialBindingRecord): DecoratedBinding {
-  const tokenStatus = tokenStatusForBinding(binding);
+async function decorateBinding(binding: ScriptCredentialBindingRecord): Promise<DecoratedBinding> {
+  const tokenStatus = await tokenStatusForBinding(binding);
   return tokenStatus ? { ...binding, tokenStatus } : binding;
 }
 
-function authSummaryForConnection(
+async function authSummaryForConnection(
   connection: ScriptConnectionRecord,
-): ConnectionAuthSummaryResponse {
+): Promise<ConnectionAuthSummaryResponse> {
   const base = connectionAuthSummary(connection);
   if (connection.authType === "oauth") {
     return {
       ...base,
       status: connection.authAuthorizationId
-        ? getOAuthBindingTokenStatus(connection.authAuthorizationId)
+        ? await getOAuthBindingTokenStatus(connection.authAuthorizationId)
         : "missing",
     };
   }
   return base;
 }
 
-function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): BindingSummary | null {
+async function bindingSummary(
+  binding: ScriptCredentialBindingRecord | undefined,
+): Promise<BindingSummary | null> {
   if (!binding) return null;
-  const tokenStatus = tokenStatusForBinding(binding);
+  const tokenStatus = await tokenStatusForBinding(binding);
   return {
     id: binding.id,
     configKey: binding.configKey,
@@ -1263,22 +1265,24 @@ async function decorateConnections(
       binding,
     ]),
   );
-  return connections.map((connection) => {
-    const {
-      openapiSpecJson: _openapiSpecJson,
-      generatedTypes: _generatedTypes,
-      generatedRuntimeJson: _generatedRuntimeJson,
-      ...safeConnection
-    } = connection;
-    return {
-      ...safeConnection,
-      ...runtimeCounts(connection),
-      credentialBinding: bindingSummary(
-        connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
-      ),
-      auth: authSummaryForConnection(connection),
-    };
-  });
+  return Promise.all(
+    connections.map(async (connection) => {
+      const {
+        openapiSpecJson: _openapiSpecJson,
+        generatedTypes: _generatedTypes,
+        generatedRuntimeJson: _generatedRuntimeJson,
+        ...safeConnection
+      } = connection;
+      return {
+        ...safeConnection,
+        ...runtimeCounts(connection),
+        credentialBinding: await bindingSummary(
+          connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
+        ),
+        auth: await authSummaryForConnection(connection),
+      };
+    }),
+  );
 }
 
 function listConnections(
@@ -1367,7 +1371,7 @@ function sanitizeAuthorization(authorization: OAuthAuthorization) {
   };
 }
 
-function sanitizeOAuthApp(row: OAuthAppRow) {
+async function sanitizeOAuthApp(row: OAuthAppRow) {
   const extraParamsObject = parseMetadata(row.extraParamsJson);
   const extraParams = Object.fromEntries(
     Object.entries(extraParamsObject).filter(
@@ -1386,10 +1390,12 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenAuthStyle: row.tokenAuthStyle,
     tokenBodyFormat: row.tokenBodyFormat,
     source: row.source,
-    tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
+    tokenStatus: row.authorizationId
+      ? await getOAuthBindingTokenStatus(row.authorizationId)
+      : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
-    authorizations: listAuthorizationsForApp(row.id).map(sanitizeAuthorization),
+    authorizations: (await listAuthorizationsForApp(row.id)).map(sanitizeAuthorization),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -1406,7 +1412,7 @@ async function listOAuthApps() {
      WHERE a.mcpServerId IS NULL
      ORDER BY a.provider ASC`,
   );
-  return rows.map(sanitizeOAuthApp);
+  return Promise.all(rows.map(sanitizeOAuthApp));
 }
 
 /**
@@ -1821,7 +1827,7 @@ async function deleteOAuthApp(
 ): Promise<{ deleted: boolean; warnings: string[] }> {
   // Resolve id first (exact — N apps per provider allowed), then provider slug
   // for old provider-keyed callers. Never touches DCR/MCP apps.
-  const existing = getOAuthAppById(idOrProvider) ?? getOAuthApp(idOrProvider);
+  const existing = (await getOAuthAppById(idOrProvider)) ?? (await getOAuthApp(idOrProvider));
   if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
   const warnings = collectOAuthAppDeletionWarnings(existing);
   await getDbClient().transaction(async (tx) => {
@@ -1829,7 +1835,7 @@ async function deleteOAuthApp(
     // which targets the oldest same-provider app and would disconnect a
     // surviving sibling. The app DELETE also CASCADEs its authorizations; this
     // explicit delete keeps the scoping correct regardless of FK enforcement.
-    deleteAuthorizationsForApp(existing.id);
+    await deleteAuthorizationsForApp(existing.id);
     await tx.run("DELETE FROM oauth_apps WHERE id = ?", [existing.id]);
   });
   return { deleted: true, warnings };
@@ -2040,12 +2046,14 @@ export async function handleScriptConnections(
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
     const includeManaged = queryParams.get("includeManaged") === "true";
     listCredentialBindingsRoute.respond(res, 200, {
-      bindings: (
-        await listRelationalCredentialBindings({
-          includeInactive: true,
-          excludeManaged: !includeManaged,
-        })
-      ).map(decorateBinding),
+      bindings: await Promise.all(
+        (
+          await listRelationalCredentialBindings({
+            includeInactive: true,
+            excludeManaged: !includeManaged,
+          })
+        ).map(decorateBinding),
+      ),
     });
     return true;
   }
@@ -2096,7 +2104,7 @@ export async function handleScriptConnections(
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
         userId: await resolveHttpAuditUserId(req, agentId),
       });
-      upsertCredentialBindingRoute.respond(res, 200, { binding: decorateBinding(binding) });
+      upsertCredentialBindingRoute.respond(res, 200, { binding: await decorateBinding(binding) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -2134,7 +2142,7 @@ export async function handleScriptConnections(
 
       // Edit targets an exact row by id (N apps per provider allowed); provider
       // is immutable on edit. 404 if the id is unknown or an MCP/DCR app.
-      const editing = body.id ? getOAuthAppById(body.id) : null;
+      const editing = body.id ? await getOAuthAppById(body.id) : null;
       if (body.id && (!editing || editing.mcpServerId !== null)) {
         jsonError(res, `OAuth app ${body.id} not found.`, 404);
         return true;
@@ -2260,13 +2268,13 @@ export async function handleScriptConnections(
   if (listAuthorizationsRoute.match(req.method, pathSegments)) {
     const parsed = await listAuthorizationsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const app = getOAuthAppById(parsed.params.id);
+    const app = await getOAuthAppById(parsed.params.id);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `OAuth app ${parsed.params.id} not found.`, 404);
       return true;
     }
     listAuthorizationsRoute.respond(res, 200, {
-      authorizations: listAuthorizationsForApp(app.id).map(sanitizeAuthorization),
+      authorizations: (await listAuthorizationsForApp(app.id)).map(sanitizeAuthorization),
     });
     return true;
   }
@@ -2276,7 +2284,7 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const app = getOAuthAppById(parsed.params.id);
+    const app = await getOAuthAppById(parsed.params.id);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `OAuth app ${parsed.params.id} is not configured.`, 404);
       return true;
@@ -2309,12 +2317,12 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const authorization = getAuthorizationById(parsed.params.id);
+    const authorization = await getAuthorizationById(parsed.params.id);
     if (!authorization) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     let revocationAttempted = false;
     if (app && authorization.accessToken && authorization.status !== "revoked") {
       revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
@@ -2329,12 +2337,12 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const authorization = getAuthorizationById(parsed.params.id);
+    const authorization = await getAuthorizationById(parsed.params.id);
     if (!authorization) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
@@ -2367,7 +2375,7 @@ export async function handleScriptConnections(
       jsonError(res, `Refresh failed: ${message}`, 502);
       return true;
     }
-    const refreshed = getAuthorizationById(authorization.id);
+    const refreshed = await getAuthorizationById(authorization.id);
     if (!refreshed) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
@@ -2434,7 +2442,7 @@ export async function handleScriptConnections(
     if (!parsed) return true;
     if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
-    const app = getOAuthApp(parsed.params.provider);
+    const app = await getOAuthApp(parsed.params.provider);
     if (!app) {
       jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
       return true;
@@ -2459,7 +2467,7 @@ export async function handleScriptConnections(
     if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     const provider = parsed.params.provider;
-    if (!getOAuthApp(provider)) {
+    if (!(await getOAuthApp(provider))) {
       jsonError(res, `OAuth app ${provider} is not configured.`, 404);
       return true;
     }
@@ -2487,7 +2495,7 @@ export async function handleScriptConnections(
 
     refreshOAuthAppTokensRoute.respond(res, 200, {
       refreshed: true,
-      tokenStatus: getOAuthBindingTokenStatus(tokens.id),
+      tokenStatus: await getOAuthBindingTokenStatus(tokens.id),
       expiresAt: (await getOAuthTokens(provider))?.expiresAt ?? null,
     });
     return true;

@@ -85,7 +85,7 @@ export function createAssistant(): Assistant {
         // the identity primitive before it reaches agent-visible task text —
         // never a raw Slack ID. Bot-mention routing checks below use the
         // raw `messageText`, not this rendered copy.
-        const renderedMessageText = rewriteSlackMentions(messageText);
+        const renderedMessageText = await rewriteSlackMentions(messageText);
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
         // check whether this message is actually addressed to us.

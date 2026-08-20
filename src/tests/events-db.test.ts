@@ -238,15 +238,15 @@ describe("getEventsFiltered", () => {
     expect(events.length).toBeLessThanOrEqual(5);
   });
 
-  test("filters by status", () => {
-    createEvent({
+  test("filters by status", async () => {
+    await createEvent({
       category: "api",
       event: "api.error",
       source: "api",
       status: "error",
       data: { message: "timeout" },
     });
-    const errors = getEventsFiltered({ status: "error" });
+    const errors = await getEventsFiltered({ status: "error" });
     expect(errors.length).toBeGreaterThanOrEqual(1);
     for (const evt of errors) {
       expect(evt.status).toBe("error");

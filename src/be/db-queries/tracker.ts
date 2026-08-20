@@ -1,6 +1,6 @@
 import type { TrackerAgentMapping, TrackerSync } from "../../tracker/types";
 import { normalizeDateRequired } from "../date-utils";
-import { getDb, getDbClient } from "../db";
+import { getDbClient } from "../db";
 
 function normalizeTrackerSync(row: TrackerSync): TrackerSync {
   return {
@@ -129,10 +129,14 @@ export async function updateTrackerSyncSwarmId(id: string, swarmId: string): Pro
  * Safe to call when no rows match (no-op, returns 0). Repoints across
  * all providers (Linear AND Jira) and all entity types in one call.
  */
-export function repointTrackerSyncBySwarmId(oldSwarmId: string, newSwarmId: string): number {
-  const result = getDb()
-    .query("UPDATE tracker_sync SET swarmId = ? WHERE swarmId = ?")
-    .run(newSwarmId, oldSwarmId);
+export async function repointTrackerSyncBySwarmId(
+  oldSwarmId: string,
+  newSwarmId: string,
+): Promise<number> {
+  const result = await getDbClient().run("UPDATE tracker_sync SET swarmId = ? WHERE swarmId = ?", [
+    newSwarmId,
+    oldSwarmId,
+  ]);
   return Number(result.changes ?? 0);
 }
 

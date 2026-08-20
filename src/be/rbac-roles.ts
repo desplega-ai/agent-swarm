@@ -117,10 +117,8 @@ function roleRowToUserRole(row: UserRoleRow): UserRole {
   };
 }
 
-function requireRoleId(roleName: string): string {
-  const row = getDb()
-    .prepare<RoleIdRow, string>("SELECT id FROM roles WHERE name = ?")
-    .get(roleName);
+async function requireRoleId(roleName: string): Promise<string> {
+  const row = await getDbClient().get<RoleIdRow>("SELECT id FROM roles WHERE name = ?", [roleName]);
   if (!row) {
     throw new Error(`Unknown RBAC role: ${roleName}`);
   }
@@ -200,7 +198,7 @@ export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
 
 export async function attachRole(userId: string, roleName: string): Promise<void> {
   await getDbClient().transaction(async (tx) => {
-    const roleId = requireRoleId(roleName);
+    const roleId = await requireRoleId(roleName);
     await tx.run(
       `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
        VALUES ('user', ?, ?)`,
@@ -211,7 +209,7 @@ export async function attachRole(userId: string, roleName: string): Promise<void
 
 export async function detachRole(userId: string, roleName: string): Promise<void> {
   await getDbClient().transaction(async (tx) => {
-    const roleId = requireRoleId(roleName);
+    const roleId = await requireRoleId(roleName);
     await tx.run(
       `DELETE FROM principal_roles
        WHERE principalType = 'user' AND principalId = ? AND roleId = ?`,

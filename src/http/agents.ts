@@ -598,7 +598,7 @@ export async function handleAgentsRest(
           versionMeta?.changeSource === "session_sync"
         ) {
           try {
-            createEvent({
+            await createEvent({
               category: "system",
               event: "system.profile_sync_rejected",
               status: "error",
@@ -636,7 +636,7 @@ export async function handleAgentsRest(
       try {
         for (const field of Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]) {
           if (body[field] === undefined) continue;
-          createEvent({
+          await createEvent({
             category: "system",
             event: "system.profile_sync_reconciled",
             status: "ok",

@@ -13470,21 +13470,6 @@ export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Bu
 }
 
 /**
- * DEFERRED (transaction rule): sync counterpart of `getBudget`, kept for
- * `canClaim` (budget-admission.ts), whose call sites all run inside a raw
- * synchronous `getDb().transaction()` callback (`/api/poll`, `task-action`
- * `accept`) — stays on the raw sync handle.
- */
-export function getBudgetSync(scope: BudgetScope, scopeId: string): Budget | null {
-  const row = getDb()
-    .prepare<BudgetRow, [string, string]>(
-      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
-    )
-    .get(scope, scopeId);
-  return row ? rowToBudget(row) : null;
-}
-
-/**
  * Phase 6: list every budget row in the system. Used by `GET /api/budgets`.
  * Order is `(scope, scope_id)` for stable output across calls.
  */
@@ -13743,19 +13728,6 @@ export async function getDailySpendForAgent(agentId: string, dateUtc: string): P
 }
 
 /**
- * DEFERRED (transaction rule): sync counterpart of `getDailySpendForAgent`,
- * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
- */
-export function getDailySpendForAgentSync(agentId: string, dateUtc: string): number {
-  const row = getDb()
-    .prepare<CoalesceSumRow, [string, string]>(
-      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
-    )
-    .get(agentId, dateUtc);
-  return row?.total ?? 0;
-}
-
-/**
  * Sum of `totalCostUsd` across all `session_costs` rows for a given UTC
  * calendar day, regardless of agent. `dateUtc` MUST be `'YYYY-MM-DD'` (UTC).
  *
@@ -13776,19 +13748,6 @@ export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
 }
 
 /**
- * DEFERRED (transaction rule): sync counterpart of `getDailySpendGlobal`,
- * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
- */
-export function getDailySpendGlobalSync(dateUtc: string): number {
-  const row = getDb()
-    .prepare<CoalesceSumRow, [string]>(
-      "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
-    )
-    .get(dateUtc);
-  return row?.total ?? 0;
-}
-
-/**
  * Sum of `totalCostUsd` across all `session_costs` rows whose task was
  * requested by a given user on a given UTC calendar day. `dateUtc` MUST be
  * `'YYYY-MM-DD'` (UTC). Costs are joined through `agent_tasks` deliberately;
@@ -13802,22 +13761,6 @@ export async function getDailySpendForUser(userId: string, dateUtc: string): Pro
        WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
     [userId, dateUtc],
   );
-  return row?.total ?? 0;
-}
-
-/**
- * DEFERRED (transaction rule): sync counterpart of `getDailySpendForUser`,
- * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
- */
-export function getDailySpendForUserSync(userId: string, dateUtc: string): number {
-  const row = getDb()
-    .prepare<CoalesceSumRow, [string, string]>(
-      `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
-       FROM session_costs sc
-       JOIN agent_tasks t ON sc.taskId = t.id
-       WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
-    )
-    .get(userId, dateUtc);
   return row?.total ?? 0;
 }
 

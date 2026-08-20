@@ -515,7 +515,7 @@ describe("script source pulls", () => {
       { actor: "user:operator" },
     );
     // Adding a source to a model that already has rows is a free schema edit.
-    updateApp(appId, { definition: parsed(issueDefinition(script.id)) });
+    await updateApp(appId, { definition: parsed(issueDefinition(script.id)) });
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
@@ -1156,7 +1156,7 @@ describe("concurrency", () => {
     );
     const pass = runAppSync({ appId });
     // Drop the source while the pull is in the air.
-    updateApp(appId, {
+    await updateApp(appId, {
       definition: parsed(appWith({ issue: { columns: ownedIssueColumns() } })),
     });
 
@@ -1188,10 +1188,10 @@ describe("concurrency", () => {
     const pass = runAppSync({ appId });
     // A join key is immutable in place, so the only way to move it is
     // remove-then-re-add — both halves land while the pull is in the air.
-    updateApp(appId, {
+    await updateApp(appId, {
       definition: parsed(appWith({ issue: { columns: withAltKey(ownedIssueColumns()) } })),
     });
-    updateApp(appId, {
+    await updateApp(appId, {
       definition: parsed(
         appWith({
           issue: {
@@ -1223,7 +1223,7 @@ describe("concurrency", () => {
 
     const pass = runAppSync({ appId });
     // Same connector and join key, different args: the old guard missed this.
-    updateApp(appId, {
+    await updateApp(appId, {
       definition: parsed(issueDefinition(script.id, { args: { repo: "owner/other" } })),
     });
 
@@ -1248,7 +1248,7 @@ describe("concurrency", () => {
     const pass = runAppSync({ appId });
     // Rebind `title` to a different field mid-pull: the payload was projected
     // against the old rules and must not land under the new ones.
-    updateApp(appId, {
+    await updateApp(appId, {
       definition: parsed(
         appWith({
           issue: {
@@ -1410,7 +1410,7 @@ describe("pass snapshot consistency", () => {
     // While pass "a" awaits its slow pull, repoint model b's source. Pass "b"
     // must pull the CURRENT script — pulling the selection-time one while
     // fingerprinting the fresh resolve would commit drifted data silently.
-    updateApp(appId, { definition: parsed(definitionWith(newScript.id)) });
+    await updateApp(appId, { definition: parsed(definitionWith(newScript.id)) });
     const result = await run;
 
     expect(result.ok).toBe(true);
@@ -1883,7 +1883,7 @@ describe("sync action kind", () => {
     for (const column of Object.values(models.issue?.columns ?? {})) {
       delete (column as { source?: unknown }).source;
     }
-    updateApp(appId, { definition: { ...app.definition, models } });
+    await updateApp(appId, { definition: { ...app.definition, models } });
 
     const response = await request<SyncBody>(`/api/apps/${appId}/actions/refresh`, {
       method: "POST",

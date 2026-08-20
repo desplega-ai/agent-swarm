@@ -47,7 +47,7 @@ export async function resolveTaskAuditUserId(
   if (task.requestedByUserId) return task.requestedByUserId;
 
   if (task.slackUserId) {
-    const user = findUserByExternalId("slack", task.slackUserId);
+    const user = await findUserByExternalId("slack", task.slackUserId);
     if (user) return user.id;
   }
 

@@ -494,8 +494,10 @@ describe("fingerprintApiKey", () => {
 describe("recordIdentityEvent", () => {
   test("can emit budget_changed / status_changed / email_* directly", async () => {
     const user = await createUser({ name: "EventDirect" });
-    recordIdentityEvent(user.id, "budget_changed", OPERATOR_ACTOR, null, { dailyBudgetUsd: 10 });
-    recordIdentityEvent(
+    await recordIdentityEvent(user.id, "budget_changed", OPERATOR_ACTOR, null, {
+      dailyBudgetUsd: 10,
+    });
+    await recordIdentityEvent(
       user.id,
       "status_changed",
       OPERATOR_ACTOR,
@@ -504,8 +506,8 @@ describe("recordIdentityEvent", () => {
         status: "suspended",
       },
     );
-    recordIdentityEvent(user.id, "email_added", OPERATOR_ACTOR, null, { email: "x@y.com" });
-    recordIdentityEvent(user.id, "email_removed", OPERATOR_ACTOR, { email: "x@y.com" }, null);
+    await recordIdentityEvent(user.id, "email_added", OPERATOR_ACTOR, null, { email: "x@y.com" });
+    await recordIdentityEvent(user.id, "email_removed", OPERATOR_ACTOR, { email: "x@y.com" }, null);
 
     const events = eventsFor(user.id);
     expect(events.map((e) => e.eventType)).toEqual([

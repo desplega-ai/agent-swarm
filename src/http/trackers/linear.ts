@@ -226,7 +226,7 @@ export async function handleLinearTracker(
     }
 
     const authorizationId = await getDefaultAuthorizationIdForProvider("linear");
-    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    const authorization = authorizationId ? await getAuthorizationById(authorizationId) : null;
     if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(

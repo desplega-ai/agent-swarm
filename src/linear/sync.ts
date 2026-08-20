@@ -417,7 +417,7 @@ async function resolveLinearActor(
     console.warn("[linear] appUserId not yet stored; bot-self-link guard disabled");
   }
 
-  const existing = findUserByExternalId("linear", linearUserId);
+  const existing = await findUserByExternalId("linear", linearUserId);
   if (existing) return existing.id;
 
   const trimmedEmail = typeof email === "string" ? email.trim() : "";

@@ -192,7 +192,7 @@ export async function handleMessageReceived(
   // identifier at all, so it renders the same non-name sentinel shape via
   // the identity primitive rather than echoing the raw header string.
   const senderDisplay = senderEmail
-    ? renderIdentity(resolveIdentityByEmail(senderEmail))
+    ? renderIdentity(await resolveIdentityByEmail(senderEmail))
     : renderIdentity({ status: "unknown", kind: "email", externalId: "unknown" });
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 

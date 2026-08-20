@@ -570,7 +570,7 @@ export async function handleUsers(
         await linkIdentity(user.id, ident.kind, ident.externalId, actor);
       }
       if (userFields.dailyBudgetUsd !== undefined) {
-        recordIdentityEvent(user.id, "budget_changed", actor, null, {
+        await recordIdentityEvent(user.id, "budget_changed", actor, null, {
           dailyBudgetUsd: userFields.dailyBudgetUsd,
         });
       }
@@ -822,7 +822,7 @@ export async function handleUsers(
         const merged = [...(targetBefore.emailAliases ?? []), ...newAliases];
         await updateUser(targetId, { emailAliases: merged });
         for (const alias of newAliases) {
-          recordIdentityEvent(targetId, "email_added", actor, null, { email: alias });
+          await recordIdentityEvent(targetId, "email_added", actor, null, { email: alias });
         }
       }
 
@@ -835,7 +835,7 @@ export async function handleUsers(
       // source user ({id, name, email}) inside the `after` payload under
       // `source` — this lets the UI render "Merged manually from X → Y".
       const targetAfter = await composeUser(targetId);
-      recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
+      await recordIdentityEvent(targetId, "manual_merge", actor, targetBefore, {
         ...targetAfter,
         source: {
           id: sourceBefore.id,
@@ -898,7 +898,7 @@ export async function handleUsers(
         parsed.body.dailyBudgetUsd !== undefined &&
         (before.dailyBudgetUsd ?? null) !== (parsed.body.dailyBudgetUsd ?? null)
       ) {
-        recordIdentityEvent(
+        await recordIdentityEvent(
           parsed.params.id,
           "budget_changed",
           actor,
@@ -909,7 +909,7 @@ export async function handleUsers(
 
       // Status event
       if (parsed.body.status !== undefined && before.status !== parsed.body.status) {
-        recordIdentityEvent(
+        await recordIdentityEvent(
           parsed.params.id,
           "status_changed",
           actor,
@@ -924,12 +924,12 @@ export async function handleUsers(
         const afterSet = new Set(parsed.body.emailAliases.map((a) => a.toLowerCase()));
         for (const a of parsed.body.emailAliases) {
           if (!beforeSet.has(a.toLowerCase())) {
-            recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
+            await recordIdentityEvent(parsed.params.id, "email_added", actor, null, { email: a });
           }
         }
         for (const a of before.emailAliases ?? []) {
           if (!afterSet.has(a.toLowerCase())) {
-            recordIdentityEvent(parsed.params.id, "email_removed", actor, { email: a }, null);
+            await recordIdentityEvent(parsed.params.id, "email_removed", actor, { email: a }, null);
           }
         }
       }
@@ -952,7 +952,7 @@ export async function handleUsers(
         const afterVal = parsed.body[field] ?? null;
         // Cheap deep-equal via JSON — fields are scalar strings or object/null.
         if (JSON.stringify(beforeVal) === JSON.stringify(afterVal)) continue;
-        recordIdentityEvent(
+        await recordIdentityEvent(
           parsed.params.id,
           "profile_changed",
           actor,

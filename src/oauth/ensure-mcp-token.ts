@@ -45,7 +45,7 @@ export async function ensureMcpToken(
   if (existing) return existing;
 
   const work = (async () => {
-    const token = getMcpOAuthToken(mcpServerId, userId);
+    const token = await getMcpOAuthToken(mcpServerId, userId);
     if (!token) return null;
     if (token.status === "revoked") return token;
     if (!isMcpTokenExpiringSoon(token, opts.bufferMs)) return token;
@@ -77,7 +77,7 @@ export async function ensureMcpToken(
         expectedTokenVersion: token.tokenVersion,
       });
 
-      return getMcpOAuthToken(mcpServerId, userId);
+      return await getMcpOAuthToken(mcpServerId, userId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (isInvalidClientError(message)) {

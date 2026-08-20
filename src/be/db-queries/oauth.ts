@@ -1,7 +1,7 @@
 import type { OAuthApp, OAuthTokens } from "../../tracker/types";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
-import { getDb, getDbClient } from "../db";
+import { getDbClient } from "../db";
 
 type OAuthAppRow = Omit<
   OAuthApp,
@@ -145,23 +145,23 @@ function normalizeAuthorization(row: OAuthAuthorizationRow): OAuthAuthorization 
   };
 }
 
-function rawOAuthAppByProvider(provider: string): OAuthAppRow | null {
-  return getDb()
-    .query(
-      `SELECT * FROM oauth_apps
+async function rawOAuthAppByProvider(provider: string): Promise<OAuthAppRow | null> {
+  return await getDbClient().get<OAuthAppRow>(
+    `SELECT * FROM oauth_apps
        WHERE provider = ? AND mcpServerId IS NULL
        ORDER BY createdAt ASC, id ASC
        LIMIT 1`,
-    )
-    .get(provider) as OAuthAppRow | null;
+    [provider],
+  );
 }
 
 /** Exact (non-MCP) app lookup by id — used to target a specific row when the
  * provider is ambiguous (N apps per provider are allowed). */
-function rawOAuthAppById(id: string): OAuthAppRow | null {
-  return getDb()
-    .query("SELECT * FROM oauth_apps WHERE id = ? AND mcpServerId IS NULL")
-    .get(id) as OAuthAppRow | null;
+async function rawOAuthAppById(id: string): Promise<OAuthAppRow | null> {
+  return await getDbClient().get<OAuthAppRow>(
+    "SELECT * FROM oauth_apps WHERE id = ? AND mcpServerId IS NULL",
+    [id],
+  );
 }
 
 async function rawDefaultAuthorizationForApp(appId: string): Promise<OAuthAuthorizationRow | null> {
@@ -193,19 +193,19 @@ export async function getDefaultAuthorizationIdForProvider(
 
 // ── OAuth Apps ──
 
-export function getOAuthApp(provider: string): OAuthApp | null {
-  const row = rawOAuthAppByProvider(provider);
+export async function getOAuthApp(provider: string): Promise<OAuthApp | null> {
+  const row = await rawOAuthAppByProvider(provider);
   return row ? normalizeOAuthApp(row) : null;
 }
 
-export function getOAuthAppById(id: string): OAuthApp | null {
-  const row = getDb().query("SELECT * FROM oauth_apps WHERE id = ?").get(id) as OAuthAppRow | null;
+export async function getOAuthAppById(id: string): Promise<OAuthApp | null> {
+  const row = await getDbClient().get<OAuthAppRow>("SELECT * FROM oauth_apps WHERE id = ?", [id]);
   return row ? normalizeOAuthApp(row) : null;
 }
 
 /** Resolve the (non-MCP) app id for a provider slug, or null if none. */
-export function getOAuthAppIdByProvider(provider: string): string | null {
-  return rawOAuthAppByProvider(provider)?.id ?? null;
+export async function getOAuthAppIdByProvider(provider: string): Promise<string | null> {
+  return (await rawOAuthAppByProvider(provider))?.id ?? null;
 }
 
 /** Shared write payload for the OAuth-app create / update / provider-upsert
@@ -339,7 +339,7 @@ export async function createOAuthApp(provider: string, data: OAuthAppWriteData):
 /** Update exactly one existing (non-MCP) app by id. Throws when the id is
  * unknown or refers to an MCP-managed app. Provider is immutable on edit. */
 export async function updateOAuthAppById(id: string, data: OAuthAppWriteData): Promise<void> {
-  const existing = rawOAuthAppById(id);
+  const existing = await rawOAuthAppById(id);
   if (!existing) {
     throw new Error(`OAuth app ${id} not found.`);
   }
@@ -352,26 +352,28 @@ export async function updateOAuthAppById(id: string, data: OAuthAppWriteData): P
  * per provider this silently clobbers a sibling row — the create path must use
  * createOAuthApp and the edit path updateOAuthAppById. */
 export async function upsertOAuthApp(provider: string, data: OAuthAppWriteData): Promise<void> {
-  await writeOAuthApp(rawOAuthAppByProvider(provider), provider, data);
+  await writeOAuthApp(await rawOAuthAppByProvider(provider), provider, data);
 }
 
 // ── OAuth Authorizations ──
 
-export function listAuthorizationsForApp(appId: string): OAuthAuthorization[] {
-  const rows = getDb()
-    .query("SELECT * FROM oauth_authorizations WHERE appId = ? ORDER BY createdAt ASC, id ASC")
-    .all(appId) as OAuthAuthorizationRow[];
+export async function listAuthorizationsForApp(appId: string): Promise<OAuthAuthorization[]> {
+  const rows = await getDbClient().query<OAuthAuthorizationRow>(
+    "SELECT * FROM oauth_authorizations WHERE appId = ? ORDER BY createdAt ASC, id ASC",
+    [appId],
+  );
   return rows.map(normalizeAuthorization);
 }
 
-export function getAuthorizationById(id: string): OAuthAuthorization | null {
-  const row = getDb()
-    .query("SELECT * FROM oauth_authorizations WHERE id = ?")
-    .get(id) as OAuthAuthorizationRow | null;
+export async function getAuthorizationById(id: string): Promise<OAuthAuthorization | null> {
+  const row = await getDbClient().get<OAuthAuthorizationRow>(
+    "SELECT * FROM oauth_authorizations WHERE id = ?",
+    [id],
+  );
   return row ? normalizeAuthorization(row) : null;
 }
 
-export function upsertAuthorization(data: {
+export async function upsertAuthorization(data: {
   id?: string;
   appId: string;
   label?: string;
@@ -387,11 +389,11 @@ export function upsertAuthorization(data: {
   lastErrorMessage?: string | null;
   lastRefreshedAt?: string | null;
   connectedByUserId?: string | null;
-}): OAuthAuthorization {
+}): Promise<OAuthAuthorization> {
   const label = data.label ?? "default";
   const existing = data.id
-    ? getAuthorizationById(data.id)
-    : listAuthorizationsForApp(data.appId).find((row) => row.label === label);
+    ? await getAuthorizationById(data.id)
+    : (await listAuthorizationsForApp(data.appId)).find((row) => row.label === label);
   const key = getEncryptionKey();
   const accessToken = encryptSecret(data.accessToken, key);
   const refreshToken =
@@ -402,17 +404,15 @@ export function upsertAuthorization(data: {
         : encryptSecret(data.refreshToken, key);
 
   if (existing) {
-    getDb()
-      .query(
-        `UPDATE oauth_authorizations SET
+    await getDbClient().run(
+      `UPDATE oauth_authorizations SET
            userId = ?, accountEmail = ?, identityJson = ?, accessToken = ?,
            refreshToken = ?, tokenType = ?, expiresAt = ?, scope = ?,
            tokensEncrypted = 1, tokenVersion = tokenVersion + 1, status = ?,
            lastErrorMessage = ?, lastRefreshedAt = ?, connectedByUserId = ?,
            updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
          WHERE id = ?`,
-      )
-      .run(
+      [
         data.userId !== undefined ? data.userId : existing.userId,
         data.accountEmail !== undefined ? data.accountEmail : existing.accountEmail,
         data.identityJson !== undefined ? data.identityJson : existing.identityJson,
@@ -430,21 +430,20 @@ export function upsertAuthorization(data: {
         data.lastRefreshedAt !== undefined ? data.lastRefreshedAt : existing.lastRefreshedAt,
         data.connectedByUserId !== undefined ? data.connectedByUserId : existing.connectedByUserId,
         existing.id,
-      );
-    return getAuthorizationById(existing.id) as OAuthAuthorization;
+      ],
+    );
+    return (await getAuthorizationById(existing.id)) as OAuthAuthorization;
   }
 
   const id = data.id ?? crypto.randomUUID();
-  getDb()
-    .query(
-      `INSERT INTO oauth_authorizations (
+  await getDbClient().run(
+    `INSERT INTO oauth_authorizations (
          id, appId, label, userId, accountEmail, identityJson,
          accessToken, refreshToken, tokenType, expiresAt, scope,
          tokensEncrypted, tokenVersion, status, lastErrorMessage,
          lastRefreshedAt, connectedByUserId
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       id,
       data.appId,
       label,
@@ -460,8 +459,9 @@ export function upsertAuthorization(data: {
       data.lastErrorMessage ?? null,
       data.lastRefreshedAt ?? null,
       data.connectedByUserId ?? null,
-    );
-  return getAuthorizationById(id) as OAuthAuthorization;
+    ],
+  );
+  return (await getAuthorizationById(id)) as OAuthAuthorization;
 }
 
 export async function updateAuthorizationTokens(
@@ -474,7 +474,7 @@ export async function updateAuthorizationTokens(
     expectedTokenVersion?: number;
   },
 ): Promise<OAuthAuthorization | null> {
-  const existing = getAuthorizationById(id);
+  const existing = await getAuthorizationById(id);
   if (!existing) return null;
   const expectedVersion = data.expectedTokenVersion ?? existing.tokenVersion;
   const key = getEncryptionKey();
@@ -503,7 +503,7 @@ export async function updateAuthorizationTokens(
       expectedVersion,
     ],
   );
-  return result.changes === 1 ? getAuthorizationById(id) : null;
+  return result.changes === 1 ? await getAuthorizationById(id) : null;
 }
 
 /**
@@ -540,8 +540,9 @@ export async function deleteAuthorizationById(id: string): Promise<boolean> {
  * sibling app's authorizations. Bindings referencing the rows detach via
  * `ON DELETE SET NULL`.
  */
-export function deleteAuthorizationsForApp(appId: string): number {
-  return getDb().query("DELETE FROM oauth_authorizations WHERE appId = ?").run(appId).changes;
+export async function deleteAuthorizationsForApp(appId: string): Promise<number> {
+  return (await getDbClient().run("DELETE FROM oauth_authorizations WHERE appId = ?", [appId]))
+    .changes;
 }
 
 // ── OAuth pending (DB-backed PKCE state for generic/tracker flows) ──
@@ -676,7 +677,7 @@ export async function markAuthorizationRefreshFailed(
        WHERE id = ? AND status != 'revoked'`,
     [message, id],
   );
-  return result.changes === 1 ? getAuthorizationById(id) : null;
+  return result.changes === 1 ? await getAuthorizationById(id) : null;
 }
 
 // ── Provider-string compatibility adapters ──
@@ -711,10 +712,10 @@ export async function storeOAuthTokens(
     scope?: string | null;
   },
 ): Promise<void> {
-  const app = rawOAuthAppByProvider(provider);
+  const app = await rawOAuthAppByProvider(provider);
   if (!app) throw new Error(`OAuth app ${provider} is not configured`);
   const existing = await rawDefaultAuthorizationForApp(app.id);
-  upsertAuthorization({
+  await upsertAuthorization({
     ...(existing ? { id: existing.id } : {}),
     appId: app.id,
     label: "default",
@@ -758,7 +759,7 @@ export async function updateOAuthTokensAfterRefresh(
   });
   if (updated) return;
 
-  const latest = getAuthorizationById(current.id);
+  const latest = await getAuthorizationById(current.id);
   if (!latest) {
     throw new Error(`OAuth token refresh persistence failed for ${provider}: token row missing`);
   }
@@ -872,7 +873,7 @@ export async function listKeepAliveAuthorizations(): Promise<KeepAliveAuthorizat
 }
 
 export async function deleteOAuthTokens(provider: string): Promise<void> {
-  const app = rawOAuthAppByProvider(provider);
+  const app = await rawOAuthAppByProvider(provider);
   if (!app) return;
   const existing = await rawDefaultAuthorizationForApp(app.id);
   if (!existing) return;

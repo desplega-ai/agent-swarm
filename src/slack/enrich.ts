@@ -23,7 +23,7 @@
 
 import type { WebClient } from "@slack/web-api";
 import { getKv, upsertKv } from "../be/db";
-import { resolveIdentity } from "../be/identity";
+import { type IdentityResolution, resolveIdentity } from "../be/identity";
 import { recordUnmappedIdentity } from "../be/unmapped-identities";
 import {
   findOrCreateUserByEmail,
@@ -128,7 +128,7 @@ export async function resolveSlackUserId(
   eventContext: { sampleEventType: string; sampleContext: string },
 ): Promise<string | undefined> {
   // 1. Fast path — existing alias.
-  const existing = findUserByExternalId("slack", slackUserId);
+  const existing = await findUserByExternalId("slack", slackUserId);
   if (existing) return existing.id;
 
   // 2. Enrich → auto-link by email.
@@ -157,7 +157,7 @@ export async function resolveSlackUserId(
     // Re-read the alias after linking. If another webhook enrolled the same
     // Slack ID between our fast-path read and `linkIdentity`, the external-ID
     // row is authoritative even when it points at a different canonical user.
-    return findUserByExternalId("slack", slackUserId)?.id ?? user.id;
+    return (await findUserByExternalId("slack", slackUserId))?.id ?? user.id;
   }
 
   // 3. No email — track as unmapped.
@@ -172,11 +172,24 @@ export async function resolveSlackUserId(
  * message bodies — both are just this same token. Pure DB reads via
  * `resolveIdentity`; zero Slack API calls, no cache.
  */
-export function rewriteSlackMentions(text: string, botUserId?: string): string {
+export async function rewriteSlackMentions(text: string, botUserId?: string): Promise<string> {
+  const userIds = new Set<string>();
+  for (const match of text.matchAll(/<@([A-Z0-9]+)>/g)) {
+    const userId = match[1];
+    if (userId && userId !== botUserId) userIds.add(userId);
+  }
+
+  const resolutions = new Map<string, IdentityResolution>();
+  await Promise.all(
+    [...userIds].map(async (userId) => {
+      resolutions.set(userId, await resolveIdentity("slack", userId));
+    }),
+  );
+
   return text.replace(/<@([A-Z0-9]+)>/g, (_match, userId: string) => {
     if (userId === botUserId) return `<@${userId}> (that's you)`;
-    const resolution = resolveIdentity("slack", userId);
-    return resolution.status === "resolved"
+    const resolution = resolutions.get(userId);
+    return resolution?.status === "resolved"
       ? `<@${userId}|${resolution.name}>`
       : `<@${userId}> (unknown user)`;
   });

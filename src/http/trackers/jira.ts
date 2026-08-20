@@ -230,7 +230,7 @@ function getRedirectUri(req: IncomingMessage): string {
 
 async function buildJiraStatusPayload(req: IncomingMessage): Promise<JiraStatusPayload> {
   const tokens = await getOAuthTokens("jira");
-  const meta = getJiraMetadata();
+  const meta = await getJiraMetadata();
   const scope = tokens?.scope ?? null;
   // Atlassian returns scopes space-separated in the token response.
   const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
@@ -335,7 +335,7 @@ export async function handleJiraTracker(
     }
 
     const authorizationId = await getDefaultAuthorizationIdForProvider("jira");
-    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    const authorization = authorizationId ? await getAuthorizationById(authorizationId) : null;
     if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
@@ -465,7 +465,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     const ids = (meta.webhookIds ?? []).map((entry) => entry.id);
 
     let webhooksDeleted = 0;

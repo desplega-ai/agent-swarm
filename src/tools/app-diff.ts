@@ -54,7 +54,7 @@ export const registerAppDiffTool = (server: McpServer) => {
       });
       if (!decision.allow) return toolErr(decision.reason);
 
-      const app = getApp(appId);
+      const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
       const selectedFrom = from ?? (await getAppVersions(appId))[0]?.version;
       if (selectedFrom === undefined)

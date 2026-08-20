@@ -11,7 +11,7 @@ import type {
 import { registerVolatileSecret } from "../../utils/secret-scrubber";
 import { generateBearerToken, generateShortId } from "../../utils/short-id";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
-import { computeContentHash, getDb, getDbClient } from "../db";
+import { computeContentHash, getDbClient } from "../db";
 import { embedScript } from "./embeddings";
 
 type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
@@ -74,11 +74,7 @@ function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {
   };
 }
 
-// NOTE: kept synchronous (raw getDb()). insertScriptVersion only runs inside
-// the client transactions of insertScript (below) and of upsertScriptByName's
-// content-changed branch, so it writes on the shared connection inside the
-// already-open BEGIN.
-function insertScriptVersion(args: {
+async function insertScriptVersion(args: {
   scriptId: string;
   version: number;
   source: string;
@@ -88,16 +84,14 @@ function insertScriptVersion(args: {
   contentHash: string;
   changedByAgentId?: string | null;
   changeReason?: string | null;
-}): void {
-  getDb()
-    .prepare(
-      `INSERT INTO script_versions (
+}): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO script_versions (
         id, scriptId, version, source, description, intent, signatureJson,
         contentHash, changedByAgentId, changedAt, changeReason
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       crypto.randomUUID(),
       args.scriptId,
       args.version,
@@ -109,7 +103,8 @@ function insertScriptVersion(args: {
       args.changedByAgentId ?? null,
       new Date().toISOString(),
       args.changeReason ?? null,
-    );
+    ],
+  );
 }
 
 export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
@@ -155,7 +150,7 @@ export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord>
 
     if (!row) throw new Error("Failed to insert script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,
@@ -289,7 +284,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
 
     if (!row) throw new Error("Failed to update script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,

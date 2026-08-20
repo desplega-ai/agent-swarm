@@ -221,7 +221,7 @@ export async function ensureAuthorizationTokenOrThrow(
   bufferMs?: number,
   force = false,
 ): Promise<void> {
-  const initial = getAuthorizationById(authorizationId);
+  const initial = await getAuthorizationById(authorizationId);
   if (!initial || initial.status === "revoked") return;
   if (!authorizationNeedsRefresh(initial, bufferMs, force)) return;
 
@@ -229,7 +229,7 @@ export async function ensureAuthorizationTokenOrThrow(
     const waitStartedAt = Date.now();
 
     while (true) {
-      const current = getAuthorizationById(authorizationId);
+      const current = await getAuthorizationById(authorizationId);
       if (!current || current.status === "revoked") return;
       // Another caller refreshed (tokenVersion bumped) since this call loaded
       // the row — its work satisfies ours. Without this check a waiter that
@@ -238,7 +238,7 @@ export async function ensureAuthorizationTokenOrThrow(
       if (current.tokenVersion !== initial.tokenVersion) return;
       if (!authorizationNeedsRefresh(current, bufferMs, force)) return;
 
-      const app = getOAuthAppById(current.appId);
+      const app = await getOAuthAppById(current.appId);
       // No provider-facing app config (missing, or a DCR/MCP app): nothing this
       // path can refresh — leave status untouched.
       if (!app || app.mcpServerId !== null) return;
@@ -268,12 +268,12 @@ export async function ensureAuthorizationTokenOrThrow(
       try {
         // Re-read under the cross-process lock: another node may have refreshed
         // (tokenVersion bumped → no longer expiring) or revoked while we waited.
-        const locked = getAuthorizationById(authorizationId);
+        const locked = await getAuthorizationById(authorizationId);
         if (!locked || locked.status === "revoked") return;
         if (locked.tokenVersion !== initial.tokenVersion) return;
         if (!authorizationNeedsRefresh(locked, bufferMs, force)) return;
 
-        const lockedApp = getOAuthAppById(locked.appId);
+        const lockedApp = await getOAuthAppById(locked.appId);
         if (!lockedApp || lockedApp.mcpServerId !== null) return;
 
         if (!locked.refreshToken) {
@@ -433,7 +433,7 @@ export async function forceRefreshTokenOrThrow(provider: string): Promise<void> 
  * Build an OAuthProviderConfig from the oauth_apps table for any provider.
  * Retained for callers that only need the provider config (not a refresh).
  */
-export function getOAuthConfig(provider: string): OAuthProviderConfig | null {
-  const app = getOAuthApp(provider);
+export async function getOAuthConfig(provider: string): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp(provider);
   return app ? oauthAppRowToProviderConfig(app) : null;
 }

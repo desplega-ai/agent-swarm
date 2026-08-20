@@ -66,12 +66,12 @@ export async function resolveOAuthAccessTokenByAuthorization(
   const minValidityMs = minValiditySeconds * 1000;
   await ensureAuthorizationTokenOrThrow(authorizationId, minValidityMs);
 
-  const authorization = getAuthorizationById(authorizationId);
+  const authorization = await getAuthorizationById(authorizationId);
   if (!authorization || authorization.status === "revoked" || !authorization.accessToken) {
     throw new Error(`OAuth authorization ${authorizationId} is not connected`);
   }
 
-  const app = getOAuthAppById(authorization.appId);
+  const app = await getOAuthAppById(authorization.appId);
   const provider = app?.provider ?? authorizationId;
   if (authorization.expiresAt) {
     assertTokenUsable(provider, authorization.expiresAt, minValidityMs);

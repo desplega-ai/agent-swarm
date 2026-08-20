@@ -589,13 +589,13 @@ function scratchSlug(intent: string, source: string): string {
   return `scratch-${base || "inline-script"}-${hash}`;
 }
 
-function emitGlobalUpsertEvent(args: {
+async function emitGlobalUpsertEvent(args: {
   agentId: string;
   script: ScriptRecord;
   isNew: boolean;
   isPromotion: boolean;
-}) {
-  createEvent({
+}): Promise<void> {
+  await createEvent({
     category: "system",
     event: "script.global_upsert",
     source: "api",
@@ -678,7 +678,7 @@ export async function handleScripts(
     });
 
     if (parsed.body.scope === "global" && !result.contentDeduped) {
-      emitGlobalUpsertEvent({
+      await emitGlobalUpsertEvent({
         agentId: agent.id,
         script: result.script,
         isNew: result.isNew,

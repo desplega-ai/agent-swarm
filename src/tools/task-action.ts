@@ -412,7 +412,7 @@ export async function taskActionHandler(
         // as the /api/poll gates so capacity AND budget share atomicity.
         // Phase 5: record dedup row + capture side-effect context for the
         // after-commit lead follow-up + workflow event-bus emit.
-        const admission = canClaim(agentId, new Date(), existingTask.requestedByUserId);
+        const admission = await canClaim(agentId, new Date(), existingTask.requestedByUserId);
         if (!admission.allowed) {
           const causeMsg =
             admission.cause === "agent"

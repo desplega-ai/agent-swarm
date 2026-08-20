@@ -715,7 +715,10 @@ function invalidDefinition(res: ServerResponse, issues: AppValidationIssue[]): v
   json(res, { error: "invalid app definition", issues }, 400);
 }
 
-function definitionNeedsRepair(res: ServerResponse, app: ReturnType<typeof getApp>): boolean {
+function definitionNeedsRepair(
+  res: ServerResponse,
+  app: Awaited<ReturnType<typeof getApp>>,
+): boolean {
   if (!app || !appDefinitionNeedsRepair(app)) return false;
   json(res, { error: "definition needs repair", issues: app.definitionError }, 409);
   return true;
@@ -750,12 +753,12 @@ function invalidRows(res: ServerResponse, error: unknown): boolean {
   return true;
 }
 
-function resolveModel(
+async function resolveModel(
   appId: string,
   modelName: string,
   res: ServerResponse,
-): { app: NonNullable<ReturnType<typeof getApp>>; model: ModelDef } | null {
-  const app = getApp(appId);
+): Promise<{ app: NonNullable<Awaited<ReturnType<typeof getApp>>>; model: ModelDef } | null> {
+  const app = await getApp(appId);
   if (definitionNeedsRepair(res, app)) return null;
   if (!app || !Object.hasOwn(app.definition.models, modelName)) {
     jsonError(res, "app or model not found", 404);
@@ -1033,7 +1036,7 @@ export async function handleApps(
     const parsed = await listAppVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
@@ -1047,7 +1050,7 @@ export async function handleApps(
     const parsed = await getAppVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
@@ -1101,7 +1104,7 @@ export async function handleApps(
     if (!parsed) return true;
     const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const rows = await createAppRows(
@@ -1124,7 +1127,7 @@ export async function handleApps(
     if (!parsed) return true;
     const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const row = await createAppRow(
@@ -1145,7 +1148,7 @@ export async function handleApps(
     const parsed = await listRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     const { filters, issues } = filtersFromQuery(queryParams, resolved.model);
     if (issues.length > 0) {
@@ -1197,7 +1200,7 @@ export async function handleApps(
     const parsed = await getRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    if (!resolveModel(parsed.params.id, parsed.params.model, res)) return true;
+    if (!(await resolveModel(parsed.params.id, parsed.params.model, res))) return true;
     const row = await getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
     if (!row) {
       jsonError(res, "row not found", 404);
@@ -1213,7 +1216,7 @@ export async function handleApps(
     if (!parsed) return true;
     const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const row = await patchAppRow(
@@ -1239,7 +1242,7 @@ export async function handleApps(
     const parsed = await deleteRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     if (
       !(await deleteAppRow(
@@ -1260,7 +1263,7 @@ export async function handleApps(
     const parsed = await runNamedQueryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (definitionNeedsRepair(res, app)) return true;
     const queries = app?.definition.queries;
     if (!app || !queries || !Object.hasOwn(queries, parsed.params.name)) {
@@ -1301,7 +1304,7 @@ export async function handleApps(
     const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
 
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1426,7 +1429,7 @@ export async function handleApps(
     const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
 
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1453,16 +1456,16 @@ export async function handleApps(
     if (!parsed) return true;
     if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
 
-    if (!getApp(parsed.params.id)) {
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    let app: ReturnType<typeof updateApp> = null;
+    let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
-        const existing = getApp(parsed.params.id);
+        const existing = await getApp(parsed.params.id);
         if (!existing) {
           jsonError(res, "app not found", 404);
           responseHandled = true;
@@ -1539,16 +1542,16 @@ export async function handleApps(
     const parsed = await updateAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    let app: ReturnType<typeof updateApp> = null;
+    let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
-        const existing = getApp(parsed.params.id);
+        const existing = await getApp(parsed.params.id);
         if (!existing) {
           jsonError(res, "app not found", 404);
           responseHandled = true;
@@ -1622,7 +1625,7 @@ export async function handleApps(
     const parsed = await deleteAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1649,7 +1652,7 @@ export async function handleApps(
     const parsed = await getAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1668,7 +1671,7 @@ export async function handleApps(
     const parsed = await getUserConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1687,7 +1690,7 @@ export async function handleApps(
     const parsed = await putUserConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;

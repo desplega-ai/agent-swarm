@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -18,7 +18,6 @@ import {
   type AppRow,
   appsNamespace,
   createAppRowUnlocked,
-  deleteKvSync,
   listAllAppRowsForMigrationUnlocked,
   patchAppRowUnlocked,
   withMutationLock,
@@ -122,7 +121,7 @@ async function writeSyncStatus(
 ): Promise<void> {
   // A pass can outlive its app: deletion purges the apps:<id> namespace while
   // a pull is in flight, and writing here would resurrect it as an orphan.
-  if (!getApp(appId)) return;
+  if (!(await getApp(appId))) return;
   const status: AppSyncStatus = {
     lastStartedAt,
     lastFinishedAt: new Date().toISOString(),
@@ -160,7 +159,7 @@ export async function getAppSyncStatus(
  */
 export async function collectAppSyncStatus(appId: string): Promise<Record<string, AppSyncStatus>> {
   const statuses: Record<string, AppSyncStatus> = {};
-  const app = getApp(appId);
+  const app = await getApp(appId);
   if (!app || appDefinitionNeedsRepair(app)) return statuses;
   for (const [modelName, model] of Object.entries(app.definition.models)) {
     for (const sourceName of Object.keys(model.sources ?? {})) {
@@ -176,16 +175,12 @@ export async function collectAppSyncStatus(appId: string): Promise<Record<string
  * projection dependencies changed between two definitions, or whose pair is
  * gone: the stored freshness described the OLD configuration, and presenting
  * it for the new one would claim a pass that never ran.
- *
- * DEFERRED (transaction rule): called from `migrateAppSchema`'s synchronous
- * `getDb().transaction()` callback (schema-migrate.ts) — stays on the raw
- * sync handle via `deleteKvSync`.
  */
-export function invalidateChangedSyncStatus(
+export async function invalidateChangedSyncStatus(
   appId: string,
   previous: AppDefinition | undefined,
   next: AppDefinition,
-): void {
+): Promise<void> {
   if (!previous) return;
   for (const [modelName, oldModel] of Object.entries(previous.models)) {
     for (const [sourceName, oldSource] of Object.entries(oldModel.sources ?? {})) {
@@ -196,7 +191,7 @@ export function invalidateChangedSyncStatus(
         nextSource !== undefined &&
         pairFingerprint(nextModel, sourceName, nextSource) ===
           pairFingerprint(oldModel, sourceName, oldSource);
-      if (!unchanged) deleteKvSync(appsNamespace(appId), syncStatusKey(modelName, sourceName));
+      if (!unchanged) await deleteKv(appsNamespace(appId), syncStatusKey(modelName, sourceName));
     }
   }
 }
@@ -545,8 +540,12 @@ function sameValue(existing: unknown, projected: unknown): boolean {
 
 type PairDefinition = { model: ModelDef; source: SourceDef };
 
-function resolvePair(appId: string, model: string, source: string): PairDefinition | null {
-  const app = getApp(appId);
+async function resolvePair(
+  appId: string,
+  model: string,
+  source: string,
+): Promise<PairDefinition | null> {
+  const app = await getApp(appId);
   if (!app || appDefinitionNeedsRepair(app)) return null;
   const modelDef = app.definition.models[model];
   const sourceDef = modelDef?.sources?.[source];
@@ -606,7 +605,7 @@ function reconcile(args: {
     // Re-read under the lock: the pull ran unlocked, so the definition it was
     // planned against may be gone. Anything that moves the identity or the
     // projection rules of this pair aborts before the first write.
-    const fresh = resolvePair(appId, model, sourceName);
+    const fresh = await resolvePair(appId, model, sourceName);
     if (!fresh) {
       throw new SyncPassError(
         `model "${model}" no longer declares source "${sourceName}"; pass aborted with no writes`,
@@ -770,7 +769,7 @@ async function executePass(args: {
 
   const finish = async (result: SyncPassResult): Promise<SyncPassResult> => {
     const scrubbed = scrubObject({ ...result, warnings, durationMs: Date.now() - startedMs });
-    const current = resolvePair(args.appId, args.model, args.sourceName);
+    const current = await resolvePair(args.appId, args.model, args.sourceName);
     const stillCurrent =
       plannedFingerprint !== null &&
       current !== null &&
@@ -793,7 +792,7 @@ async function executePass(args: {
   try {
     // Snapshot the pair's projection rules before the unlocked pull; reconcile
     // compares under the lock and aborts on any drift.
-    const planned = resolvePair(args.appId, args.model, args.sourceName);
+    const planned = await resolvePair(args.appId, args.model, args.sourceName);
     if (!planned) {
       throw new SyncPassError(
         `model "${args.model}" no longer declares source "${args.sourceName}"; pass aborted with no writes`,
@@ -902,7 +901,7 @@ export async function runAppSync(input: {
   source?: string;
   invokedBy?: string;
 }): Promise<AppSyncResult> {
-  const app = getApp(input.appId);
+  const app = await getApp(input.appId);
   if (!app) {
     return {
       ok: false,

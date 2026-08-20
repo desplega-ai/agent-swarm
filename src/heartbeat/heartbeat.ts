@@ -10,7 +10,6 @@ import {
   getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
-  getDb,
   getDbClient,
   getIdleWorkersWithCapacity,
   getLeadAgent,
@@ -769,14 +768,13 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
     if (idleWorkers.length === 0) return;
 
     const reservedByWorker = new Map<string, number>();
-    const reservedForWorker = (agentId: string): number => {
+    const reservedForWorker = async (agentId: string): Promise<number> => {
       const cached = reservedByWorker.get(agentId);
       if (cached !== undefined) return cached;
-      const row = getDb()
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
-        )
-        .get(agentId);
+      const row = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
+        [agentId],
+      );
       const reserved = row?.count ?? 0;
       reservedByWorker.set(agentId, reserved);
       return reserved;
@@ -792,15 +790,22 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
       for (const task of batch) {
         if (assignedCount >= maxAutoAssignPerSweep()) break;
 
-        const worker = idleWorkers.find(
-          (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
-        );
+        let worker: (typeof idleWorkers)[number] | undefined;
+        for (const w of idleWorkers) {
+          if (
+            (await reservedForWorker(w.id)) < (w.maxTasks ?? 1) &&
+            isAgentEligibleForTask(w, task)
+          ) {
+            worker = w;
+            break;
+          }
+        }
         if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
 
         const assigned = await assignUnassignedTaskPending(task.id, worker.id);
         if (assigned) {
           findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-          reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
+          reservedByWorker.set(worker.id, (await reservedForWorker(worker.id)) + 1);
           assignedCount++;
         }
       }
@@ -886,7 +891,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
           "pin_unreclaimed_escalated",
         );
         if (!terminalized) return null; // reclaimed in the gap — no writes made
-        repointTrackerSyncBySwarmId(resume.id, original.id);
+        await repointTrackerSyncBySwarmId(resume.id, original.id);
         const decision = await createRerouteDecisionTask({
           original,
           staleResume: resume,

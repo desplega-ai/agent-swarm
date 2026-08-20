@@ -230,10 +230,18 @@ export const registerManageUserTool = (server: McpServer) => {
             if (input.emailAliases !== undefined) {
               const { added, removed } = diffAliases(before.emailAliases, input.emailAliases);
               for (const alias of added) {
-                recordIdentityEvent(input.userId, "email_added", operatorActor, null, { alias });
+                await recordIdentityEvent(input.userId, "email_added", operatorActor, null, {
+                  alias,
+                });
               }
               for (const alias of removed) {
-                recordIdentityEvent(input.userId, "email_removed", operatorActor, { alias }, null);
+                await recordIdentityEvent(
+                  input.userId,
+                  "email_removed",
+                  operatorActor,
+                  { alias },
+                  null,
+                );
               }
             }
 

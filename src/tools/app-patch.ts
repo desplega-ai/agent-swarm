@@ -74,10 +74,10 @@ export const registerAppPatchTool = (server: McpServer) => {
       });
       if (!decision.allow) return toolErr(decision.reason);
 
-      const existing = getApp(input.appId);
+      const existing = await getApp(input.appId);
       if (!existing) return toolErr(`App ${input.appId} not found.`);
       return withAppDefinitionLock(input.appId, async () => {
-        const lockedExisting = getApp(input.appId);
+        const lockedExisting = await getApp(input.appId);
         if (!lockedExisting) return toolErr(`App ${input.appId} not found.`);
         if (appDefinitionNeedsRepair(lockedExisting)) {
           return toolErr("Definition needs repair.", {
@@ -105,7 +105,7 @@ export const registerAppPatchTool = (server: McpServer) => {
           });
         }
 
-        let app: ReturnType<typeof updateApp>;
+        let app: Awaited<ReturnType<typeof updateApp>>;
         let migration: AppMigrationReport;
         try {
           const migrated = await migrateAppSchema({

@@ -116,7 +116,7 @@ async function getThreadContextForBuffer(channelId: string, threadTs: string): P
       })
       .join("\n");
 
-    return rewriteSlackMentions(formatted);
+    return await rewriteSlackMentions(formatted);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context for buffer:", error);
     return "";
@@ -149,7 +149,7 @@ async function slackFlush(
   // Build combined task description. Any in-body `<@U…>` mentions the
   // requester typed are rewritten via the identity primitive so the agent
   // sees a name or the explicit UNKNOWN sentinel — never a raw Slack ID.
-  const combinedText = rewriteSlackMentions(items.map((m) => m.text).join("\n---\n"));
+  const combinedText = await rewriteSlackMentions(items.map((m) => m.text).join("\n---\n"));
   const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining

@@ -68,7 +68,7 @@ export const registerAppSyncTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
       const result = await runAppSync({

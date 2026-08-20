@@ -859,7 +859,7 @@ export async function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
-    ...elementDefinitionIssues(parsed.data, catalog, elementContext),
+    ...(await elementDefinitionIssues(parsed.data, catalog, elementContext)),
   ];
   const grandfatheredScriptRefs = collectScriptReferencePathMap(elementContext.existingDefinition);
   for (const [modelName, model] of Object.entries(parsed.data.models)) {

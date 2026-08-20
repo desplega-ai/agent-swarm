@@ -293,7 +293,7 @@ export async function handlePoll(
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
             // context here so the after-commit step can notify the lead.
-            const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
+            const admission = await canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
               const dedup = await recordBudgetRefusalNotification({
@@ -378,7 +378,7 @@ export async function handlePoll(
             const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
             const requestedByUnknownName =
               !requestedByUser && pendingTask.slackUserId
-                ? renderIdentity(resolveIdentity("slack", pendingTask.slackUserId))
+                ? renderIdentity(await resolveIdentity("slack", pendingTask.slackUserId))
                 : undefined;
 
             return {
@@ -458,7 +458,11 @@ export async function handlePoll(
             if (unassignedIds.length > 0) {
               const candidateId = unassignedIds[0]!;
               const candidateTask = await getTaskById(candidateId);
-              const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
+              const admission = await canClaim(
+                myAgentId,
+                new Date(),
+                candidateTask?.requestedByUserId,
+              );
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
                 const dedup = await recordBudgetRefusalNotification({

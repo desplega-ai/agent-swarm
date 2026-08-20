@@ -1,4 +1,4 @@
-import { type AppVersion, createAppVersion, getAppVersions, getDb } from "../be/db";
+import { type AppVersion, createAppVersion, getAppVersions, getDbClient } from "../be/db";
 import { type AppDefinition, type AppValidationIssue, parseAppDefinition } from "./definition";
 import { upgradeAppDefinition } from "./format-upgrades";
 import {
@@ -67,9 +67,10 @@ function snapshotDefinition(rawDefinition: string): unknown {
  * column directly: recovery snapshots must not depend on it being decodable.
  */
 export async function snapshotApp(appId: string, changedByAgentId?: string): Promise<AppVersion> {
-  const app = getDb()
-    .prepare<StoredAppRow, [string]>("SELECT name, description, definition FROM apps WHERE id = ?")
-    .get(appId);
+  const app = await getDbClient().get<StoredAppRow>(
+    "SELECT name, description, definition FROM apps WHERE id = ?",
+    [appId],
+  );
   if (!app) throw new Error(`App ${appId} not found — cannot create snapshot`);
 
   const versions = await getAppVersions(appId);
@@ -171,7 +172,7 @@ export async function rollbackApp(input: {
   writerIsUser?: boolean;
 }): Promise<{ app: AppRecord; migration: AppMigrationReport }> {
   return withAppDefinitionLock(input.appId, async () => {
-    const existing = getApp(input.appId);
+    const existing = await getApp(input.appId);
     if (!existing) throw new AppRollbackAppNotFoundError(input.appId);
 
     const version = (await getAppVersions(input.appId)).find(

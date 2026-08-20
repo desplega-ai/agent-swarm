@@ -1,5 +1,5 @@
 import { defaultAssetKey } from "../assets/key";
-import { getDb, getDbClient } from "../be/db";
+import { getDbClient } from "../be/db";
 import type { AppDefinition, AppValidationIssue } from "./definition";
 import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
 import {
@@ -123,19 +123,11 @@ export async function createApp(input: {
   return decodeApp(row);
 }
 
-/**
- * DEFERRED (transaction rule): called synchronously by `updateApp` below,
- * which every `migrateAppSchema` caller (tools/app-patch.ts, tools/app-upsert.ts,
- * src/apps/version.ts, src/http/apps.ts) passes as the `writeDefinition`
- * closure invoked inside schema-migrate.ts's synchronous `getDb().transaction()`
- * callback — stays on the raw sync handle.
- */
-export function getApp(id: string): AppRecord | null {
-  const row = getDb()
-    .prepare<AppDbRow, [string]>(
-      `SELECT id, name, description, definition, created_at, updated_at FROM apps WHERE id = ?`,
-    )
-    .get(id);
+export async function getApp(id: string): Promise<AppRecord | null> {
+  const row = await getDbClient().get<AppDbRow>(
+    `SELECT id, name, description, definition, created_at, updated_at FROM apps WHERE id = ?`,
+    [id],
+  );
   return row ? decodeApp(row) : null;
 }
 
@@ -161,34 +153,26 @@ export async function listAppRecords(): Promise<AppRecord[]> {
   return rows.map(decodeApp);
 }
 
-/**
- * DEFERRED (transaction rule): passed as `writeDefinition` inside every
- * `migrateAppSchema` call (tools/app-patch.ts, tools/app-upsert.ts,
- * src/apps/version.ts, src/http/apps.ts), invoked synchronously from
- * schema-migrate.ts's synchronous `getDb().transaction()` callback — stays on
- * the raw sync handle via `getApp` above.
- */
-export function updateApp(
+export async function updateApp(
   id: string,
   patch: { name?: string; description?: string | null; definition?: AppDefinition },
-): AppRecord | null {
-  const existing = getApp(id);
+): Promise<AppRecord | null> {
+  const existing = await getApp(id);
   if (!existing) return null;
   const updatedAt = nextTimestamp(existing.updatedAt);
-  const row = getDb()
-    .prepare<AppDbRow, [string, string | null, string, string, string]>(
-      `UPDATE apps
-       SET name = ?, description = ?, definition = ?, updated_at = ?
-       WHERE id = ?
-       RETURNING id, name, description, definition, created_at, updated_at`,
-    )
-    .get(
+  const row = await getDbClient().get<AppDbRow>(
+    `UPDATE apps
+     SET name = ?, description = ?, definition = ?, updated_at = ?
+     WHERE id = ?
+     RETURNING id, name, description, definition, created_at, updated_at`,
+    [
       patch.name ?? existing.name,
       patch.description === undefined ? (existing.description ?? null) : patch.description,
       encodeDefinition(patch.definition ?? existing.definition),
       updatedAt,
       id,
-    );
+    ],
+  );
   return row ? decodeApp(row) : null;
 }
 

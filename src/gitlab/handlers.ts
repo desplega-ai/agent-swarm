@@ -80,7 +80,7 @@ async function resolveGitLabSender(
   sampleEventType: string,
   sampleContext: string,
 ): Promise<string | undefined> {
-  const existing = findUserByExternalId("gitlab", user.username);
+  const existing = await findUserByExternalId("gitlab", user.username);
   if (existing) return existing.id;
 
   // Inline-email cascade — only run when email is a real non-empty string.
@@ -116,8 +116,8 @@ async function resolveGitLabSender(
  * Render a GitLab username for agent-visible text: the resolved canonical
  * name or the explicit UNKNOWN sentinel — never the raw `username`.
  */
-function renderGitLabIdentity(username: string): string {
-  return renderIdentity(resolveIdentity("gitlab", username));
+async function renderGitLabIdentity(username: string): Promise<string> {
+  return renderIdentity(await resolveIdentity("gitlab", username));
 }
 
 // ── Event Handlers ──
@@ -157,11 +157,12 @@ export async function handleMergeRequest(
 
       const context = mr.description ? extractMentionContext(mr.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
+      const username = await renderGitLabIdentity(user.username);
       const result = resolveTemplate("gitlab.merge_request.opened", {
         mr_iid: mr.iid,
         mr_title: mr.title,
         repo,
-        username: renderGitLabIdentity(user.username),
+        username,
         source_branch: mr.source_branch,
         target_branch: mr.target_branch,
         mr_url: mr.url,
@@ -265,11 +266,12 @@ export async function handleIssue(
 
       const context = issue.description ? extractMentionContext(issue.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
+      const username = await renderGitLabIdentity(user.username);
       const result = resolveTemplate("gitlab.issue.assigned", {
         issue_iid: issue.iid,
         issue_title: issue.title,
         repo,
-        username: renderGitLabIdentity(user.username),
+        username,
         issue_url: issue.url,
         context_section: contextSection,
       });
@@ -367,9 +369,10 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._`
     : "";
 
+  const username = await renderGitLabIdentity(user.username);
   const noteResult = resolveTemplate("gitlab.comment.mentioned", {
     entity_label: entityLabel,
-    username: renderGitLabIdentity(user.username),
+    username,
     repo,
     target_url: targetUrl,
     context,

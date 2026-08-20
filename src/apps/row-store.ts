@@ -1,4 +1,4 @@
-import { deleteKv, getDb, getDbClient, getKv, listKv, upsertKv } from "../be/db";
+import { deleteKv, getDbClient, getKv, listKv, upsertKv } from "../be/db";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -438,94 +438,49 @@ export async function patchAppRowUnlocked(
 }
 
 /**
- * Sync counterpart of the `upsertKv({ valueType: "json" })` write, kept for
- * callers embedded in `migrateAppSchema`'s raw synchronous
- * `getDb().transaction()` callback (schema-migrate.ts), which cannot await.
- */
-function upsertKvJsonSync(namespace: string, key: string, value: unknown): void {
-  const now = Date.now();
-  getDb()
-    .prepare(
-      `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, 'json', NULL, ?, ?)
-       ON CONFLICT(namespace, key) DO UPDATE SET
-         value = excluded.value,
-         value_type = excluded.value_type,
-         expires_at = excluded.expires_at,
-         updated_at = excluded.updated_at`,
-    )
-    .run(namespace, key, JSON.stringify(value), now, now);
-}
-
-/**
- * Sync counterpart of `deleteKv`, kept for the same transaction-bound reason.
- * Exported for `invalidateChangedSyncStatus` (sync.ts), which is also called
- * from inside `migrateAppSchema`'s synchronous transaction callback.
- */
-export function deleteKvSync(namespace: string, key: string): void {
-  getDb().prepare(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`).run(namespace, key);
-}
-
-/** Sync counterpart of `listKv`'s prefix scan (keys only), same reason. */
-function listKvKeysSync(
-  namespace: string,
-  prefix: string,
-  limit: number,
-  offset: number,
-): string[] {
-  const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const now = Date.now();
-  const rows = getDb()
-    .prepare<{ key: string }, [string, number, string, number, number]>(
-      `SELECT key FROM kv_entries
-        WHERE namespace = ?
-          AND (expires_at IS NULL OR expires_at > ?)
-          AND key LIKE ? ESCAPE '\\'
-        ORDER BY key
-        LIMIT ? OFFSET ?`,
-    )
-    .all(namespace, now, `${escaped}%`, limit, offset);
-  return rows.map((r) => r.key);
-}
-
-/**
  * Caller must already hold the app/model mutation lock.
- *
- * DEFERRED (transaction rule): called from `migrateAppSchema`'s synchronous
- * `getDb().transaction()` callback (schema-migrate.ts) — stays on the raw
- * sync handle via `upsertKvJsonSync`.
  */
-export function writeAppRowForMigrationUnlocked(appId: string, model: string, row: AppRow): void {
-  upsertKvJsonSync(appsNamespace(appId), rowKey(model, row.id), row);
+export async function writeAppRowForMigrationUnlocked(
+  appId: string,
+  model: string,
+  row: AppRow,
+): Promise<void> {
+  await upsertKv({
+    namespace: appsNamespace(appId),
+    key: rowKey(model, row.id),
+    value: row,
+    valueType: "json",
+  });
 }
 
-/**
- * Caller must already hold the app/model mutation lock.
- *
- * DEFERRED (transaction rule): called from `migrateAppSchema`'s synchronous
- * `getDb().transaction()` callback (schema-migrate.ts) — stays on the raw
- * sync handle via `listKvKeysSync` / `deleteKvSync` / `upsertKvJsonSync`.
- */
-export function rebuildAppColumnIndexUnlocked(
+/** Caller must already hold the app/model mutation lock. */
+export async function rebuildAppColumnIndexUnlocked(
   appId: string,
   model: string,
   columnName: string,
   column: ColumnDef | undefined,
   rows: AppRow[],
-): void {
+): Promise<void> {
   const namespace = appsNamespace(appId);
   const prefix = `${model}/idx/${columnName}/`;
   while (true) {
-    const keys = listKvKeysSync(namespace, prefix, MIGRATION_KV_BATCH_SIZE, 0);
+    const keys = (
+      await listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset: 0 })
+    ).map((entry) => entry.key);
     if (keys.length === 0) break;
-    for (const key of keys) deleteKvSync(namespace, key);
+    for (const key of keys) await deleteKv(namespace, key);
   }
   if (!column || !isIndexed(column)) return;
   for (const row of rows) {
     if (!Object.hasOwn(row, columnName)) continue;
     const value = row[columnName];
     if (value === undefined || value === null) continue;
-    upsertKvJsonSync(namespace, appIndexKey(model, columnName, value, row.id), "1");
+    await upsertKv({
+      namespace,
+      key: appIndexKey(model, columnName, value, row.id),
+      value: "1",
+      valueType: "json",
+    });
   }
 }
 
