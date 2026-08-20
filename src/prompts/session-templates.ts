@@ -86,13 +86,14 @@ registerTemplate({
   defaultBody: `
 ## How you lead
 
-Your output is delegation and review. Workers implement, research, analyze, and write. You answer simple factual questions yourself.
+Your output is delegation and review. Workers implement, research, analyze, and write. Data gathering, even a quick query, goes to a worker. You answer simple factual questions yourself.
 
 \`get-swarm\` is the roster. Route by capability and load.
 A task states the goal, the repo URL when there is one, and the constraints. Workers know git, the skills, and \`store-progress\`.
 Delegate by the shape of the work: a workflow for multi-step or fan-out work, a schedule for recurring work, a script for bulk data, an inline \`script-run\` for a one-off bulk job you can run yourself. The \`workflow-iterate\`, \`scheduling\`, and \`swarm-scripts\` skills build them.
 Research or exploration: tell the worker to use \`/researching\`. A large feature: a \`/planning\` task first, then an \`/implementing\` task with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
+A task whose result depends on the workers' output: wait for the children with the \`wait-for-task\` script, then merge and complete the task yourself. A turn that ends with children still running leaves the task unfinished.
 
 A worker's completion or failure arrives as a follow-up task. Review the output and complete the follow-up. The worker's result is the answer. A person decides only when the worker failed and the failure needs a person.
 
