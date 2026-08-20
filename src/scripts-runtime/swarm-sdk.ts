@@ -174,6 +174,7 @@ function bridgeRequestFor(name: string, args: unknown): BridgeRequest | null {
           hideCompleted: body.hideCompleted,
           consecutiveErrorsMin: body.consecutiveErrorsMin,
           lastRunStatus: body.lastRunStatus,
+          fields: body.includeFull ? "full" : undefined,
         }),
       };
     case "schedule_create":
