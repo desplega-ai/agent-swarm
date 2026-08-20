@@ -1707,9 +1707,7 @@ describe("offered task strand recovery (#1190)", () => {
     const onlineId = makeAgent(1);
 
     const reviewing = createTaskExtended("reviewing-not-offered", { offeredTo: offlineId });
-    getDb()
-      .prepare("UPDATE agent_tasks SET status = 'reviewing' WHERE id = ?")
-      .run(reviewing.id);
+    getDb().prepare("UPDATE agent_tasks SET status = 'reviewing' WHERE id = ?").run(reviewing.id);
     const healthyOffer = createTaskExtended("healthy-offer", { offeredTo: onlineId });
 
     const released = releaseStaleOfferedTasksForOfflineAgents();
