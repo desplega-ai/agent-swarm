@@ -1,4 +1,4 @@
-import { getDb } from "../be/db";
+import { getDb, getDbClient } from "../be/db";
 import { getOAuthApp } from "../be/db-queries/oauth";
 import type { JiraOAuthAppMetadata } from "./types";
 
@@ -108,10 +108,8 @@ export function updateJiraMetadata(partial: Partial<JiraOAuthAppMetadata>): void
  * flow to drop cloudId, siteUrl, and webhookIds in one shot. The row itself
  * stays — `initJira()` requires the `oauth_apps` row to exist.
  */
-export function clearJiraMetadata(): void {
-  getDb()
-    .query(
-      "UPDATE oauth_apps SET metadata = '{}', updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
-    )
-    .run();
+export async function clearJiraMetadata(): Promise<void> {
+  await getDbClient().run(
+    "UPDATE oauth_apps SET metadata = '{}', updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
+  );
 }

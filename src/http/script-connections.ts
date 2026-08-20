@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
-import { getAgentById, getDb } from "@/be/db";
+import { getAgentById, getDb, getDbClient } from "@/be/db";
 import {
   createOAuthApp,
   deleteAuthorizationById,
@@ -1395,19 +1395,17 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
   };
 }
 
-function listOAuthApps() {
-  const rows = getDb()
-    .prepare<OAuthAppRow, []>(
-      `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
-              z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
-              z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
-       FROM oauth_apps a
-       LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
-       WHERE a.mcpServerId IS NULL
-       ORDER BY a.provider ASC`,
-    )
-    .all();
+async function listOAuthApps() {
+  const rows = await getDbClient().query<OAuthAppRow>(
+    `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
+            a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
+            z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
+            z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
+     FROM oauth_apps a
+     LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
+     WHERE a.mcpServerId IS NULL
+     ORDER BY a.provider ASC`,
+  );
   return rows.map(sanitizeOAuthApp);
 }
 
@@ -2110,7 +2108,7 @@ export async function handleScriptConnections(
   }
 
   if (listOAuthAppsRoute.match(req.method, pathSegments)) {
-    listOAuthAppsRoute.respond(res, 200, { oauthApps: listOAuthApps() });
+    listOAuthAppsRoute.respond(res, 200, { oauthApps: await listOAuthApps() });
     return true;
   }
 
@@ -2217,7 +2215,7 @@ export async function handleScriptConnections(
       } else {
         savedId = await createOAuthApp(provider, appData);
       }
-      const app = listOAuthApps().find((row) => row.id === savedId);
+      const app = (await listOAuthApps()).find((row) => row.id === savedId);
       upsertOAuthAppRoute.respond(res, 200, {
         oauthApp: app,
         redirectUri,

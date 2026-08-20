@@ -482,7 +482,7 @@ export async function handleJiraTracker(
     }
 
     await deleteOAuthTokens("jira");
-    clearJiraMetadata();
+    await clearJiraMetadata();
 
     console.log(
       `[Jira] Disconnected: ${webhooksDeleted}/${ids.length} webhooks deleted, tokens cleared, metadata reset`,

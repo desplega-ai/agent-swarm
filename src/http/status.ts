@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   getAgentHarnessProviders,
-  getDb,
+  getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
   hasFirstCompletedTask,
@@ -459,9 +459,9 @@ function jiraMilestone(): SetupMilestone {
 async function workersMilestone(): Promise<SetupMilestone> {
   // `configured` if ≥1 row in agents; `verified` if both lead+worker alive
   // within the last 5 minutes.
-  const totalRow = getDb()
-    .prepare<{ count: number }, []>(`SELECT COUNT(*) AS count FROM agents`)
-    .get();
+  const totalRow = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM agents`,
+  );
   const totalAgents = totalRow?.count ?? 0;
 
   const { leads_alive, workers_alive } = await getLiveAgentCounts(5);

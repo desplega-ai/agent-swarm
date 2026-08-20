@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { chunkContent } from "../be/chunking";
-import { getDb, getTaskById } from "../be/db";
+import { getDbClient, getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
@@ -1229,14 +1229,15 @@ let memoryGcTimer: ReturnType<typeof setInterval> | null = null;
 
 const SEARCH_RETRIEVAL_TTL_DAYS = 90;
 
-function purgeStaleSearchRetrievals(): number {
+async function purgeStaleSearchRetrievals(): Promise<number> {
   try {
     const cutoff = new Date(
       Date.now() - SEARCH_RETRIEVAL_TTL_DAYS * 24 * 60 * 60 * 1000,
     ).toISOString();
-    const result = getDb()
-      .prepare("DELETE FROM memory_retrieval WHERE eventType = 'search' AND retrievedAt < ?")
-      .run(cutoff);
+    const result = await getDbClient().run(
+      "DELETE FROM memory_retrieval WHERE eventType = 'search' AND retrievedAt < ?",
+      [cutoff],
+    );
     return result.changes;
   } catch (err) {
     console.error("[memory-gc] Search retrieval purge failed:", (err as Error).message);
@@ -1250,7 +1251,7 @@ async function runMemoryGcTick(label: "Initial" | "Periodic"): Promise<void> {
     if (purged > 0) {
       console.log(`[memory-gc] ${label} purge removed ${purged} expired memory row(s)`);
     }
-    const searchPurged = purgeStaleSearchRetrievals();
+    const searchPurged = await purgeStaleSearchRetrievals();
     if (searchPurged > 0) {
       console.log(
         `[memory-gc] ${label} purge removed ${searchPurged} stale search retrieval row(s)`,
