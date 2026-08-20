@@ -2876,22 +2876,24 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         newValue: "completed",
       });
     } catch {}
-    import("../workflows/event-bus")
-      .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("task.completed", {
-          taskId: id,
-          output,
-          agentId: row.agentId,
-          workflowRunId: row.workflowRunId,
-          workflowRunStepId: row.workflowRunStepId,
-        });
-      })
-      .catch((err) =>
-        console.error(
-          "[db] task.completed event not emitted:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+    getDbClient().afterSettled(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("task.completed", {
+            taskId: id,
+            output,
+            agentId: row.agentId,
+            workflowRunId: row.workflowRunId,
+            workflowRunStepId: row.workflowRunStepId,
+          });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] task.completed event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
     try {
       promotePendingSteeringForTask(id, "Task completed before steering was delivered");
     } catch (error) {
@@ -2947,22 +2949,24 @@ export function failTask(id: string, reason: string): AgentTask | null {
         metadata: { reason: scrubbedReason },
       });
     } catch {}
-    import("../workflows/event-bus")
-      .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("task.failed", {
-          taskId: id,
-          failureReason: reason,
-          agentId: row.agentId,
-          workflowRunId: row.workflowRunId,
-          workflowRunStepId: row.workflowRunStepId,
-        });
-      })
-      .catch((err) =>
-        console.error(
-          "[db] task.failed event not emitted:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+    getDbClient().afterSettled(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("task.failed", {
+            taskId: id,
+            failureReason: reason,
+            agentId: row.agentId,
+            workflowRunId: row.workflowRunId,
+            workflowRunStepId: row.workflowRunStepId,
+          });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] task.failed event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
     try {
       promotePendingSteeringForTask(id, "Task failed before steering was delivered");
     } catch (error) {
@@ -3055,21 +3059,23 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         metadata: reason ? { reason } : undefined,
       });
     } catch {}
-    import("../workflows/event-bus")
-      .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("task.cancelled", {
-          taskId: id,
-          agentId: row.agentId,
-          workflowRunId: row.workflowRunId,
-          workflowRunStepId: row.workflowRunStepId,
-        });
-      })
-      .catch((err) =>
-        console.error(
-          "[db] task.cancelled event not emitted:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+    getDbClient().afterSettled(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("task.cancelled", {
+            taskId: id,
+            agentId: row.agentId,
+            workflowRunId: row.workflowRunId,
+            workflowRunStepId: row.workflowRunStepId,
+          });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] task.cancelled event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
     try {
       promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
     } catch (error) {
@@ -3149,23 +3155,25 @@ export async function supersedeTask(
         metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
       });
     } catch {}
-    import("../workflows/event-bus")
-      .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("task.superseded", {
-          taskId: id,
-          reason: args.reason,
-          resumeTaskId: args.resumeTaskId,
-          agentId: row.agentId,
-          workflowRunId: row.workflowRunId,
-          workflowRunStepId: row.workflowRunStepId,
-        });
-      })
-      .catch((err) =>
-        console.error(
-          "[db] task.superseded event not emitted:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+    getDbClient().afterSettled(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("task.superseded", {
+            taskId: id,
+            reason: args.reason,
+            resumeTaskId: args.resumeTaskId,
+            agentId: row.agentId,
+            workflowRunId: row.workflowRunId,
+            workflowRunStepId: row.workflowRunStepId,
+          });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] task.superseded event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
 
     try {
       cascadeFailDependents(id, "superseded");
@@ -3398,20 +3406,22 @@ export function updateTaskProgress(id: string, progress: string): AgentTask | nu
         newValue: scrubbedProgress,
       });
     } catch {}
-    import("../workflows/event-bus")
-      .then(({ workflowEventBus }) => {
-        workflowEventBus.emit("task.progress", {
-          taskId: id,
-          progress: scrubbedProgress,
-          agentId: row.agentId,
-        });
-      })
-      .catch((err) =>
-        console.error(
-          "[db] task.progress event not emitted:",
-          scrubSecrets(err instanceof Error ? err.message : String(err)),
-        ),
-      );
+    getDbClient().afterSettled(() => {
+      import("../workflows/event-bus")
+        .then(({ workflowEventBus }) => {
+          workflowEventBus.emit("task.progress", {
+            taskId: id,
+            progress: scrubbedProgress,
+            agentId: row.agentId,
+          });
+        })
+        .catch((err) =>
+          console.error(
+            "[db] task.progress event not emitted:",
+            scrubSecrets(err instanceof Error ? err.message : String(err)),
+          ),
+        );
+    });
   }
   return row ? rowToAgentTask(row) : null;
 }
@@ -4933,24 +4943,26 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
     (task) => task !== null,
   );
 
-  import("../workflows/event-bus")
-    .then(({ workflowEventBus }) => {
-      workflowEventBus.emit("task.created", {
-        taskId: row.id,
-        task: row.task,
-        source: row.source,
-        tags: options?.tags ?? [],
-        agentId: row.agentId,
-        workflowRunId: row.workflowRunId,
-        workflowRunStepId: row.workflowRunStepId,
-      });
-    })
-    .catch((err) =>
-      console.error(
-        "[db] task.created event not emitted:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
+  getDbClient().afterSettled(() => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.created", {
+          taskId: row.id,
+          task: row.task,
+          source: row.source,
+          tags: options?.tags ?? [],
+          agentId: row.agentId,
+          workflowRunId: row.workflowRunId,
+          workflowRunStepId: row.workflowRunStepId,
+        });
+      })
+      .catch((err) =>
+        console.error(
+          "[db] task.created event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
+  });
 
   return rowToAgentTask(row);
 }
@@ -9044,16 +9056,21 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   if (run.status !== "completed" && run.status !== "failed") return;
 
-  queueMicrotask(async () => {
-    const latest = await getWorkflowRun(run.id);
-    if (!latest || latest.status !== run.status) return;
-    const steps = getWorkflowRunStepsByRunId(run.id);
-    telemetry.workflow(run.status, {
-      workflowId: run.workflowId,
-      durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
-      stepsCompleted: steps.filter((step) => step.status === "completed").length,
-      stepsFailed: steps.filter((step) => step.status === "failed").length,
-    });
+  // afterSettled (not queueMicrotask): under an async client transaction,
+  // microtasks drain before COMMIT, so the verify read below could observe
+  // uncommitted state. afterSettled runs strictly post-COMMIT/ROLLBACK.
+  getDbClient().afterSettled(() => {
+    void (async () => {
+      const latest = await getWorkflowRun(run.id);
+      if (!latest || latest.status !== run.status) return;
+      const steps = getWorkflowRunStepsByRunId(run.id);
+      telemetry.workflow(run.status, {
+        workflowId: run.workflowId,
+        durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
+        stepsCompleted: steps.filter((step) => step.status === "completed").length,
+        stepsFailed: steps.filter((step) => step.status === "failed").length,
+      });
+    })();
   });
 }
 
