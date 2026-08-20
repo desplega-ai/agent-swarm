@@ -1,0 +1,209 @@
+---
+title: Model Gateways
+description: Route Agent Swarm harnesses through OpenRouter, Ramp Router, or an OpenRouter-compatible proxy
+---
+
+Agent Swarm's harness and its model gateway are separate choices. `HARNESS_PROVIDER` selects the coding agent that runs the task. Gateway settings tell that harness where to send model requests.
+
+This page covers the stock worker image. A gateway that an upstream CLI supports is not necessarily supported by Agent Swarm until its credentials and configuration reach that CLI inside the worker.
+
+## Support matrix
+
+| Gateway                         | Claude Code                                                                            | Codex                                                                | OpenCode                                                      | pi-mono                                                       | Devin            | Claude Managed   |
+| ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ---------------- | ---------------- |
+| **OpenRouter**                  | Not yet supported: the worker rejects `ANTHROPIC_AUTH_TOKEN` before Claude Code starts | Custom image/config and a swarm-recognized Codex credential required | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
+| **Ramp Router**                 | Not yet supported: same `ANTHROPIC_AUTH_TOKEN` credential gap                          | Custom image/config and a swarm-recognized Codex credential required | Not yet supported: Ramp's provider plugin is not in the image | Not yet supported: Ramp's provider plugin is not in the image | Not configurable | Not configurable |
+| **OpenRouter-compatible proxy** | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
+
+**Supported** means the stock image works with environment or swarm-config values. “Custom image” means the upstream harness can use the gateway, but the stock Agent Swarm image does not install the required provider configuration or plugin.
+
+<Callout type="warn">
+  `OPENROUTER_BASE_URL` is not a universal OpenAI base-URL switch. It only
+  redirects the swarm's existing OpenRouter consumers. The target must provide
+  the OpenRouter-compatible model-list and chat-completions routes described
+  below. It does not make Ramp Router work with OpenCode or pi-mono.
+</Callout>
+
+For the standard harness credentials, model defaults, and Docker examples, see [Harness Configuration](/docs/guides/harness-configuration). For the contributor-facing adapter contract, see [Harness Providers](/docs/guides/harness-providers).
+
+## OpenRouter
+
+OpenCode and pi-mono have first-class OpenRouter support in the stock image. Both use the same key and the same model slug after the harness-specific prefix.
+
+### OpenCode
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=opencode
+OPENROUTER_API_KEY=sk-or-...
+MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash
+
+API_KEY=your-swarm-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
+```
+
+- **Base URL:** `https://openrouter.ai/api/v1` (built in)
+- **Credential:** `OPENROUTER_API_KEY`
+- **Model string:** `openrouter/<openrouter-model-id>`. For example, OpenRouter model `qwen/qwen3-coder-flash` becomes `openrouter/qwen/qwen3-coder-flash`.
+- **Config file:** none. The adapter writes a per-task OpenCode config and injects the swarm plugin automatically.
+
+Choose another ID from the [OpenRouter model catalog](https://openrouter.ai/models), keeping the `openrouter/` harness prefix.
+
+### pi-mono
+
+```bash
+# .env.docker
+HARNESS_PROVIDER=pi
+OPENROUTER_API_KEY=sk-or-...
+MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
+
+API_KEY=your-swarm-api-key
+MCP_BASE_URL=http://host.docker.internal:3013
+AGENT_ID=your-worker-uuid
+```
+
+- **Base URL:** `https://openrouter.ai/api/v1` (built in)
+- **Credential:** `OPENROUTER_API_KEY`
+- **Model string:** `openrouter/<openrouter-model-id>`
+- **Config file:** none for direct OpenRouter use. The adapter supplies the key through pi-mono's per-session `ModelRuntime`.
+
+Do not add `CLAUDE_CODE_OAUTH_TOKEN` to a pi worker. Keep only credentials used by the selected pi provider.
+
+### Claude Code: upstream-compatible, blocked in Agent Swarm
+
+OpenRouter documents an Anthropic-compatible endpoint for Claude Code:
+
+```bash
+ANTHROPIC_BASE_URL=https://openrouter.ai/api
+ANTHROPIC_AUTH_TOKEN=sk-or-...
+ANTHROPIC_API_KEY=
+ANTHROPIC_DEFAULT_SONNET_MODEL=~anthropic/claude-sonnet-latest
+```
+
+The base URL intentionally has no `/v1`; Claude Code appends it. OpenRouter also requires `ANTHROPIC_API_KEY` to be explicitly empty so it does not compete with the bearer token. See OpenRouter's [Claude Code integration guide](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration).
+
+This setup does **not** work in Agent Swarm today. Both the boot credential check and the session validator accept only `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`, so the worker parks or fails before Claude Code sees `ANTHROPIC_AUTH_TOKEN`. Setting `SWARM_USE_CLAUDE_BRIDGE=true` is not a workaround: the bridge requires Claude OAuth and deliberately removes gateway-related `ANTHROPIC_*` variables from its child process.
+
+### Codex: upstream-compatible, not in the stock image
+
+OpenRouter's Codex setup uses the user-level `~/.codex/config.toml`:
+
+```toml
+model = "openai/gpt-5.3-codex"
+model_provider = "openrouter"
+
+[model_providers.openrouter]
+name = "OpenRouter"
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+wire_api = "responses"
+```
+
+The stock worker image bakes its own Codex config with the native provider and model, and Agent Swarm has no environment variable that adds this provider block. Its credential gate also does not recognize `OPENROUTER_API_KEY`; it waits for `OPENAI_API_KEY`, Codex OAuth, or an existing `~/.codex/auth.json` before starting work.
+
+An experimental derivative image therefore needs both the complete provider config and a credential state the swarm accepts, in addition to `OPENROUTER_API_KEY` in the worker process environment. Merely setting `OPENROUTER_API_KEY`, mounting the TOML block, or setting `OPENROUTER_BASE_URL` is not sufficient in the stock deployment. Do not disable the credential gate to hide this mismatch.
+
+See OpenRouter's [Codex CLI setup](https://openrouter.ai/blog/tutorials/codex-cli-openrouter/) for the upstream configuration. This path has not been smoke-tested with the stock Agent Swarm worker.
+
+## OpenRouter-compatible proxies
+
+`OPENROUTER_BASE_URL` redirects the OpenRouter provider used by OpenCode and pi-mono. It also redirects other OpenRouter consumers in the deployment, including model refreshes and internal summarizers.
+
+The target must accept the OpenRouter key as a bearer credential and provide, at minimum:
+
+- `GET <base-url>/models` for model discovery
+- `POST <base-url>/chat/completions` for OpenRouter-compatible inference and swarm summarizers
+- Model IDs compatible with the OpenRouter catalog entries selected through `MODEL_OVERRIDE`
+
+Set the variable on both API and worker processes if every OpenRouter call must use the proxy.
+
+### OpenCode through a proxy
+
+```bash
+HARNESS_PROVIDER=opencode
+OPENROUTER_API_KEY=your-proxy-credential
+OPENROUTER_BASE_URL=https://gateway.example.com/v1
+MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash
+```
+
+The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config.
+
+### pi-mono through a proxy
+
+```bash
+HARNESS_PROVIDER=pi
+OPENROUTER_API_KEY=your-proxy-credential
+OPENROUTER_BASE_URL=https://gateway.example.com/v1
+MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
+```
+
+The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads.
+
+`OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
+
+## Ramp Router (router.com)
+
+Ramp Router is not supported by the stock Agent Swarm worker image today. The current Ramp CLI has dedicated integrations for Claude Code, Codex, OpenCode, and Pi, but each path hits a swarm-side gap.
+
+Ramp's [public API endpoint documentation](https://docs.router.com/docs/api/endpoint) names `https://api.router.com/v1`. Its current CLI instead configures coding agents against `https://router-api.ramp.com/v1`; the Claude Code integration removes `/v1` because Claude Code appends it. Follow the [Ramp CLI source and installer](https://github.com/ramp-public/ramp-cli) for coding-agent configuration rather than substituting `router.com` as the model API host.
+
+In a custom image that installs Ramp's CLI, the upstream configuration starts with:
+
+```bash
+RAMP_ROUTER_CONFIGURE_API_KEY='<router-key>' ramp router configure
+```
+
+That command writes client-specific files on a normal workstation. It does not resolve the Agent Swarm gaps in the table below.
+
+No fixed model string is safe to copy into a Router deployment. Router returns the models available to the authenticated key from `GET /v1/models`, and `ramp router configure` writes the selected ID in the shape required by each client.
+
+| Harness     | Ramp configuration                                                                                                                                                                                                                  | Agent Swarm gap                                                                                                                                                                         |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | `ANTHROPIC_BASE_URL=https://router-api.ramp.com`, `ANTHROPIC_AUTH_TOKEN=<router-key>`, `ANTHROPIC_CUSTOM_HEADERS='X-Gateway-Client: claude-code'`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, and an empty `ANTHROPIC_API_KEY` | Agent Swarm does not accept `ANTHROPIC_AUTH_TOKEN` as a Claude credential                                                                                                               |
+| Codex       | `[model_providers.ramp-router]` in `~/.codex/config.toml`, `base_url = "https://router-api.ramp.com/v1"`, `wire_api = "responses"`, plus command-based auth and `X-Gateway-Client = "codex"`                                        | The stock image does not contain this provider block, key file, generated model catalog, or Router hooks; the swarm credential gate also does not recognize the provider's command auth |
+| OpenCode    | Ramp's bundled local provider plugin in both `opencode.json` and `tui.json`; model string `ramp-router/<discovered-model-id>`                                                                                                       | The plugin is bundled inside `ramp-cli`, is not published as an independently installable npm package, and is not in the worker image                                                   |
+| pi-mono     | Ramp's bundled local provider package, Router auth entry, and `ramp-router-config.json`; provider `ramp-router` with a discovered model ID                                                                                          | The package and configuration are not in the worker image, and the swarm adapter has no Ramp provider path                                                                              |
+
+Do not point `OPENROUTER_BASE_URL` at Ramp Router. Ramp's OpenCode and Pi integrations use the OpenAI Responses API through dedicated plugins, while the swarm's OpenRouter override also needs chat-completions compatibility.
+
+<Callout type="info">
+  These Ramp paths were verified from `ramp-public/ramp-cli` at commit
+  [`b71f7f12`](https://github.com/ramp-public/ramp-cli/tree/b71f7f124668a557e4ab8352078107ac85d9e302).
+  They have not been authenticated end to end from an Agent Swarm worker because
+  no Router key was available during verification.
+</Callout>
+
+## Managed harnesses
+
+Devin and Claude Managed Agents execute sessions in their vendors' clouds. Their adapters call vendor-managed session APIs directly and expose no model base-URL override. `OPENROUTER_BASE_URL`, `ANTHROPIC_BASE_URL`, and Codex provider files do not redirect them.
+
+If gateway routing is mandatory, choose a supported local harness. Today that means OpenCode or pi-mono with OpenRouter or an OpenRouter-compatible proxy.
+
+## Troubleshooting
+
+### The worker is waiting for credentials
+
+The selected harness did not find a credential type it recognizes. Check the support matrix before adding another variable. In particular, `ANTHROPIC_AUTH_TOKEN` alone is not a valid Agent Swarm Claude credential today.
+
+### The gateway receives model-list requests but no inference
+
+Confirm the gateway supports `POST /chat/completions`, not only `POST /responses`. `OPENROUTER_BASE_URL` routes more than the harness session itself, so internal summarizers may also call the same base URL.
+
+### The model is not found
+
+OpenCode and pi-mono require the `openrouter/` harness prefix before the OpenRouter catalog ID. For example:
+
+```
+OpenRouter ID:  qwen/qwen3-coder-flash
+MODEL_OVERRIDE: openrouter/qwen/qwen3-coder-flash
+```
+
+Ramp model IDs are key-specific. Discover them with Ramp's configuration flow instead of reusing an OpenRouter slug.
+
+## Related
+
+- [Harness Configuration](/docs/guides/harness-configuration) — standard credentials, model selection, and worker examples
+- [Harness Providers](/docs/guides/harness-providers) — adapter architecture and contributor requirements
+- [Environment Variables](/docs/reference/environment-variables) — full variable reference
+- [Codex OAuth](/docs/guides/provider-auth/codex-oauth) — native Codex authentication without a gateway
