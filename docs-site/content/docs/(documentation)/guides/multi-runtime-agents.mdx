@@ -1,0 +1,172 @@
+---
+title: Multi-runtime agents
+description: Run several worker processes for one logical Agent Swarm agent with shared liveness, capacity, and workspace state
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multi-runtime mode lets several worker processes serve one logical agent. Each
+process gets its own runtime identity and liveness record, while the workers
+still share the agent's task policy and queue identity.
+
+## When to use it
+
+Use multi-runtime mode when you want to scale one logical agent horizontally.
+Give every replica the same `AGENT_ID`. The control plane then treats the
+replicas as one agent for task routing, status, and the logical
+`AGENT_MAX_TASKS` limit.
+
+Register separate agents instead when the workers need independent task
+policies, credentials, workspace state, or operational ownership. Give each
+agent its own `AGENT_ID`. Multi-runtime mode does not synchronize arbitrary
+files between containers and does not turn separate workers into isolated
+agents.
+
+## Enable it in this order
+
+Update every worker that will serve the agent before enabling the flag on the
+API server:
+
+1. Deploy a worker version that sends its runtime identity during registration,
+   polling, and shutdown. The runner generates a random UUID once per process
+   boot. You do not configure a runtime ID, and a restarted process receives a
+   new one.
+2. Keep `MULTI_RUNTIME_ENABLED` off while rolling the workers. Confirm that
+   the updated workers have started and can register normally.
+3. Enable `MULTI_RUNTIME_ENABLED` on the API server, then reload or restart
+   the API as required by your configuration deployment.
+
+Once the flag is on, registration without a runtime identity returns `400`, and
+`POST /close` without `X-Runtime-Instance-ID` also returns `400`. This is why
+the worker rollout must finish first. An old worker can otherwise fail to
+register on its next reconnect, and its anonymous shutdown cannot take the
+legacy agent-wide close path.
+
+### The task-limit seed
+
+On the first multi-runtime registration for an agent, Agent Swarm creates the
+agent-scoped `AGENT_MAX_TASKS` policy from the agent's persisted `maxTasks`
+value. This preserves the concurrency policy already in force. Later runtime
+registrations do not overwrite that policy with their own reported capacity.
+
+An existing `AGENT_MAX_TASKS` row is authoritative and repairs the agent's
+enforcement mirror when a runtime registers. Change the policy through the
+agent-scoped configuration setting when you want to change the logical limit.
+Each runtime's reported slots remain process-level observability; they are not
+an alias for the agent's logical policy.
+
+## Liveness and expiry
+
+`RUNTIME_STALE_THRESHOLD_MIN` controls how long a runtime may go without a
+fresh ping before it stops counting as live. The default is 5 minutes. Worker
+traffic from the runtime, including the polling loop, refreshes `last_seen_at`.
+
+- A graceful shutdown calls `POST /close` and retires only that process's
+  runtime row. Sibling runtimes keep the logical agent online. If it was the
+  last live runtime, the agent goes offline immediately.
+- A crash, OOM kill, or network partition cannot call `/close`. The heartbeat
+  sweep finds the stale row after the threshold, retires and prunes it, then
+  recomputes the agent from the surviving runtime rows. The agent goes offline
+  only when no live runtime remains.
+- Expiry prevents new work from being dispatched to the dead process. It does
+  not delete active sessions or decide that in-flight work failed. Session and
+  task remediation uses the separate heartbeat crash-recovery paths.
+
+<Callout type="warn" title="Offered-task recovery is still being tracked">
+  Issue [#1190](https://github.com/desplega-ai/agent-swarm/issues/1190) is still
+  open. Until it lands, a task already offered to an agent can remain in the
+  `offered` state when that agent's last runtime expires. A worker with the
+  same agent ID can recover the offer by registering again and polling; a
+  permanently dead agent may require manual recovery.
+</Callout>
+
+## Shared workspace state
+
+Sharing an `AGENT_ID` means a task can continue on a different runtime than the
+one that started it. If continuation depends on local repositories, generated
+files, or other workspace state, mount a shared persistent workspace volume at
+the worker's workspace path. If you cannot share the workspace, keep task
+continuation reconstructible from the repository, control plane, or task
+attachments.
+
+This complete Compose file runs one API and three worker replicas. The worker
+replicas use one `AGENT_ID` and one named volume at `/workspace/personal`. The
+runtime identity is generated inside each worker at boot, so there is no
+per-container runtime setting in the file.
+
+Create a `.env` beside the file first:
+
+```dotenv title=".env"
+API_KEY=replace-with-a-secret
+AGENT_ID=replace-with-one-stable-uuid
+CLAUDE_CODE_OAUTH_TOKEN=replace-with-your-token
+```
+
+```yaml title="docker-compose.yml"
+services:
+  api:
+    image: ghcr.io/desplega-ai/agent-swarm:latest
+    pull_policy: always
+    environment:
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      MCP_BASE_URL: http://api:3013
+    ports:
+      - "3013:3013"
+    volumes:
+      - swarm_api:/app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/desplega-ai/agent-swarm-worker:latest
+    pull_policy: always
+    depends_on:
+      api:
+        condition: service_healthy
+    deploy:
+      replicas: 3
+    stop_grace_period: 60s
+    environment:
+      API_KEY: ${API_KEY:?Set API_KEY in .env}
+      AGENT_ID: ${AGENT_ID:?Set AGENT_ID in .env}
+      AGENT_ROLE: worker
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:?Set CLAUDE_CODE_OAUTH_TOKEN in .env}
+      MCP_BASE_URL: http://api:3013
+      TEMPLATE_ID: official/coder
+      YOLO: "true"
+    volumes:
+      - swarm_logs:/logs
+      - shared_agent_workspace:/workspace/personal
+    restart: unless-stopped
+
+volumes:
+  shared_agent_workspace:
+  swarm_api:
+  swarm_logs:
+```
+
+Start it with:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+For a deployment that already has an API, keep the `worker` service and point
+`MCP_BASE_URL` at that API instead. Do not give replicas separate workspace
+volumes when the task workflow depends on local state.
+
+## Rollback
+
+To roll back, turn `MULTI_RUNTIME_ENABLED` off on the API server and deploy the
+legacy worker version if needed. Existing `runtime_instances` rows become
+inert: legacy registration, ping, polling, and close semantics resume, and the
+heartbeat expiry sweep does not retire those rows while the flag is off. The
+agent-scoped `AGENT_MAX_TASKS` row remains stored but no longer controls
+legacy registration. Re-enable multi-runtime only after all workers again
+support the runtime identity contract.
