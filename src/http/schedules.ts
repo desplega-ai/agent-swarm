@@ -380,7 +380,7 @@ export async function handleSchedules(
       const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
       let key: string | undefined;
       try {
-        key = body.key ? authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
+        key = body.key ? await authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -507,7 +507,7 @@ export async function handleSchedules(
     const body = parsed.body as Record<string, unknown>;
     if (parsed.body.key !== undefined) {
       try {
-        body.key = authorizeAssetKeyWrite(
+        body.key = await authorizeAssetKeyWrite(
           parsed.body.key,
           await resolveHttpAuditUserId(req, myAgentId),
         );

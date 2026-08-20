@@ -461,7 +461,10 @@ export async function handlePages(
 
     try {
       const key = parsed.body.key
-        ? authorizeAssetKeyWrite(parsed.body.key, await resolveHttpAuditUserId(req, myAgentId))
+        ? await authorizeAssetKeyWrite(
+            parsed.body.key,
+            await resolveHttpAuditUserId(req, myAgentId),
+          )
         : undefined;
       const page = await createPage({
         key,
@@ -687,7 +690,10 @@ export async function handlePages(
     let key: string | undefined;
     if (parsed.body.key !== undefined) {
       try {
-        key = authorizeAssetKeyWrite(parsed.body.key, await resolveHttpAuditUserId(req, myAgentId));
+        key = await authorizeAssetKeyWrite(
+          parsed.body.key,
+          await resolveHttpAuditUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);

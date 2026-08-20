@@ -21,7 +21,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { User } from "../types";
-import { getDb } from "./db";
+import { getDb, getDbClient } from "./db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,14 +82,18 @@ function rowToUser(row: UserRow): User {
 // ---------------------------------------------------------------------------
 
 /** Single SELECT by primary key. */
-export function findUserById(id: string): User | null {
-  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+export async function findUserById(id: string): Promise<User | null> {
+  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
   return row ? rowToUser(row) : null;
 }
 
 /**
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
+ *
+ * DEFERRED (transaction rule): reached from `resolveIdentity` inside
+ * `http/poll.ts`'s synchronous `getDb().transaction()` callback — stays on
+ * the raw sync handle.
  */
 export function findUserByExternalId(kind: string, externalId: string): User | null {
   const row = getDb()
@@ -109,6 +113,10 @@ export function findUserByExternalId(kind: string, externalId: string): User | n
  * NOTE: SQLite's `json_each` requires a non-null source; we filter on
  * `emailAliases != '[]'` in the alias branch so the rare row with NULL
  * aliases doesn't blow up the JOIN.
+ *
+ * DEFERRED (transaction rule): called synchronously by `findOrCreateUserByEmail`
+ * before that function's own `db.transaction()` — that whole function is
+ * deferred, so this stays on the raw sync handle too.
  */
 export function findUserByEmail(email: string): User | null {
   const lower = email.toLowerCase();
@@ -142,20 +150,21 @@ export function findUserByEmail(email: string): User | null {
  * `resolve-user`'s name lookup treats more than one match as ambiguous
  * rather than guessing.
  */
-export function findUsersByName(name: string): User[] {
+export async function findUsersByName(name: string): Promise<User[]> {
   const trimmed = name.trim();
   if (!trimmed) return [];
-  const db = getDb();
+  const client = getDbClient();
 
-  const exact = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)")
-    .all(trimmed);
+  const exact = await client.query<UserRow>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)", [
+    trimmed,
+  ]);
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
-  const prefixed = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'")
-    .all(firstToken);
+  const prefixed = await client.query<UserRow>(
+    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'",
+    [firstToken],
+  );
   return prefixed.map(rowToUser);
 }
 
@@ -163,12 +172,13 @@ export function findUsersByName(name: string): User[] {
  * Return all `(kind, externalId)` mappings for a user — used by the People
  * page detail view to render identity badges in one request.
  */
-export function getUserIdentities(userId: string): Array<{ kind: string; externalId: string }> {
-  return getDb()
-    .prepare<{ kind: string; externalId: string }, string>(
-      "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
-    )
-    .all(userId);
+export async function getUserIdentities(
+  userId: string,
+): Promise<Array<{ kind: string; externalId: string }>> {
+  return getDbClient().query<{ kind: string; externalId: string }>(
+    "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
+    [userId],
+  );
 }
 
 /**
@@ -213,35 +223,33 @@ function rowToEvent(row: IdentityEventRow): IdentityEvent {
  * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
  * passing back the last event's `createdAt`.
  */
-export function listUserEvents(
+export async function listUserEvents(
   userId: string,
   opts: { limit?: number; before?: string } = {},
-): IdentityEvent[] {
+): Promise<IdentityEvent[]> {
   const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
   const before = opts.before;
-  const db = getDb();
+  const client = getDbClient();
   if (before) {
-    return db
-      .prepare<IdentityEventRow, [string, string, number]>(
-        `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+    const rows = await client.query<IdentityEventRow>(
+      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
            FROM user_identity_events
           WHERE userId = ? AND createdAt < ?
           ORDER BY createdAt DESC, rowid DESC
           LIMIT ?`,
-      )
-      .all(userId, before, limit)
-      .map(rowToEvent);
+      [userId, before, limit],
+    );
+    return rows.map(rowToEvent);
   }
-  return db
-    .prepare<IdentityEventRow, [string, number]>(
-      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+  const rows = await client.query<IdentityEventRow>(
+    `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
          FROM user_identity_events
         WHERE userId = ?
         ORDER BY createdAt DESC, rowid DESC
         LIMIT ?`,
-    )
-    .all(userId, limit)
-    .map(rowToEvent);
+    [userId, limit],
+  );
+  return rows.map(rowToEvent);
 }
 
 /**
@@ -266,15 +274,14 @@ type UserTokenRow = UserTokenSummary;
  * MCP-token plan, this helper lands here so step-8's `GET /users` response
  * can include token summaries.
  */
-export function listUserTokens(userId: string): UserTokenSummary[] {
-  return getDb()
-    .prepare<UserTokenRow, string>(
-      `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
+export async function listUserTokens(userId: string): Promise<UserTokenSummary[]> {
+  return getDbClient().query<UserTokenRow>(
+    `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
          FROM user_tokens
         WHERE userId = ?
         ORDER BY createdAt DESC`,
-    )
-    .all(userId);
+    [userId],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +293,11 @@ export function listUserTokens(userId: string): UserTokenSummary[] {
  * tool / HTTP endpoint can emit `email_added` / `email_removed` /
  * `budget_changed` / `status_changed` directly (the mutating helpers below
  * already emit their own events in-transaction).
+ *
+ * DEFERRED (transaction rule): called from inside the synchronous
+ * `db.transaction()` callbacks of `findOrCreateUserByEmail`, `linkIdentity`,
+ * `unlinkIdentity`, `mintToken`, and `revokeToken` below — stays on the raw
+ * sync handle.
  */
 export function recordIdentityEvent(
   userId: string,
@@ -507,29 +519,26 @@ export function revokeToken(tokenId: string, actor: IdentityActor): void {
 
 /**
  * Resolve a plaintext token to its owning user. Returns null if the token
- * is unknown or revoked. On a successful hit, fires-and-forgets a
- * `lastUsedAt` update so the People page can surface "last seen" without
- * blocking the request path.
+ * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
+ * People page can surface "last seen".
  */
-export function resolveUserByToken(plaintext: string): User | null {
+export async function resolveUserByToken(plaintext: string): Promise<User | null> {
   const hash = sha256Hex(plaintext);
-  const db = getDb();
+  const client = getDbClient();
 
-  const row = db
-    .prepare<{ id: string; userId: string; revokedAt: string | null }, string>(
-      "SELECT id, userId, revokedAt FROM user_tokens WHERE tokenHash = ?",
-    )
-    .get(hash);
+  const row = await client.get<{ id: string; userId: string; revokedAt: string | null }>(
+    "SELECT id, userId, revokedAt FROM user_tokens WHERE tokenHash = ?",
+    [hash],
+  );
   if (!row || row.revokedAt !== null) return null;
 
-  // Fire-and-forget lastUsedAt update. Synchronous bun:sqlite write is fast
-  // enough that we don't need to defer to a microtask; treating it as
-  // best-effort keeps the call-site clean.
+  // Best-effort lastUsedAt update — never let a failure here leak to the
+  // caller and block a successful token resolution.
   try {
-    db.prepare("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?").run(
+    await client.run("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?", [
       new Date().toISOString(),
       row.id,
-    );
+    ]);
   } catch {
     // Never let a `lastUsedAt` update failure leak to the caller.
   }

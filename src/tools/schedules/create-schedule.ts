@@ -272,7 +272,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         const createdBy =
           (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
           undefined;
-        const assetKey = key ? authorizeAssetKeyWrite(key, createdBy) : undefined;
+        const assetKey = key ? await authorizeAssetKeyWrite(key, createdBy) : undefined;
 
         const schedule = await createScheduledTask({
           key: assetKey,

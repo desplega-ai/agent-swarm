@@ -546,7 +546,9 @@ export async function handleWorkflows(
     const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let key: string | undefined;
     try {
-      key = parsed.body.key ? authorizeAssetKeyWrite(parsed.body.key, trustedUserId) : undefined;
+      key = parsed.body.key
+        ? await authorizeAssetKeyWrite(parsed.body.key, trustedUserId)
+        : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);
@@ -684,7 +686,7 @@ export async function handleWorkflows(
     };
     if (parsed.body.key !== undefined) {
       try {
-        updateArgs.key = authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
+        updateArgs.key = await authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -745,7 +747,7 @@ export async function handleWorkflows(
     let key: string | undefined;
     if (body.key !== undefined) {
       try {
-        key = authorizeAssetKeyWrite(body.key, updatedBy2);
+        key = await authorizeAssetKeyWrite(body.key, updatedBy2);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);

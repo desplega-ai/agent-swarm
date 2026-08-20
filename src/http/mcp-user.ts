@@ -20,10 +20,10 @@ function extractBearer(req: IncomingMessage): string | null {
   return token.startsWith("aswt_") ? token : null;
 }
 
-function resolveActiveUser(req: IncomingMessage): User | null {
+async function resolveActiveUser(req: IncomingMessage): Promise<User | null> {
   const token = extractBearer(req);
   if (!token) return null;
-  const user = resolveUserByToken(token);
+  const user = await resolveUserByToken(token);
   if (!user || user.status !== "active") return null;
   return user;
 }
@@ -41,7 +41,7 @@ export async function handleMcpUser(
     return false;
   }
 
-  const user = resolveActiveUser(req);
+  const user = await resolveActiveUser(req);
   if (!user) return unauthorized(res);
 
   if (sessionId && transports[sessionId] && sessionUsers[sessionId] !== user.id) {

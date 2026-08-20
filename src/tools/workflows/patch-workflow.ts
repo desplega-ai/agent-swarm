@@ -119,7 +119,7 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
           definition: patchResult.definition,
         };
         if (key !== undefined) {
-          updateArgs.key = authorizeAssetKeyWrite(key, updatedBy);
+          updateArgs.key = await authorizeAssetKeyWrite(key, updatedBy);
         }
         if (triggerSchema !== undefined) {
           updateArgs.triggerSchema = triggerSchema;

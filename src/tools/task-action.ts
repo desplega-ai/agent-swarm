@@ -237,7 +237,7 @@ export async function taskActionHandler(
   if (action === "create") {
     try {
       assetKey = key
-        ? authorizeAssetKeyWrite(key, await resolveTaskAuditUserId(ctx.sourceTaskId, agentId))
+        ? await authorizeAssetKeyWrite(key, await resolveTaskAuditUserId(ctx.sourceTaskId, agentId))
         : undefined;
     } catch (error) {
       const message =

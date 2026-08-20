@@ -4,7 +4,7 @@
  * entity from one a user has modified. See migration 070_seed_state.sql.
  */
 
-import { getDb } from "../db";
+import { getDbClient } from "../db";
 
 export type SeedStateRow = {
   kind: string;
@@ -14,18 +14,20 @@ export type SeedStateRow = {
 };
 
 /** The last hash this framework seeded for `(kind, key)`, or null if never seeded. */
-export function getSeedState(kind: string, key: string): SeedStateRow | null {
-  const row = getDb()
-    .prepare<SeedStateRow, [string, string]>(
-      "SELECT kind, key, seededHash, seededAt FROM seed_state WHERE kind = ? AND key = ?",
-    )
-    .get(kind, key);
-  return row ?? null;
+export async function getSeedState(kind: string, key: string): Promise<SeedStateRow | null> {
+  return getDbClient().get<SeedStateRow>(
+    "SELECT kind, key, seededHash, seededAt FROM seed_state WHERE kind = ? AND key = ?",
+    [kind, key],
+  );
 }
 
 /** Record (or refresh) the hash this framework just seeded for `(kind, key)`. */
-export function recordSeedState(kind: string, key: string, seededHash: string): void {
-  getDb().run(
+export async function recordSeedState(
+  kind: string,
+  key: string,
+  seededHash: string,
+): Promise<void> {
+  await getDbClient().run(
     `INSERT INTO seed_state (kind, key, seededHash, seededAt)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(kind, key) DO UPDATE SET

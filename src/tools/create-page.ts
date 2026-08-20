@@ -149,7 +149,7 @@ export const registerCreatePageTool = (server: McpServer) => {
       let assetKey: string | undefined;
       try {
         if (input.key !== undefined || !existing) {
-          assetKey = input.key ? authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
+          assetKey = input.key ? await authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);

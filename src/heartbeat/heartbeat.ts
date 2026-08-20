@@ -11,6 +11,7 @@ import {
   getActiveTaskCount,
   getAllAgents,
   getDb,
+  getDbClient,
   getIdleWorkersWithCapacity,
   getLeadAgent,
   getPendingSteeringForTask,
@@ -638,14 +639,13 @@ export async function runRebootSweep(): Promise<void> {
       let retryTaskId: string | null = null;
 
       // Guard: only retry if parent doesn't already have a retry child
-      const existingRetry = getDb()
-        .prepare<{ id: string }, [string]>(
-          `SELECT id FROM agent_tasks
+      const existingRetry = await getDbClient().get<{ id: string }>(
+        `SELECT id FROM agent_tasks
            WHERE parentTaskId = ?
              AND status NOT IN ('completed', 'failed', 'cancelled')
            LIMIT 1`,
-        )
-        .get(task.id);
+        [task.id],
+      );
 
       if (!existingRetry) {
         try {
@@ -1214,15 +1214,14 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
   // Dedup: skip if lead already has an active heartbeat-checklist task
-  const existing = getDb()
-    .prepare<{ id: string }, [string]>(
-      `SELECT id FROM agent_tasks
+  const existing = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'heartbeat-checklist'
          AND status NOT IN ('completed', 'failed', 'cancelled')
        LIMIT 1`,
-    )
-    .get(lead.id);
+    [lead.id],
+  );
   if (existing) return;
 
   const systemStatus = await gatherSystemStatus();
@@ -1400,15 +1399,14 @@ export async function createBootTriageTask(): Promise<void> {
   const heartbeatMd = lead.heartbeatMd ?? "";
 
   // Dedup: skip if lead already has an active boot-triage task
-  const existing = getDb()
-    .prepare<{ id: string }, [string]>(
-      `SELECT id FROM agent_tasks
+  const existing = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'boot-triage'
          AND status NOT IN ('completed', 'failed', 'cancelled')
        LIMIT 1`,
-    )
-    .get(lead.id);
+    [lead.id],
+  );
   if (existing) return;
 
   const systemStatus = await gatherSystemStatus({ isBootTriage: true });

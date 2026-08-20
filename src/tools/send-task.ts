@@ -276,7 +276,7 @@ export async function sendTaskHandler(
     const trustedUserId =
       ctx.kind === "user" ? ctx.userId : await resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
     const requestedKey = key ?? effectiveParentTask?.key;
-    assetKey = requestedKey ? authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
+    assetKey = requestedKey ? await authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
   } catch (error) {
     const message =
       error instanceof AssetKeyAuthorizationError

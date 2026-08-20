@@ -210,7 +210,7 @@ export const registerManageUserTool = (server: McpServer) => {
 
             // Identity diff — pass the desired set, helper emits the deltas.
             if (input.identities !== undefined) {
-              const current = getUserIdentities(input.userId);
+              const current = await getUserIdentities(input.userId);
               const currentSet = new Set(current.map((i) => `${i.kind}:${i.externalId}`));
               const desiredSet = new Set(input.identities.map((i) => `${i.kind}:${i.externalId}`));
 

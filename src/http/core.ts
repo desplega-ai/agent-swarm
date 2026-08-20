@@ -325,13 +325,13 @@ export async function handleCore(
   // either the global swarm key or an active user-bound `aswt_` token.
   const pathSegments = getPathSegments(req.url || "");
   const isUserMcpRoute = req.url === "/mcp-user";
-  let auth = null as ReturnType<typeof resolveHttpRequestAuth>;
+  let auth = null as Awaited<ReturnType<typeof resolveHttpRequestAuth>>;
   // `/mcp-user` runs its own `aswt_`-token auth in `handleMcpUser`; the swarm
   // API key must not gate it.
   if (isUserMcpRoute || isPublicRoute(req.method, pathSegments)) {
     setRequestAuth(req, null);
   } else {
-    auth = resolveHttpRequestAuth(req, apiKey);
+    auth = await resolveHttpRequestAuth(req, apiKey);
 
     if (!auth) {
       setRequestAuth(req, null);

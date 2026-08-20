@@ -10,10 +10,10 @@ function extractBearer(req: IncomingMessage): string | null {
   return header.slice("Bearer ".length).trim();
 }
 
-export function resolveHttpRequestAuth(
+export async function resolveHttpRequestAuth(
   req: IncomingMessage,
   apiKey: string | undefined,
-): HttpRequestAuth | null {
+): Promise<HttpRequestAuth | null> {
   const bearer = extractBearer(req);
   if (!bearer) return null;
 
@@ -22,7 +22,7 @@ export function resolveHttpRequestAuth(
   }
 
   if (bearer.startsWith("aswt_")) {
-    const user = resolveUserByToken(bearer);
+    const user = await resolveUserByToken(bearer);
     if (isActiveUser(user)) {
       return { kind: "user", userId: user.id, user };
     }

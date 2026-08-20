@@ -64,11 +64,16 @@ import { jsonError } from "./utils";
 async function composeUser(userId: string, recentEventLimit = 5) {
   const user = await getUserById(userId);
   if (!user) return null;
+  const [identities, tokens, recentEvents] = await Promise.all([
+    getUserIdentities(userId),
+    listUserTokens(userId),
+    listUserEvents(userId, { limit: recentEventLimit }),
+  ]);
   return {
     ...user,
-    identities: getUserIdentities(userId),
-    tokens: listUserTokens(userId),
-    recentEvents: listUserEvents(userId, { limit: recentEventLimit }),
+    identities,
+    tokens,
+    recentEvents,
   };
 }
 
@@ -646,7 +651,7 @@ export async function handleUsers(
       jsonError(res, "User not found", 404);
       return true;
     }
-    const events: IdentityEvent[] = listUserEvents(parsed.params.id, {
+    const events: IdentityEvent[] = await listUserEvents(parsed.params.id, {
       limit: parsed.query.limit,
       before: parsed.query.before,
     });
@@ -667,7 +672,7 @@ export async function handleUsers(
 
     try {
       const { tokenId, plaintext } = mintToken(parsed.params.id, parsed.body.label ?? null, actor);
-      const token = listUserTokens(parsed.params.id).find((t) => t.id === tokenId);
+      const token = (await listUserTokens(parsed.params.id)).find((t) => t.id === tokenId);
       mintUserMcpTokenRoute.respond(res, 200, {
         plaintext,
         token,
@@ -690,7 +695,7 @@ export async function handleUsers(
       return true;
     }
 
-    const tokenBelongsToUser = listUserTokens(parsed.params.id).some(
+    const tokenBelongsToUser = (await listUserTokens(parsed.params.id)).some(
       (token) => token.id === parsed.params.tokenId,
     );
     if (!tokenBelongsToUser) {
@@ -724,7 +729,9 @@ export async function handleUsers(
     }
     try {
       linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
-      addIdentityRoute.respond(res, 200, { identities: getUserIdentities(parsed.params.id) });
+      addIdentityRoute.respond(res, 200, {
+        identities: await getUserIdentities(parsed.params.id),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to link identity", 400);
     }
@@ -748,7 +755,9 @@ export async function handleUsers(
       const kind = decodeURIComponent(parsed.params.kind);
       const externalId = decodeURIComponent(parsed.params.externalId);
       unlinkIdentity(parsed.params.id, kind, externalId, actor);
-      deleteIdentityRoute.respond(res, 200, { identities: getUserIdentities(parsed.params.id) });
+      deleteIdentityRoute.respond(res, 200, {
+        identities: await getUserIdentities(parsed.params.id),
+      });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to unlink identity", 500);
     }
@@ -951,7 +960,7 @@ export async function handleUsers(
       // Identities diff — complete-list semantics. linkIdentity / unlinkIdentity
       // already emit the right event each.
       if (identities !== undefined) {
-        const beforeIds = getUserIdentities(parsed.params.id);
+        const beforeIds = await getUserIdentities(parsed.params.id);
         const beforeKeys = new Set(beforeIds.map((i) => `${i.kind}:${i.externalId}`));
         const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
         for (const i of identities) {

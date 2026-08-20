@@ -205,7 +205,7 @@ describe("seeded skills with bundled files", () => {
 
     // Old-format hash: base only, no file section.
     const legacyHash = computeContentHash(`${legacyContent}\n\n# seed:systemDefault=1\n`);
-    recordSeedState("skill", "artifacts", legacyHash);
+    await recordSeedState("skill", "artifacts", legacyHash);
 
     const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "artifacts");
     if (!item) throw new Error("artifacts seed item missing");

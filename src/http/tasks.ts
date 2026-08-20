@@ -724,7 +724,7 @@ export async function handleTasks(
     let requestedByUserId = trustedUserId ?? undefined;
     const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
-      const candidate = findUserById(parsed.body.requestedByUserId);
+      const candidate = await findUserById(parsed.body.requestedByUserId);
       if (candidate) requestedByUserId = candidate.id;
     }
 
@@ -746,7 +746,9 @@ export async function handleTasks(
         ? getTaskById(parsed.body.parentTaskId)?.key
         : undefined;
       const requestedKey = parsed.body.key ?? inheritedKey;
-      assetKey = requestedKey ? authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
+      assetKey = requestedKey
+        ? await authorizeAssetKeyWrite(requestedKey, trustedUserId)
+        : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);
@@ -931,7 +933,7 @@ export async function handleTasks(
       !requestedByUserId &&
       parsed.body.requestedByUserId
     ) {
-      requestedByUserId = findUserById(parsed.body.requestedByUserId)?.id;
+      requestedByUserId = (await findUserById(parsed.body.requestedByUserId))?.id;
     }
 
     try {
