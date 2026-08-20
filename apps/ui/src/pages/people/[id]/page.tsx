@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { useUpdateUser, useUser } from "@/api/hooks/use-users";
-import type { User } from "@/api/types";
+import type { User, UserCommsPrefs } from "@/api/types";
 import { PageSkeleton } from "@/components/shared/page-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,24 @@ function coerceTab(raw: string | null): TabValue {
   return raw && (TAB_VALUES as Set<string>).has(raw) ? (raw as TabValue) : "profile";
 }
 
+/**
+ * Read `metadata.comms` the way agents do. Mirrors `getUserCommsPrefs` in
+ * `src/utils/requester-comms.ts`. `metadata` is a free-form JSON blob with no
+ * write-side validation, so only non-empty string fields survive.
+ */
+function readComms(user: User): UserCommsPrefs {
+  const comms = user.metadata?.comms;
+  if (!comms || typeof comms !== "object" || Array.isArray(comms)) return {};
+  const record = comms as Record<string, unknown>;
+  const pick = (value: unknown) =>
+    typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  return {
+    tone: pick(record.tone),
+    language: pick(record.language),
+    verbosity: pick(record.verbosity),
+  };
+}
+
 interface ProfileDraft {
   name: string;
   email: string;
@@ -89,9 +107,13 @@ interface ProfileDraft {
   dailyBudgetUnlimited: boolean;
   preferredChannel: string;
   timezone: string;
+  commsTone: string;
+  commsLanguage: string;
+  commsVerbosity: string;
 }
 
 function userToDraft(user: User): ProfileDraft {
+  const comms = readComms(user);
   return {
     name: user.name,
     email: user.email ?? "",
@@ -103,6 +125,9 @@ function userToDraft(user: User): ProfileDraft {
     dailyBudgetUnlimited: user.dailyBudgetUsd == null,
     preferredChannel: user.preferredChannel || "slack",
     timezone: user.timezone ?? "",
+    commsTone: comms.tone ?? "",
+    commsLanguage: comms.language ?? "",
+    commsVerbosity: comms.verbosity ?? "",
   };
 }
 
@@ -147,6 +172,22 @@ function draftDiff(
   }
   if ((draft.timezone.trim() || undefined) !== (user.timezone ?? undefined)) {
     changes.timezone = draft.timezone.trim() === "" ? undefined : draft.timezone.trim();
+  }
+  // comms travels as its own PATCH field. The server merges it into
+  // `metadata.comms` so sibling metadata keys survive. Cleared (all three
+  // blank) means `null`, which drops the whole block.
+  const currentComms = readComms(user);
+  const nextComms: UserCommsPrefs = {};
+  if (draft.commsTone.trim()) nextComms.tone = draft.commsTone.trim();
+  if (draft.commsLanguage.trim()) nextComms.language = draft.commsLanguage.trim();
+  if (draft.commsVerbosity.trim()) nextComms.verbosity = draft.commsVerbosity.trim();
+  if (
+    nextComms.tone !== currentComms.tone ||
+    nextComms.language !== currentComms.language ||
+    nextComms.verbosity !== currentComms.verbosity
+  ) {
+    const anySet = Boolean(nextComms.tone || nextComms.language || nextComms.verbosity);
+    changes.comms = anySet ? nextComms : null;
   }
   if (!draft.name.trim()) return { changes, error: "Name is required" };
   return { changes, error: null };
@@ -489,6 +530,51 @@ function ProfileCard({ user }: { user: User }) {
             className="min-h-[120px] text-sm resize-y"
           />
         </Field>
+
+        {/* Communication preferences: free-form strings persisted under
+            `metadata.comms`. Agents read them via the Requester Profile,
+            alongside Notes. */}
+        <div className="space-y-3 pt-4 border-t border-border/40">
+          <div className="space-y-1">
+            <h3 className="text-xs uppercase tracking-wide text-muted-foreground">
+              Communication preferences
+            </h3>
+            <p className="text-[11px] text-muted-foreground/80">
+              Read by agents to adapt replies to this person (tone, language, verbosity).
+            </p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+            <Field label="Tone" htmlFor="f-comms-tone">
+              <Input
+                id="f-comms-tone"
+                value={draft.commsTone}
+                onChange={(e) => setDraft((d) => ({ ...d, commsTone: e.target.value }))}
+                placeholder="casual"
+                className="h-9"
+              />
+            </Field>
+
+            <Field label="Language" htmlFor="f-comms-language">
+              <Input
+                id="f-comms-language"
+                value={draft.commsLanguage}
+                onChange={(e) => setDraft((d) => ({ ...d, commsLanguage: e.target.value }))}
+                placeholder="Ukrainian"
+                className="h-9"
+              />
+            </Field>
+
+            <Field label="Verbosity" htmlFor="f-comms-verbosity">
+              <Input
+                id="f-comms-verbosity"
+                value={draft.commsVerbosity}
+                onChange={(e) => setDraft((d) => ({ ...d, commsVerbosity: e.target.value }))}
+                placeholder="terse"
+                className="h-9"
+              />
+            </Field>
+          </div>
+        </div>
 
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
           {error && <span className="text-xs text-status-error-strong mr-auto">{error}</span>}

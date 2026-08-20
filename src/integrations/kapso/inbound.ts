@@ -80,7 +80,7 @@ async function resolveKapsoIdentity(externalId: string): Promise<IdentityResolut
   return kapsoResolution;
 }
 
-async function resolveKapsoRequestedByUserId(
+export async function resolveKapsoRequestedByUserId(
   payload: KapsoWebhookPayload,
 ): Promise<string | undefined> {
   const externalId = normalizeKapsoSender(payload);

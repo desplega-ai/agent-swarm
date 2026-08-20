@@ -20,7 +20,20 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createUser, getBudget, getDbClient, initDb, upsertKv } from "../be/db";
+import {
+  closeDb,
+  createScheduledTask,
+  createUser,
+  createWorkflow,
+  createWorkflowRun,
+  getBudget,
+  getDbClient,
+  getScheduledTaskById,
+  getWorkflowRun,
+  initDb,
+  updateWorkflowRun,
+  upsertKv,
+} from "../be/db";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -91,6 +104,10 @@ beforeEach(async () => {
   await client.run("DELETE FROM user_identity_events");
   await client.run("DELETE FROM user_external_ids");
   await client.run("DELETE FROM user_tokens");
+  await client.run("DELETE FROM workflow_run_steps");
+  await client.run("DELETE FROM workflow_runs");
+  await client.run("DELETE FROM workflows");
+  await client.run("DELETE FROM scheduled_tasks");
   await client.run("DELETE FROM users");
   await client.run("DELETE FROM budgets");
   await client.run("DELETE FROM kv_entries");
@@ -321,6 +338,56 @@ describe("PATCH /api/users/:id", () => {
       .filter((f): f is string => !!f);
     expect(fields).toContain("name");
     expect(fields).not.toContain("role");
+  });
+
+  test("comms merges into metadata.comms and preserves sibling metadata keys", async () => {
+    const u = await createUser({ name: "CommsMerge", metadata: { customerId: "abc123" } });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        comms: { tone: "casual", verbosity: "short" },
+      }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({
+      customerId: "abc123",
+      comms: { tone: "casual", verbosity: "short" },
+    });
+  });
+
+  test("comms: null removes only the comms key", async () => {
+    const u = await createUser({
+      name: "CommsRemove",
+      metadata: { customerId: "abc123", comms: { tone: "formal" } },
+    });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ comms: null }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({ customerId: "abc123" });
+  });
+
+  test("comms combined with metadata applies metadata first then comms", async () => {
+    const u = await createUser({ name: "CommsWithMetadata", metadata: { customerId: "abc123" } });
+
+    const r = await authedFetch(`/api/users/${u.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        metadata: { region: "eu" },
+        comms: { tone: "formal" },
+      }),
+    });
+    expect(r.status).toBe(200);
+    const { user } = (await r.json()) as { user: { metadata: Record<string, unknown> | null } };
+    expect(user.metadata).toEqual({
+      region: "eu",
+      comms: { tone: "formal" },
+    });
   });
 });
 
@@ -631,6 +698,24 @@ describe("POST /api/users/:id/merge", () => {
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     await linkIdentity(source.id, "slack", "U_SRC", actor);
     await linkIdentity(source.id, "github", "src-gh", actor);
+    const workflow = await createWorkflow({
+      name: `merge-user-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: source.id,
+    });
+    await updateWorkflowRun(run.id, {
+      context: { swarm: { requestedByUserId: source.id }, retained: "value" },
+    });
+    const schedule = await createScheduledTask({
+      name: `merge-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Run merged schedule",
+      createdBy: source.id,
+    });
 
     const r = await authedFetch(`/api/users/${target.id}/merge`, {
       method: "POST",
@@ -658,6 +743,13 @@ describe("POST /api/users/:id/merge", () => {
     // Source user is gone.
     const sourceR = await authedFetch(`/api/users/${source.id}`);
     expect(sourceR.status).toBe(404);
+    expect((await getWorkflowRun(run.id))?.createdBy).toBe(target.id);
+    expect((await getWorkflowRun(run.id))?.context).toEqual({
+      swarm: { requestedByUserId: target.id },
+      retained: "value",
+    });
+    expect((await getScheduledTaskById(schedule.id))?.createdBy).toBe(target.id);
+    expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBe(target.id);
   });
 
   test("manual_merge event payload carries the source user's id/name", async () => {
@@ -684,6 +776,83 @@ describe("POST /api/users/:id/merge", () => {
     expect(mergeEvent!.after?.source?.id).toBe(source.id);
     expect(mergeEvent!.after?.source?.name).toBe("MergeSource");
     expect(mergeEvent!.after?.source?.email).toBe("ms@x.com");
+  });
+
+  test("rolls back identity moves when deletion fails", async () => {
+    const target = await createUser({ name: "RollbackTarget", email: "rollback-target@x.com" });
+    const source = await createUser({ name: "RollbackSource", email: "rollback-source@x.com" });
+    const workflow = await createWorkflow({
+      name: `rollback-attribution-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: source.id,
+    });
+    await updateWorkflowRun(run.id, {
+      context: { swarm: { requestedByUserId: source.id }, retained: "rollback" },
+    });
+    const schedule = await createScheduledTask({
+      name: `rollback-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Retain rollback schedule",
+      createdBy: source.id,
+    });
+    await linkIdentity(source.id, "slack", "U_MERGE_ROLLBACK", {
+      kind: "operator",
+      id: OPERATOR_FP,
+    });
+    await getDbClient().run(`CREATE TEMP TRIGGER fail_merge_source_delete
+      BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
+      BEGIN SELECT RAISE(ABORT, 'forced merge failure'); END`);
+
+    try {
+      const response = await authedFetch(`/api/users/${target.id}/merge`, {
+        method: "POST",
+        body: JSON.stringify({ sourceUserId: source.id }),
+      });
+      expect(response.status).toBe(500);
+
+      const identity = await getDbClient().get<{ userId: string }>(
+        "SELECT userId FROM user_external_ids WHERE kind = ? AND externalId = ?",
+        ["slack", "U_MERGE_ROLLBACK"],
+      );
+      expect(identity?.userId).toBe(source.id);
+      expect(
+        (
+          await getDbClient().get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM users WHERE id = ?",
+            [source.id],
+          )
+        )?.count,
+      ).toBe(1);
+      expect(
+        (
+          await getDbClient().get<{ emailAliases: string }>(
+            "SELECT emailAliases FROM users WHERE id = ?",
+            [target.id],
+          )
+        )?.emailAliases,
+      ).toBe("[]");
+      expect(
+        (
+          await getDbClient().get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM user_identity_events WHERE userId = ?",
+            [target.id],
+          )
+        )?.count,
+      ).toBe(0);
+      expect((await getWorkflowRun(run.id))?.createdBy).toBe(source.id);
+      expect((await getWorkflowRun(run.id))?.context).toEqual({
+        swarm: { requestedByUserId: source.id },
+        retained: "rollback",
+      });
+      expect((await getScheduledTaskById(schedule.id))?.createdBy).toBe(source.id);
+      expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBe(source.id);
+    } finally {
+      await getDbClient().run("DROP TRIGGER fail_merge_source_delete");
+    }
   });
 
   test("400 when target == source", async () => {

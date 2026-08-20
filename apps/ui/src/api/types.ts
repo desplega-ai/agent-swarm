@@ -82,6 +82,25 @@ export interface Agent {
   lastUpdatedAt: string;
 }
 
+export type RuntimeInstanceStatus = "active" | "offline";
+
+export interface RuntimeInstance {
+  id: string;
+  agentId: string;
+  status: RuntimeInstanceStatus;
+  reportedSlots: number;
+  credentialReady?: boolean | null;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+  isLive: boolean;
+}
+
+export interface AgentRuntimeInstancesResponse {
+  runtimeInstances: RuntimeInstance[];
+  staleThresholdMinutes: number;
+}
+
 export interface AgentCredStatusLiveTest {
   ok: boolean;
   error?: string | null;
@@ -353,8 +372,21 @@ export interface CreateUserInput {
 }
 
 /**
+ * Structured communication preferences stored under `users.metadata.comms`.
+ * Mirrors `UserCommsPrefsSchema` in the API's `src/types.ts`. All fields are
+ * free-form strings that agents read to adapt their replies to this person.
+ */
+export interface UserCommsPrefs {
+  tone?: string;
+  language?: string;
+  verbosity?: string;
+}
+
+/**
  * PATCH /api/users/:id body. Every field is optional (server requires
  * at least one). Passing `identities` replaces the user's identity set.
+ * `comms` is merged into `metadata.comms` server-side (siblings survive);
+ * `null` clears it.
  */
 export interface UpdateUserInput {
   name?: string;
@@ -368,6 +400,7 @@ export interface UpdateUserInput {
   dailyBudgetUsd?: number | null;
   status?: "invited" | "active" | "suspended";
   metadata?: Record<string, unknown> | null;
+  comms?: UserCommsPrefs | null;
 }
 
 /**
@@ -827,8 +860,37 @@ export interface UsageSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
-  /** Share of `totalCostUsd` whose task carries a human requester. Older API servers omit it. */
+  /**
+   * Cost of tasks with a human requester, over `attributableCostUsd` (not
+   * `totalCostUsd` — that denominator includes structurally-human-free work
+   * that could never have scored). Older API servers omit all three fields.
+   */
   attributedCostUsd?: number;
+  /** Corrected coverage denominator: `totalCostUsd` minus `excludedCostUsd`. */
+  attributableCostUsd?: number;
+  /** Cost of heartbeat/boot-triage/scheduled work and self-maintenance follow-ups. */
+  excludedCostUsd?: number;
+  /** Distinct tasks behind `excludedCostUsd` — name the exclusion, don't just show a percentage. */
+  excludedTaskCount?: number;
+}
+
+/**
+ * One row of `AttributionByPersonResponse`. `firstPassYield` is always `null`
+ * today — see `getAttributionByPerson` in `src/be/db.ts` for why it's not a
+ * computed proxy.
+ */
+export interface AttributionByPersonRow {
+  userId: string;
+  problemsInitiated: number;
+  problemsShipped: number;
+  agentsReached: number;
+  reposReached: number;
+  surfacesReached: number;
+  firstPassYield: null;
+}
+
+export interface AttributionByPersonResponse {
+  rows: AttributionByPersonRow[];
 }
 
 export interface UsageSummaryDailyRow {

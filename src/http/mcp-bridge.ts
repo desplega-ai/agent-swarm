@@ -10,7 +10,7 @@ import { z } from "zod";
 import { createServer } from "@/server";
 import { isMcpToolAllowedForScripts } from "../scripts-runtime/sdk-allowlist";
 import { markScriptSdkRequestOrigin } from "../tools/utils";
-import { route } from "./route-def";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { json, jsonError } from "./utils";
 
 // Lazy singleton — created once on first bridge call to avoid boot-time cost.
@@ -41,6 +41,7 @@ const mcpBridgeRoute = route({
   pattern: ["api", "mcp-bridge"],
   summary: "Generic MCP tool proxy for the scripts SDK bridge",
   tags: ["Scripts"],
+  headers: runtimeInstanceHeader("acquire work through bridged tools"),
   body: z.object({
     tool: z.string().min(1).max(200),
     args: z.record(z.string(), z.unknown()).default({}),
@@ -93,6 +94,11 @@ export async function handleMcpBridge(
   const sourceTaskId = Array.isArray(req.headers["x-source-task-id"])
     ? req.headers["x-source-task-id"][0]
     : (req.headers["x-source-task-id"] as string | undefined);
+  // Runtime identity rides the bridge like the agent identity so the
+  // work-acquisition gates in bridged tools see the invoking worker process.
+  const runtimeInstanceId = Array.isArray(req.headers["x-runtime-instance-id"])
+    ? req.headers["x-runtime-instance-id"][0]
+    : (req.headers["x-runtime-instance-id"] as string | undefined);
 
   const extra = markScriptSdkRequestOrigin({
     sessionId: "mcp-bridge",
@@ -100,6 +106,7 @@ export async function handleMcpBridge(
       headers: {
         "x-agent-id": myAgentId ?? "",
         ...(sourceTaskId ? { "x-source-task-id": sourceTaskId } : {}),
+        ...(runtimeInstanceId ? { "x-runtime-instance-id": runtimeInstanceId } : {}),
       },
     },
   });

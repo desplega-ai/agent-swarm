@@ -68,7 +68,7 @@ describe("Session templates — registration", () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 18 system templates are registered", () => {
+  test("all 19 system templates are registered", () => {
     const systemTemplates = [
       "system.agent.role",
       "system.agent.register",
@@ -89,6 +89,7 @@ describe("Session templates — registration", () => {
       "system.agent.services",
       "system.agent.artifacts",
       "system.agent.share_urls",
+      "system.agent.communication_style",
     ];
 
     for (const eventType of systemTemplates) {
@@ -113,7 +114,7 @@ describe("Session templates — registration", () => {
     }
   });
 
-  test("total of 31 session/system templates registered", () => {
+  test("total of 32 session/system templates registered", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
     // 26 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
@@ -124,7 +125,8 @@ describe("Session templates — registration", () => {
     // 30 = 29 + `system.agent.scheduling` (split out of context_mode so the
     // pi composites keep the scheduling rules without the ctx_* tool block).
     // 31 = 30 + `system.agent.apps`.
-    expect(sessionSystem.length).toBe(31);
+    // 32 = 31 + `system.agent.communication_style`.
+    expect(sessionSystem.length).toBe(32);
   });
 });
 
@@ -332,6 +334,9 @@ describe("Session templates — composite resolution", () => {
     // Contains register section
     expect(result.text).toContain("join-swarm");
 
+    // Lead is hinted to persist learned requester comms preferences
+    expect(result.text).toContain("persist them with its `comms` field");
+
     // Contains lead-specific section (not worker)
     expect(result.text).toContain("CRITICAL: You are a coordinator");
     expect(result.text).toContain("coordinator");
@@ -351,6 +356,9 @@ describe("Session templates — composite resolution", () => {
 
     // Contains system
     expect(result.text).toContain("System packages available");
+
+    // Contains communication style
+    expect(result.text).toContain("### Communication Style");
   });
 
   test("system.session.worker resolves all template references", () => {
@@ -387,6 +395,27 @@ describe("Session templates — composite resolution", () => {
 
     // Contains system
     expect(result.text).toContain("System packages available");
+
+    // Contains communication style
+    expect(result.text).toContain("### Communication Style");
+  });
+
+  test("communication style block resolves in every session composite", () => {
+    const composites = [
+      "system.session.lead",
+      "system.session.worker",
+      "system.session.worker.pi",
+      "system.session.lead.pi",
+      "system.session.worker.remote",
+    ];
+
+    for (const eventType of composites) {
+      const result = resolveTemplate(eventType, { role: "worker", agentId: "agent-001" });
+      expect(result.skipped).toBe(false);
+      expect(result.text).toContain("### Communication Style");
+      expect(result.text).toContain("Mirror the requester");
+      expect(result.text).toContain("Never use em dashes");
+    }
   });
 
   test("composite does NOT include conditional sections (agent_fs, services, artifacts)", () => {

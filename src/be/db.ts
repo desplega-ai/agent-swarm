@@ -124,11 +124,13 @@ import {
   parseModelTier,
   ReasoningEffortSchema,
   RoutingAffinitySchema,
+  SERVER_GENERATED_ATTACHMENT_CAPABILITY,
   SessionCostModelBreakdownSchema,
 } from "../types";
 import { deriveProviderFromKeyType } from "../utils/credentials";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import type { RateLimitWindowTelemetry } from "../utils/error-tracker";
+import { extractGitHubPullRequestUrls } from "../utils/github-pull-request";
 import {
   type BudgetedIdentityField,
   checkIdentityFieldBudget,
@@ -776,6 +778,21 @@ export async function updateAgentCredentialState(
   return row ? rowToAgent(row) : null;
 }
 
+/**
+ * Record which env vars a worker is missing without touching status — the
+ * logical status is derived from runtime readiness in multi-runtime mode.
+ */
+export async function updateAgentCredentialMissing(
+  agentId: string,
+  missing: string[] | null,
+): Promise<void> {
+  const json = missing && missing.length > 0 ? JSON.stringify(missing) : null;
+  await getDbClient().run(
+    "UPDATE agents SET credentialMissing = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    [json, agentId],
+  );
+}
+
 export async function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
 ): Promise<Agent> {
@@ -1018,10 +1035,20 @@ export async function deleteAgent(id: string): Promise<boolean> {
  * Get the count of active (in_progress) tasks for an agent.
  * Used to determine current capacity usage.
  */
+/**
+ * Tasks occupying one of the agent's concurrency slots.
+ *
+ * A claimed offer counts too — omitting it let a second concurrent poll take
+ * another task past the limit. It is counted only through `offeredTo`, the
+ * agent actually reviewing it: `agentId` on an offer may still be the lead
+ * that created it, which would otherwise consume the lead's own capacity.
+ */
 export async function getActiveTaskCount(agentId: string): Promise<number> {
   const result = await getDbClient().get<{ count: number }>(
-    "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
-    [agentId],
+    `SELECT COUNT(*) as count FROM agent_tasks
+     WHERE (agentId = ? AND status = 'in_progress')
+        OR (offeredTo = ? AND status = 'reviewing')`,
+    [agentId, agentId],
   );
   return result?.count ?? 0;
 }
@@ -1207,6 +1234,7 @@ type AgentTaskRow = {
   credentialKeySuffix: string | null;
   credentialKeyType: string | null;
   requestedByUserId: string | null;
+  requestedByUserIdInherited: number;
   swarmVersion: string | null;
   provider: string | null;
   providerMeta: string | null;
@@ -2028,12 +2056,21 @@ export async function updateTaskVcs(
     vcsUrl: string;
   },
 ): Promise<AgentTask | null> {
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks
+  const row = await getDbClient().transaction(async () => {
+    const updated = await getDbClient().get<AgentTaskRow>(
+      `UPDATE agent_tasks
        SET vcsProvider = ?, vcsRepo = ?, vcsNumber = ?, vcsUrl = ?, lastUpdatedAt = ?
        WHERE id = ? RETURNING *`,
-    [vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId],
-  );
+      [vcs.vcsProvider, vcs.vcsRepo, vcs.vcsNumber, vcs.vcsUrl, new Date().toISOString(), taskId],
+    );
+    if (updated) {
+      await reconcileTaskPullRequestAttachments(taskId, updated.agentId, [
+        updated.output,
+        vcs.vcsProvider === "github" ? vcs.vcsUrl : null,
+      ]);
+    }
+    return updated;
+  });
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2816,19 +2853,29 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
     return null;
   }
 
-  const finishedAt = new Date().toISOString();
-  let row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
-    ["completed", finishedAt, id],
-  );
-  if (!row) return null;
-
-  if (output) {
-    row = await getDbClient().get<AgentTaskRow>(
-      "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-      [scrubSecrets(output), id],
+  const row = await getDbClient().transaction(async () => {
+    const finishedAt = new Date().toISOString();
+    let completed = await getDbClient().get<AgentTaskRow>(
+      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
+      ["completed", finishedAt, id],
     );
-  }
+    if (!completed) return null;
+
+    if (output) {
+      completed = await getDbClient().get<AgentTaskRow>(
+        "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+        [scrubSecrets(output), id],
+      );
+    }
+    if (completed) {
+      await reconcileTaskPullRequestAttachments(id, completed.agentId, [
+        completed.output,
+        completed.vcsProvider === "github" ? completed.vcsUrl : null,
+      ]);
+    }
+    return completed;
+  });
+  if (!row) return null;
 
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
@@ -2979,12 +3026,22 @@ export async function overwriteTerminalTaskResultText(
     patch.failureReason !== undefined
       ? scrubSecrets(patch.failureReason)
       : (task.failureReason ?? null);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET output = ?, failureReason = ?
-       WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
-       RETURNING *`,
-    [output, failureReason, id],
-  );
+  const row = await getDbClient().transaction(async () => {
+    const updated =
+      (await getDbClient().get<AgentTaskRow>(
+        `UPDATE agent_tasks SET output = ?, failureReason = ?
+         WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
+         RETURNING *`,
+        [output, failureReason, id],
+      )) ?? null;
+    if (updated && patch.output !== undefined) {
+      await reconcileTaskPullRequestAttachments(id, updated.agentId, [
+        updated.output,
+        updated.vcsProvider === "github" ? updated.vcsUrl : null,
+      ]);
+    }
+    return updated;
+  });
 
   return row ? rowToAgentTask(row) : task;
 }
@@ -3533,6 +3590,98 @@ export async function insertTaskAttachment(
     }
     return attachment;
   });
+}
+
+const GENERATED_PULL_REQUEST_PROVIDER_ID = "github";
+const GENERATED_PULL_REQUEST_INTENT = "task-deliverable";
+const GENERATED_PULL_REQUEST_DESCRIPTION = "Pull request shipped by this task";
+const GENERATED_PULL_REQUEST_SOURCE = "task-pull-request-recorder";
+
+function pullRequestKey(pullRequest: { owner: string; repo: string; number: number }): string {
+  return `${pullRequest.owner.toLowerCase()}/${pullRequest.repo.toLowerCase()}#${pullRequest.number}`;
+}
+
+/**
+ * Persist PRs detected by server-owned task lifecycle paths. Existing URL
+ * attachments win regardless of display name, so an agent-authored row and an
+ * automatic row never duplicate the same task deliverable. A capability key
+ * rejected by AttachmentInputSchema marks server-generated rows so
+ * reconciliation cannot mistake caller-authored metadata for provenance.
+ */
+export async function recordTaskPullRequestAttachments(
+  taskId: string,
+  agentId: string | null,
+  text: string | null | undefined,
+): Promise<TaskAttachment[]> {
+  const pullRequests = extractGitHubPullRequestUrls(text);
+  if (pullRequests.length === 0) return [];
+
+  const existingRows = await getDbClient().query<{ url: string }>(
+    "SELECT url FROM task_attachments WHERE task_id = ? AND kind = 'url' AND url IS NOT NULL",
+    [taskId],
+  );
+  const existingPullRequests = new Set(
+    existingRows.flatMap((row) => extractGitHubPullRequestUrls(row.url)).map(pullRequestKey),
+  );
+  const stored: TaskAttachment[] = [];
+  for (const pullRequest of pullRequests) {
+    const dedupeKey = pullRequestKey(pullRequest);
+    if (existingPullRequests.has(dedupeKey)) continue;
+    stored.push(
+      await insertTaskAttachment({
+        taskId,
+        agentId,
+        name: `GitHub pull request #${pullRequest.number}`,
+        kind: "url",
+        url: pullRequest.url,
+        providerId: GENERATED_PULL_REQUEST_PROVIDER_ID,
+        capabilities: {
+          [SERVER_GENERATED_ATTACHMENT_CAPABILITY]: GENERATED_PULL_REQUEST_SOURCE,
+        },
+        intent: GENERATED_PULL_REQUEST_INTENT,
+        description: GENERATED_PULL_REQUEST_DESCRIPTION,
+      }),
+    );
+    existingPullRequests.add(dedupeKey);
+  }
+  return stored;
+}
+
+/** Reconcile only lifecycle-generated PR rows against their current source text. */
+async function reconcileTaskPullRequestAttachments(
+  taskId: string,
+  agentId: string | null,
+  sourceTexts: Array<string | null | undefined>,
+): Promise<TaskAttachment[]> {
+  const desiredPullRequests = sourceTexts.flatMap(extractGitHubPullRequestUrls);
+  const desiredKeys = new Set(desiredPullRequests.map(pullRequestKey));
+  const generatedRows = await getDbClient().query<{ id: string; name: string; url: string }>(
+    `SELECT id, name, url
+     FROM task_attachments
+     WHERE task_id = ?
+       AND kind = 'url'
+       AND url IS NOT NULL
+       AND json_extract(capabilities, '$.${SERVER_GENERATED_ATTACHMENT_CAPABILITY}') = ?`,
+    [taskId, GENERATED_PULL_REQUEST_SOURCE],
+  );
+
+  for (const row of generatedRows) {
+    const pullRequest = extractGitHubPullRequestUrls(row.url)[0];
+    const expectedName = pullRequest ? `GitHub pull request #${pullRequest.number}` : null;
+    if (
+      !pullRequest ||
+      row.name !== expectedName ||
+      !desiredKeys.has(pullRequestKey(pullRequest))
+    ) {
+      await getDbClient().run("DELETE FROM task_attachments WHERE id = ?", [row.id]);
+    }
+  }
+
+  return await recordTaskPullRequestAttachments(
+    taskId,
+    agentId,
+    desiredPullRequests.map((pullRequest) => pullRequest.url).join("\n"),
+  );
 }
 
 async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promise<TaskAttachment> {
@@ -4549,6 +4698,7 @@ export async function createTaskExtended(
   // coerce: a bad shape throws before anything reaches the INSERT; absent
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
+  let requestedByUserIdInherited = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const status: AgentTaskStatus = options?.offeredTo
@@ -4684,6 +4834,7 @@ export async function createTaskExtended(
       // Attribution
       if (parent.requestedByUserId && !options.requestedByUserId) {
         options.requestedByUserId = parent.requestedByUserId;
+        requestedByUserIdInherited = true;
       }
       if (parent.key && !options.key) {
         options.key = parent.key;
@@ -4798,8 +4949,8 @@ export async function createTaskExtended(
         vcsInstallationId, vcsNodeId,
         agentmailInboxId, agentmailMessageId, agentmailThreadId,
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
-        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+        workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       assetKey,
@@ -4843,6 +4994,7 @@ export async function createTaskExtended(
       options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
       options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
       options?.requestedByUserId ?? null,
+      requestedByUserIdInherited ? 1 : 0,
       options?.contextKey ?? null,
       options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
       pkg.version,
@@ -6598,8 +6750,30 @@ export interface SessionCostSummaryTotals {
   totalDurationMs: number;
   totalSessions: number;
   avgCostPerSession: number;
-  /** Share of `totalCostUsd` whose task carries a human requester. */
+  /**
+   * Cost of tasks with a human requester, over `attributableCostUsd` (not
+   * `totalCostUsd`) — see `attributableCostUsd` for why. Also excludes cost on
+   * a structurally-human-free task that happens to carry a stale/inherited
+   * `requestedByUserId` (measured 2026-08-19: ~5% of the naive-attributed
+   * population), so the two totals stay a consistent partition.
+   */
   attributedCostUsd: number;
+  /**
+   * The corrected coverage denominator: `totalCostUsd` minus the cost of
+   * structurally-human-free tasks (heartbeat/boot-triage, scheduled runs, and
+   * `source='system'` follow-ups whose parent itself had no human requester —
+   * i.e. follow-ups of the swarm's own self-maintenance, not of human work).
+   * These tasks have no human requester *by construction*; stamping one on
+   * them would be a lie, not coverage, so they don't belong in the
+   * denominator at all. `attributedCostUsd / attributableCostUsd` is the
+   * number to show as "coverage" — dividing by `totalCostUsd` instead
+   * silently deflates it with a population that could never have scored.
+   */
+  attributableCostUsd: number;
+  /** Cost of the structurally-human-free population excluded from `attributableCostUsd`. */
+  excludedCostUsd: number;
+  /** Distinct tasks behind `excludedCostUsd` — surfaced so the UI can name the exclusion count, not just wave at a percentage. */
+  excludedTaskCount: number;
 }
 
 export interface SessionCostDailyRow {
@@ -6632,6 +6806,60 @@ export interface SessionCostByUserRow {
 /** `opts.userId` sentinel selecting spend with no human requester. */
 export const UNATTRIBUTED_USER_ID = "unattributed";
 
+// Structurally-human-free tasks and their descendants. An explicitly supplied
+// requester is a human handoff and stops propagation; a requester copied from
+// the parent does not.
+const HUMAN_FREE_TASKS_CTE = `human_free_tasks(id) AS (
+        SELECT task.id
+        FROM agent_tasks task
+        LEFT JOIN agent_tasks parent ON parent.id = task.parentTaskId
+        WHERE COALESCE(task.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+          OR COALESCE(task.tags, '[]') LIKE '%"heartbeat"%'
+          OR (COALESCE(task.source, '') = 'schedule' AND task.requestedByUserId IS NULL)
+          OR (
+            task.parentTaskId IS NULL
+            AND COALESCE(task.source, '') = 'workflow'
+            AND task.requestedByUserId IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workflow_runs run
+              WHERE run.id = task.workflowRunId
+                AND run.triggerType = 'schedule'
+                AND run.created_by IS NULL
+            )
+          )
+          OR (
+            COALESCE(task.source, '') = 'system'
+            AND parent.id IS NOT NULL
+            AND parent.requestedByUserId IS NULL
+          )
+
+        UNION
+
+        SELECT child.id
+        FROM agent_tasks child
+        JOIN human_free_tasks parent ON child.parentTaskId = parent.id
+        WHERE child.requestedByUserId IS NULL
+          OR child.requestedByUserIdInherited = 1
+      )`;
+const HUMAN_FREE_SQL = "EXISTS (SELECT 1 FROM human_free_tasks WHERE id = t.id)";
+const ROOT_HUMAN_FREE_SQL = `(
+        COALESCE(t.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+        OR COALESCE(t.tags, '[]') LIKE '%"heartbeat"%'
+        OR (COALESCE(t.source, '') = 'schedule' AND t.requestedByUserId IS NULL)
+        OR (
+          COALESCE(t.source, '') = 'workflow'
+          AND t.requestedByUserId IS NULL
+          AND EXISTS (
+            SELECT 1
+            FROM workflow_runs run
+            WHERE run.id = t.workflowRunId
+              AND run.triggerType = 'schedule'
+              AND run.created_by IS NULL
+          )
+        )
+      )`;
+
 export async function getSessionCostSummary(opts: {
   startDate?: string;
   endDate?: string;
@@ -6650,6 +6878,15 @@ export async function getSessionCostSummary(opts: {
   // through the task (same shape as `getDailySpendForUser`). Every column is
   // `sc.`-qualified because `createdAt`/`agentId` exist on both sides.
   const from = "FROM session_costs sc LEFT JOIN agent_tasks t ON t.id = sc.taskId";
+
+  // Structurally-human-free: the swarm maintaining itself, with no human
+  // requester by construction — heartbeat/boot-triage tasks, scheduled runs
+  // without a human creator (including workflow roots launched by such a
+  // schedule), and `source='system'` follow-ups whose parent itself has no
+  // human requester. That classification propagates through descendants while
+  // they remain unattributed, so autonomous fan-out cannot leak back into the
+  // denominator. An explicitly attributed child is an independent handoff and
+  // stops propagation down that branch.
   const conditions: string[] = [];
   const params: string[] = [];
 
@@ -6666,9 +6903,9 @@ export async function getSessionCostSummary(opts: {
     params.push(opts.agentId);
   }
   if (opts.userId === UNATTRIBUTED_USER_ID) {
-    conditions.push("t.requestedByUserId IS NULL");
+    conditions.push(`(t.requestedByUserId IS NULL OR ${HUMAN_FREE_SQL})`);
   } else if (opts.userId) {
-    conditions.push("t.requestedByUserId = ?");
+    conditions.push(`(t.requestedByUserId = ? AND NOT ${HUMAN_FREE_SQL})`);
     params.push(opts.userId);
   }
 
@@ -6684,10 +6921,14 @@ export async function getSessionCostSummary(opts: {
     totalDurationMs: number;
     totalSessions: number;
     attributedCostUsd: number;
+    attributableCostUsd: number;
+    excludedCostUsd: number;
+    excludedTaskCount: number;
   };
 
   const totalsRow = await getDbClient().get<TotalsRow>(
-    `SELECT
+    `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+      SELECT
         COALESCE(SUM(sc.totalCostUsd), 0) as totalCostUsd,
         COALESCE(SUM(sc.inputTokens), 0) as totalInputTokens,
         COALESCE(SUM(sc.outputTokens), 0) as totalOutputTokens,
@@ -6695,8 +6936,13 @@ export async function getSessionCostSummary(opts: {
         COALESCE(SUM(sc.cacheWriteTokens), 0) as totalCacheWriteTokens,
         COALESCE(SUM(sc.durationMs), 0) as totalDurationMs,
         COUNT(*) as totalSessions,
-        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL THEN sc.totalCostUsd ELSE 0 END), 0)
-          as attributedCostUsd
+        COALESCE(SUM(CASE WHEN t.requestedByUserId IS NOT NULL AND NOT ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as attributedCostUsd,
+        COALESCE(SUM(CASE WHEN NOT ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as attributableCostUsd,
+        COALESCE(SUM(CASE WHEN ${HUMAN_FREE_SQL}
+          THEN sc.totalCostUsd ELSE 0 END), 0) as excludedCostUsd,
+        COUNT(DISTINCT CASE WHEN ${HUMAN_FREE_SQL} THEN t.id END) as excludedTaskCount
       ${from} ${where}`,
     params,
   );
@@ -6717,6 +6963,9 @@ export async function getSessionCostSummary(opts: {
         totalSessions: 0,
         avgCostPerSession: 0,
         attributedCostUsd: 0,
+        attributableCostUsd: 0,
+        excludedCostUsd: 0,
+        excludedTaskCount: 0,
       };
 
   // Daily breakdown
@@ -6730,7 +6979,8 @@ export async function getSessionCostSummary(opts: {
       outputTokens: number;
       sessions: number;
     }>(
-      `SELECT
+      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+        SELECT
           DATE(sc.createdAt) as date,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -6754,7 +7004,8 @@ export async function getSessionCostSummary(opts: {
       sessions: number;
       durationMs: number;
     }>(
-      `SELECT
+      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+        SELECT
           sc.agentId as agentId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
@@ -6768,27 +7019,254 @@ export async function getSessionCostSummary(opts: {
     );
   }
 
-  // Per-requester breakdown. The `userId IS NULL` bucket is a real row, not a
-  // gap: autonomous spend (heartbeat, boot triage) has no human requester and
-  // must stay visible rather than being folded into a person.
+  // Per-requester breakdown. Structurally-human-free work is assigned to the
+  // autonomous bucket even if a stale requester id survives on the task.
   let byUser: SessionCostByUserRow[] = [];
   if (groupBy === "user" || groupBy === "both") {
     byUser = await getDbClient().query<SessionCostByUserRow>(
-      `SELECT
-          t.requestedByUserId as userId,
+      `WITH RECURSIVE ${HUMAN_FREE_TASKS_CTE}
+        SELECT
+          CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END as userId,
           COALESCE(SUM(sc.totalCostUsd), 0) as costUsd,
           COALESCE(SUM(sc.inputTokens), 0) as inputTokens,
           COALESCE(SUM(sc.outputTokens), 0) as outputTokens,
           COUNT(DISTINCT sc.taskId) as tasks,
           COALESCE(SUM(sc.durationMs), 0) as durationMs
         ${from} ${where}
-        GROUP BY t.requestedByUserId
+        GROUP BY CASE WHEN ${HUMAN_FREE_SQL} THEN NULL ELSE t.requestedByUserId END
         ORDER BY costUsd DESC`,
       params,
     );
   }
 
   return { totals, daily, byAgent, byUser };
+}
+
+// --- Per-person attribution (four-metric view) ---
+
+export interface AttributionByPersonRow {
+  userId: string;
+  /** Root tasks (`parentTaskId IS NULL`) only — counting fan-out children would let
+   *  whoever triggers the biggest decomposition win by accident. */
+  problemsInitiated: number;
+  /** Roots that completed AND show shippable evidence — see `getAttributionByPerson` doc. */
+  problemsShipped: number;
+  /** Distinct agents engaged across the person's entire task tree (not root-scoped —
+   *  a root that fans out to nine agents is nine agents of reach). */
+  agentsReached: number;
+  reposReached: number;
+  surfacesReached: number;
+  /**
+   * Share of root tasks completed without a re-dispatch or a human correction.
+   * Deliberately `null`: distinguishing a legitimate multi-agent fan-out from a
+   * correction-driven re-dispatch isn't computable from a single query pass
+   * (would need to inspect *why* a child task was created, which isn't a stored
+   * fact), and a task-count-based proxy would misclassify normal delegation as
+   * rework. Render as "not yet computed" — do not invent a stand-in.
+   */
+  firstPassYield: null;
+}
+
+/**
+ * Four metrics per human requester, reported side by side — never summed into
+ * a composite score. Scope is root tasks (`problemsInitiated`/`problemsShipped`)
+ * or the person's entire task tree (`*Reached`); `requestedByUserId IS NULL`
+ * (autonomous work) and structurally-human-free rows with a stale/inherited
+ * requester (see `HUMAN_FREE_SQL` in `getSessionCostSummary`) are excluded —
+ * neither belongs to a person.
+ *
+ * "Problems shipped" detection walks each root's full task tree, preferring a
+ * `task_attachments` row (`kind='url'` matching a GitHub PR or GitLab MR URL,
+ * or `kind='page'` for a published artifact) and falling back to the same
+ * provider-specific URL match on any task output. GitLab matching is host
+ * agnostic so self-hosted instances are covered. This does NOT detect a closed ticket (no
+ * Linear/Jira issue-state table exists locally) — "shipped" undercounts
+ * ticket-only outcomes until the real artifacts join lands.
+ */
+export async function getAttributionByPerson(opts: {
+  startDate?: string;
+  endDate?: string;
+}): Promise<AttributionByPersonRow[]> {
+  const conditions: string[] = ["t.requestedByUserId IS NOT NULL"];
+  const params: string[] = [];
+  if (opts.startDate) {
+    conditions.push("t.createdAt >= ?");
+    params.push(opts.startDate);
+  }
+  if (opts.endDate) {
+    // A date-only value represents the whole UTC day. Preserve inclusive
+    // timestamp semantics for callers that provide an exact instant.
+    const dateOnlyEnd = /^\d{4}-\d{2}-\d{2}$/.test(opts.endDate)
+      ? new Date(`${opts.endDate}T00:00:00.000Z`)
+      : null;
+    if (
+      dateOnlyEnd &&
+      !Number.isNaN(dateOnlyEnd.getTime()) &&
+      dateOnlyEnd.toISOString().slice(0, 10) === opts.endDate
+    ) {
+      dateOnlyEnd.setUTCDate(dateOnlyEnd.getUTCDate() + 1);
+      conditions.push("t.createdAt < ?");
+      params.push(dateOnlyEnd.toISOString());
+    } else {
+      conditions.push("t.createdAt <= ?");
+      params.push(opts.endDate);
+    }
+  }
+  const where = `WHERE ${conditions.join(" AND ")}`;
+
+  type RootRow = { userId: string; initiated: number; shipped: number };
+  const rootRows = await getDbClient().query<RootRow>(
+    `WITH RECURSIVE selected_roots(id, requestedByUserId, status, output) AS (
+        SELECT t.id, t.requestedByUserId, t.status, t.output
+        FROM agent_tasks t
+        ${where} AND t.parentTaskId IS NULL AND NOT ${ROOT_HUMAN_FREE_SQL}
+      ),
+      task_tree(rootId, taskId, output) AS (
+        SELECT id, id, output
+        FROM selected_roots
+
+        UNION ALL
+
+        SELECT tree.rootId, child.id, child.output
+        FROM agent_tasks child
+        JOIN task_tree tree ON child.parentTaskId = tree.taskId
+      )
+      SELECT
+        t.requestedByUserId as userId,
+        COUNT(*) as initiated,
+        SUM(CASE WHEN t.status = 'completed' AND (
+          EXISTS (
+            SELECT 1
+            FROM task_tree tree
+            JOIN task_attachments ta ON ta.task_id = tree.taskId
+            WHERE tree.rootId = t.id
+              AND ta.kind = 'url'
+              AND (
+                ta.url LIKE '%github.com/%/pull/%'
+                OR ta.url LIKE '%/-/merge_requests/%'
+              )
+          )
+          OR EXISTS (
+            SELECT 1 FROM task_attachments ta
+            JOIN task_tree tree ON tree.taskId = ta.task_id
+            WHERE tree.rootId = t.id AND ta.kind = 'page'
+          )
+          OR EXISTS (
+            SELECT 1 FROM task_tree tree
+            WHERE tree.rootId = t.id
+              AND (
+                tree.output LIKE '%github.com/%/pull/%'
+                OR tree.output LIKE '%/-/merge_requests/%'
+              )
+          )
+        ) THEN 1 ELSE 0 END) as shipped
+      FROM selected_roots t
+      GROUP BY t.requestedByUserId`,
+    params,
+  );
+
+  type ReachRow = {
+    userId: string;
+    agentsReached: number;
+    reposReached: number;
+    surfacesReached: number;
+  };
+  const reachRows = await getDbClient().query<ReachRow>(
+    `WITH RECURSIVE report_tasks AS (
+        SELECT t.*
+        FROM agent_tasks t
+        ${where}
+      ),
+      task_ancestry(
+        taskId, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
+        taskType, tags, source, workflowRunId
+      ) AS (
+        SELECT
+          id, id, parentTaskId, requestedByUserId, requestedByUserIdInherited,
+          taskType, tags, source, workflowRunId
+        FROM report_tasks
+
+        UNION ALL
+
+        SELECT
+          child.taskId, parent.id, parent.parentTaskId, parent.requestedByUserId,
+          parent.requestedByUserIdInherited, parent.taskType, parent.tags,
+          parent.source, parent.workflowRunId
+        FROM agent_tasks parent
+        JOIN task_ancestry child ON parent.id = child.parentTaskId
+        WHERE child.requestedByUserId IS NULL
+          OR child.requestedByUserIdInherited = 1
+      ),
+      human_free_report_tasks(id) AS (
+        SELECT DISTINCT ancestor.taskId
+        FROM task_ancestry ancestor
+        LEFT JOIN agent_tasks parent ON parent.id = ancestor.parentTaskId
+        WHERE COALESCE(ancestor.taskType, '') IN ('heartbeat', 'heartbeat-checklist', 'boot-triage')
+          OR COALESCE(ancestor.tags, '[]') LIKE '%"heartbeat"%'
+          OR (COALESCE(ancestor.source, '') = 'schedule' AND ancestor.requestedByUserId IS NULL)
+          OR (
+            ancestor.parentTaskId IS NULL
+            AND COALESCE(ancestor.source, '') = 'workflow'
+            AND ancestor.requestedByUserId IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM workflow_runs run
+              WHERE run.id = ancestor.workflowRunId
+                AND run.triggerType = 'schedule'
+                AND run.created_by IS NULL
+            )
+          )
+          OR (
+            COALESCE(ancestor.source, '') = 'system'
+            AND parent.id IS NOT NULL
+            AND parent.requestedByUserId IS NULL
+          )
+      )
+      SELECT
+        t.requestedByUserId as userId,
+        COUNT(DISTINCT t.agentId) as agentsReached,
+        COUNT(DISTINCT t.vcsRepo) as reposReached,
+        COUNT(DISTINCT t.source) as surfacesReached
+      FROM report_tasks t
+      WHERE NOT EXISTS (SELECT 1 FROM human_free_report_tasks WHERE id = t.id)
+      GROUP BY t.requestedByUserId`,
+    params,
+  );
+
+  const byUser = new Map<string, AttributionByPersonRow>();
+  for (const r of rootRows) {
+    byUser.set(r.userId, {
+      userId: r.userId,
+      problemsInitiated: r.initiated,
+      problemsShipped: r.shipped,
+      agentsReached: 0,
+      reposReached: 0,
+      surfacesReached: 0,
+      firstPassYield: null,
+    });
+  }
+  for (const r of reachRows) {
+    const existing = byUser.get(r.userId);
+    if (existing) {
+      existing.agentsReached = r.agentsReached;
+      existing.reposReached = r.reposReached;
+      existing.surfacesReached = r.surfacesReached;
+    } else {
+      // Reach with no root task in-window (e.g. only fan-out children whose
+      // root predates the window) — still a real person row.
+      byUser.set(r.userId, {
+        userId: r.userId,
+        problemsInitiated: 0,
+        problemsShipped: 0,
+        agentsReached: r.agentsReached,
+        reposReached: r.reposReached,
+        surfacesReached: r.surfacesReached,
+        firstPassYield: null,
+      });
+    }
+  }
+
+  return Array.from(byUser.values());
 }
 
 // --- Dashboard cost summary (P4) ---
@@ -8233,13 +8711,14 @@ export async function insertActiveSession(session: {
   inboxMessageId?: string;
   taskDescription?: string;
   runnerSessionId?: string;
+  runtimeInstanceId?: string;
 }): Promise<ActiveSession> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const row = await getDbClient().get<ActiveSession>(
-    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, startedAt, lastHeartbeatAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO active_sessions (id, agentId, taskId, triggerType, inboxMessageId, taskDescription, runnerSessionId, runtimeInstanceId, startedAt, lastHeartbeatAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
     [
       id,
@@ -8249,6 +8728,7 @@ export async function insertActiveSession(session: {
       session.inboxMessageId ?? null,
       session.taskDescription ?? null,
       session.runnerSessionId ?? null,
+      session.runtimeInstanceId ?? null,
       now,
       now,
     ],
@@ -8861,9 +9341,11 @@ type WorkflowRunRow = {
   id: string;
   workflowId: string;
   status: string;
+  triggerType: string;
   triggerData: string | null;
   context: string | null;
   error: string | null;
+  created_by: string | null;
   startedAt: string;
   lastUpdatedAt: string;
   finishedAt: string | null;
@@ -8877,6 +9359,7 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
     triggerData: row.triggerData ? JSON.parse(row.triggerData) : undefined,
     context: row.context ? (JSON.parse(row.context) as Record<string, unknown>) : undefined,
     error: row.error ?? undefined,
+    createdBy: row.created_by ?? undefined,
     startedAt: normalizeDateRequired(row.startedAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     finishedAt: normalizeDate(row.finishedAt) ?? undefined,
@@ -8886,12 +9369,21 @@ function rowToWorkflowRun(row: WorkflowRunRow): WorkflowRun {
 export async function createWorkflowRun(data: {
   id: string;
   workflowId: string;
+  triggerType?: "schedule" | "manual" | "event" | "api";
   triggerData?: unknown;
+  createdBy?: string;
 }): Promise<WorkflowRun> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunRow>(
-    `INSERT INTO workflow_runs (id, workflowId, startedAt, triggerData) VALUES (?, ?, ?, ?) RETURNING *`,
-    [data.id, data.workflowId, now, data.triggerData ? JSON.stringify(data.triggerData) : null],
+    `INSERT INTO workflow_runs (id, workflowId, triggerType, startedAt, triggerData, created_by) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+    [
+      data.id,
+      data.workflowId,
+      data.triggerType ?? "manual",
+      now,
+      data.triggerData ? JSON.stringify(data.triggerData) : null,
+      data.createdBy ?? null,
+    ],
   );
   if (!row) throw new Error("Failed to create workflow run");
   return rowToWorkflowRun(row);
@@ -12810,14 +13302,97 @@ export async function updateUser(
   return row ? rowToUser(row) : null;
 }
 
-export async function deleteUser(id: string): Promise<boolean> {
-  const client = getDbClient();
-  // Clear any task references before deleting
-  await client.run("UPDATE agent_tasks SET requestedByUserId = NULL WHERE requestedByUserId = ?", [
-    id,
-  ]);
-  const result = await client.run("DELETE FROM users WHERE id = ?", [id]);
-  return result.changes > 0;
+type UserReferenceRow = {
+  tableName: string;
+  columnName: string;
+};
+
+function quoteSqlIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+export async function deleteUser(id: string, replacementUserId?: string): Promise<boolean> {
+  if (replacementUserId === id) {
+    throw new Error("Replacement user must differ from deleted user");
+  }
+
+  return await getDbClient().transaction(async (tx) => {
+    const userExists = (
+      await tx.get<{ present: number }>(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+        [id],
+      )
+    )?.present;
+    if (!userExists) return false;
+
+    if (replacementUserId) {
+      const replacementExists = (
+        await tx.get<{ present: number }>(
+          "SELECT EXISTS(SELECT 1 FROM users WHERE id = ?) AS present",
+          [replacementUserId],
+        )
+      )?.present;
+      if (!replacementExists) throw new Error("Replacement user not found");
+    }
+
+    // Preserve rows that carry user attribution but lack ON DELETE semantics.
+    // Schema discovery keeps this correct as new nullable user audit columns are added.
+    // Migration 103 accidentally dropped the scheduled_tasks audit FKs while
+    // recreating that table, so discover those two known logical references as
+    // well until the table is next rebuilt with its original constraints.
+    const references = await tx.query<UserReferenceRow>(
+      `SELECT tables.name AS tableName, foreign_keys."from" AS columnName
+       FROM sqlite_schema AS tables
+       JOIN pragma_foreign_key_list(tables.name) AS foreign_keys
+       JOIN pragma_table_info(tables.name) AS columns
+         ON columns.name = foreign_keys."from"
+       WHERE tables.type = 'table'
+         AND foreign_keys."table" = 'users'
+         AND foreign_keys.on_delete IN ('NO ACTION', 'RESTRICT')
+         AND columns."notnull" = 0
+       UNION ALL
+       SELECT 'scheduled_tasks' AS tableName, columns.name AS columnName
+       FROM pragma_table_info('scheduled_tasks') AS columns
+       WHERE columns.name IN ('created_by', 'updated_by')
+         AND columns."notnull" = 0
+         AND NOT EXISTS (
+           SELECT 1
+           FROM pragma_foreign_key_list('scheduled_tasks') AS foreign_keys
+           WHERE foreign_keys."from" = columns.name
+             AND foreign_keys."table" = 'users'
+         )`,
+    );
+    const replacement = replacementUserId ?? null;
+    for (const reference of references) {
+      const table = quoteSqlIdentifier(reference.tableName);
+      const column = quoteSqlIdentifier(reference.columnName);
+      await tx.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, [replacement, id]);
+    }
+
+    // Workflow context is persisted JSON rather than a relational column, but
+    // it exposes the same requester identity to downstream interpolation. Keep
+    // it consistent with workflow_runs.created_by inside this transaction.
+    if (replacementUserId) {
+      await tx.run(
+        `UPDATE workflow_runs
+         SET context = json_set(context, '$.swarm.requestedByUserId', ?)
+         WHERE json_valid(context)
+           AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        [replacementUserId, id],
+      );
+    } else {
+      await tx.run(
+        `UPDATE workflow_runs
+         SET context = json_remove(context, '$.swarm.requestedByUserId')
+         WHERE json_valid(context)
+           AND json_extract(context, '$.swarm.requestedByUserId') = ?`,
+        [id],
+      );
+    }
+
+    const result = await tx.run("DELETE FROM users WHERE id = ?", [id]);
+    return result.changes > 0;
+  });
 }
 
 // ============================================================================

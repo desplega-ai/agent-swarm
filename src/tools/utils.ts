@@ -32,6 +32,8 @@ export function markScriptSdkRequestOrigin<T extends object>(meta: T): T {
 export type RequestInfo = {
   sessionId: string | undefined;
   agentId: string | undefined;
+  /** Calling worker process, when multi-runtime mode is on. */
+  runtimeInstanceId: string | undefined;
   sourceTaskId: string | undefined;
   contextKey: string | undefined;
   callOrigin: "mcp" | "script-sdk";
@@ -41,6 +43,8 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
   const agentIdHeader = req.requestInfo?.headers?.["x-agent-id"];
   const sourceTaskIdHeader = req.requestInfo?.headers?.["x-source-task-id"];
   const contextKeyHeader = req.requestInfo?.headers?.["x-context-key"];
+  const runtimeHeader = req.requestInfo?.headers?.["x-runtime-instance-id"];
+  const runtimeInstanceId = Array.isArray(runtimeHeader) ? runtimeHeader[0] : runtimeHeader;
 
   let agentId: string | undefined;
   if (Array.isArray(agentIdHeader)) {
@@ -66,6 +70,7 @@ export const getRequestInfo = (req: Meta): RequestInfo => {
   return {
     sessionId: req.sessionId || undefined,
     agentId,
+    runtimeInstanceId: typeof runtimeInstanceId === "string" ? runtimeInstanceId : undefined,
     sourceTaskId,
     contextKey,
     callOrigin: scriptSdkRequestOrigins.has(req) ? "script-sdk" : "mcp",

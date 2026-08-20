@@ -542,6 +542,15 @@ describe("script connections", () => {
       markMigrationApplied(database, "130_scratch_script_retention_grace.sql");
       // 131 indexes session_logs, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "131_session_logs_created_at_index.sql");
+      // 132 alters active_sessions, which this partial fixture does not create.
+      markMigrationApplied(database, "132_multi_runtime_instances.sql");
+      // 133 alters workflow_runs, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "133_workflow_run_trigger_type.sql");
+      // 135 backfills task_attachments, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "135_backfill_task_pull_request_attachments.sql");
+      // 136 alters agent_tasks, which this migration-112-only fixture only creates partially.
+      markMigrationApplied(database, "136_task_requester_provenance.sql");
+      markMigrationApplied(database, "137_memory_retrieval_composite_index.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

@@ -3,15 +3,21 @@ import { unlinkSync } from "node:fs";
 import {
   closeDb,
   createAgent,
+  createScheduledTask,
   createTaskExtended,
   createUser,
+  createWorkflow,
+  createWorkflowRun,
   deleteUser,
   getAllUsers,
   getDbClient,
+  getScheduledTaskById,
   getTaskById,
   getUserById,
+  getWorkflowRun,
   initDb,
   updateUser,
+  updateWorkflowRun,
 } from "../be/db";
 import {
   findOrCreateUserByEmail,
@@ -281,12 +287,73 @@ describe("deleteUser", () => {
       source: "slack",
       requestedByUserId: user.id,
     });
+    await getDbClient().run("UPDATE agent_tasks SET created_by = ? WHERE id = ?", [
+      user.id,
+      task.id,
+    ]);
     expect((await getTaskById(task.id))!.requestedByUserId).toBe(user.id);
+    expect(
+      (
+        await getDbClient().get<{ created_by: string | null }>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+          [task.id],
+        )
+      )?.created_by,
+    ).toBe(user.id);
 
     await deleteUser(user.id);
     expect((await getTaskById(task.id))!.requestedByUserId).toBeUndefined();
+    expect(
+      (
+        await getDbClient().get<{ created_by: string | null }>(
+          "SELECT created_by FROM agent_tasks WHERE id = ?",
+          [task.id],
+        )
+      )?.created_by,
+    ).toBeNull();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
     expect(await findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
+  });
+
+  test("clears retained workflow run attribution before deleting the user", async () => {
+    const user = await createUser({ name: "Workflow Trigger" });
+    const workflow = await createWorkflow({
+      name: `delete-user-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [] },
+    });
+    const run = await createWorkflowRun({
+      id: crypto.randomUUID(),
+      workflowId: workflow.id,
+      createdBy: user.id,
+    });
+    await updateWorkflowRun(run.id, {
+      context: {
+        swarm: { requestedByUserId: user.id, retained: "swarm-value" },
+        retained: "root-value",
+      },
+    });
+
+    expect(await deleteUser(user.id)).toBe(true);
+    expect(await getUserById(user.id)).toBeNull();
+    expect((await getWorkflowRun(run.id))?.createdBy).toBeUndefined();
+    expect((await getWorkflowRun(run.id))?.context).toEqual({
+      swarm: { retained: "swarm-value" },
+      retained: "root-value",
+    });
+  });
+
+  test("clears schedule attribution whose audit FKs were dropped by migration 103", async () => {
+    const user = await createUser({ name: "Schedule Trigger" });
+    const schedule = await createScheduledTask({
+      name: `delete-user-schedule-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Run scheduled work",
+      createdBy: user.id,
+    });
+
+    expect(await deleteUser(user.id)).toBe(true);
+    expect((await getScheduledTaskById(schedule.id))?.createdBy).toBeUndefined();
+    expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBeUndefined();
   });
 });
 
@@ -522,6 +589,14 @@ describe("recordIdentityEvent", () => {
 // ─── requestedByUserId on tasks ───────────────────────────────────────────────
 
 describe("requestedByUserId in tasks", () => {
+  const requesterWasInherited = async (taskId: string): Promise<number | undefined> =>
+    (
+      await getDbClient().get<{ requestedByUserIdInherited: number }>(
+        "SELECT requestedByUserIdInherited FROM agent_tasks WHERE id = ?",
+        [taskId],
+      )
+    )?.requestedByUserIdInherited;
+
   test("createTaskExtended stores requestedByUserId", async () => {
     const user = await createUser({ name: "Requester" });
     const task = await createTaskExtended("task with requester", {
@@ -531,6 +606,7 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetched = await getTaskById(task.id);
     expect(fetched!.requestedByUserId).toBe(user.id);
+    expect(await requesterWasInherited(task.id)).toBe(0);
     await deleteUser(user.id);
   });
 
@@ -548,6 +624,7 @@ describe("requestedByUserId in tasks", () => {
     });
     const fetchedChild = await getTaskById(child.id);
     expect(fetchedChild!.requestedByUserId).toBe(user.id);
+    expect(await requesterWasInherited(child.id)).toBe(1);
     await deleteUser(user.id);
   });
 
@@ -566,6 +643,7 @@ describe("requestedByUserId in tasks", () => {
       requestedByUserId: user2.id,
     });
     expect((await getTaskById(child.id))!.requestedByUserId).toBe(user2.id);
+    expect(await requesterWasInherited(child.id)).toBe(0);
     await deleteUser(user1.id);
     await deleteUser(user2.id);
   });

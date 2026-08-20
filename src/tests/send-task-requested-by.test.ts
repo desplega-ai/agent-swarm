@@ -79,6 +79,13 @@ afterAll(async () => {
 describe("send-task: requestedByUserId inheritance", () => {
   const server = new McpServer({ name: "test-send-task", version: "1.0.0" });
   registerSendTaskTool(server);
+  const requesterWasInherited = async (taskId: string): Promise<number | undefined> =>
+    (
+      await getDbClient().get<{ inherited: number }>(
+        "SELECT requestedByUserIdInherited AS inherited FROM agent_tasks WHERE id = ?",
+        [taskId],
+      )
+    )?.inherited;
 
   test("child pool task inherits requestedByUserId from caller's sourceTaskId", async () => {
     // Parent task has no agentId so the auto-route won't force a lead assignment.
@@ -98,6 +105,7 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(s.task).toBeDefined();
     const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userAId);
+    expect(await requesterWasInherited(s.task!.id)).toBe(1);
   });
 
   test("explicit requestedByUserId in args wins over inherited value", async () => {
@@ -116,6 +124,7 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(s.success).toBe(true);
     const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userBId);
+    expect(await requesterWasInherited(s.task!.id)).toBe(0);
   });
 
   test("no crash when caller has no sourceTaskId and no requestedByUserId arg", async () => {
@@ -152,6 +161,7 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(s.success).toBe(true);
     const created = await getTaskById(s.task!.id);
     expect(created?.requestedByUserId).toBe(userAId);
+    expect(await requesterWasInherited(s.task!.id)).toBe(1);
   });
 
   test("skips creating a child when source task already owns a Linear tracker contextKey", async () => {

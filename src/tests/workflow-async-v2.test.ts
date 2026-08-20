@@ -155,7 +155,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(task!.task).toBe("Do the thing");
     });
 
-    test("inherits requestedByUserId from workflow execution options", async () => {
+    test("persists the requester on the run and attributes the root task", async () => {
       const user = await createUser({ name: "Workflow Requester" });
       const workflow = await makeWorkflow({
         nodes: [
@@ -173,6 +173,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const steps = await getWorkflowRunStepsByRunId(runId);
       const task = await getTaskByWorkflowRunStepId(steps[0]!.id);
 
+      expect((await getWorkflowRun(runId))?.createdBy).toBe(user.id);
       expect(task).toBeTruthy();
       expect(task!.requestedByUserId).toBe(user.id);
     });
@@ -252,6 +253,47 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(updatedSteps).toHaveLength(2);
       const completedSteps = updatedSteps.filter((s) => s.status === "completed");
       expect(completedSteps).toHaveLength(2);
+    });
+
+    test("resume rehydrates requester attribution from the workflow run", async () => {
+      const user = await createUser({ name: "Resumed Workflow Requester" });
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "task1",
+            type: "agent-task",
+            config: { template: "First attributed task" },
+            next: "task2",
+          },
+          {
+            id: "task2",
+            type: "agent-task",
+            config: { template: "Second attributed task" },
+          },
+        ],
+      });
+
+      const runId = await startWorkflowExecution(workflow, {}, registry, {
+        requestedByUserId: user.id,
+      });
+      const firstStep = (await getWorkflowRunStepsByRunId(runId)).find(
+        (step) => step.nodeId === "task1",
+      )!;
+      const firstTask = (await getTaskByWorkflowRunStepId(firstStep.id))!;
+
+      workflowEventBus.emit("task.completed", {
+        taskId: firstTask.id,
+        output: "done",
+        workflowRunId: runId,
+        workflowRunStepId: firstStep.id,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const secondStep = (await getWorkflowRunStepsByRunId(runId)).find(
+        (step) => step.nodeId === "task2",
+      );
+      expect(secondStep).toBeDefined();
+      expect((await getTaskByWorkflowRunStepId(secondStep!.id))?.requestedByUserId).toBe(user.id);
     });
 
     test("resume from task failure marks run as failed", async () => {

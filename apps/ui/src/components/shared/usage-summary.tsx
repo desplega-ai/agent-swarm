@@ -129,12 +129,18 @@ export function UsageSummary(props: UsageSummaryProps) {
     );
   }
 
-  // Share of spend whose task carries a human requester. The rest is autonomous
-  // work (heartbeat, boot triage) — the number is deliberately shown as-is.
+  // Share of spend whose task carries a human requester, over the corrected
+  // denominator (`attributableCostUsd` = totalCost minus structurally-human-free
+  // work — heartbeat, boot-triage, scheduled runs, self-maintenance follow-ups).
+  // Dividing by `totalCost` instead would silently deflate the number with a
+  // population that could never have scored a requester in the first place.
   const attributedPct =
-    totals?.attributedCostUsd !== undefined && stats.totalCost > 0
-      ? (totals.attributedCostUsd / stats.totalCost) * 100
+    totals?.attributedCostUsd !== undefined &&
+    totals?.attributableCostUsd !== undefined &&
+    totals.attributableCostUsd > 0
+      ? (totals.attributedCostUsd / totals.attributableCostUsd) * 100
       : null;
+  const excludedTaskCount = totals?.excludedTaskCount;
 
   return (
     <div className="space-y-4">
@@ -152,7 +158,14 @@ export function UsageSummary(props: UsageSummaryProps) {
             label="Attributed spend"
             value={`${attributedPct.toFixed(1)}%`}
             icon={UserCheck}
-            hint="Share of spend on tasks with a named human requester. The remainder is autonomous work (heartbeat, boot triage) with no requester."
+            hint={
+              `Share of spend on tasks with a named human requester, out of spend that could ` +
+              `plausibly carry one. Excludes ${formatCompactNumber(excludedTaskCount ?? 0)} ` +
+              `heartbeat / boot-triage / scheduled tasks and their self-maintenance follow-ups ` +
+              `(these have no human requester by construction, so counting them against ` +
+              `coverage would misrepresent it). The remainder of the denominator is still ` +
+              `unattributed autonomous or unmatched work.`
+            }
           />
         )}
       </div>

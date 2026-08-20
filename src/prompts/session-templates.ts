@@ -63,7 +63,7 @@ As the lead agent, you coordinate all worker agents in the swarm.
 
 **Identity:**
 - \`update-profile\`: Update your own or other agents' profile fields (name, role, capabilities, soulMd, identityMd, heartbeatMd, claudeMd, toolsMd, setupScript)
-- \`manage-user\`: Register or update human users (resolve from GitHub/GitLab identity or other source metadata)
+- \`manage-user\`: Register or update human users (resolve from GitHub/GitLab identity or other source metadata). When you learn a requester's stable communication preferences (tone, language, verbosity), persist them with its \`comms\` field so future sessions adapt.
 
 #### Task Routing
 
@@ -803,6 +803,32 @@ When working in a repository, your system prompt may include a **Repository Guid
   category: "system",
 });
 
+registerTemplate({
+  eventType: "system.agent.communication_style",
+  header: "",
+  defaultBody: `
+### Communication Style
+
+Your persona lives in your SOUL.md (see Your Identity, when present). It defines who you are. The rules below define how you write, whoever you are.
+
+They govern everything a human reads from you: Slack, PR and issue comments, tickets, email, pages, and task summaries.
+
+- Write like a person, not a press release. Plain words, direct statements.
+- Lead with the outcome or the answer. Context comes after.
+- Keep sentences short (25 words or fewer). One idea per sentence.
+- Use active voice. Say who did what.
+- Never use em dashes. Use a period, a comma, a colon, or parentheses.
+- No marketing adjectives (seamless, robust, powerful). State the fact that earns the claim instead.
+- No hedge stacks ("might possibly perhaps"). Keep a hedge only when you are genuinely unsure, and keep it: "may have failed" never becomes "failed".
+- No filler ("I hope this helps", "Great question!") and no formal sign-offs.
+- If something is broken, blocked, or a bad idea, say so plainly and say why.
+- Mirror the requester: reply in the language they wrote in, match their register, and answer at the depth they asked. A one-line question gets the answer first, detail after.
+- If a Requester Profile section is present, it wins on tone, depth, and format. Correctness always wins over style.
+`,
+  variables: [],
+  category: "system",
+});
+
 // ============================================================================
 // Per-task prompt templates (category: "task_lifecycle")
 // ============================================================================
@@ -812,12 +838,18 @@ registerTemplate({
   header: "",
   defaultBody: `
 ## Requester Profile
-This task was requested by {{requester_name}}{{requester_role_suffix}}.{{requester_notes_section}}
+This task was requested by {{requester_name}}{{requester_role_suffix}}.{{requester_comms_section}}{{requester_notes_section}}
 Honor this requester profile in tone, depth, and format where it doesn't conflict with correctness or your operating rules.
+If this task reveals new stable communication preferences for this requester, persist them: the lead updates \`comms\` (tone, language, verbosity) via \`manage-user\`.
 `,
   variables: [
     { name: "requester_name", description: "The requesting user's display name" },
     { name: "requester_role_suffix", description: "Formatted role suffix, including parentheses" },
+    {
+      name: "requester_comms_section",
+      description:
+        "Formatted communication preferences (tone/language/verbosity) sourced from users.metadata.comms, or empty string",
+    },
     {
       name: "requester_notes_section",
       description: "Formatted notes section sourced from users.notes, or empty string",
@@ -859,7 +891,8 @@ registerTemplate({
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}
-{{@template[system.agent.code_quality]}}`,
+{{@template[system.agent.code_quality]}}
+{{@template[system.agent.communication_style]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },
@@ -881,7 +914,8 @@ registerTemplate({
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}
-{{@template[system.agent.code_quality]}}`,
+{{@template[system.agent.code_quality]}}
+{{@template[system.agent.communication_style]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },
@@ -910,7 +944,8 @@ registerTemplate({
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}
-{{@template[system.agent.code_quality]}}`,
+{{@template[system.agent.code_quality]}}
+{{@template[system.agent.communication_style]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },
@@ -939,7 +974,8 @@ registerTemplate({
 
 {{@template[system.agent.system]}}
 {{@template[system.agent.share_urls]}}
-{{@template[system.agent.code_quality]}}`,
+{{@template[system.agent.code_quality]}}
+{{@template[system.agent.communication_style]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },
@@ -982,7 +1018,9 @@ registerTemplate({
   header: "",
   defaultBody: `{{@template[system.agent.role]}}
 
-{{@template[system.agent.worker.remote]}}`,
+{{@template[system.agent.worker.remote]}}
+
+{{@template[system.agent.communication_style]}}`,
   variables: [
     { name: "role", description: "The agent's role" },
     { name: "agentId", description: "The agent's unique identifier" },

@@ -36,6 +36,11 @@ import {
   updateAgentStatus,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
+import {
+  agentsWithLiveRuntime,
+  countActiveRuntimeInstancesForAgent,
+  expireStaleRuntimeInstances,
+} from "../be/multi-runtime";
 import { promotePendingSteeringForTask } from "../be/steering";
 import { resolveTemplate } from "../prompts/resolver";
 import {
@@ -48,6 +53,7 @@ import {
   REBOOT_RETRY_PIN_TAG,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
@@ -212,6 +218,7 @@ export interface HeartbeatFindings {
     mentionProcessing: number;
     inboxProcessing: number;
     workflowRuns: number;
+    staleRuntimes: number;
   };
 }
 
@@ -285,8 +292,14 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       mentionProcessing: 0,
       inboxProcessing: 0,
       workflowRuns: 0,
+      staleRuntimes: 0,
     },
   };
+
+  // 0. Retire runtimes that stopped pinging, before anything reasons about
+  // which workers are alive — otherwise auto-assignment below can hand a task
+  // to an agent this same sweep is about to mark offline, stranding it.
+  findings.staleCleanup.staleRuntimes = (await expireStaleRuntimeInstances()).expired;
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   await detectAndRemediateStalledTasks(findings);
@@ -426,7 +439,7 @@ async function remediateCrashedWorkerTask(
         `[Heartbeat] Workflow-step task ${task.id.slice(0, 8)} failed — engine will handle retry (${opts.shortLabel})`,
       );
       const remaining = await getActiveTaskCount(task.agentId);
-      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -446,7 +459,7 @@ async function remediateCrashedWorkerTask(
         })`,
       );
       const remaining = await getActiveTaskCount(task.agentId);
-      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -465,7 +478,7 @@ async function remediateCrashedWorkerTask(
         `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${RESUME_BUDGET_EXHAUSTED_REASON} (${opts.shortLabel})`,
       );
       const remaining = await getActiveTaskCount(task.agentId);
-      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
@@ -540,7 +553,7 @@ async function remediateCrashedWorkerTask(
   if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
 
   const remaining = await getActiveTaskCount(task.agentId);
-  if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
+  if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
 }
 
 /**
@@ -625,7 +638,7 @@ export async function runRebootSweep(): Promise<void> {
 
       // Fix agent status
       if ((await getActiveTaskCount(task.agentId)) === 0) {
-        await updateAgentStatus(task.agentId, "idle");
+        await restoreAgentIdleAfterRemediation(task.agentId);
       }
 
       // Don't retry system-generated heartbeat tasks
@@ -762,8 +775,20 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
     // re-querying per worker via shouldBlockPolling().
+    // A multi-runtime agent whose runtimes have all died still reads as idle
+    // until its rows expire; assigning to it would strand the task, since
+    // nothing is left to poll for it.
+    // While the mode is on, only an agent with a live runtime can poll, so
+    // anything else — dead runtimes, or a worker that has not re-registered
+    // since the flag was enabled — would have the task stranded on it. With
+    // the flag off this is inert: legacy workers stop refreshing their
+    // retained rows, and filtering on them would park tasks on healthy agents.
+    const multiRuntime = isMultiRuntimeEnabled();
+    const withLiveRuntime = multiRuntime ? await agentsWithLiveRuntime() : null;
     const idleWorkers = (await getIdleWorkersWithCapacity()).filter(
-      (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
+      (w) =>
+        (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS &&
+        (withLiveRuntime === null || withLiveRuntime.has(w.id)),
     );
     if (idleWorkers.length === 0) return;
 
@@ -965,6 +990,16 @@ async function escalateStarvedPoolTasks(findings: HeartbeatFindings): Promise<vo
       );
     }
   }
+}
+
+/**
+ * Return a remediated agent to idle — unless multi-runtime liveness says no
+ * process is serving it. Recovery still runs for the task; the agent just
+ * must not be advertised as available when nothing can poll for it.
+ */
+async function restoreAgentIdleAfterRemediation(agentId: string): Promise<void> {
+  if (isMultiRuntimeEnabled() && (await countActiveRuntimeInstancesForAgent(agentId)) === 0) return;
+  await updateAgentStatus(agentId, "idle");
 }
 
 /**
@@ -1278,8 +1313,15 @@ export async function runHeartbeatSweep(): Promise<void> {
           mentionProcessing: 0,
           inboxProcessing: 0,
           workflowRuns: 0,
+          staleRuntimes: 0,
         },
       };
+      // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
+      // stopped pinging is exactly the case the preflight gate sees as
+      // "nothing actionable", and it would otherwise stay available forever.
+      cleanupOnlyFindings.staleCleanup.staleRuntimes = (
+        await expireStaleRuntimeInstances()
+      ).expired;
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early

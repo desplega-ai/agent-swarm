@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { awaitCredentials, BootMaxWaitExceededError } from "../commands/credential-wait";
+import {
+  awaitCredentials,
+  BootMaxWaitExceededError,
+  retryBootStep,
+} from "../commands/credential-wait";
 
 /**
  * Capture-only logger so test output stays clean and we can assert on
@@ -278,5 +282,67 @@ describe("awaitCredentials", () => {
 
     expect(status.ready).toBe(true);
     expect(probedPaths).toContain("/home/worker/.codex/auth.json");
+  });
+});
+
+describe("retryBootStep", () => {
+  test("returns after the first success without sleeping", async () => {
+    const sleeper = makeSleeper();
+    let calls = 0;
+    await retryBootStep(
+      async () => {
+        calls++;
+      },
+      { sleep: sleeper.fn, log: () => {} },
+    );
+    expect(calls).toBe(1);
+    expect(sleeper.calls).toEqual([]);
+  });
+
+  test("retries with exponential backoff until success", async () => {
+    const sleeper = makeSleeper();
+    const logger = makeLogger();
+    let calls = 0;
+    await retryBootStep(
+      async () => {
+        calls++;
+        if (calls < 3) throw new Error(`transient ${calls}`);
+      },
+      { sleep: sleeper.fn, log: logger.fn, initialDelayMs: 100, maxDelayMs: 1000 },
+    );
+    expect(calls).toBe(3);
+    expect(sleeper.calls).toEqual([100, 200]);
+    expect(logger.lines).toHaveLength(2);
+    expect(logger.lines[0]).toContain("attempt 1/5");
+  });
+
+  test("propagates the last error once attempts are exhausted", async () => {
+    const sleeper = makeSleeper();
+    let calls = 0;
+    await expect(
+      retryBootStep(
+        async () => {
+          calls++;
+          throw new Error(`down ${calls}`);
+        },
+        { attempts: 3, sleep: sleeper.fn, log: () => {} },
+      ),
+    ).rejects.toThrow("down 3");
+    expect(calls).toBe(3);
+    // No sleep after the final attempt.
+    expect(sleeper.calls).toHaveLength(2);
+  });
+
+  test("caps the backoff at maxDelayMs", async () => {
+    const sleeper = makeSleeper();
+    let calls = 0;
+    await retryBootStep(
+      async () => {
+        calls++;
+        if (calls < 5) throw new Error("transient");
+      },
+      { sleep: sleeper.fn, log: () => {}, initialDelayMs: 400, maxDelayMs: 1000 },
+    );
+    expect(sleeper.calls).toEqual([400, 800, 1000, 1000]);
   });
 });

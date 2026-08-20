@@ -1017,6 +1017,46 @@ describe("OpencodeAdapter — per-task isolation (DES-300)", () => {
     expect(opts.config?.permission?.edit).toBe("allow");
   });
 
+  test("swarm MCP headers carry the per-boot runtime identity when set", async () => {
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    process.env.SWARM_RUNTIME_INSTANCE_ID = "opencode-runtime-1";
+    try {
+      const events: OpencodeEvent[] = [
+        { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+      ];
+      await driveSession(events, testConfig({ taskId: "task-1" }));
+
+      const opts = lastCreateOpencodeConfig as {
+        config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+      };
+      expect(opts.config?.mcp?.swarm?.headers?.["X-Runtime-Instance-ID"]).toBe(
+        "opencode-runtime-1",
+      );
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+    }
+  });
+
+  test("swarm MCP headers omit the runtime identity when unset", async () => {
+    const prev = process.env.SWARM_RUNTIME_INSTANCE_ID;
+    delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+    try {
+      const events: OpencodeEvent[] = [
+        { type: "session.idle", properties: { sessionID: "sess-abc-123" } },
+      ];
+      await driveSession(events, testConfig({ taskId: "task-1" }));
+
+      const opts = lastCreateOpencodeConfig as {
+        config?: { mcp?: Record<string, { headers?: Record<string, string> }> };
+      };
+      expect(opts.config?.mcp?.swarm?.headers?.["X-Runtime-Instance-ID"]).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.SWARM_RUNTIME_INSTANCE_ID;
+      else process.env.SWARM_RUNTIME_INSTANCE_ID = prev;
+    }
+  });
+
   test("per-task agent file is written with system prompt", async () => {
     const cwd = `/tmp/opencode-test-agent-${Date.now()}`;
     await Bun.$`mkdir -p ${cwd}`.quiet();

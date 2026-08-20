@@ -13,8 +13,10 @@ import {
   getDbClient,
   getLeadAgent,
   getLogsByTaskId,
+  getTaskAttachments,
   getTaskById,
   initDb,
+  insertTaskAttachment,
   startTask,
 } from "../be/db";
 import { createWorkerTaskFollowUp } from "../tasks/worker-follow-up";
@@ -520,6 +522,65 @@ describe("store-progress terminal result reporting", () => {
       workflowEventBus.off("task.completed", onTerminalEvent);
       workflowEventBus.off("task.failed", onTerminalEvent);
     }
+  });
+
+  test("force reconciles generated PR attachments without deleting caller attachments", async () => {
+    const agent = await createAgent({
+      name: "terminal-handler-force-attachments",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = await createTaskExtended("terminal forced attachment correction", {
+      agentId: agent.id,
+    });
+    await startTask(task.id);
+    await completeTask(task.id, "Original https://github.com/owner/repo/pull/1");
+    const callerUrl = "https://github.com/caller/owned/pull/77";
+    await insertTaskAttachment({
+      taskId: task.id,
+      agentId: agent.id,
+      name: "Caller-owned evidence",
+      kind: "url",
+      url: callerUrl,
+      providerId: "github",
+      intent: "task-deliverable",
+      description: "Pull request shipped by this task",
+    });
+    const handler = buildStoreProgressHandler();
+
+    const changed = (await handler.handler(
+      {
+        taskId: task.id,
+        output: "Corrected https://github.com/owner/repo/pull/2",
+        force: true,
+      },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+    expect(changed.structuredContent.wasForcedOverwrite).toBe(true);
+    expect(
+      (await getTaskAttachments(task.id)).map(({ name, url, providerId }) => ({
+        name,
+        url,
+        providerId,
+      })),
+    ).toEqual([
+      { name: "Caller-owned evidence", url: callerUrl, providerId: "github" },
+      {
+        name: "GitHub pull request #2",
+        url: "https://github.com/owner/repo/pull/2",
+        providerId: "github",
+      },
+    ]);
+
+    const removed = (await handler.handler(
+      { taskId: task.id, output: "Corrected with no pull request", force: true },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+    expect(removed.structuredContent.wasForcedOverwrite).toBe(true);
+    expect((await getTaskAttachments(task.id)).map(({ name, url }) => ({ name, url }))).toEqual([
+      { name: "Caller-owned evidence", url: callerUrl },
+    ]);
   });
 
   test("force preserves outputSchema validation before overwriting terminal output", async () => {

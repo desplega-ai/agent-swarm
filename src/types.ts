@@ -741,11 +741,19 @@ export type CreateTaskOptions = z.infer<typeof CreateTaskOptionsSchema>;
 export const TaskAttachmentKindSchema = z.enum(["agent-fs", "url", "shared-fs", "page"]);
 export type TaskAttachmentKind = z.infer<typeof TaskAttachmentKindSchema>;
 
+export const SERVER_GENERATED_ATTACHMENT_CAPABILITY = "_agentSwarmGeneratedBy";
+
+const attachmentCapabilitiesSchema = z
+  .record(z.string(), z.unknown())
+  .refine((capabilities) => !(SERVER_GENERATED_ATTACHMENT_CAPABILITY in capabilities), {
+    message: `${SERVER_GENERATED_ATTACHMENT_CAPABILITY} is reserved for server-generated attachments`,
+  });
+
 const attachmentCommonFields = {
   name: z.string().min(1).describe("Display name for the attachment."),
   providerId: z.string().min(1).optional(),
   providerKey: z.string().min(1).optional(),
-  capabilities: z.record(z.string(), z.unknown()).optional(),
+  capabilities: attachmentCapabilitiesSchema.optional(),
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().min(0).optional(),
   sha256: z.string().optional(),
@@ -850,6 +858,22 @@ export const UserSchema = z
   .openapi("User");
 
 export type User = z.infer<typeof UserSchema>;
+
+/**
+ * Structured communication preferences read from `users.metadata.comms`.
+ * All fields are free-form strings; values render verbatim into the requester
+ * profile prompt. Written merge-safely via the `comms` field on
+ * PATCH /api/users/{id} and the manage-user tool.
+ */
+export const UserCommsPrefsSchema = z
+  .object({
+    tone: z.string().optional(),
+    language: z.string().optional(),
+    verbosity: z.string().optional(),
+  })
+  .openapi("UserCommsPrefs");
+
+export type UserCommsPrefs = z.infer<typeof UserCommsPrefsSchema>;
 
 /**
  * Identity event types — mirrored in lockstep with the CHECK constraint on
@@ -1661,12 +1685,53 @@ export const ActiveSessionSchema = z
     taskDescription: z.string().nullable(),
     runnerSessionId: z.string().nullable(),
     providerSessionId: z.string().nullable(),
+    /** Runtime process that owns this session; null for single-runtime rows. */
+    runtimeInstanceId: z.string().nullable().optional(),
     startedAt: z.iso.datetime(),
     lastHeartbeatAt: z.iso.datetime(),
   })
   .openapi("ActiveSession");
 
 export type ActiveSession = z.infer<typeof ActiveSessionSchema>;
+
+// ============================================================================
+// Runtime Instance Types (multi-runtime worker tracking)
+// ============================================================================
+
+/**
+ * Lifecycle of a runtime instance. Zod is the source of truth for the allowed
+ * values — the SQL column has no CHECK constraint (migration 132) so adding a
+ * state doesn't require a table rebuild.
+ */
+export const RuntimeInstanceStatusSchema = z.enum(["active", "offline"]);
+
+/**
+ * One worker process serving a logical agent. The `agents` row (AGENT_ID /
+ * X-Agent-ID) keeps durable identity and the logical maxTasks policy; a
+ * runtime instance carries only process-scoped state: liveness and its own
+ * reported execution capacity. A logical agent may be served by 0..N runtime
+ * instances; rows exist only for multi-runtime registrations
+ * (MULTI_RUNTIME_ENABLED).
+ */
+export const RuntimeInstanceSchema = z
+  .object({
+    id: z.string(),
+    agentId: z.string(),
+    status: RuntimeInstanceStatusSchema,
+    /** Runtime-local concurrent task capacity, self-reported at registration. */
+    reportedSlots: z.number().int(),
+    /** Process-local credential readiness; null when never reported. */
+    credentialReady: z.boolean().nullable().optional(),
+    /** Provider-neutral metadata; unused in the initial slice. */
+    metadata: z.record(z.string(), z.unknown()).nullable(),
+    lastSeenAt: z.iso.datetime(),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .openapi("RuntimeInstance");
+
+export type RuntimeInstanceStatus = z.infer<typeof RuntimeInstanceStatusSchema>;
+export type RuntimeInstance = z.infer<typeof RuntimeInstanceSchema>;
 
 // ============================================================================
 // Workflow Engine Types
@@ -2336,6 +2401,7 @@ export const WorkflowRunSchema = z
     triggerData: z.unknown().optional(),
     context: z.record(z.string(), z.unknown()).optional(),
     error: z.string().optional(),
+    createdBy: z.string().optional(),
     startedAt: z.string(),
     lastUpdatedAt: z.string(),
     finishedAt: z.string().optional(),

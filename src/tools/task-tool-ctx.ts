@@ -3,13 +3,20 @@ import type { AgentTask, User } from "@/types";
 import { type RequestInfo, type SwarmToolResult, toolErr } from "./utils";
 
 export type ToolCtx =
-  | { kind: "owner"; agentId?: string; sourceTaskId?: string; sessionId?: string }
+  | {
+      kind: "owner";
+      agentId?: string;
+      runtimeInstanceId?: string;
+      sourceTaskId?: string;
+      sessionId?: string;
+    }
   | { kind: "user"; userId: string; user: User; sessionId?: string };
 
 export function ownerCtx(info: RequestInfo): ToolCtx {
   return {
     kind: "owner",
     agentId: info.agentId,
+    runtimeInstanceId: info.runtimeInstanceId,
     sourceTaskId: info.sourceTaskId,
     sessionId: info.sessionId,
   };

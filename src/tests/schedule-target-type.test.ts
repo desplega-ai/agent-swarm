@@ -20,7 +20,9 @@ import {
   closeDb,
   createAgent,
   createScheduledTask,
+  createUser,
   createWorkflow,
+  deleteUser,
   getDbClient,
   getScheduledTaskById,
   getWorkflowRun,
@@ -233,11 +235,13 @@ describe("scheduled_tasks DB layer — targetType", () => {
 describe("dispatchScheduleTarget — workflow target", () => {
   test("triggers the workflow directly and returns its run ID (no implicit-binding lookup)", async () => {
     const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const requester = await createUser({ name: "Workflow Schedule Requester" });
     const schedule = await createScheduledTask({
       name: `dispatch-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
       workflowId: wf.id,
+      createdBy: requester.id,
     });
 
     const result = await dispatchScheduleTarget(schedule);
@@ -246,6 +250,41 @@ describe("dispatchScheduleTarget — workflow target", () => {
 
     const run = await getWorkflowRun(result.workflowRunIds![0]!);
     expect(run?.workflowId).toBe(wf.id);
+    expect(run?.createdBy).toBe(requester.id);
+  });
+
+  test("runs an implicitly bound workflow without dangling attribution after owner deletion", async () => {
+    const requester = await createUser({ name: "Deleted Schedule Requester" });
+    const schedule = await createScheduledTask({
+      name: `dispatch-deleted-owner-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Fallback task that should not run",
+      createdBy: requester.id,
+    });
+    const wf = await createWorkflow({
+      name: `implicit-schedule-workflow-${crypto.randomUUID()}`,
+      definition: { nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] },
+      triggers: [{ type: "schedule", scheduleId: schedule.id }],
+      createdByAgentId: agentId,
+    });
+
+    expect(await deleteUser(requester.id)).toBe(true);
+    // Simulate an orphan created before deleteUser learned to clean audit
+    // columns whose FK was dropped by migration 103.
+    await getDbClient().run("UPDATE scheduled_tasks SET created_by = ? WHERE id = ?", [
+      requester.id,
+      schedule.id,
+    ]);
+    const reloaded = (await getScheduledTaskById(schedule.id))!;
+    expect(reloaded.createdBy).toBe(requester.id);
+
+    const result = await dispatchScheduleTarget(reloaded);
+    expect(result.triggeredWorkflows).toBe(true);
+    expect(result.task).toBeUndefined();
+    expect(result.workflowRunIds).toHaveLength(1);
+    const run = await getWorkflowRun(result.workflowRunIds![0]!);
+    expect(run?.workflowId).toBe(wf.id);
+    expect(run?.createdBy).toBeUndefined();
   });
 
   test("throws when the target workflow is disabled", async () => {

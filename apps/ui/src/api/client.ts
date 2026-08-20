@@ -3,6 +3,7 @@ import { getConfig } from "@/lib/config";
 import type {
   AgentAvatar,
   AgentMcpServersResponse,
+  AgentRuntimeInstancesResponse,
   AgentSkillsResponse,
   AgentsResponse,
   AgentTask,
@@ -20,6 +21,7 @@ import type {
   AssetKeyAuditResult,
   AssetKeyMapping,
   AssetSummary,
+  AttributionByPersonResponse,
   Budget,
   BudgetRefusalsResponse,
   BudgetScope,
@@ -253,6 +255,13 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/agents/${id}${includeTasks ? "?include=tasks" : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch agent: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAgentRuntimeInstances(id: string): Promise<AgentRuntimeInstancesResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${id}/runtime-instances`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch runtime instances: ${res.status}`);
     return res.json();
   }
 
@@ -694,6 +703,20 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/session-costs/dashboard`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch dashboard costs: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAttributionByPerson(filters?: {
+    startDate?: string;
+    endDate?: string;
+  }): Promise<AttributionByPersonResponse> {
+    const params = new URLSearchParams();
+    if (filters?.startDate) params.set("startDate", filters.startDate);
+    if (filters?.endDate) params.set("endDate", filters.endDate);
+    const queryString = params.toString();
+    const url = `${this.getBaseUrl()}/api/attribution/by-person${queryString ? `?${queryString}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch attribution by person: ${res.status}`);
     return res.json();
   }
 

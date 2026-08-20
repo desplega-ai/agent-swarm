@@ -14,6 +14,12 @@ function headers(config: SwarmConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${Redacted.value(config.apiKey)}`,
     "X-Agent-ID": Redacted.value(config.agentId),
+    // Per-boot identity of the invoking worker process (system context, not
+    // script input) — work-acquisition endpoints gate on it in multi-runtime
+    // mode.
+    ...(config.runtimeInstanceId
+      ? { "X-Runtime-Instance-ID": Redacted.value(config.runtimeInstanceId) }
+      : {}),
     "Content-Type": "application/json",
   };
 }

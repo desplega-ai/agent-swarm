@@ -49,6 +49,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { readNumberParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
 import { formatSmartTime } from "@/lib/utils";
 import { CredentialsPanel } from "./credentials-panel";
+import { RuntimeInstancesSection } from "./runtime-instances-section";
 
 const PAGE_SIZE = 100;
 
@@ -343,38 +344,41 @@ export default function AgentDetailPage() {
         <TabsContent value="profile" className="mt-4 overflow-y-auto">
           <DetailPageBody
             main={
-              <Card>
-                <CardContent className="p-4">
-                  <DefinitionList>
-                    <InfoRow label="Harness">
-                      <HarnessCell
-                        harnessProvider={agent.harnessProvider}
-                        credStatus={agent.credStatus}
-                      />
-                    </InfoRow>
-                    <InfoRow label="Runtime">
-                      <AgentRuntimeSettings agent={agent} />
-                    </InfoRow>
-                    {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}
-                    {agent.description && (
-                      <InfoRow label="Description">{agent.description}</InfoRow>
-                    )}
-                    {agent.capabilities && agent.capabilities.length > 0 && (
-                      <InfoRow label="Capabilities">
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {agent.capabilities.map((cap) => (
-                            <Badge key={cap} variant="outline" size="tag">
-                              {cap}
-                            </Badge>
-                          ))}
-                        </div>
+              <div className="space-y-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <DefinitionList>
+                      <InfoRow label="Harness">
+                        <HarnessCell
+                          harnessProvider={agent.harnessProvider}
+                          credStatus={agent.credStatus}
+                        />
                       </InfoRow>
-                    )}
-                    <InfoRow label="Joined">{formatSmartTime(agent.createdAt)}</InfoRow>
-                    <InfoRow label="Last update">{formatSmartTime(agent.lastUpdatedAt)}</InfoRow>
-                  </DefinitionList>
-                </CardContent>
-              </Card>
+                      <InfoRow label="Runtime">
+                        <AgentRuntimeSettings agent={agent} />
+                      </InfoRow>
+                      {agent.role && <InfoRow label="Role">{agent.role}</InfoRow>}
+                      {agent.description && (
+                        <InfoRow label="Description">{agent.description}</InfoRow>
+                      )}
+                      {agent.capabilities && agent.capabilities.length > 0 && (
+                        <InfoRow label="Capabilities">
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {agent.capabilities.map((cap) => (
+                              <Badge key={cap} variant="outline" size="tag">
+                                {cap}
+                              </Badge>
+                            ))}
+                          </div>
+                        </InfoRow>
+                      )}
+                      <InfoRow label="Joined">{formatSmartTime(agent.createdAt)}</InfoRow>
+                      <InfoRow label="Last update">{formatSmartTime(agent.lastUpdatedAt)}</InfoRow>
+                    </DefinitionList>
+                  </CardContent>
+                </Card>
+                <RuntimeInstancesSection agent={agent} />
+              </div>
             }
             rail={
               <DetailPageRail>

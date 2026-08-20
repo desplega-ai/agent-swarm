@@ -136,6 +136,8 @@ export interface HandleWebhookTriggerOptions {
    * Never set this on a path that accepts an unauthenticated request.
    */
   alreadyAuthenticated?: boolean;
+  /** Canonical user resolved by an authenticated integration ingress. */
+  requestedByUserId?: string;
 }
 
 /**
@@ -202,6 +204,7 @@ export async function handleWebhookTrigger(
 
   const runId = await startWorkflowExecution(workflow, triggerData, registry, {
     triggerType: "event",
+    requestedByUserId: options.requestedByUserId,
   });
   return { runId };
 }
@@ -271,6 +274,7 @@ export async function handleScheduleTrigger(
     };
     const runId = await startWorkflowExecution(workflow, triggerData, registry, {
       triggerType: "schedule",
+      requestedByUserId: schedule.createdBy,
     });
     runIds.push(runId);
     console.log(

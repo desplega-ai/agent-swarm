@@ -616,7 +616,7 @@ describe("Workflow HTTP API v2", () => {
       expect(res.status).toBe(201);
     });
 
-    test("falls back to the workflow author when the trigger has no user auth", async () => {
+    test("does not attribute a trigger with no user auth to the workflow author", async () => {
       const author = await createUser({
         name: "Workflow Author",
         email: `workflow-author-${crypto.randomUUID()}@example.com`,
@@ -634,9 +634,8 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(201);
       const { runId } = (await res.json()) as { runId: string };
-      expect((await getWorkflowRun(runId))?.context?.swarm).toEqual({
-        requestedByUserId: author.id,
-      });
+      expect((await getWorkflowRun(runId))?.createdBy).toBeUndefined();
+      expect((await getWorkflowRun(runId))?.context?.swarm).toBeUndefined();
     });
 
     test("returns 400 for disabled workflow", async () => {

@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { api } from "../client";
 import type { AgentAvatar, AgentWithTasks, ReasoningEffortLevel } from "../types";
 
@@ -15,6 +16,39 @@ export function useAgent(id: string) {
     queryKey: ["agent", id],
     queryFn: () => api.fetchAgent(id, false),
     enabled: !!id,
+  });
+}
+
+export function useAgentRuntimeInstances(id: string, enabled = true) {
+  return useQuery({
+    queryKey: ["agent-runtime-instances", id],
+    queryFn: () => api.fetchAgentRuntimeInstances(id),
+    enabled: !!id && enabled,
+    refetchInterval: 5000,
+  });
+}
+
+export function useUpdateAgentMaxTasks() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ agentId, maxTasks }: { agentId: string; maxTasks: number }) =>
+      api.upsertConfig({
+        scope: "agent",
+        scopeId: agentId,
+        key: "AGENT_MAX_TASKS",
+        value: String(maxTasks),
+        description: "Set from the agent detail page",
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      queryClient.invalidateQueries({ queryKey: ["agent"] });
+      queryClient.invalidateQueries({ queryKey: ["configs"] });
+      toast.success("Logical task limit updated");
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : "Failed to update the task limit");
+    },
   });
 }
 

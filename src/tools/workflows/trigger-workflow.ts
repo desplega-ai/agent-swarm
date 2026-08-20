@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { resolveTaskAuditUserId } from "@/be/audit-user";
 import { getWorkflow, getWorkflowRun } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { getExecutorRegistry, startWorkflowExecution } from "@/workflows";
@@ -28,7 +29,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         triggerSchema: z.record(z.string(), z.unknown()).optional(),
       }),
     },
-    async ({ id, triggerData }) => {
+    async ({ id, triggerData }, requestInfo) => {
       try {
         const workflow = await getWorkflow(id);
         if (!workflow) {
@@ -41,6 +42,12 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           workflow,
           triggerData ?? {},
           getExecutorRegistry(),
+          {
+            triggerType: "manual",
+            requestedByUserId:
+              (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+              undefined,
+          },
         );
 
         // Check if the run was skipped due to cooldown

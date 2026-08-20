@@ -76,7 +76,13 @@ export async function startWorkflowExecution(
   // Cooldown check
   if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
     const runId = crypto.randomUUID();
-    await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+    await createWorkflowRun({
+      id: runId,
+      workflowId: workflow.id,
+      triggerType: options.triggerType ?? "manual",
+      triggerData,
+      createdBy: options.requestedByUserId,
+    });
     await updateWorkflowRun(runId, {
       status: "skipped",
       error: "cooldown",
@@ -86,7 +92,13 @@ export async function startWorkflowExecution(
   }
 
   const runId = crypto.randomUUID();
-  await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
+  await createWorkflowRun({
+    id: runId,
+    workflowId: workflow.id,
+    triggerType: options.triggerType ?? "manual",
+    triggerData,
+    createdBy: options.requestedByUserId,
+  });
   telemetry.workflow("started", {
     workflowId: workflow.id,
     nodeCount: workflow.definition.nodes.length,
@@ -160,6 +172,14 @@ export async function walkGraph(
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<void> {
+  // Initial triggers carry the requester in options. Resumes, retries, and
+  // recovery start from persisted state, so rehydrate it from the run.
+  if (!options.requestedByUserId) {
+    options = {
+      ...options,
+      requestedByUserId: (await getWorkflowRun(runId))?.createdBy,
+    };
+  }
   let nodeExecutionCount = 0;
   // `run.id` is a context builtin (like `trigger` / `input`) so nodes can reference
   // their own run — e.g. an audit/receipt node correlating its output with the run

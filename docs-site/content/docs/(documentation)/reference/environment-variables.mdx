@@ -64,6 +64,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `SKILL_FILES_MAX_FILE_BYTES` | `512000` (500 KB) | Max size in bytes for a single file within a skill file-set upsert. |
 | `SKILL_FILES_MAX_TOTAL_BYTES` | `10485760` (10 MB) | Max combined size in bytes for all files in a single skill file-set upsert. |
 | `BUDGET_ADMISSION_DISABLED` | `false` | Operator escape hatch — set to `true` at process boot to make budget admission always return allowed, bypassing the agent/global/user daily-spend budget gates on task claiming. |
+| `MULTI_RUNTIME_ENABLED` | `false` | Lets several worker processes serve one logical agent. Set consistently on the API server and every worker; runtimes sharing an `AGENT_ID` need compatible workspace state. The agent-scoped `AGENT_MAX_TASKS` setting remains the shared logical task limit. |
 | `HEARTBEAT_INTERVAL_MS` | `90000` | Heartbeat sweep interval (ms) |
 | `HEARTBEAT_CHECKLIST_DISABLE` | `false` | Disables the periodic `HEARTBEAT.md` checklist polling loop (separate from the infrastructure sweep). |
 | `HEARTBEAT_CHECKLIST_INTERVAL_MS` | `1800000` | Interval (ms) between `HEARTBEAT.md` checklist checks (default 30 min). |
@@ -77,6 +78,7 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_PIN_CRASH_RESUME` | `true` (on) | Rollback kill-switch for pinning `crash_recovery` resumes back to their original agent. Set to `0` to restore the pre-pin behavior requiring the `WORKER_LIVENESS_WINDOW_SECONDS` freshness check |
 | `HEARTBEAT_PIN_GRACEFUL_RESUME` | `true` (on) | Rollback kill-switch for pinning `graceful_shutdown` resumes back to their original agent. Set to `0` to restore the old pool-based follow-up path |
 | `HEARTBEAT_RESUME_PIN_GRACE_MIN` | `10` | Grace window (minutes) a same-agent-pinned crash-recovery or graceful-shutdown resume waits before the reaper escalates it to a Lead re-delegation decision. Set to `0` to disable the reaper |
+| `RUNTIME_STALE_THRESHOLD_MIN` | `5` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. Used only when `MULTI_RUNTIME_ENABLED` is on. |
 | `WORKER_LIVENESS_WINDOW_SECONDS` | `30` | Seconds within which a worker's last-activity timestamp must be fresh to be treated as "online" for resume pre-assignment / same-agent crash-pin freshness checks |
 
 <Callout type="warn">

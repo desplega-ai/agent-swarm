@@ -129,3 +129,17 @@ export function useDashboardCosts(opts?: { enabled?: boolean }) {
     enabled: opts?.enabled ?? true,
   });
 }
+
+/** Four-metric per-person attribution from `GET /api/attribution/by-person`. */
+export function useAttributionByPerson(filters?: {
+  startDate?: string;
+  endDate?: string;
+  enabled?: boolean;
+}) {
+  return useQuery({
+    queryKey: ["attribution-by-person", filters],
+    queryFn: () => api.fetchAttributionByPerson(filters),
+    select: (data) => data.rows,
+    enabled: filters?.enabled !== false,
+  });
+}

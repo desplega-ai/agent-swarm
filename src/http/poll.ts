@@ -27,6 +27,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { renderIdentity, resolveIdentity } from "../be/identity";
+import { touchRuntimeInstance } from "../be/multi-runtime";
 import { hasCapability } from "../server";
 import { fetchChannelActivity } from "../slack/channel-activity";
 import { telemetry } from "../telemetry";
@@ -34,9 +35,12 @@ import {
   AgentTaskSchema,
   BudgetRefusedTriggerSchema,
   TaskAttachmentSchema,
+  UserCommsPrefsSchema,
   UserSchema,
 } from "../types";
-import { route } from "./route-def";
+import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
+import { getUserCommsPrefs } from "../utils/requester-comms";
+import { route, runtimeInstanceHeader } from "./route-def";
 import { jsonError } from "./utils";
 
 // ─── Budget-refused trigger envelope ────────────────────────────────────────
@@ -94,12 +98,16 @@ const PollRequestedBySchema = UserSchema.pick({
   email: true,
   role: true,
   notes: true,
+}).extend({
+  // Structured communication preferences from `users.metadata.comms`.
+  comms: UserCommsPrefsSchema.optional(),
 });
 
 const PollTaskOfferedTriggerSchema = z.object({
   type: z.literal("task_offered"),
   taskId: z.string(),
   task: AgentTaskSchema,
+  requestedBy: PollRequestedBySchema.optional(),
 });
 
 const PollTaskAssignedTriggerSchema = z.object({
@@ -156,6 +164,7 @@ const pollTriggers = route({
   summary: "Poll for triggers (tasks, mentions)",
   tags: ["Poll"],
   auth: { apiKey: true, agentId: true },
+  headers: runtimeInstanceHeader("poll for work"),
   responses: {
     200: { description: "Trigger data or null", schema: pollResponseSchema },
     400: { description: "Missing X-Agent-ID" },
@@ -170,6 +179,33 @@ let lastChannelActivityCheckAt = 0;
 
 function getRequesterNotes(notes: string | undefined): string | undefined {
   return typeof notes === "string" && notes.trim().length > 0 ? notes : undefined;
+}
+
+/**
+ * Resolve the requester projection for a task trigger. If the task carries a
+ * machine-recorded external id (today: the Slack user field) but no
+ * requestedByUserId, render the explicit UNKNOWN sentinel instead of silently
+ * omitting the section: never a substituted human (Rule 33 /
+ * provenance-or-silence).
+ */
+async function buildTriggerRequestedBy(task: {
+  requestedByUserId?: string | null;
+  slackUserId?: string | null;
+}): Promise<z.infer<typeof PollRequestedBySchema> | undefined> {
+  const user = task.requestedByUserId ? await getUserById(task.requestedByUserId) : undefined;
+  if (user) {
+    return {
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      notes: getRequesterNotes(user.notes),
+      comms: getUserCommsPrefs(user),
+    };
+  }
+  if (task.slackUserId) {
+    return { name: renderIdentity(await resolveIdentity("slack", task.slackUserId)) };
+  }
+  return undefined;
 }
 
 /**
@@ -224,6 +260,9 @@ export async function handlePoll(
   queryParams: URLSearchParams,
   myAgentId: string | undefined,
 ): Promise<boolean> {
+  const runtimeInstanceId = ((h) => (Array.isArray(h) ? h[0] : h))(
+    req.headers["x-runtime-instance-id"],
+  );
   // Handle cursor commit endpoint
   if (commitCursorsRoute.match(req.method, pathSegments)) {
     const parsed = await commitCursorsRoute.parse(req, res, pathSegments, queryParams);
@@ -267,18 +306,39 @@ export async function handlePoll(
           return { error: "Agent not found", status: 404 };
         }
 
+        // A process whose runtime has been retired must not be handed work: it
+        // would execute alongside whatever replaced it. Dispatch is gated on a
+        // live runtime identity rather than on X-Agent-ID alone, which only
+        // names the logical agent. Polling is worker activity, so this also
+        // refreshes liveness — it cannot revive a retired runtime, since the
+        // update only matches one that is still live.
+        if (
+          isMultiRuntimeEnabled() &&
+          !(runtimeInstanceId && (await touchRuntimeInstance(runtimeInstanceId, agent.id)))
+        ) {
+          return { trigger: null };
+        }
+
         // Check for offered tasks first (highest priority for both workers and leads)
-        // Atomically claim the task for review to prevent duplicate processing
-        const offeredTasks = await getOfferedTasksForAgent(myAgentId);
+        // Atomically claim the task for review to prevent duplicate processing.
+        // Capacity is checked in the same transaction as the claim: with
+        // several runtimes serving one agent these polls run concurrently, and
+        // an unguarded claim here would let each of them take a task past the
+        // agent's logical limit.
+        const offeredTasks = (await hasCapacity(myAgentId))
+          ? await getOfferedTasksForAgent(myAgentId)
+          : [];
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
           const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
+            const offeredRequestedBy = await buildTriggerRequestedBy(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
                 taskId: claimedTask.id,
                 task: claimedTask,
+                ...(offeredRequestedBy && { requestedBy: offeredRequestedBy }),
               },
             };
           }
@@ -367,19 +427,9 @@ export async function handlePoll(
               });
             });
 
-            // Resolve requesting user if available. If the task carries a
-            // machine-recorded external id (today: the Slack user field) but
-            // no requestedByUserId, render the explicit UNKNOWN sentinel
-            // instead of silently omitting the section — never a substituted
-            // human (Rule 33 / provenance-or-silence).
-            const requestedByUser = pendingTask.requestedByUserId
-              ? await getUserById(pendingTask.requestedByUserId)
-              : undefined;
-            const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
-            const requestedByUnknownName =
-              !requestedByUser && pendingTask.slackUserId
-                ? renderIdentity(await resolveIdentity("slack", pendingTask.slackUserId))
-                : undefined;
+            // Resolve requesting user if available (UNKNOWN sentinel handling
+            // lives in buildTriggerRequestedBy).
+            const assignedRequestedBy = await buildTriggerRequestedBy(pendingTask);
 
             return {
               trigger: {
@@ -390,17 +440,7 @@ export async function handlePoll(
                   status: "in_progress",
                   attachments: await attachmentsForTrigger(pendingTask.id),
                 },
-                ...(requestedByUser && {
-                  requestedBy: {
-                    name: requestedByUser.name,
-                    email: requestedByUser.email,
-                    role: requestedByUser.role,
-                    notes: requestedByNotes,
-                  },
-                }),
-                ...(requestedByUnknownName && {
-                  requestedBy: { name: requestedByUnknownName },
-                }),
+                ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
               },
             };
           }
@@ -520,11 +560,13 @@ export async function handlePoll(
                     agentId: myAgentId,
                   });
                 });
+                const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
                 return {
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
                     task: { ...claimed, attachments: await attachmentsForTrigger(claimed.id) },
+                    ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
                   },
                 };
               }

@@ -25,8 +25,8 @@ Each row shows a source chip when the underlying environment variable is set on 
 | --- | --- |
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
-| Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
-| Harness & tools | `SCRIPTS_ONLY_MCP`, `CAPABILITIES`, `WORKER_API_READY_TIMEOUT_SECONDS` |
+| Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
+| Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `WORKER_API_READY_TIMEOUT_SECONDS` |
 | Integrations | `SLACK_DISABLE`, `SLACK_RENDER_V2`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
@@ -51,6 +51,14 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
 
 <Callout type="info" title="Credentials live elsewhere">
   This page intentionally excludes secrets. Integration credentials (Slack tokens, GitHub app keys, OAuth secrets) are managed on the [Integrations](/docs/guides/slack-integration) pages, and swarm-wide secret values on the Secrets page — see the [secrets encryption guide](/docs/guides/secrets-encryption).
+</Callout>
+
+<Callout type="info" title="Multiple runtimes per agent">
+  `MULTI_RUNTIME_ENABLED` is off by default: one worker process serves one agent, and that worker's reported concurrency becomes the agent's task limit. Turning it on lets several processes serve the same agent — each is tracked with its own capacity and liveness, and the agent's limit moves to its agent-scoped `AGENT_MAX_TASKS` setting (seeded from the agent's current limit the first time it registers, so enabling the flag does not change what the swarm enforces).
+
+  Workers must be updated before enabling it: with the flag on, a worker that does not identify its runtime is rejected at registration and shutdown. A worker that stops reporting for `RUNTIME_STALE_THRESHOLD_MIN` (default 5 minutes) stops counting toward its agent, and an agent whose last live worker expires is marked offline — see the [heartbeat and crash recovery runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/heartbeat-crash-recovery.md).
+
+  **Workspace state is not shared for you.** Work for one agent can continue on a different process than the one that started it, so runtimes sharing an `AGENT_ID` need compatible workspace state. In Docker Compose or similar deployments, give them the same persistent workspace/repository volume when continuation depends on local files. If their workspaces are independent, task continuation must rely only on state that can be reconstructed from shared sources — the repository, the control plane, or attachments — because enabling this setting does not synchronize arbitrary local filesystem state between workers.
 </Callout>
 
 <Callout type="warn" title="WORKER_API_READY_TIMEOUT_SECONDS is bootstrap-only">
