@@ -105,13 +105,17 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const queryEmbedding = await provider.embed(query);
 
       const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
-      const candidates = store.search(queryEmbedding ?? new Float32Array(0), requestInfo.agentId, {
-        scope: scope as "agent" | "swarm" | "all",
-        limit: candidateLimit,
-        source,
-        isLead,
-        queryText: query,
-      });
+      const candidates = await store.search(
+        queryEmbedding ?? new Float32Array(0),
+        requestInfo.agentId,
+        {
+          scope: scope as "agent" | "swarm" | "all",
+          limit: candidateLimit,
+          source,
+          isLead,
+          queryText: query,
+        },
+      );
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
       const expanded = await expandCandidatesWithGraph(candidates, requestInfo.agentId, {
@@ -169,7 +173,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY and no FTS hit)
-      const recent = store.list(requestInfo.agentId, {
+      const recent = await store.list(requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,

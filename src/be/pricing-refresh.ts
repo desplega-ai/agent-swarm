@@ -3,6 +3,7 @@ import {
   createLogEntry,
   getActivePricingRowSync,
   getDb,
+  getDbClient,
   type InsertPricingRowInput,
   insertPricingRowSync,
 } from "./db";
@@ -75,25 +76,24 @@ function insertChangedPricingRows(
   return { inserted, unchanged };
 }
 
-function prunePricingHistory(keepLatest = 2): number {
-  const result = getDb()
-    .prepare(
-      `DELETE FROM pricing
-       WHERE rowid IN (
-         SELECT rowid
-         FROM (
-           SELECT
-             rowid,
-             ROW_NUMBER() OVER (
-               PARTITION BY provider, model, token_class
-               ORDER BY effective_from DESC
-             ) AS rn
-           FROM pricing
-         )
-         WHERE rn > ?
-       )`,
-    )
-    .run(keepLatest);
+async function prunePricingHistory(keepLatest = 2): Promise<number> {
+  const result = await getDbClient().run(
+    `DELETE FROM pricing
+     WHERE rowid IN (
+       SELECT rowid
+       FROM (
+         SELECT
+           rowid,
+           ROW_NUMBER() OVER (
+             PARTITION BY provider, model, token_class
+             ORDER BY effective_from DESC
+           ) AS rn
+         FROM pricing
+       )
+       WHERE rn > ?
+     )`,
+    [keepLatest],
+  );
   return result.changes;
 }
 
@@ -157,7 +157,7 @@ export async function refreshPricingFromModelsDev(
   updateLiveModelsCatalog(cache, now);
   const rows = buildModelsDevSeedRows(cache);
   const { inserted, unchanged } = insertChangedPricingRows(rows, now);
-  const pruned = prunePricingHistory(2);
+  const pruned = await prunePricingHistory(2);
   lastETag = etag;
 
   const result: PricingRefreshResult = {

@@ -53,7 +53,7 @@ export async function runBootReembed(): Promise<void> {
       const embeddings = await provider.embedBatch(batch.map((m) => m.content));
       for (let j = 0; j < embeddings.length; j++) {
         if (embeddings[j]) {
-          store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
+          await store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
           reembedded++;
         }
       }

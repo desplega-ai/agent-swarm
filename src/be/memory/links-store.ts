@@ -14,7 +14,7 @@
  * `resolved: false` and no target metadata, indistinguishable from targets
  * the viewer may not see, so nothing leaks. Server-side only.
  */
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import type { LinkType, TargetKind } from "./link-resolver";
 
 /** Minimal metadata about a linked/backlinking memory — enough to memory-get it. */
@@ -97,30 +97,29 @@ function redactedTargetId(sourceText: string | null): string {
   return wikilink?.[1] ?? "";
 }
 
-export function getLinksForMemory(
+export async function getLinksForMemory(
   memoryId: string,
   options: GetLinksOptions = {},
-): MemoryLinksResult {
+): Promise<MemoryLinksResult> {
   const { viewerAgentId, isLead = false } = options;
-  const db = getDb();
+  const db = getDbClient();
 
   // Outgoing links. The LEFT JOIN resolves memory-kind targets to a live
   // agent_memory row; dangling/unresolved/expired targets join to NULL.
-  const outgoing = db
-    .prepare<OutgoingRow, [string]>(
-      `SELECT ml.id, ml.linkType, ml.targetKind, ml.targetId, ml.strength,
-              ml.resolver, ml.sourceText, ml.createdAt,
-              m.id AS targetMemoryId, m.name AS targetName,
-              m.scope AS targetScope, m.agentId AS targetAgentId
-         FROM memory_link ml
-         LEFT JOIN agent_memory m
-           ON ml.targetKind = 'memory'
-          AND m.id = ml.targetId
-          AND (m.expiresAt IS NULL OR m.expiresAt > datetime('now'))
-        WHERE ml.from_memory_id = ?
-        ORDER BY ml.createdAt ASC, ml.id ASC`,
-    )
-    .all(memoryId);
+  const outgoing = await db.query<OutgoingRow>(
+    `SELECT ml.id, ml.linkType, ml.targetKind, ml.targetId, ml.strength,
+            ml.resolver, ml.sourceText, ml.createdAt,
+            m.id AS targetMemoryId, m.name AS targetName,
+            m.scope AS targetScope, m.agentId AS targetAgentId
+       FROM memory_link ml
+       LEFT JOIN agent_memory m
+         ON ml.targetKind = 'memory'
+        AND m.id = ml.targetId
+        AND (m.expiresAt IS NULL OR m.expiresAt > datetime('now'))
+      WHERE ml.from_memory_id = ?
+      ORDER BY ml.createdAt ASC, ml.id ASC`,
+    [memoryId],
+  );
 
   const links: MemoryLinkView[] = outgoing.map((row) => {
     if (row.targetKind !== "memory") {
@@ -184,16 +183,15 @@ export function getLinksForMemory(
     params.push(viewerAgentId ?? null);
   }
 
-  const inbound = db
-    .prepare<BacklinkRow, (string | null)[]>(
-      `SELECT ml.id, ml.linkType, ml.strength, ml.sourceText, ml.createdAt,
-              m.id AS fromId, m.name AS fromName, m.scope AS fromScope
-         FROM memory_link ml
-         JOIN agent_memory m ON m.id = ml.from_memory_id
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY ml.createdAt ASC, ml.id ASC`,
-    )
-    .all(...params);
+  const inbound = await db.query<BacklinkRow>(
+    `SELECT ml.id, ml.linkType, ml.strength, ml.sourceText, ml.createdAt,
+            m.id AS fromId, m.name AS fromName, m.scope AS fromScope
+       FROM memory_link ml
+       JOIN agent_memory m ON m.id = ml.from_memory_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY ml.createdAt ASC, ml.id ASC`,
+    params,
+  );
 
   const backlinks: MemoryBacklinkView[] = inbound.map((row) => ({
     id: row.id,

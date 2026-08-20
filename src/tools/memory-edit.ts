@@ -112,7 +112,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
         if (result.changed) {
           const provider = getEmbeddingProvider();
           const embedding = await provider.embed(result.memory.content);
-          if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+          if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
           try {
             // Edit path: prune links derived from removed content (sequel links survive).
             refreshLinks(result.memory.id, requestInfo.agentId, result.memory.content);

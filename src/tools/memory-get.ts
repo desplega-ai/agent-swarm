@@ -104,7 +104,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
     },
     async ({ memoryId, intent }, requestInfo, _meta) => {
       const store = getMemoryStore();
-      const memoryForAuth = store.peek(memoryId);
+      const memoryForAuth = await store.peek(memoryId);
 
       if (!memoryForAuth) {
         return toolErr(`Memory "${memoryId}" not found.`, {
@@ -116,7 +116,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
         return toolErr("Not authorized", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const memory = store.get(memoryId)!;
+      const memory = (await store.get(memoryId))!;
 
       if (requestInfo.sourceTaskId && requestInfo.agentId) {
         try {
@@ -144,7 +144,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
       let linkBlocks: MemoryLinksResult = { links: [], backlinks: [] };
       try {
         const agent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : undefined;
-        linkBlocks = getLinksForMemory(memory.id, {
+        linkBlocks = await getLinksForMemory(memory.id, {
           viewerAgentId: requestInfo.agentId,
           isLead: agent?.isLead ?? false,
         });

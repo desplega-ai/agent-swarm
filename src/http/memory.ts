@@ -633,14 +633,14 @@ export async function handleMemory(
     const provider = getEmbeddingProvider();
 
     if (sourcePath && memoryAgentId && contentChunks.length === 1) {
-      const existing = store
-        .list(memoryAgentId, {
+      const existing = (
+        await store.list(memoryAgentId, {
           scope,
           limit: 2,
           ownerAgentId: memoryAgentId,
           sourcePath,
         })
-        .filter((memory) => memory.sourcePath === sourcePath);
+      ).filter((memory) => memory.sourcePath === sourcePath);
       if (existing.length === 1 && existing[0]?.totalChunks === 1) {
         const result = store.edit({
           id: existing[0].id,
@@ -650,7 +650,7 @@ export async function handleMemory(
           changedByAgentId: agentId,
         });
         const embedding = await provider.embed(contentChunks[0]!.content);
-        if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+        if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Re-index of an existing memory: prune stale content-derived links.
           refreshLinks(result.memory.id, memoryAgentId, result.memory.content);
@@ -671,7 +671,7 @@ export async function handleMemory(
 
     // Dedup multi-chunk or ambiguous source paths via the existing lossy path.
     if (sourcePath && memoryAgentId) {
-      store.deleteBySourcePath(sourcePath, memoryAgentId);
+      await store.deleteBySourcePath(sourcePath, memoryAgentId);
     }
 
     // Derive contextKey from body or X-Context-Key header
@@ -720,7 +720,7 @@ export async function handleMemory(
         const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
         for (let i = 0; i < embeddings.length; i++) {
           if (embeddings[i]) {
-            store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
+            await store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
           }
         }
       } catch (err) {
@@ -754,7 +754,7 @@ export async function handleMemory(
       const queryEmbedding = await provider.embed(query);
 
       const candidateLimit = Math.min(limit, 20) * CANDIDATE_SET_MULTIPLIER;
-      const candidates = store.search(queryEmbedding ?? new Float32Array(0), myAgentId, {
+      const candidates = await store.search(queryEmbedding ?? new Float32Array(0), myAgentId, {
         scope,
         limit: candidateLimit,
         source,
@@ -840,7 +840,7 @@ export async function handleMemory(
           4096,
           Math.max(offset + pageLimit, pageLimit) * CANDIDATE_SET_MULTIPLIER,
         );
-        let candidates = store.search(queryEmbedding ?? new Float32Array(0), agentId ?? "", {
+        let candidates = await store.search(queryEmbedding ?? new Float32Array(0), agentId ?? "", {
           scope,
           limit: candidateLimit,
           isLead: true,
@@ -896,8 +896,8 @@ export async function handleMemory(
         source,
         sourcePath: pathNeedle,
       };
-      const rows = store.list(agentId ?? "", listOptions);
-      const total = store.count(agentId ?? "", listOptions);
+      const rows = await store.list(agentId ?? "", listOptions);
+      const total = await store.count(agentId ?? "", listOptions);
 
       listMemory.respond(res, 200, {
         results: rows.map((r) => ({
@@ -964,7 +964,7 @@ export async function handleMemory(
       if (result.changed) {
         const provider = getEmbeddingProvider();
         const embedding = await provider.embed(result.memory.content);
-        if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+        if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Edit path: prune links derived from removed content (sequel links survive).
           refreshLinks(result.memory.id, myAgentId, result.memory.content);
@@ -999,7 +999,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { days, threshold } = parsed.query;
-    memoryUsefulness.respond(res, 200, getUsefulnessStats({ days, threshold }));
+    memoryUsefulness.respond(res, 200, await getUsefulnessStats({ days, threshold }));
     return true;
   }
 
@@ -1008,7 +1008,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const store = getMemoryStore();
-    const deleted = store.delete(parsed.params.id);
+    const deleted = await store.delete(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Memory not found", 404);
       return true;
@@ -1024,7 +1024,7 @@ export async function handleMemory(
     const { agentId, batchSize } = parsed.body;
     const store = getMemoryStore();
     const provider = getEmbeddingProvider();
-    const memories = store.listForReembedding(agentId ? { agentId } : undefined);
+    const memories = await store.listForReembedding(agentId ? { agentId } : undefined);
 
     reEmbedMemory.respond(res, 202, { started: true, totalMemories: memories.length });
 
@@ -1036,7 +1036,7 @@ export async function handleMemory(
           const embeddings = await provider.embedBatch(batch.map((m) => m.content));
           for (let j = 0; j < embeddings.length; j++) {
             if (embeddings[j]) {
-              store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
+              await store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
             }
           }
           console.log(
@@ -1076,7 +1076,7 @@ export async function handleMemory(
         jsonError(res, `explicit-self rating for memoryId=${evt.memoryId} requires taskId`, 400);
         return true;
       }
-      if (!hasRetrievalForTask(evt.taskId, evt.memoryId)) {
+      if (!(await hasRetrievalForTask(evt.taskId, evt.memoryId))) {
         jsonError(
           res,
           `explicit-self rating rejected: memoryId=${evt.memoryId} not present in memory_retrieval for task=${evt.taskId}`,
@@ -1140,7 +1140,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { taskId, sessionId } = parsed.query;
-    const rows = getRetrievalsForAgent(myAgentId, { taskId, sessionId });
+    const rows = await getRetrievalsForAgent(myAgentId, { taskId, sessionId });
     getRetrievals.respond(res, 200, { results: rows });
     return true;
   }
@@ -1167,7 +1167,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const store = getMemoryStore();
-    const memoryForAuth = store.peek(parsed.params.id);
+    const memoryForAuth = await store.peek(parsed.params.id);
     if (!memoryForAuth) {
       jsonError(res, "Memory not found", 404);
       return true;
@@ -1178,7 +1178,7 @@ export async function handleMemory(
       return true;
     }
 
-    const memory = store.get(parsed.params.id)!;
+    const memory = (await store.get(parsed.params.id))!;
 
     const { intent } = parsed.query;
     const sourceTaskIdHeader = req.headers["x-source-task-id"];
@@ -1206,7 +1206,7 @@ export async function handleMemory(
     // surface has no lead special-casing (same as POST /api/memory/search).
     let linkBlocks: MemoryLinksResult = { links: [], backlinks: [] };
     try {
-      linkBlocks = getLinksForMemory(memory.id, { viewerAgentId: myAgentId });
+      linkBlocks = await getLinksForMemory(memory.id, { viewerAgentId: myAgentId });
     } catch (err) {
       console.error("[memory-get] link traversal failed:", (err as Error).message);
     }
@@ -1244,40 +1244,31 @@ function purgeStaleSearchRetrievals(): number {
   }
 }
 
-export function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): void {
-  if (memoryGcTimer) return;
-
-  // Run immediately on startup to clear any backlog
+async function runMemoryGcTick(label: "Initial" | "Periodic"): Promise<void> {
   try {
-    const purged = getMemoryStore().purgeExpired();
+    const purged = await getMemoryStore().purgeExpired();
     if (purged > 0) {
-      console.log(`[memory-gc] Initial purge removed ${purged} expired memory row(s)`);
+      console.log(`[memory-gc] ${label} purge removed ${purged} expired memory row(s)`);
     }
     const searchPurged = purgeStaleSearchRetrievals();
     if (searchPurged > 0) {
       console.log(
-        `[memory-gc] Initial purge removed ${searchPurged} stale search retrieval row(s)`,
+        `[memory-gc] ${label} purge removed ${searchPurged} stale search retrieval row(s)`,
       );
     }
   } catch (err) {
-    console.error("[memory-gc] Initial purge failed:", err);
+    console.error(`[memory-gc] ${label} purge failed:`, err);
   }
+}
+
+export async function startMemoryGc(intervalMs = MEMORY_GC_INTERVAL_MS): Promise<void> {
+  if (memoryGcTimer) return;
+
+  // Run immediately on startup to clear any backlog
+  await runMemoryGcTick("Initial");
 
   memoryGcTimer = setInterval(() => {
-    try {
-      const purged = getMemoryStore().purgeExpired();
-      if (purged > 0) {
-        console.log(`[memory-gc] Periodic purge removed ${purged} expired memory row(s)`);
-      }
-      const searchPurged = purgeStaleSearchRetrievals();
-      if (searchPurged > 0) {
-        console.log(
-          `[memory-gc] Periodic purge removed ${searchPurged} stale search retrieval row(s)`,
-        );
-      }
-    } catch (err) {
-      console.error("[memory-gc] Periodic purge failed:", err);
-    }
+    void runMemoryGcTick("Periodic");
   }, intervalMs);
   if (typeof memoryGcTimer?.unref === "function") memoryGcTimer.unref();
 }

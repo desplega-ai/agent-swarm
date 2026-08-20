@@ -27,7 +27,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       const store = getMemoryStore();
-      const memory = store.peek(memoryId);
+      const memory = await store.peek(memoryId);
 
       if (!memory) {
         return toolErr(`Memory "${memoryId}" not found.`, {
@@ -54,7 +54,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         );
       }
 
-      const deleted = store.delete(memoryId);
+      const deleted = await store.delete(memoryId);
 
       const message = deleted
         ? `Memory "${memoryId}" deleted.`

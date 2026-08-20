@@ -18,7 +18,7 @@ async function main() {
   const server = await createServer();
   setAuditSink(enqueueAuditRow);
   startAuditWriter();
-  startAuditGc();
+  await startAuditGc();
 
   const transport = new StdioServerTransport();
 

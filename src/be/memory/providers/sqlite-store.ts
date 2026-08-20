@@ -1,4 +1,4 @@
-import { getDb, isSqliteVecAvailable } from "@/be/db";
+import { getDb, getDbClient, isSqliteVecAvailable } from "@/be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "@/be/embedding";
 import { contentSha256 } from "@/commands/profile-sync";
 import type { AgentMemory, AgentMemoryScope, AgentMemorySource } from "@/types";
@@ -233,15 +233,14 @@ export class SqliteMemoryStore implements MemoryStore {
     }
   }
 
-  private deleteFtsRows(ids: string[]): void {
+  private async deleteFtsRows(ids: string[]): Promise<void> {
     // Always re-check the CURRENT db's schema instead of trusting
     // ftsInitialized — the flag can outlive a DB swap (tests reinit the DB
     // process-wide), and a stale `true` would make this DELETE throw
     // "no such table: memory_fts". Mirrors the vec guard in purgeByIds.
     if (ids.length === 0 || !this.getFtsTableSchema()) return;
-    const db = getDb();
     const placeholders = ids.map(() => "?").join(",");
-    db.prepare(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`).run(...ids);
+    await getDbClient().run(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`, ids);
   }
 
   private ensureVecTable(): void {
@@ -464,34 +463,33 @@ export class SqliteMemoryStore implements MemoryStore {
     return results;
   }
 
-  get(id: string): AgentMemory | null {
-    const db = getDb();
-    const row = db
-      .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
-      .get(id);
+  async get(id: string): Promise<AgentMemory | null> {
+    const db = getDbClient();
+    const row = await db.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [id]);
     if (!row) return null;
 
     // Update accessedAt and increment accessCount
-    db.prepare(
+    await db.run(
       "UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WHERE id = ?",
-    ).run(new Date().toISOString(), id);
+      [new Date().toISOString(), id],
+    );
 
     return rowToAgentMemory(row);
   }
 
-  peek(id: string): AgentMemory | null {
-    const row = getDb()
-      .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
-      .get(id);
+  async peek(id: string): Promise<AgentMemory | null> {
+    const row = await getDbClient().get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [
+      id,
+    ]);
     if (!row) return null;
     return rowToAgentMemory(row);
   }
 
-  search(
+  async search(
     embedding: Float32Array,
     agentId: string,
     options: MemorySearchOptions = {},
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const { scope = "all", limit = 10, source, isLead = false, includeExpired = false } = options;
 
     const health = this.getHealth();
@@ -553,7 +551,7 @@ export class SqliteMemoryStore implements MemoryStore {
     });
   }
 
-  private searchHybrid(
+  private async searchHybrid(
     queryEmbedding: Float32Array,
     queryText: string,
     agentId: string,
@@ -564,13 +562,16 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const overfetchLimit = Math.min(Math.max(options.limit * 4, options.limit), 100);
-    const vectorCandidates = this.searchWithVec(queryEmbedding, agentId, {
+    const vectorCandidates = await this.searchWithVec(queryEmbedding, agentId, {
       ...options,
       limit: overfetchLimit,
     });
-    const ftsCandidates = this.searchFts(queryText, agentId, { ...options, limit: overfetchLimit });
+    const ftsCandidates = await this.searchFts(queryText, agentId, {
+      ...options,
+      limit: overfetchLimit,
+    });
     if (ftsCandidates.length === 0) return vectorCandidates.slice(0, options.limit);
 
     const byId = new Map<string, MemoryCandidate>();
@@ -603,7 +604,7 @@ export class SqliteMemoryStore implements MemoryStore {
       .slice(0, options.limit);
   }
 
-  private searchFts(
+  private async searchFts(
     queryText: string,
     agentId: string,
     options: {
@@ -613,11 +614,10 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const match = this.buildFtsMatch(queryText);
     if (!match) return [];
 
-    const db = getDb();
     const { scope, limit, source, isLead, includeExpired } = options;
     const conditions: string[] = ["memory_fts MATCH ?"];
     const params: (Buffer | string | number | null)[] = [match];
@@ -635,16 +635,15 @@ export class SqliteMemoryStore implements MemoryStore {
 
     try {
       const sqlLimit = Math.min(Math.max(limit * 4, limit), 100);
-      const rows = db
-        .prepare<AgentMemoryRow & { rank: number }, (Buffer | string | number | null)[]>(
-          `SELECT m.*, bm25(memory_fts) AS rank
-           FROM memory_fts
-           JOIN agent_memory m ON m.id = memory_fts.memory_id
-           WHERE ${conditions.join(" AND ")}
-           ORDER BY rank
-           LIMIT ?`,
-        )
-        .all(...params, sqlLimit);
+      const rows = await getDbClient().query<AgentMemoryRow & { rank: number }>(
+        `SELECT m.*, bm25(memory_fts) AS rank
+         FROM memory_fts
+         JOIN agent_memory m ON m.id = memory_fts.memory_id
+         WHERE ${conditions.join(" AND ")}
+         ORDER BY rank
+         LIMIT ?`,
+        [...params, sqlLimit],
+      );
 
       const now = new Date();
       return rows
@@ -679,7 +678,7 @@ export class SqliteMemoryStore implements MemoryStore {
     return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
   }
 
-  private searchWithVec(
+  private async searchWithVec(
     queryEmbedding: Float32Array,
     agentId: string,
     options: {
@@ -689,8 +688,7 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
-    const db = getDb();
+  ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired } = options;
 
     const embeddingBuffer = serializeEmbedding(queryEmbedding);
@@ -714,16 +712,15 @@ export class SqliteMemoryStore implements MemoryStore {
     conditions.push("v.k = ?");
     params.push(knnLimit);
 
-    const rows = db
-      .prepare<AgentMemoryRow & { distance: number }, (Buffer | string | number | null)[]>(
-        `SELECT m.*, v.distance
-         FROM memory_vec v
-         JOIN agent_memory m ON m.id = v.memory_id
-         WHERE ${conditions.join(" AND ")}
-         ORDER BY v.distance
-         LIMIT ?`,
-      )
-      .all(...params, limit);
+    const rows = await getDbClient().query<AgentMemoryRow & { distance: number }>(
+      `SELECT m.*, v.distance
+       FROM memory_vec v
+       JOIN agent_memory m ON m.id = v.memory_id
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY v.distance
+       LIMIT ?`,
+      [...params, limit],
+    );
 
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
@@ -735,7 +732,7 @@ export class SqliteMemoryStore implements MemoryStore {
     return candidates;
   }
 
-  private searchBruteForce(
+  private async searchBruteForce(
     queryEmbedding: Float32Array,
     agentId: string,
     options: {
@@ -745,9 +742,8 @@ export class SqliteMemoryStore implements MemoryStore {
       isLead: boolean;
       includeExpired: boolean;
     },
-  ): MemoryCandidate[] {
+  ): Promise<MemoryCandidate[]> {
     const { scope, limit, source, isLead, includeExpired } = options;
-    const db = getDb();
 
     const conditions: string[] = ["embedding IS NOT NULL"];
     const params: (string | null)[] = [];
@@ -765,9 +761,10 @@ export class SqliteMemoryStore implements MemoryStore {
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const rows = db
-      .prepare<AgentMemoryRow, (string | null)[]>(`SELECT * FROM agent_memory ${whereClause}`)
-      .all(...params);
+    const rows = await getDbClient().query<AgentMemoryRow>(
+      `SELECT * FROM agent_memory ${whereClause}`,
+      params,
+    );
 
     const candidates: MemoryCandidate[] = [];
     for (const row of rows) {
@@ -843,29 +840,25 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
-  list(agentId: string, options: MemoryListOptions = {}): AgentMemory[] {
+  async list(agentId: string, options: MemoryListOptions = {}): Promise<AgentMemory[]> {
     const { limit = 20, offset = 0 } = options;
-    const db = getDb();
     const { whereClause, params } = this.buildListWhereClause(agentId, options);
     const queryParams = [...params, limit, offset];
 
-    const rows = db
-      .prepare<AgentMemoryRow, (Buffer | string | number | null)[]>(
-        `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
-      )
-      .all(...queryParams);
+    const rows = await getDbClient().query<AgentMemoryRow>(
+      `SELECT * FROM agent_memory ${whereClause} ORDER BY createdAt DESC LIMIT ? OFFSET ?`,
+      queryParams,
+    );
 
     return rows.map(rowToAgentMemory);
   }
 
-  count(agentId: string, options: MemoryListOptions = {}): number {
-    const db = getDb();
+  async count(agentId: string, options: MemoryListOptions = {}): Promise<number> {
     const { whereClause, params } = this.buildListWhereClause(agentId, options);
-    const row = db
-      .prepare<{ count: number }, (Buffer | string | number | null)[]>(
-        `SELECT COUNT(*) AS count FROM agent_memory ${whereClause}`,
-      )
-      .get(...params);
+    const row = await getDbClient().get<{ count: number }>(
+      `SELECT COUNT(*) AS count FROM agent_memory ${whereClause}`,
+      params,
+    );
 
     return row?.count ?? 0;
   }
@@ -960,96 +953,86 @@ export class SqliteMemoryStore implements MemoryStore {
     };
   }
 
-  listForCuration(
+  async listForCuration(
     agentId?: string,
-  ): { id: string; source: string; name: string; createdAt: string }[] {
-    const db = getDb();
+  ): Promise<{ id: string; source: string; name: string; createdAt: string }[]> {
+    const db = getDbClient();
     const protectedList = [...PROTECTED_SOURCES].map((s) => `'${s}'`).join(",");
     if (agentId) {
-      return db
-        .prepare<{ id: string; source: string; name: string; createdAt: string }, [string]>(
-          `SELECT id, source, name, createdAt FROM agent_memory
-           WHERE agentId = ? AND source NOT IN (${protectedList})`,
-        )
-        .all(agentId);
-    }
-    return db
-      .prepare<{ id: string; source: string; name: string; createdAt: string }, []>(
+      return db.query<{ id: string; source: string; name: string; createdAt: string }>(
         `SELECT id, source, name, createdAt FROM agent_memory
-         WHERE source NOT IN (${protectedList})`,
-      )
-      .all();
-  }
-
-  listForReembedding(options?: { agentId?: string }): { id: string; content: string }[] {
-    const db = getDb();
-    if (options?.agentId) {
-      return db
-        .prepare<{ id: string; content: string }, [string]>(
-          "SELECT id, content FROM agent_memory WHERE agentId = ?",
-        )
-        .all(options.agentId);
+         WHERE agentId = ? AND source NOT IN (${protectedList})`,
+        [agentId],
+      );
     }
-    return db
-      .prepare<{ id: string; content: string }, []>("SELECT id, content FROM agent_memory")
-      .all();
+    return db.query<{ id: string; source: string; name: string; createdAt: string }>(
+      `SELECT id, source, name, createdAt FROM agent_memory
+       WHERE source NOT IN (${protectedList})`,
+    );
   }
 
-  private purgeByIds(ids: string[]): void {
+  async listForReembedding(options?: {
+    agentId?: string;
+  }): Promise<{ id: string; content: string }[]> {
+    const db = getDbClient();
+    if (options?.agentId) {
+      return db.query<{ id: string; content: string }>(
+        "SELECT id, content FROM agent_memory WHERE agentId = ?",
+        [options.agentId],
+      );
+    }
+    return db.query<{ id: string; content: string }>("SELECT id, content FROM agent_memory");
+  }
+
+  private async purgeByIds(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
-    const db = getDb();
     if (this.vecInitialized && this.getVecTableSchema()) {
       const placeholders = ids.map(() => "?").join(",");
-      db.prepare(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`).run(...ids);
+      await getDbClient().run(`DELETE FROM memory_vec WHERE memory_id IN (${placeholders})`, ids);
     }
-    this.deleteFtsRows(ids);
+    await this.deleteFtsRows(ids);
   }
 
-  delete(id: string): boolean {
-    const db = getDb();
-    this.purgeByIds([id]);
-    const result = db.prepare("DELETE FROM agent_memory WHERE id = ?").run(id);
+  async delete(id: string): Promise<boolean> {
+    await this.purgeByIds([id]);
+    const result = await getDbClient().run("DELETE FROM agent_memory WHERE id = ?", [id]);
     return result.changes > 0;
   }
 
-  deleteBySourcePath(sourcePath: string, agentId: string): number {
-    const db = getDb();
+  async deleteBySourcePath(sourcePath: string, agentId: string): Promise<number> {
+    const db = getDbClient();
 
-    const ids = db
-      .prepare<{ id: string }, [string, string]>(
-        "SELECT id FROM agent_memory WHERE sourcePath = ? AND agentId = ?",
-      )
-      .all(sourcePath, agentId);
+    const ids = await db.query<{ id: string }>(
+      "SELECT id FROM agent_memory WHERE sourcePath = ? AND agentId = ?",
+      [sourcePath, agentId],
+    );
 
-    this.purgeByIds(ids.map((r) => r.id));
+    await this.purgeByIds(ids.map((r) => r.id));
 
-    const result = db
-      .prepare("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?")
-      .run(sourcePath, agentId);
+    const result = await db.run("DELETE FROM agent_memory WHERE sourcePath = ? AND agentId = ?", [
+      sourcePath,
+      agentId,
+    ]);
     return ids.length || result.changes;
   }
 
-  purgeExpired(): number {
-    const db = getDb();
+  async purgeExpired(): Promise<number> {
+    const db = getDbClient();
 
-    const expiredIds = db
-      .prepare<{ id: string }, []>(
-        "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-      )
-      .all();
+    const expiredIds = await db.query<{ id: string }>(
+      "SELECT id FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+    );
 
     if (expiredIds.length === 0) return 0;
 
     const batchSize = 500;
     for (let i = 0; i < expiredIds.length; i += batchSize) {
-      this.purgeByIds(expiredIds.slice(i, i + batchSize).map((r) => r.id));
+      await this.purgeByIds(expiredIds.slice(i, i + batchSize).map((r) => r.id));
     }
 
-    const result = db
-      .prepare(
-        "DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-      )
-      .run();
+    const result = await db.run(
+      "DELETE FROM agent_memory WHERE expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+    );
 
     console.log(
       `[memory] Purged ${result.changes} expired memory row(s) (vec cleanup: ${expiredIds.length} id(s))`,
@@ -1057,14 +1040,14 @@ export class SqliteMemoryStore implements MemoryStore {
     return result.changes;
   }
 
-  updateEmbedding(id: string, embedding: Float32Array, model: string): void {
-    const db = getDb();
+  async updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void> {
+    const db = getDbClient();
     const buffer = serializeEmbedding(embedding);
-    db.prepare("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?").run(
+    await db.run("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?", [
       buffer,
       model,
       id,
-    );
+    ]);
 
     if (this.vecInitialized && this.getVecTableSchema()) {
       const vecBuffer = this.toVecBuffer(embedding);
@@ -1075,46 +1058,41 @@ export class SqliteMemoryStore implements MemoryStore {
         return;
       }
       try {
-        db.prepare("DELETE FROM memory_vec WHERE memory_id = ?").run(id);
-        db.prepare("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)").run(id, vecBuffer);
+        await db.run("DELETE FROM memory_vec WHERE memory_id = ?", [id]);
+        await db.run("INSERT INTO memory_vec(memory_id, embedding) VALUES (?, ?)", [id, vecBuffer]);
       } catch (err) {
         console.error(`[memory-vec] update failed memory_id=${id}: ${(err as Error).message}`);
       }
     }
   }
 
-  getStats(agentId: string): MemoryStats {
-    const db = getDb();
+  async getStats(agentId: string): Promise<MemoryStats> {
+    const db = getDbClient();
 
-    const total = db
-      .prepare<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
-      )
-      .get(agentId);
+    const total = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ?",
+      [agentId],
+    );
 
-    const bySourceRows = db
-      .prepare<{ source: string; count: number }, [string]>(
-        "SELECT source, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY source",
-      )
-      .all(agentId);
+    const bySourceRows = await db.query<{ source: string; count: number }>(
+      "SELECT source, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY source",
+      [agentId],
+    );
 
-    const byScopeRows = db
-      .prepare<{ scope: string; count: number }, [string]>(
-        "SELECT scope, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY scope",
-      )
-      .all(agentId);
+    const byScopeRows = await db.query<{ scope: string; count: number }>(
+      "SELECT scope, COUNT(*) as count FROM agent_memory WHERE agentId = ? GROUP BY scope",
+      [agentId],
+    );
 
-    const withEmbeddings = db
-      .prepare<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND embedding IS NOT NULL",
-      )
-      .get(agentId);
+    const withEmbeddings = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND embedding IS NOT NULL",
+      [agentId],
+    );
 
-    const expired = db
-      .prepare<{ count: number }, [string]>(
-        "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
-      )
-      .get(agentId);
+    const expired = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM agent_memory WHERE agentId = ? AND expiresAt IS NOT NULL AND expiresAt <= datetime('now')",
+      [agentId],
+    );
 
     const bySource: Record<string, number> = {};
     for (const row of bySourceRows) bySource[row.source] = row.count;

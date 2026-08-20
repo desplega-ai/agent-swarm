@@ -257,7 +257,7 @@ describe("retention purge", () => {
     expect(countAuditRows()).toBe(2);
   });
 
-  test("respects RBAC_AUDIT_RETENTION_DAYS override and runs via startAuditGc", () => {
+  test("respects RBAC_AUDIT_RETENTION_DAYS override and runs via startAuditGc", async () => {
     process.env.RBAC_AUDIT_RETENTION_DAYS = "7";
     const insert = getDb().prepare(
       `INSERT INTO permission_audit (ts, principalType, verb, decision, source)
@@ -267,7 +267,7 @@ describe("retention purge", () => {
     insert.run("-1 days");
 
     // startAuditGc purges immediately on start (pattern: startMemoryGc).
-    startAuditGc();
+    await startAuditGc();
     expect(countAuditRows()).toBe(1);
     stopAuditGc();
   });

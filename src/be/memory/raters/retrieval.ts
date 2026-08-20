@@ -1,5 +1,5 @@
 import { ensure } from "@desplega.ai/business-use";
-import { getDb } from "@/be/db";
+import { getDb, getDbClient } from "@/be/db";
 import type { MemoryRetrievalSource } from "@/be/memory/types";
 
 /**
@@ -94,12 +94,11 @@ export function recordRetrievals(
   });
 }
 
-export function getRetrievalsForTask(
+export async function getRetrievalsForTask(
   taskId: string,
-): { memoryId: string; similarity: number | null }[] {
-  return getDb()
-    .prepare<{ memoryId: string; similarity: number | null }, [string]>(
-      "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
-    )
-    .all(taskId);
+): Promise<{ memoryId: string; similarity: number | null }[]> {
+  return getDbClient().query<{ memoryId: string; similarity: number | null }>(
+    "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
+    [taskId],
+  );
 }

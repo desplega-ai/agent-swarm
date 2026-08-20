@@ -581,7 +581,7 @@ try {
 // RBAC_AUDIT_DISABLED=true makes the sink a no-op inside enqueueAuditRow.
 setAuditSink(enqueueAuditRow);
 startAuditWriter();
-startAuditGc();
+await startAuditGc();
 startScratchScriptGc();
 
 // business-use initialization (no-op if envs not set)
@@ -687,7 +687,7 @@ httpServer
     startOAuthPendingGc();
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
-    startMemoryGc();
+    await startMemoryGc();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

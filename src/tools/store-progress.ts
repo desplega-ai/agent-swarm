@@ -369,7 +369,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             });
             const embedding = await provider.embed(taskContent);
             if (embedding) {
-              store.updateEmbedding(memory.id, embedding, provider.name);
+              await store.updateEmbedding(memory.id, embedding, provider.name);
             }
 
             // Auto-promote high-value completions to swarm memory (P3)
@@ -391,7 +391,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 });
                 const swarmEmbedding = await provider.embed(taskContent);
                 if (swarmEmbedding) {
-                  store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
+                  await store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
                 }
               } catch {
                 // Non-blocking — swarm memory promotion failure is not critical
@@ -422,7 +422,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // Fire-and-forget: rater failure must NEVER affect task status.
         (async () => {
           try {
-            const retrievals = getRetrievalsForTask(taskId);
+            const retrievals = await getRetrievalsForTask(taskId);
             if (retrievals.length === 0) return;
 
             const retrievedMemoryIds = retrievals.map((r) => r.memoryId);

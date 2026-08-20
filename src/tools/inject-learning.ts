@@ -75,7 +75,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
         const provider = getEmbeddingProvider();
         const embedding = await provider.embed(content);
         if (embedding) {
-          store.updateEmbedding(memory.id, embedding, provider.name);
+          await store.updateEmbedding(memory.id, embedding, provider.name);
         }
       } catch {
         // Non-blocking — memory was created, embedding is optional

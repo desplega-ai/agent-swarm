@@ -18,7 +18,7 @@
  */
 import type { AdmissionDecision, RbacCheck, RbacDecision } from "../rbac";
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getDb } from "./db";
+import { getDb, getDbClient } from "./db";
 
 type AuditRow = {
   principalType: "agent" | "user" | "operator";
@@ -219,14 +219,15 @@ export function stopAuditWriter(): void {
 }
 
 /** Delete audit rows older than the retention window. Returns rows deleted. */
-export function purgeExpiredAuditRows(): number {
+export async function purgeExpiredAuditRows(): Promise<number> {
   try {
     const days = Number(process.env.RBAC_AUDIT_RETENTION_DAYS) || DEFAULT_RETENTION_DAYS;
     // ts is CURRENT_TIMESTAMP format ("YYYY-MM-DD HH:MM:SS"); compute the
     // cutoff in SQLite so the string formats always match.
-    const result = getDb()
-      .prepare("DELETE FROM permission_audit WHERE ts < datetime('now', ?)")
-      .run(`-${days} days`);
+    const result = await getDbClient().run(
+      "DELETE FROM permission_audit WHERE ts < datetime('now', ?)",
+      [`-${days} days`],
+    );
     return result.changes;
   } catch (err) {
     console.warn("[rbac-audit] retention purge failed:", (err as Error).message);
@@ -234,20 +235,24 @@ export function purgeExpiredAuditRows(): number {
   }
 }
 
+async function runAuditGcTick(): Promise<void> {
+  const n = await purgeExpiredAuditRows();
+  if (n > 0) {
+    console.log(`[rbac-audit] Retention purge removed ${n} audit row(s)`);
+  }
+}
+
 /** Start the retention GC (daily tick, immediate first run). Idempotent. */
-export function startAuditGc(intervalMs = AUDIT_GC_INTERVAL_MS): void {
+export async function startAuditGc(intervalMs = AUDIT_GC_INTERVAL_MS): Promise<void> {
   if (auditGcTimer) return;
 
-  const purged = purgeExpiredAuditRows();
+  const purged = await purgeExpiredAuditRows();
   if (purged > 0) {
     console.log(`[rbac-audit] Initial retention purge removed ${purged} audit row(s)`);
   }
 
   auditGcTimer = setInterval(() => {
-    const n = purgeExpiredAuditRows();
-    if (n > 0) {
-      console.log(`[rbac-audit] Retention purge removed ${n} audit row(s)`);
-    }
+    void runAuditGcTick();
   }, intervalMs);
   if (typeof auditGcTimer?.unref === "function") auditGcTimer.unref();
 }
