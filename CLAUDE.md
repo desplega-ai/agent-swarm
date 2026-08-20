@@ -17,7 +17,7 @@ System prompt and task prompt text MUST go through the prompt-template registry 
 All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite` imports) is allowed only for the boot-path files listed in `scripts/check-async-db-seam.sh` (CI-enforced).
 
 - Client-level calls made inside a transaction callback join that transaction automatically (AsyncLocalStorage routing). Nested `transaction` calls become SAVEPOINTs.
-- Post-commit hooks (telemetry, workflow event-bus emits) MUST use `getDbClient().afterSettled(fn)`, never `queueMicrotask` or a bare `.then()`. Microtasks drain BEFORE COMMIT under async transaction callbacks, so they can observe or publish uncommitted state.
+- Post-commit hooks (telemetry, workflow event-bus emits) MUST use `getDbClient().afterCommit(fn)`, never `queueMicrotask` or a bare `.then()`. Microtasks drain BEFORE COMMIT under async transaction callbacks, so they can observe or publish uncommitted state.
 - A missing `await` on an async DB call compiles clean in many positions and fails silently at runtime. CI catches this class via `bun scripts/check-floating-promises.ts` (statement position) and `bun scripts/check-promise-sinks.ts` (truthiness, serialization, object-literal sinks). Run both locally before pushing, next to the usual gates.
 
 </important>

@@ -170,10 +170,10 @@ function emitTaskLifecycleTelemetryAfterCommit(
   props: TaskTelemetryProps,
   verify?: (task: AgentTask | null) => boolean,
 ): void {
-  // afterSettled (not queueMicrotask): under an async client transaction,
+  // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read could observe
-  // uncommitted state. afterSettled runs strictly post-COMMIT/ROLLBACK.
-  getDbClient().afterSettled(() => {
+  // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
+  getDbClient().afterCommit(() => {
     if (!verify) {
       telemetry.taskEvent(event, props);
       return;
@@ -2855,8 +2855,12 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
 
   const row = await getDbClient().transaction(async () => {
     const finishedAt = new Date().toISOString();
+    // The status predicate re-checks the idempotency guard atomically: the
+    // await between the guard read above and this write lets a racing
+    // terminal transition (e.g. heartbeat failTask) land first.
     let completed = await getDbClient().get<AgentTaskRow>(
-      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
+      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
       ["completed", finishedAt, id],
     );
     if (!completed) return null;
@@ -2899,7 +2903,7 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
         newValue: "completed",
       });
     } catch {}
-    getDbClient().afterSettled(() => {
+    getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.completed", {
@@ -2943,9 +2947,11 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
 
   const finishedAt = new Date().toISOString();
   const scrubbedReason = scrubSecrets(reason);
+  // Status predicate re-checks the idempotency guard atomically (a racing
+  // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
     [scrubbedReason, finishedAt, id],
   );
   if (row && oldTask) {
@@ -2971,7 +2977,7 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
         metadata: { reason: scrubbedReason },
       });
     } catch {}
-    getDbClient().afterSettled(() => {
+    getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.failed", {
@@ -3057,9 +3063,11 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
 
   const finishedAt = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
+  // Status predicate re-checks the idempotency guard atomically (a racing
+  // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? RETURNING *`,
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
     [cancelReason, finishedAt, id],
   );
 
@@ -3088,7 +3096,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
         metadata: reason ? { reason } : undefined,
       });
     } catch {}
-    getDbClient().afterSettled(() => {
+    getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.cancelled", {
@@ -3184,7 +3192,7 @@ export async function supersedeTask(
         metadata: { reason: args.reason, resumeTaskId: args.resumeTaskId },
       });
     } catch {}
-    getDbClient().afterSettled(() => {
+    getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.superseded", {
@@ -3434,7 +3442,7 @@ export async function updateTaskProgress(id: string, progress: string): Promise<
         newValue: scrubbedProgress,
       });
     } catch {}
-    getDbClient().afterSettled(() => {
+    getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
           workflowEventBus.emit("task.progress", {
@@ -5029,7 +5037,7 @@ export async function createTaskExtended(
     (task) => task !== null,
   );
 
-  getDbClient().afterSettled(() => {
+  getDbClient().afterCommit(() => {
     import("../workflows/event-bus")
       .then(({ workflowEventBus }) => {
         workflowEventBus.emit("task.created", {
@@ -9399,10 +9407,10 @@ export async function getWorkflowRun(id: string): Promise<WorkflowRun | null> {
 function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   if (run.status !== "completed" && run.status !== "failed") return;
 
-  // afterSettled (not queueMicrotask): under an async client transaction,
+  // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read below could observe
-  // uncommitted state. afterSettled runs strictly post-COMMIT/ROLLBACK.
-  getDbClient().afterSettled(() => {
+  // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
+  getDbClient().afterCommit(() => {
     void (async () => {
       const latest = await getWorkflowRun(run.id);
       if (!latest || latest.status !== run.status) return;

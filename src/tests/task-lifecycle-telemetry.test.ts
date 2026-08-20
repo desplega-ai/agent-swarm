@@ -17,7 +17,7 @@ const TEST_DB_PATH = "./test-task-lifecycle-telemetry.sqlite";
 const WORKER_ID = "bbbb0000-0000-4000-8000-000000000002";
 
 async function flushMicrotasks(): Promise<void> {
-  // The post-commit telemetry hook runs through DbClient.afterSettled and then
+  // The post-commit telemetry hook runs through DbClient.afterCommit and then
   // chains an async verify read, so one microtask turn no longer covers it.
   for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }

@@ -34,14 +34,19 @@ export interface DbClient extends DbExecutor {
    */
   transaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T>;
   /**
-   * Schedule `fn` to run strictly after the currently-open transaction (if
-   * any) has committed or rolled back. With no transaction open it runs on
-   * the next microtask-ish turn. This is the post-commit hook point: under
-   * synchronous bun:sqlite transactions a queueMicrotask always observed
-   * settled state, but an async transaction callback drains microtasks
-   * before COMMIT — hooks that must see committed state go through here.
+   * Schedule `fn` to run strictly after the currently-open transaction
+   * COMMITs; if that transaction rolls back the hook is DROPPED (the write it
+   * reacts to never happened). With no transaction open it runs on the next
+   * microtask-ish turn. This is the post-commit hook point: under synchronous
+   * bun:sqlite transactions a queueMicrotask always observed settled state,
+   * but an async transaction callback drains microtasks before COMMIT —
+   * hooks that must see committed state go through here.
+   *
+   * Nested-savepoint caveat: hooks queue on the outermost transaction, so a
+   * hook registered inside a savepoint that rolls back still fires when the
+   * outer transaction commits (matches the pre-seam microtask behaviour).
    */
-  afterSettled(fn: () => void): void;
+  afterCommit(fn: () => void): void;
 }
 
 /**
@@ -68,6 +73,8 @@ type TxContext = {
   closed: boolean;
   /** SAVEPOINT nesting depth (0 = outermost BEGIN). */
   depth: number;
+  /** Hooks to run after COMMIT; dropped on ROLLBACK. */
+  afterCommit: (() => void)[];
 };
 
 const txContext = new AsyncLocalStorage<TxContext>();
@@ -99,19 +106,24 @@ class BunSqliteClient implements DbClient {
     }
 
     const release = await this.lock.acquire();
-    const db = this.getDatabase();
-    const ctx: TxContext = { closed: false, depth: 0 };
-    const tx = this.boundExecutor(ctx);
-    db.run("BEGIN");
+    const ctx: TxContext = { closed: false, depth: 0, afterCommit: [] };
+    let began = false;
     try {
+      const db = this.getDatabase();
+      const tx = this.boundExecutor(ctx);
+      db.run("BEGIN");
+      began = true;
       const result = await txContext.run(ctx, () => fn(tx));
       db.run("COMMIT");
+      for (const hook of ctx.afterCommit) this.scheduleHook(hook);
       return result;
     } catch (err) {
-      try {
-        db.run("ROLLBACK");
-      } catch {
-        // Connection-level failure while rolling back; surface the original error.
+      if (began) {
+        try {
+          this.getDatabase().run("ROLLBACK");
+        } catch {
+          // Connection-level failure while rolling back; surface the original error.
+        }
       }
       throw err;
     } finally {
@@ -120,10 +132,19 @@ class BunSqliteClient implements DbClient {
     }
   }
 
-  afterSettled(fn: () => void): void {
-    // Queueing behind the FIFO lock guarantees the hook runs after any open
-    // transaction's COMMIT/ROLLBACK (the transaction holds the lock for its
-    // whole span). The hook runs outside the lock so its own client calls
+  afterCommit(fn: () => void): void {
+    const ctx = txContext.getStore();
+    if (ctx && !ctx.closed) {
+      // Inside a transaction: run only if it commits; dropped on rollback.
+      ctx.afterCommit.push(fn);
+      return;
+    }
+    this.scheduleHook(fn);
+  }
+
+  private scheduleHook(fn: () => void): void {
+    // Queueing behind the FIFO lock keeps hooks ordered after already-queued
+    // operations. The hook runs outside the lock so its own client calls
     // re-acquire normally.
     void this.lock.acquire().then((release) => {
       release();

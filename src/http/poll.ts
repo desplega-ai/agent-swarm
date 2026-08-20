@@ -400,10 +400,10 @@ export async function handlePoll(
             await startTask(pendingTask.id);
             await updateAgentStatusFromCapacity(myAgentId);
 
-            // Lifecycle announcements go through `afterSettled`, not straight
+            // Lifecycle announcements go through `afterCommit`, not straight
             // line: they must not claim "this task started" for a claim the
             // transaction can still roll back.
-            getDbClient().afterSettled(() => {
+            getDbClient().afterCommit(() => {
               ensure({
                 id: "started",
                 flow: "task",
@@ -553,7 +553,7 @@ export async function handlePoll(
                 await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
-                getDbClient().afterSettled(() => {
+                getDbClient().afterCommit(() => {
                   telemetry.taskEvent("claimed", {
                     taskId: claimed.id,
                     source: claimed.source,

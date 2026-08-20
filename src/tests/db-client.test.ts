@@ -123,7 +123,7 @@ describe("db-client transactions", () => {
     );
   });
 
-  test("afterSettled hook scheduled inside a transaction observes committed state", async () => {
+  test("afterCommit hook scheduled inside a transaction observes committed state", async () => {
     let observed: string[] | null = null;
     let hookDone: (() => void) | undefined;
     const done = new Promise<void>((resolve) => {
@@ -131,7 +131,7 @@ describe("db-client transactions", () => {
     });
     await client.transaction(async (tx) => {
       await tx.run("INSERT INTO items (name) VALUES (?)", ["committed"]);
-      client.afterSettled(() => {
+      client.afterCommit(() => {
         void names().then((n) => {
           observed = n;
           hookDone?.();
@@ -146,32 +146,44 @@ describe("db-client transactions", () => {
     expect<string[] | null>(observed).toEqual(["committed"]);
   });
 
-  test("afterSettled hook after a rollback observes the rolled-back state", async () => {
-    let observed: string[] | null = null;
-    let hookDone: (() => void) | undefined;
-    const done = new Promise<void>((resolve) => {
-      hookDone = resolve;
-    });
+  test("afterCommit hook registered in a rolled-back transaction never fires", async () => {
+    let fired = false;
     await expect(
       client.transaction(async (tx) => {
         await tx.run("INSERT INTO items (name) VALUES (?)", ["doomed"]);
-        client.afterSettled(() => {
-          void names().then((n) => {
-            observed = n;
-            hookDone?.();
-          });
+        client.afterCommit(() => {
+          fired = true;
         });
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    await done;
-    expect<string[] | null>(observed).toEqual([]);
+    // Fence: a post-rollback hook scheduled with no open transaction runs
+    // strictly after anything the rolled-back transaction could have queued.
+    await new Promise<void>((resolve) => {
+      client.afterCommit(resolve);
+    });
+    expect(fired).toBe(false);
+    expect(await names()).toEqual([]);
   });
 
-  test("afterSettled with no open transaction runs promptly", async () => {
+  test("a throwing getDatabase does not wedge the lock", async () => {
+    let boom = true;
+    const flaky = createBunSqliteClient(() => {
+      if (boom) throw new Error("db unavailable");
+      return raw;
+    });
+    await expect(flaky.transaction(async (tx) => tx.run("SELECT 1"))).rejects.toThrow(
+      "db unavailable",
+    );
+    boom = false;
+    const result = await flaky.run("INSERT INTO items (name) VALUES (?)", ["recovered"]);
+    expect(result.changes).toBe(1);
+  });
+
+  test("afterCommit with no open transaction runs promptly", async () => {
     let ran = false;
     const done = new Promise<void>((resolve) => {
-      client.afterSettled(() => {
+      client.afterCommit(() => {
         ran = true;
         resolve();
       });
