@@ -250,3 +250,13 @@ Changes after the Standards + Spec review:
 - Docs: size table 2.1 / 4.3 GB, "four pins", `runbooks/testing.md` hard rule 4, dangling `runbooks/testing.md` pointers now target `LOCAL_TESTING.md`.
 
 Observed once in three full local `--parallel=4` runs: `scripts-runtime-identity` "ctx.swarm.task_poll() presents X-Runtime-Instance-ID" returned `eval_error` (spawn failure under load; passes alone and in the other runs). Same macOS `ulimit -u` class as the known set; watch it on Linux CI.
+
+### CI round (Linux, 4-vCPU runners, 2026-08-21)
+
+The first two Merge Gate runs each failed shard 1/2 on tests my macOS runs never tripped; shard 2/2 was green both times and the known macOS-only set passes on Linux as expected.
+
+- Run 1: `apps-spike5` bulk migration scan (200k kv rows) took 10.2 s and hit the new `--timeout 10000`. Explicit 60 s budget. Two `seed-scripts` typecheck tests were at 9.7 s / 10.1 s and got the same.
+- Run 2: `additive-buffer` debounce tests (20 ms / 30 ms windows with 5 ms / 20 ms sleeps) flushed early under load; windows widened 10x. `claude-managed-adapter` tool-loop test: the adapter fires `checkToolLoop` without awaiting it and each call is a read-modify-write of a `/tmp` history file behind a `mkdir -p` subprocess, so 25 ms event gaps overlap under load and lose updates. Event gap 100 ms, poll window 10 s, `{ timeout: 30_000, retry: 2 }`. The lost-update race itself is a product follow-up (serialize the checks per session); not touched here.
+
+These are the flakes the global `retry = 3` used to hide. `--parallel=4` on a 4-vCPU runner is the honest load test for them; if a third class shows up, dropping to `--parallel=3` is the cheap lever.
+

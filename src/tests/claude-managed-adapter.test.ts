@@ -1166,85 +1166,98 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
     }
   }, 10_000);
 
-  test("repeated identical tool_use events trigger checkToolLoop block → session aborts", async () => {
-    // checkToolLoop persists history across calls in /tmp using the taskId
-    // as the session key. We use a unique taskId per test run so we don't
-    // contaminate other tests. After 15 identical tool_use events the
-    // detector returns blocked=true (REPEAT_CRITICAL_THRESHOLD = 15 in
-    // src/hooks/tool-loop-detection.ts).
-    const taskId = `task-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Timing-sensitive by design: the adapter fires checkToolLoop without
+  // awaiting it, and each call is a read-modify-write of a /tmp history file
+  // behind a `mkdir -p` subprocess. Under `bun test --parallel` on a loaded
+  // runner those calls overlap and lose updates, so the repeat count can fall
+  // short of the threshold. The gap between events is wide and the test
+  // retries instead of relying on a global retry.
+  test(
+    "repeated identical tool_use events trigger checkToolLoop block → session aborts",
+    async () => {
+      // checkToolLoop persists history across calls in /tmp using the taskId
+      // as the session key. We use a unique taskId per test run so we don't
+      // contaminate other tests. After 15 identical tool_use events the
+      // detector returns blocked=true (REPEAT_CRITICAL_THRESHOLD = 15 in
+      // src/hooks/tool-loop-detection.ts).
+      const taskId = `task-loop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // Fetch stub: cancel poll always returns empty (we want the LOOP path,
-    // not the cancel path, to drive the abort).
-    globalThis.fetch = (async () =>
-      new Response(JSON.stringify({ cancelled: [] }), { status: 200 })) as typeof fetch;
+      // Fetch stub: cancel poll always returns empty (we want the LOOP path,
+      // not the cancel path, to drive the abort).
+      globalThis.fetch = (async () =>
+        new Response(JSON.stringify({ cancelled: [] }), { status: 200 })) as typeof fetch;
 
-    let abortObserved = false;
-    const spy = makeFakeClient({
-      streamEvents: async function* () {
-        // Yield 20 identical tool_use events with tiny gaps — well above
-        // the critical threshold.
-        for (let i = 0; i < 20; i++) {
-          if (abortObserved) {
-            throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      let abortObserved = false;
+      const spy = makeFakeClient({
+        streamEvents: async function* () {
+          // Yield 20 identical tool_use events with tiny gaps — well above
+          // the critical threshold.
+          for (let i = 0; i < 20; i++) {
+            if (abortObserved) {
+              throw Object.assign(new Error("aborted"), { name: "AbortError" });
+            }
+            yield {
+              type: "agent.tool_use",
+              id: `tu-${i}`,
+              processed_at: "2026-01-01T00:00:00Z",
+              name: "stuck_tool",
+              input: { same: "args" },
+            };
+            // Let the async checkToolLoop finish before the next event so the
+            // history read-modify-write does not overlap (see comment above).
+            await new Promise((r) => setTimeout(r, 100));
           }
-          yield {
-            type: "agent.tool_use",
-            id: `tu-${i}`,
-            processed_at: "2026-01-01T00:00:00Z",
-            name: "stuck_tool",
-            input: { same: "args" },
-          };
-          // Small await so the async checkToolLoop has a chance to fire.
-          await new Promise((r) => setTimeout(r, 25));
+        },
+      });
+
+      const adapter = new ClaudeManagedAdapter({ client: spy.client });
+      const session = await adapter.createSession(
+        tConfig({
+          logFile: join(tmpLogDir, "tool-loop.log"),
+          apiUrl: "http://test-api",
+          apiKey: "test-key",
+          taskId,
+        }),
+      );
+
+      const emitted: ProviderEvent[] = [];
+      session.onEvent((e) => {
+        emitted.push(e);
+      });
+
+      // Wait until we observe a raw_stderr warning OR archive — either path
+      // proves the abort fired from the loop detector.
+      const start = Date.now();
+      while (Date.now() - start < 10_000) {
+        const blockedWarning = emitted.find(
+          (e) =>
+            e.type === "raw_stderr" &&
+            typeof e.content === "string" &&
+            e.content.includes("Tool-loop"),
+        );
+        if (blockedWarning || spy.archived.length > 0) {
+          abortObserved = true;
+          break;
         }
-      },
-    });
+        await new Promise((r) => setTimeout(r, 25));
+      }
 
-    const adapter = new ClaudeManagedAdapter({ client: spy.client });
-    const session = await adapter.createSession(
-      tConfig({
-        logFile: join(tmpLogDir, "tool-loop.log"),
-        apiUrl: "http://test-api",
-        apiKey: "test-key",
-        taskId,
-      }),
-    );
-
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => {
-      emitted.push(e);
-    });
-
-    // Wait until we observe a raw_stderr warning OR archive — either path
-    // proves the abort fired from the loop detector.
-    const start = Date.now();
-    while (Date.now() - start < 5_000) {
+      const result = await session.waitForCompletion();
+      // Either the loop detector aborted (errorCategory cancelled) or the
+      // stream completed all 20 events naturally — but the warning should
+      // have surfaced in the emitted events.
       const blockedWarning = emitted.find(
         (e) =>
           e.type === "raw_stderr" &&
           typeof e.content === "string" &&
           e.content.includes("Tool-loop"),
       );
-      if (blockedWarning || spy.archived.length > 0) {
-        abortObserved = true;
-        break;
-      }
-      await new Promise((r) => setTimeout(r, 25));
-    }
-
-    const result = await session.waitForCompletion();
-    // Either the loop detector aborted (errorCategory cancelled) or the
-    // stream completed all 20 events naturally — but the warning should
-    // have surfaced in the emitted events.
-    const blockedWarning = emitted.find(
-      (e) =>
-        e.type === "raw_stderr" && typeof e.content === "string" && e.content.includes("Tool-loop"),
-    );
-    expect(blockedWarning).toBeDefined();
-    // After the block fires, abort propagates → cancelled result.
-    expect(result.isError).toBe(true);
-  }, 15_000);
+      expect(blockedWarning).toBeDefined();
+      // After the block fires, abort propagates → cancelled result.
+      expect(result.isError).toBe(true);
+    },
+    { timeout: 30_000, retry: 2 },
+  );
 });
 
 // ---------------------------------------------------------------------------

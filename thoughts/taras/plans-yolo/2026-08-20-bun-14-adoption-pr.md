@@ -21,7 +21,7 @@ The repo pins Bun 1.4.0 everywhere (`packageManager`, three Dockerfiles plus the
 - `test-timings.json` generated locally on macOS with Bun 1.4.0 (no global retry); relative durations drive shard balance. Refresh path documented. (assumed)
 - Preload cache key covers migrations, `db.ts`, `seed-prompt-templates.ts`, `preload.ts`, the prompt registry JSON, and `Bun.version`, because `initDb` bakes the prompt registry into the template. Cache hit must also warm the encryption-key cache (one test depended on that side effect). (verified by a failing test)
 - `bun dedupe --check` NOT added to the gate: it fails today (31 duplicates) and `bun dedupe` would bump Biome 2.3.10 -> 2.4.5, zod, openai. Documented in `runbooks/ci.md` as a deliberate separate PR. (assumed)
-- No per-test `{ retry }` added: the watchdog candidate is a deterministic macOS-only failure, the watermark candidate was a real ms race and got a root-cause fix instead. (verified)
+- Per-test `{ retry }`: none of the plan's candidates needed it (watchdog = deterministic macOS-only failure; watermark = real ms race, fixed). Linux CI later surfaced one genuinely racy test (`claude-managed-adapter` tool-loop, fire-and-forget `/tmp` read-modify-write) which got `{ timeout: 30_000, retry: 2 }` plus a wider event gap; the other CI flakes were budget/window bumps. (verified on CI)
 - API binary stays plain; worker binary gets `--bytecode --format=esm`. (from prompt)
 - `Bun.markdown.render()` for `markdownToSlack`: skipped; a parser cannot pass the exact-output regex tests unchanged. (from prompt's condition)
 - `--asset` refactor: out of scope. (from prompt)
