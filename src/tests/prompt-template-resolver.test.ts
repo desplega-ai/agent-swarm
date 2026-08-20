@@ -725,6 +725,39 @@ describe("Prompt Template Resolver", () => {
       warn.mockRestore();
     });
 
+    test("customized templates matching the code default preserve skip_event state", () => {
+      registerTemplate({
+        eventType: "seed.test.custom-matching-skipped",
+        header: "",
+        defaultBody: "Still current",
+        variables: [],
+        category: "event",
+      });
+
+      seedDefaultTemplates();
+      const skipped = upsertPromptTemplate({
+        eventType: "seed.test.custom-matching-skipped",
+        scope: "global",
+        state: "skip_event",
+        body: "Still current",
+        changedBy: "user-123",
+      });
+      expect(skipped.isDefault).toBe(false);
+      expect(skipped.state).toBe("skip_event");
+
+      seedDefaultTemplates();
+
+      const afterReseed = getPromptTemplates({
+        eventType: "seed.test.custom-matching-skipped",
+        scope: "global",
+      });
+      expect(afterReseed).toHaveLength(1);
+      expect(afterReseed[0].body).toBe("Still current");
+      expect(afterReseed[0].state).toBe("skip_event");
+      expect(afterReseed[0].isDefault).toBe(false);
+      expect(afterReseed[0].version).toBe(skipped.version);
+    });
+
     test("unchanged default templates remain defaults without warnings", () => {
       const warn = spyOn(console, "warn").mockImplementation(() => {});
       registerTemplate({

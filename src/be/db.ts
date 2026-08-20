@@ -290,7 +290,17 @@ export function initDb(dbPath = "./agent-swarm-db.sqlite"): Database {
   loadSqliteVec(database);
 
   // Run database migrations (schema creation + incremental changes)
-  runMigrations(database);
+  try {
+    runMigrations(database);
+  } catch (error) {
+    db = null;
+    try {
+      database.close();
+    } catch (closeError) {
+      console.error("[migrations] Failed to close database after migration failure:", closeError);
+    }
+    throw error;
+  }
 
   // Compatibility migration for legacy databases that predate profile fields
   ensureAgentProfileColumns(database);

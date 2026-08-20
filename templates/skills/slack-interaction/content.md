@@ -33,6 +33,7 @@ The task carries `slackChannelId` and `slackThreadTs` in its metadata. A follow-
 | `slack-download-file` | download a Slack file by ID or URL |
 | `slack-update` | edit your own message |
 | `slack-delete` | delete your own message (lead) |
+| `slack-create-channel`, `slack-invite-to-channel`, `slack-archive-channel` | channel lifecycle (lead) |
 
 Files attached to your task already come with download commands in the task message. Use those before `slack-download-file`.
 

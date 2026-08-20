@@ -93,6 +93,18 @@ export const PERMISSIONS = {
     description: "Start a thread in a direct Slack channel.",
     namespace: "integration",
   },
+  "integration.slack.channel.create": {
+    description: "Create a Slack channel.",
+    namespace: "integration",
+  },
+  "integration.slack.channel.invite": {
+    description: "Invite users to a Slack channel.",
+    namespace: "integration",
+  },
+  "integration.slack.channel.archive": {
+    description: "Archive a Slack channel.",
+    namespace: "integration",
+  },
   "integration.slack.upload": {
     description: "Upload a file to a direct Slack channel.",
     namespace: "integration",

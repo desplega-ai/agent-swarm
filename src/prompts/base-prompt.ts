@@ -266,7 +266,7 @@ function renderToolsAndSkills(input: {
       const where = input.hasLocalEnv
         ? "Your harness loads them from its skills directory."
         : "This session has no local skills directory, so reach them through the MCP tools.";
-      section += `You have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery}\n`;
+      section += `You have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery} When a skill matches the task, use it before manual work.\n`;
     } else {
       // Codex and opencode have no native skill system; without this list they
       // have zero ambient awareness that any skill exists.
@@ -276,7 +276,7 @@ function renderToolsAndSkills(input: {
       const lines = skills
         .map((s) => `- ${input.hasLocalEnv ? "/" : ""}${s.name}: ${s.description}`)
         .join("\n");
-      section += `Installed skills. ${howTo}\n\n${lines}\n\n${discovery}\n`;
+      section += `Installed skills. ${howTo} When a skill matches the task, use it before manual work.\n\n${lines}\n\n${discovery}\n`;
     }
   }
 

@@ -952,6 +952,9 @@ const SWARM_TOOL_LABELS: Record<string, string | null> = {
   // Slack
   "slack-post": "💬 Posting to Slack",
   "slack-start-thread": "💬 Starting Slack thread",
+  "slack-create-channel": "💬 Creating Slack channel",
+  "slack-invite-to-channel": "💬 Inviting to Slack channel",
+  "slack-archive-channel": "💬 Archiving Slack channel",
   "slack-reply": "💬 Replying in Slack",
   "slack-read": "💬 Reading Slack",
   "slack-list-channels": "💬 Listing Slack channels",

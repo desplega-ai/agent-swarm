@@ -2,12 +2,31 @@ import type { WebClient } from "@slack/web-api";
 
 const logger = console;
 
+type SlackErrorData = {
+  error?: unknown;
+  needed?: unknown;
+};
+
 // @slack/web-api platform errors set message to "An API error occurred: <code>"
-// and store the raw Slack API code at error.data.error.
-function slackCode(error: unknown): string | undefined {
+// and store Slack's full response body on error.data.
+function slackErrorData(error: unknown): SlackErrorData | undefined {
   if (!(error instanceof Error)) return undefined;
-  const d = (error as { data?: { error?: unknown } }).data;
+  return (error as { data?: SlackErrorData }).data;
+}
+
+export function slackCode(error: unknown): string | undefined {
+  const d = slackErrorData(error);
   return typeof d?.error === "string" ? d.error : undefined;
+}
+
+export function slackMissingScopeMessage(error: unknown): string | undefined {
+  const data = slackErrorData(error);
+  if (data?.error !== "missing_scope" || typeof data.needed !== "string") return undefined;
+
+  const needed = data.needed.trim();
+  if (!needed) return undefined;
+
+  return `Slack requires the \`${needed}\` scope. Add it to slack-manifest.json, apply the updated manifest to the Slack app, then reinstall the app to the workspace for the change to take effect.`;
 }
 
 /**

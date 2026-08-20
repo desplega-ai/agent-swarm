@@ -525,6 +525,7 @@ try {
   startupConfigsInjected = loadGlobalConfigsIntoEnv(false);
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
+  process.exitCode = 1;
   throw err;
 }
 
