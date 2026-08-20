@@ -72,9 +72,10 @@ export function seedDefaultTemplates(): void {
         console.warn(
           `[prompt-templates] Customized template "${def.eventType}" has drifted from its code default; frozen for ${frozenFor} since ${globalRecord.updatedAt}; byte delta ${signedByteDelta} (code default ${drift.defaultBytes} bytes, customization ${drift.customizedBytes} bytes). The customization was preserved; reset it manually to reconcile.`,
         );
-      } else {
+      } else if (globalRecord.state === "enabled") {
         // The row was marked customized without any content change. Restore default ownership so
-        // future code-default updates continue to reconcile it.
+        // future code-default updates continue to reconcile it. Non-enabled states are deliberate
+        // operator choices, and resetPromptTemplateToDefault would silently enable them.
         resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
       }
     }
