@@ -44,7 +44,7 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function userMayReadSecrets(req: IncomingMessage): boolean {
+async function userMayReadSecrets(req: IncomingMessage): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return true;
   // Agent/no-user HTTP reads keep their pre-RBAC behavior; MCP get-config has
@@ -52,12 +52,12 @@ function userMayReadSecrets(req: IncomingMessage): boolean {
   if (auth?.kind !== "user") return true;
   if (!isRbacEnabled()) return true;
 
-  const grant = getUserGrant(auth.userId);
+  const grant = await getUserGrant(auth.userId);
   return grant.grantsAll || grant.verbs.has("config.read.secrets");
 }
 
-function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
-  if (!includeSecrets || userMayReadSecrets(req)) {
+async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
+  if (!includeSecrets || (await userMayReadSecrets(req))) {
     return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
   }
   return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
@@ -265,7 +265,7 @@ export async function handleConfig(
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
       await getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
     );
@@ -327,7 +327,7 @@ export async function handleConfig(
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const singleResult = effectiveIncludeSecrets ? config : maskSecrets([config])[0]!;
     if (effectiveIncludeSecrets && singleResult.isSecret && singleResult.value) {
       registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
@@ -343,7 +343,7 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
       await getSwarmConfigs({
         scope: parsed.query.scope || undefined,

@@ -1158,8 +1158,8 @@ function parseRecord(value: string | null): Record<string, unknown> | null {
   }
 }
 
-function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail {
-  const decorated = decorateConnections([connection])[0];
+async function connectionDetail(connection: ScriptConnectionRecord): Promise<ConnectionDetail> {
+  const decorated = (await decorateConnections([connection]))[0];
   if (!decorated) throw new Error("Failed to decorate connection detail.");
 
   const runtime = parseRecord(connection.generatedRuntimeJson);
@@ -1254,9 +1254,11 @@ function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail 
   return detail;
 }
 
-function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedConnection[] {
+async function decorateConnections(
+  connections: ScriptConnectionRecord[],
+): Promise<DecoratedConnection[]> {
   const bindings = new Map(
-    listRelationalCredentialBindings({ includeInactive: true }).map((binding) => [
+    (await listRelationalCredentialBindings({ includeInactive: true })).map((binding) => [
       binding.id,
       binding,
     ]),
@@ -1279,7 +1281,9 @@ function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedCo
   });
 }
 
-function listConnections(query: z.infer<typeof listConnectionsQuerySchema>): DecoratedConnection[] {
+function listConnections(
+  query: z.infer<typeof listConnectionsQuerySchema>,
+): Promise<DecoratedConnection[]> {
   const connections = listScriptConnections({
     includeDisabled: true,
     allScopes: true,
@@ -1850,7 +1854,7 @@ export async function handleScriptConnections(
   if (listConnectionsRoute.match(req.method, pathSegments)) {
     const parsed = await listConnectionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    listConnectionsRoute.respond(res, 200, { connections: listConnections(parsed.query) });
+    listConnectionsRoute.respond(res, 200, { connections: await listConnections(parsed.query) });
     return true;
   }
 
@@ -1865,7 +1869,7 @@ export async function handleScriptConnections(
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    getConnectionRoute.respond(res, 200, { connection: connectionDetail(connection) });
+    getConnectionRoute.respond(res, 200, { connection: await connectionDetail(connection) });
     return true;
   }
 
@@ -1884,7 +1888,9 @@ export async function handleScriptConnections(
         jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
-      const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
+      const existingConnection = parsed.body.id
+        ? await getScriptConnectionById(parsed.body.id)
+        : null;
       const existingOpenapiConnection =
         existingConnection?.kind === "openapi" ? existingConnection : null;
       if (
@@ -1982,7 +1988,7 @@ export async function handleScriptConnections(
       });
 
       upsertConnectionRoute.respond(res, 200, {
-        connection: decorateConnections([connection])[0]!,
+        connection: (await decorateConnections([connection]))[0]!,
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
@@ -2005,7 +2011,7 @@ export async function handleScriptConnections(
         return true;
       }
       refreshConnectionRoute.respond(res, 200, {
-        connection: decorateConnections([refreshed])[0]!,
+        connection: (await decorateConnections([refreshed]))[0]!,
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
@@ -2017,7 +2023,7 @@ export async function handleScriptConnections(
     const parsed = await setConnectionEnabledRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureConnectionAdmin(req, res, agentId)) return true;
-    const updated = setScriptConnectionEnabled(
+    const updated = await setScriptConnectionEnabled(
       parsed.params.id,
       parsed.body.enabled,
       await resolveHttpAuditUserId(req, agentId),
@@ -2026,17 +2032,21 @@ export async function handleScriptConnections(
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    setConnectionEnabledRoute.respond(res, 200, { connection: decorateConnections([updated])[0]! });
+    setConnectionEnabledRoute.respond(res, 200, {
+      connection: (await decorateConnections([updated]))[0]!,
+    });
     return true;
   }
 
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
     const includeManaged = queryParams.get("includeManaged") === "true";
     listCredentialBindingsRoute.respond(res, 200, {
-      bindings: listRelationalCredentialBindings({
-        includeInactive: true,
-        excludeManaged: !includeManaged,
-      }).map(decorateBinding),
+      bindings: (
+        await listRelationalCredentialBindings({
+          includeInactive: true,
+          excludeManaged: !includeManaged,
+        })
+      ).map(decorateBinding),
     });
     return true;
   }
@@ -2074,7 +2084,7 @@ export async function handleScriptConnections(
         authKind: parsed.body.authKind ?? "config",
         oauthAuthorizationId: parsed.body.oauthAuthorizationId,
       });
-      const binding = upsertCredentialBinding({
+      const binding = await upsertCredentialBinding({
         id: parsed.body.id,
         configKey: nextBinding.configKey,
         allowedHosts: nextBinding.allowedHosts,

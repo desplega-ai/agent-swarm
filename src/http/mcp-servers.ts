@@ -205,13 +205,13 @@ const getAgentMcpServersRoute = route({
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 
-function canResolveMcpSecretsForHttpUser(req: IncomingMessage): boolean {
+async function canResolveMcpSecretsForHttpUser(req: IncomingMessage): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind !== "user") return true;
   if (!isRbacEnabled()) return true;
 
   const verb: PermissionVerb = "mcp-server.read.secrets";
-  const grant = getUserGrant(auth.userId);
+  const grant = await getUserGrant(auth.userId);
   const decision =
     grant.grantsAll || grant.verbs.has(verb)
       ? ({ allow: true, verb } as const)
@@ -290,7 +290,7 @@ export async function handleMcpServers(
     const resolveSecrets = parsed.query.resolveSecrets === "true";
 
     if (resolveSecrets) {
-      if (!canResolveMcpSecretsForHttpUser(req)) {
+      if (!(await canResolveMcpSecretsForHttpUser(req))) {
         jsonError(res, "Forbidden: admission: missing permission 'mcp-server.read.secrets'", 403);
         return true;
       }

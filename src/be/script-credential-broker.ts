@@ -17,7 +17,7 @@ import { listRelationalCredentialBindings } from "./script-connections";
 // resolution now reads exclusively from the relational table — including the
 // auto-managed bindings that back embedded connection auth.
 class RelationalCredentialBindingStore implements CredentialBindingStore {
-  listActiveBindings(context: CredentialBindingStoreContext): CredentialBinding[] {
+  listActiveBindings(context: CredentialBindingStoreContext): Promise<CredentialBinding[]> {
     return listRelationalCredentialBindings(context);
   }
 }

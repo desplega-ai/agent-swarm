@@ -102,15 +102,15 @@ export function decodeAppVersion(appVersion: AppVersion): AppVersion {
   };
 }
 
-function rollbackSnapshot(
+async function rollbackSnapshot(
   version: AppVersion,
   writer: { writerAgentId?: string | null; writerIsUser?: boolean },
   existingDefinition: unknown,
-): {
+): Promise<{
   name: string;
   description: string | null;
   definition: AppDefinition;
-} {
+}> {
   if (
     typeof version.snapshot !== "object" ||
     version.snapshot === null ||
@@ -140,7 +140,7 @@ function rollbackSnapshot(
   // trusted restore: the historical snapshot may reintroduce foreign-owned or
   // lead-run script references the writer could never add directly, so the
   // same ownership/grandfathering checks apply against the CURRENT definition.
-  const parsed = parseAppDefinition(upgradeAppDefinition(snapshot.definition), {
+  const parsed = await parseAppDefinition(upgradeAppDefinition(snapshot.definition), {
     currentAppId: version.appId,
     resolveApp: getApp,
     writerAgentId: writer.writerAgentId ?? null,
@@ -178,7 +178,7 @@ export async function rollbackApp(input: {
       (candidate) => candidate.version === input.version,
     );
     if (!version) throw new AppRollbackVersionNotFoundError(input.version);
-    const snapshot = rollbackSnapshot(version, input, existing.definition);
+    const snapshot = await rollbackSnapshot(version, input, existing.definition);
 
     const migrated = await migrateAppSchema({
       appId: input.appId,

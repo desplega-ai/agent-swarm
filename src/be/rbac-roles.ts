@@ -1,6 +1,6 @@
 import type { PermissionVerb } from "../rbac";
 import { PermissionVerbSchema } from "../rbac";
-import { getDb } from "./db";
+import { getDb, getDbClient } from "./db";
 
 export const DEFAULT_ROLE_ID = "rbac-role-admin";
 
@@ -167,17 +167,16 @@ function parseDatabaseGrantVerb(roleId: string, verb: string): PermissionVerb | 
   return null;
 }
 
-export function getUserGrant(userId: string): EffectiveGrant {
-  const rows = getDb()
-    .prepare<GrantRow, string>(
-      `SELECT r.id AS roleId, r.grantsAll, rp.verb
-       FROM principal_roles pr
-       JOIN roles r ON r.id = pr.roleId
-       LEFT JOIN role_permissions rp ON rp.roleId = r.id
-       WHERE pr.principalType = 'user' AND pr.principalId = ?
-       ORDER BY r.grantsAll DESC`,
-    )
-    .all(userId);
+export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
+  const rows = await getDbClient().query<GrantRow>(
+    `SELECT r.id AS roleId, r.grantsAll, rp.verb
+     FROM principal_roles pr
+     JOIN roles r ON r.id = pr.roleId
+     LEFT JOIN role_permissions rp ON rp.roleId = r.id
+     WHERE pr.principalType = 'user' AND pr.principalId = ?
+     ORDER BY r.grantsAll DESC`,
+    [userId],
+  );
 
   if (rows.length === 0) {
     return { grantsAll: false, verbs: new Set() };
@@ -221,17 +220,16 @@ export function detachRole(userId: string, roleName: string): void {
   })();
 }
 
-export function listUserRoles(userId: string): UserRole[] {
-  return getDb()
-    .prepare<UserRoleRow, string>(
-      `SELECT r.id, r.name, r.description, r.isBuiltin, r.grantsAll, r.createdAt
-       FROM principal_roles pr
-       JOIN roles r ON r.id = pr.roleId
-       WHERE pr.principalType = 'user' AND pr.principalId = ?
-       ORDER BY r.name`,
-    )
-    .all(userId)
-    .map(roleRowToUserRole);
+export async function listUserRoles(userId: string): Promise<UserRole[]> {
+  const rows = await getDbClient().query<UserRoleRow>(
+    `SELECT r.id, r.name, r.description, r.isBuiltin, r.grantsAll, r.createdAt
+     FROM principal_roles pr
+     JOIN roles r ON r.id = pr.roleId
+     WHERE pr.principalType = 'user' AND pr.principalId = ?
+     ORDER BY r.name`,
+    [userId],
+  );
+  return rows.map(roleRowToUserRole);
 }
 
 export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncStats {
@@ -388,23 +386,21 @@ function printRolesTable(rows: RbacRoleSummaryRow[]): void {
   }
 }
 
-function getRbacRoleSummary(): RbacRoleSummaryRow[] {
-  return getDb()
-    .prepare<RbacRoleSummaryRow, []>(
-      `SELECT
-         r.name,
-         r.isBuiltin,
-         r.grantsAll,
-         COUNT(DISTINCT rp.verb) AS verbCount,
-         COUNT(DISTINCT CASE WHEN pr.principalType = 'user' THEN pr.principalId END)
-           AS attachedUserCount
-       FROM roles r
-       LEFT JOIN role_permissions rp ON rp.roleId = r.id
-       LEFT JOIN principal_roles pr ON pr.roleId = r.id
-       GROUP BY r.id, r.name, r.isBuiltin, r.grantsAll
-       ORDER BY r.isBuiltin DESC, r.name`,
-    )
-    .all();
+async function getRbacRoleSummary(): Promise<RbacRoleSummaryRow[]> {
+  return getDbClient().query<RbacRoleSummaryRow>(
+    `SELECT
+       r.name,
+       r.isBuiltin,
+       r.grantsAll,
+       COUNT(DISTINCT rp.verb) AS verbCount,
+       COUNT(DISTINCT CASE WHEN pr.principalType = 'user' THEN pr.principalId END)
+         AS attachedUserCount
+     FROM roles r
+     LEFT JOIN role_permissions rp ON rp.roleId = r.id
+     LEFT JOIN principal_roles pr ON pr.roleId = r.id
+     GROUP BY r.id, r.name, r.isBuiltin, r.grantsAll
+     ORDER BY r.isBuiltin DESC, r.name`,
+  );
 }
 
 export async function runRbacCliCommand(args: string[]): Promise<void> {
@@ -414,7 +410,7 @@ export async function runRbacCliCommand(args: string[]): Promise<void> {
   }
 
   const stats = ensureRbacSeedsSynced({ quiet: true });
-  const roles = getRbacRoleSummary();
+  const roles = await getRbacRoleSummary();
 
   console.log("RBAC bootstrap complete");
   console.log(`RBAC_ENABLED: ${describeRbacFlag()}`);

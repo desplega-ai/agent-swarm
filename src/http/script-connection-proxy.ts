@@ -102,7 +102,7 @@ export async function handleScriptConnectionProxy(
     return true;
   }
 
-  const connection = getScriptConnectionById(parsed.params.id);
+  const connection = await getScriptConnectionById(parsed.params.id);
   if (!connection) {
     jsonError(res, "Script connection not found", 404);
     return true;

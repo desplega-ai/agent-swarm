@@ -276,11 +276,11 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         return toolErr(denyMessage, { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const currentBindings = () =>
+      const currentBindings = async () =>
         decorateBindings(
-          listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
+          await listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
         );
-      const bindings = currentBindings();
+      const bindings = await currentBindings();
 
       if (args.action === "oauth-app-upsert") {
         // A presetId fills endpoints/scopes/quirks; explicit fields still win.
@@ -364,7 +364,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
             provider,
             redirectUri,
             ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
-            bindings: currentBindings(),
+            bindings: await currentBindings(),
           },
         });
       }
@@ -453,14 +453,14 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       if (args.action === "disable") {
-        const disabled = args.id ? disableCredentialBinding(args.id) : null;
+        const disabled = args.id ? await disableCredentialBinding(args.id) : null;
         if (!disabled) {
           return toolErr("Credential binding id not found.", {
             data: { yourAgentId: requestInfo.agentId, bindings },
           });
         }
 
-        const nextBindings = currentBindings();
+        const nextBindings = await currentBindings();
         return toolOk(`Credential binding ${disabled.configKey} disabled.`, {
           details: renderBindingsList(nextBindings),
           data: { yourAgentId: requestInfo.agentId, bindings: nextBindings },
@@ -519,7 +519,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         oauthAuthorizationId: args.oauthAuthorizationId,
       });
 
-      upsertCredentialBinding({
+      await upsertCredentialBinding({
         id: args.id,
         configKey: nextBinding.configKey,
         allowedHosts: nextBinding.allowedHosts,
@@ -531,7 +531,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         authKind: nextBinding.authKind,
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
       });
-      const nextBindings = currentBindings();
+      const nextBindings = await currentBindings();
 
       return toolOk(`Credential binding ${args.configKey} saved.`, {
         details: renderBindingsList(nextBindings),

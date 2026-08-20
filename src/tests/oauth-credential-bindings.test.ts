@@ -181,7 +181,7 @@ describe("OAuth credential bindings", () => {
       refreshToken: "stored-oauth-refresh",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_RESOLVE_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_RESOLVE_OAUTH]",
@@ -207,7 +207,7 @@ describe("OAuth credential bindings", () => {
       refreshToken: "old-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_REFRESH_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_REFRESH_OAUTH]",
@@ -256,7 +256,7 @@ describe("OAuth credential bindings", () => {
       refreshToken: "old-basic-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_BASIC_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BASIC_OAUTH]",
@@ -388,14 +388,14 @@ describe("OAuth credential bindings", () => {
       refreshToken: "stale-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_BROKEN_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BROKEN_OAUTH]",
       authKind: "oauth",
       oauthAuthorizationId: getOAuthTokens("phase2-broken")!.id,
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_HEALTHY_CONFIG",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_HEALTHY_CONFIG]",
@@ -430,7 +430,7 @@ describe("OAuth credential bindings", () => {
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
     const authorizationId = getOAuthTokens("phase2-missing")!.id;
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "PHASE2_MISSING_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_MISSING_OAUTH]",

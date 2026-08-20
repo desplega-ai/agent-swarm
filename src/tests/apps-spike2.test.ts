@@ -1037,7 +1037,7 @@ describe("custom app actions", () => {
       );
       expect(patched.status).toBe(200);
     } finally {
-      deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
+      await deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
     }
   });
 

@@ -217,7 +217,7 @@ function canManageAppNamespace(
 }
 
 function canManageScriptNamespace(
-  script: NonNullable<ReturnType<typeof getScriptById>>,
+  script: NonNullable<Awaited<ReturnType<typeof getScriptById>>>,
   req: IncomingMessage,
   myAgentId: string | undefined,
 ): boolean {
@@ -328,7 +328,7 @@ export async function handleAssets(
       }
     }
     if (parsed.params.entityType === "script") {
-      const script = getScriptById(parsed.params.id);
+      const script = await getScriptById(parsed.params.id);
       if (!script) {
         jsonError(res, "Asset not found", 404);
         return true;

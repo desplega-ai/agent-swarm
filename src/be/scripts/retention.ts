@@ -1,6 +1,6 @@
 import { collectScriptReferences } from "../../apps/definition";
 import { listAppRecords } from "../../apps/store";
-import { getDb, listWorkflows } from "../db";
+import { getDbClient, listWorkflows } from "../db";
 
 const SCRATCH_RETENTION_DAYS = 14;
 const SCRATCH_GC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -38,10 +38,10 @@ async function appReferencedScriptIds(candidateIds: readonly string[]): Promise<
  * so an unreferenced-looking scratch script backing a live `/api/x/script` endpoint
  * would otherwise be silently deleted out from under it.
  */
-function scriptApiReferencedScriptIds(): Set<string> {
-  const rows = getDb()
-    .prepare<{ scriptId: string }, []>("SELECT DISTINCT scriptId FROM script_apis")
-    .all();
+async function scriptApiReferencedScriptIds(): Promise<Set<string>> {
+  const rows = await getDbClient().query<{ scriptId: string }>(
+    "SELECT DISTINCT scriptId FROM script_apis",
+  );
   return new Set(rows.map((row) => row.scriptId));
 }
 
@@ -100,15 +100,18 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   const cutoff = new Date(
     now.getTime() - SCRATCH_RETENTION_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString();
-  const candidates = getDb()
-    .prepare<{ id: string; name: string; scopeId: string | null }, [string]>(
-      `SELECT id, name, scopeId FROM scripts
-       WHERE scope = 'agent'
-         AND isScratch = 1
-         AND name GLOB 'scratch-*'
-         AND updatedAt < ?`,
-    )
-    .all(cutoff);
+  const candidates = await getDbClient().query<{
+    id: string;
+    name: string;
+    scopeId: string | null;
+  }>(
+    `SELECT id, name, scopeId FROM scripts
+     WHERE scope = 'agent'
+       AND isScratch = 1
+       AND name GLOB 'scratch-*'
+       AND updatedAt < ?`,
+    [cutoff],
+  );
   if (candidates.length === 0) return 0;
 
   // A scratch script still wired into a durable reference — an app action/model
@@ -118,7 +121,7 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   // appScriptReferenceIssues, applied here to the whole sweep at once, plus the two
   // durable reference kinds that guard doesn't cover either.
   const referenced = await appReferencedScriptIds(candidates.map((row) => row.id));
-  const apiReferenced = scriptApiReferencedScriptIds();
+  const apiReferenced = await scriptApiReferencedScriptIds();
   const workflowReferenced = await workflowReferencedAgentScriptKeys();
   const ownerlessWorkflowReferencedNames =
     await workflowReferencedScratchNamesForOwnerlessWorkflows();
@@ -131,14 +134,12 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   if (idsToDelete.length === 0) return 0;
 
   const placeholders = idsToDelete.map(() => "?").join(",");
-  return (
-    getDb()
-      .prepare<{ id: string }, string[]>(
-        `DELETE FROM scripts WHERE id IN (${placeholders}) RETURNING id`,
-      )
-      // RETURNING counts scripts only; SQLite's change count includes cascaded rows.
-      .all(...idsToDelete).length
+  // RETURNING counts scripts only; SQLite's change count includes cascaded rows.
+  const deleted = await getDbClient().query<{ id: string }>(
+    `DELETE FROM scripts WHERE id IN (${placeholders}) RETURNING id`,
+    idsToDelete,
   );
+  return deleted.length;
 }
 
 async function runScratchScriptGc(label: "Initial" | "Periodic"): Promise<void> {

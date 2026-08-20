@@ -268,7 +268,7 @@ async function pullFromScript(args: {
 }): Promise<PullResult> {
   const warnings: string[] = [];
   const { source } = args;
-  const script = getScriptById(source.scriptId);
+  const script = await getScriptById(source.scriptId);
   if (!script) throw new SyncPassError(`script "${source.scriptId}" not found`);
   const agentId = resolveSyncRunAs(script);
 

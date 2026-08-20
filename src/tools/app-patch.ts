@@ -92,7 +92,7 @@ export const registerAppPatchTool = (server: McpServer) => {
             data: { issues: patch.issues },
           });
         }
-        const parsed = parseAppDefinition(patch.definition, {
+        const parsed = await parseAppDefinition(patch.definition, {
           currentAppId: input.appId,
           resolveApp: getApp,
           writerAgentId: requestInfo.agentId,

@@ -566,11 +566,16 @@ function signatureJsonFor(source: string): string {
   return JSON.stringify(extractScriptSignature(source));
 }
 
-function resolveScript(name: string, agentId: string, scope?: ScriptScope): ScriptRecord | null {
+async function resolveScript(
+  name: string,
+  agentId: string,
+  scope?: ScriptScope,
+): Promise<ScriptRecord | null> {
   if (scope === "global") return getScript({ name, scope: "global" });
   if (scope === "agent") return getScript({ name, scope: "agent", scopeId: agentId });
   return (
-    getScript({ name, scope: "agent", scopeId: agentId }) ?? getScript({ name, scope: "global" })
+    (await getScript({ name, scope: "agent", scopeId: agentId })) ??
+    getScript({ name, scope: "global" })
   );
 }
 
@@ -653,7 +658,7 @@ export async function handleScripts(
 
     const existingAgentScript =
       parsed.body.scope === "global"
-        ? getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
+        ? await getScript({ name: parsed.body.name, scope: "agent", scopeId: agent.id })
         : null;
     const argsJsonSchema = await extractArgsJsonSchema(parsed.body.source);
     const result = await upsertScriptByName({
@@ -699,7 +704,7 @@ export async function handleScripts(
     let fsMode = parsed.body.fsMode;
     let namedScript: ScriptRecord | null = null;
     if (parsed.body.name) {
-      const script = resolveScript(parsed.body.name, agent.id, parsed.body.scope);
+      const script = await resolveScript(parsed.body.name, agent.id, parsed.body.scope);
       if (!script) {
         jsonError(res, "Script not found", 404);
         return true;
@@ -718,7 +723,7 @@ export async function handleScripts(
     // Touch before executing so an already-stale scratch script isn't reaped
     // by the retention sweep while this run is still in flight.
     const runStartTouch = namedScript?.isScratch
-      ? touchScratchScriptLastUsed(namedScript.id)
+      ? await touchScratchScriptLastUsed(namedScript.id)
       : null;
     const credentials = await buildScriptCredentialBindingsWithFailures({ agentId: agent.id });
     const output = await runScript({
@@ -734,12 +739,16 @@ export async function handleScripts(
     const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
 
     if (namedScript?.isScratch && ok) {
-      touchScratchScriptLastUsed(namedScript.id);
+      await touchScratchScriptLastUsed(namedScript.id);
     } else if (namedScript?.isScratch && runStartTouch) {
       // Failed run — restore the pre-run timestamp so it doesn't buy the
       // script another retention window, unless a concurrent run already
       // touched it since.
-      restoreScratchScriptLastUsedIfUnchanged(namedScript.id, namedScript.updatedAt, runStartTouch);
+      await restoreScratchScriptLastUsedIfUnchanged(
+        namedScript.id,
+        namedScript.updatedAt,
+        runStartTouch,
+      );
     }
 
     // Persist output to KV when idempotencyKey is provided and run succeeded
@@ -869,10 +878,12 @@ export async function handleScripts(
   if (listScriptsRoute.match(req.method, pathSegments)) {
     const parsed = await listScriptsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const scripts: ScriptListItem[] = listScripts({
-      scope: parsed.query.scope,
-      includeScratch: parsed.query.includeScratch === "true",
-    }).map((script) => ({
+    const scripts: ScriptListItem[] = (
+      await listScripts({
+        scope: parsed.query.scope,
+        includeScratch: parsed.query.includeScratch === "true",
+      })
+    ).map((script) => ({
       id: script.id,
       name: script.name,
       scope: script.scope,
@@ -907,7 +918,7 @@ export async function handleScripts(
   if (getScriptByIdRoute.match(req.method, pathSegments)) {
     const parsed = await getScriptByIdRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const script = getScriptById(parsed.params.id);
+    const script = await getScriptById(parsed.params.id);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -928,11 +939,11 @@ export async function handleScripts(
   if (listVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getScriptById(parsed.params.id)) {
+    if (!(await getScriptById(parsed.params.id))) {
       jsonError(res, "Script not found", 404);
       return true;
     }
-    listVersionsRoute.respond(res, 200, { versions: listScriptVersions(parsed.params.id) });
+    listVersionsRoute.respond(res, 200, { versions: await listScriptVersions(parsed.params.id) });
     return true;
   }
 
@@ -942,7 +953,7 @@ export async function handleScripts(
     const agent = requireAgent(res, agentId);
     if (!agent) return true;
 
-    const script = resolveScript(parsed.params.name, agent.id, parsed.query.scope);
+    const script = await resolveScript(parsed.params.name, agent.id, parsed.query.scope);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -992,7 +1003,7 @@ export async function handleScripts(
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
     };
-    const existing = getScript(identity);
+    const existing = await getScript(identity);
     if (existing) {
       // An app that wires this script as a source or a script action would be
       // left with a dangling reference: its definition stops parsing and every
@@ -1012,7 +1023,7 @@ export async function handleScripts(
       }
     }
 
-    const deleted = deleteScript(identity);
+    const deleted = await deleteScript(identity);
     deleteRoute.respond(res, 200, { deleted });
     return true;
   }
@@ -1021,7 +1032,7 @@ export async function handleScripts(
   if (createScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await createScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const script = getScriptById(parsed.params.id);
+    const script = await getScriptById(parsed.params.id);
     if (!script) {
       jsonError(res, "Script not found", 404);
       return true;
@@ -1033,7 +1044,7 @@ export async function handleScripts(
       jsonError(res, "agentId is required: this script has no owning agent to run as", 400);
       return true;
     }
-    const endpoint = createScriptApi({
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: runAsAgentId,
       authMode: parsed.body.authMode,
@@ -1047,35 +1058,40 @@ export async function handleScripts(
   if (listScriptApisRoute.match(req.method, pathSegments)) {
     const parsed = await listScriptApisRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getScriptById(parsed.params.id)) {
+    if (!(await getScriptById(parsed.params.id))) {
       jsonError(res, "Script not found", 404);
       return true;
     }
-    listScriptApisRoute.respond(res, 200, { apis: listScriptApisForScript(parsed.params.id) });
+    listScriptApisRoute.respond(res, 200, {
+      apis: await listScriptApisForScript(parsed.params.id),
+    });
     return true;
   }
 
   if (revealScriptApiSecretRoute.match(req.method, pathSegments)) {
     const parsed = await revealScriptApiSecretRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const endpoint = getScriptApiById(parsed.params.endpointId);
+    const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
       return true;
     }
-    revealScriptApiSecretRoute.respond(res, 200, { token: getScriptApiSecret(endpoint.id) });
+    revealScriptApiSecretRoute.respond(res, 200, { token: await getScriptApiSecret(endpoint.id) });
     return true;
   }
 
   if (rotateScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await rotateScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const endpoint = getScriptApiById(parsed.params.endpointId);
+    const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
       return true;
     }
-    const rotated = rotateScriptApiSecret(endpoint.id, await resolveHttpAuditUserId(req, agentId));
+    const rotated = await rotateScriptApiSecret(
+      endpoint.id,
+      await resolveHttpAuditUserId(req, agentId),
+    );
     if (!rotated) {
       jsonError(res, "Cannot rotate a token on a 'none' auth endpoint", 400);
       return true;
@@ -1087,12 +1103,12 @@ export async function handleScripts(
   if (patchScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await patchScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const endpoint = getScriptApiById(parsed.params.endpointId);
+    const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
       return true;
     }
-    const updated = updateScriptApi(endpoint.id, {
+    const updated = await updateScriptApi(endpoint.id, {
       enabled: parsed.body.enabled,
       label: parsed.body.label,
       updatedBy: await resolveHttpAuditUserId(req, agentId),
@@ -1104,12 +1120,12 @@ export async function handleScripts(
   if (deleteScriptApiRoute.match(req.method, pathSegments)) {
     const parsed = await deleteScriptApiRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const endpoint = getScriptApiById(parsed.params.endpointId);
+    const endpoint = await getScriptApiById(parsed.params.endpointId);
     if (!endpoint || endpoint.scriptId !== parsed.params.id) {
       jsonError(res, "Endpoint not found", 404);
       return true;
     }
-    deleteScriptApiRoute.respond(res, 200, { deleted: deleteScriptApi(endpoint.id) });
+    deleteScriptApiRoute.respond(res, 200, { deleted: await deleteScriptApi(endpoint.id) });
     return true;
   }
 

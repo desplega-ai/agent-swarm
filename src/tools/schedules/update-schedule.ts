@@ -216,7 +216,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (!mergedScriptName) {
           return toolErr("scriptName is required when targetType is 'script'.");
         }
-        if (!getScript({ name: mergedScriptName, scope: "global" })) {
+        if (!(await getScript({ name: mergedScriptName, scope: "global" }))) {
           return toolErr(`Script not found: ${mergedScriptName}`);
         }
       }

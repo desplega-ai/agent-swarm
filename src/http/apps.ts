@@ -1005,7 +1005,7 @@ export async function handleApps(
       );
       return true;
     }
-    const definition = parseAppDefinition(parsed.body.definition, {
+    const definition = await parseAppDefinition(parsed.body.definition, {
       resolveApp: getApp,
       writerAgentId: myAgentId ?? null,
       writerIsUser: getRequestAuth(req)?.kind === "user",
@@ -1316,7 +1316,7 @@ export async function handleApps(
     const action = actions[parsed.params.name]!;
     const input = parsed.body.input ?? {};
     if (action.kind === "script") {
-      const script = getScriptById(action.scriptId);
+      const script = await getScriptById(action.scriptId);
       if (!script) {
         json(
           res,
@@ -1478,7 +1478,7 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
-        const definition = parseAppDefinition(patch.definition, {
+        const definition = await parseAppDefinition(patch.definition, {
           currentAppId: parsed.params.id,
           resolveApp: getApp,
           writerAgentId: myAgentId ?? null,
@@ -1556,7 +1556,7 @@ export async function handleApps(
         }
         let definition: AppDefinition | undefined;
         if (parsed.body.definition !== undefined) {
-          const parsedDefinition = parseAppDefinition(parsed.body.definition, {
+          const parsedDefinition = await parseAppDefinition(parsed.body.definition, {
             currentAppId: parsed.params.id,
             resolveApp: getApp,
             writerAgentId: myAgentId ?? null,

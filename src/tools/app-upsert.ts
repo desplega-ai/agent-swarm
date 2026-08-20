@@ -83,7 +83,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
               data: { appId, url: `/apps/${appId}` },
             });
           }
-          const parsed = parseAppDefinition(input.definition, {
+          const parsed = await parseAppDefinition(input.definition, {
             currentAppId: appId,
             resolveApp: getApp,
             writerAgentId: requestInfo.agentId,
@@ -150,7 +150,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
         return toolErr("migration requires appId; new apps have no rows to migrate.");
       if (input.forceElementBreak)
         return toolErr("forceElementBreak requires appId; new apps have no consumers to break.");
-      const parsed = parseAppDefinition(input.definition, {
+      const parsed = await parseAppDefinition(input.definition, {
         resolveApp: getApp,
         writerAgentId: requestInfo.agentId,
       });

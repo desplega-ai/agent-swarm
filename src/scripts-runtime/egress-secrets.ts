@@ -10,7 +10,7 @@ export type EgressSecretEntry = ResolvedCredentialBinding;
 
 export async function buildEgressSecrets(): Promise<EgressSecretEntry[]> {
   const broker = new CredentialBroker(
-    { listActiveBindings: () => [] },
+    { listActiveBindings: async () => [] },
     (configKey) => process.env[configKey],
     DEFAULT_CREDENTIAL_BINDINGS,
   );

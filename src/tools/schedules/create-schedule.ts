@@ -247,7 +247,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         if (!scriptName) {
           return toolErr("scriptName is required when targetType is 'script'.");
         }
-        if (!getScript({ name: scriptName, scope: "global" })) {
+        if (!(await getScript({ name: scriptName, scope: "global" }))) {
           return toolErr(`Script not found: ${scriptName}`);
         }
       }

@@ -370,7 +370,7 @@ export async function handleSchedules(
         jsonError(res, "scriptName is required when targetType is 'script'.", 400);
         return true;
       }
-      if (!getScript({ name: body.scriptName, scope: "global" })) {
+      if (!(await getScript({ name: body.scriptName, scope: "global" }))) {
         jsonError(res, `Script not found: ${body.scriptName}`, 400);
         return true;
       }
@@ -605,7 +605,7 @@ export async function handleSchedules(
         jsonError(res, "scriptName is required when targetType is 'script'.", 400);
         return true;
       }
-      if (!getScript({ name: mergedScriptName, scope: "global" })) {
+      if (!(await getScript({ name: mergedScriptName, scope: "global" }))) {
         jsonError(res, `Script not found: ${mergedScriptName}`, 400);
         return true;
       }

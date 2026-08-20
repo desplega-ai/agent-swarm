@@ -43,7 +43,7 @@ export class CredentialBroker {
   async resolveBindingsWithFailures(
     context: Parameters<CredentialBindingStore["listActiveBindings"]>[0],
   ): Promise<{ resolved: ResolvedCredentialBinding[]; failed: FailedCredentialBinding[] }> {
-    const merged = [...this.defaults, ...this.store.listActiveBindings(context)];
+    const merged = [...this.defaults, ...(await this.store.listActiveBindings(context))];
     const resolved: ResolvedCredentialBinding[] = [];
     const failed: FailedCredentialBinding[] = [];
     const seen = new Set<string>();

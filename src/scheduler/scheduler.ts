@@ -76,7 +76,7 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
     throw new Error(`Schedule "${schedule.name}" has no scriptName (targetType=script)`);
   }
 
-  const script = getScript({ name: schedule.scriptName, scope: "global" });
+  const script = await getScript({ name: schedule.scriptName, scope: "global" });
   if (!script) {
     throw new Error(`Script '${schedule.scriptName}' not found`);
   }

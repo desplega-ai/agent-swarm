@@ -343,7 +343,7 @@ export async function handleCore(
   }
 
   if (auth?.kind === "user" && isRbacEnabled()) {
-    const grant = getUserGrant(auth.userId);
+    const grant = await getUserGrant(auth.userId);
     if (!grant.grantsAll) {
       const def = findRoute(req.method, pathSegments);
       const decision = decideAdmission({

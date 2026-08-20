@@ -604,7 +604,7 @@ describe("script MCP connections", () => {
         mcpServerId: mcpServer.id,
         agentId: lead.id,
       });
-      setScriptConnectionEnabled(globalConnection.id, false);
+      await setScriptConnectionEnabled(globalConnection.id, false);
 
       const disabled = await dispatchProxyApi(
         `/api/script-connections/${globalConnection.id}/mcp-call`,

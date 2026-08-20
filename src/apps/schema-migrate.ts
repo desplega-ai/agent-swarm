@@ -311,10 +311,12 @@ async function exportedElementCompatibilityIssues(
     let parseable = false;
     try {
       raw = JSON.parse(row.definition);
-      parseable = parseAppDefinition(upgradeAppDefinition(raw), {
-        currentAppId: row.id,
-        skipExternalTargetResolution: true,
-      }).success;
+      parseable = (
+        await parseAppDefinition(upgradeAppDefinition(raw), {
+          currentAppId: row.id,
+          skipExternalTargetResolution: true,
+        })
+      ).success;
     } catch {
       raw = row.definition;
     }

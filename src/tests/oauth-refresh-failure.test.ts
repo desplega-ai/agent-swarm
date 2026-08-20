@@ -147,14 +147,14 @@ describe("OAuth refresh failure semantics", () => {
   test("the broker surfaces a failed OAuth binding while other bindings still resolve", async () => {
     await upsertOAuthApp("acme", { ...appConfig("acme"), displayName: "Acme Corp" });
     const authId = await seedDefault("acme", "acme-refresh", 60 * 1000);
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "ACME_OAUTH",
       allowedHosts: ["api.acme.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:ACME_OAUTH]",
       authKind: "oauth",
       oauthAuthorizationId: authId,
     });
-    upsertCredentialBinding({
+    await upsertCredentialBinding({
       configKey: "HEALTHY_CONFIG",
       allowedHosts: ["api.acme.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:HEALTHY_CONFIG]",

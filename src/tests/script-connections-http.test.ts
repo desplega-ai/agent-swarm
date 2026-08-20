@@ -325,7 +325,7 @@ describe("/api/script-connections HTTP", () => {
       openapiSpecJson: inlineOpenApiSpec(),
       enabled: false,
     });
-    setScriptConnectionEnabled(connection.id, false);
+    await setScriptConnectionEnabled(connection.id, false);
 
     const res = await dispatch("/api/script-connections", {
       method: "POST",
