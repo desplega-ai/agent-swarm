@@ -168,7 +168,10 @@ function emitTaskLifecycleTelemetryAfterCommit(
   props: TaskTelemetryProps,
   verify?: (task: AgentTask | null) => boolean,
 ): void {
-  queueMicrotask(() => {
+  // afterSettled (not queueMicrotask): under an async client transaction,
+  // microtasks drain before COMMIT, so the verify read could observe
+  // uncommitted state. afterSettled runs strictly post-COMMIT/ROLLBACK.
+  getDbClient().afterSettled(() => {
     if (verify && !verify(getTaskById(props.taskId))) return;
     telemetry.taskEvent(event, props);
   });
