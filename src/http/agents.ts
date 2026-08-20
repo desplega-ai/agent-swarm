@@ -9,7 +9,7 @@ import {
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   resetEmptyPollCount,
   setAgentHarnessProvider,
@@ -379,7 +379,7 @@ export async function handleAgentRegister(
 
     const agentId = myAgentId || crypto.randomUUID();
 
-    const result = getDb().transaction(() => {
+    const result = await getDbClient().transaction(async () => {
       const existingAgent = getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
@@ -420,7 +420,7 @@ export async function handleAgentRegister(
       });
 
       return { agent, created: true };
-    })();
+    });
 
     telemetry.agent("registered", {
       role: parsed.body.role,
@@ -729,13 +729,10 @@ export async function handleAgentsRest(
       }
     }
 
-    // Not wrapped in a getDb().transaction() — the swarm_config writes below
-    // go through the async DbClient seam, which can't run inside a
-    // synchronous transaction callback. Each write below is independently
-    // atomic (single UPDATE/INSERT ... RETURNING); a crash mid-sequence can
-    // no longer roll back the whole PATCH as one unit.
-    const agent = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
-    if (agent) {
+    const agent = await getDbClient().transaction(async () => {
+      const updated = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
+      if (!updated) return null;
+
       await upsertSwarmConfig({
         scope: "agent",
         scopeId: parsed.params.id,
@@ -776,7 +773,10 @@ export async function handleAgentsRest(
           description: "Set via PATCH /api/agents/{id}/runtime",
         });
       }
-    }
+
+      return updated;
+    });
+
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;

@@ -296,7 +296,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   checkWorkerHealth(findings);
 
   // 3. Auto-assign pool tasks to idle workers
-  autoAssignPoolTasks(findings);
+  await autoAssignPoolTasks(findings);
 
   // 4. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
@@ -757,8 +757,8 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at
  * `POOL_SCAN_CAP` rows scanned).
  */
-function autoAssignPoolTasks(findings: HeartbeatFindings): void {
-  getDb().transaction(() => {
+async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
+  await getDbClient().transaction(async () => {
     // Skip idle workers whose accumulated empty-poll count has hit the gate;
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
@@ -808,7 +808,7 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
       offset += batch.length;
       if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
     }
-  })();
+  });
 }
 
 /**
@@ -879,7 +879,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
     //    cancel so the pin is retried next sweep instead of being stranded.
     let escalation: { decisionTaskId: string } | null = null;
     try {
-      escalation = getDb().transaction(() => {
+      escalation = await getDbClient().transaction(async () => {
         const terminalized = failPendingResumeIfUnclaimed(
           resume.id,
           "cancelled",
@@ -897,7 +897,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
           throw new Error(`reroute-decision not created: ${decision.reason}`);
         }
         return { decisionTaskId: decision.task.id };
-      })();
+      });
     } catch (err) {
       console.warn(
         `[Heartbeat] Reroute escalation rolled back for resume ${resume.id.slice(0, 8)} — ${

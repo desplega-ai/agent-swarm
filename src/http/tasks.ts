@@ -10,7 +10,7 @@ import {
   failTask,
   getAgentById,
   getAllTasks,
-  getDb,
+  getDbClient,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
@@ -1227,56 +1227,58 @@ export async function handleTasks(
     ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
       !("alreadyFinished" in r && r.alreadyFinished);
 
-    const result = getDb().transaction((): FinishTaskTransactionResult => {
-      const task = getTaskById(parsed.params.id);
+    const result = await getDbClient().transaction(
+      async (): Promise<FinishTaskTransactionResult> => {
+        const task = getTaskById(parsed.params.id);
 
-      if (!task) {
-        return { error: "Task not found", status: 404 };
-      }
-
-      if (task.agentId && task.agentId !== myAgentId) {
-        return { error: "Task is assigned to another agent", status: 403 };
-      }
-
-      const terminalResultGuard = guardTerminalTaskResultWrite(task, parsed.body);
-      if (terminalResultGuard.handled) {
-        const { handled: _handled, ...guardResult } = terminalResultGuard;
-        return { ...guardResult, alreadyFinished: true };
-      }
-
-      if (task.status !== "in_progress") {
-        return { success: true, task, alreadyFinished: true };
-      }
-
-      const wasPaused = task.wasPaused;
-
-      let updatedTask: typeof task;
-      if (parsed.body.status === "completed") {
-        const result = completeTask(
-          parsed.params.id,
-          parsed.body.output || "Completed by runner wrapper (no explicit output)",
-        );
-        if (!result) {
-          return { error: "Failed to complete task", status: 500 };
+        if (!task) {
+          return { error: "Task not found", status: 404 };
         }
-        updatedTask = result;
-      } else {
-        const result = failTask(
-          parsed.params.id,
-          parsed.body.failureReason || "Process exited without explicit completion",
-        );
-        if (!result) {
-          return { error: "Failed to mark task as failed", status: 500 };
+
+        if (task.agentId && task.agentId !== myAgentId) {
+          return { error: "Task is assigned to another agent", status: 403 };
         }
-        updatedTask = result;
-      }
 
-      if (task.agentId) {
-        updateAgentStatusFromCapacity(task.agentId);
-      }
+        const terminalResultGuard = guardTerminalTaskResultWrite(task, parsed.body);
+        if (terminalResultGuard.handled) {
+          const { handled: _handled, ...guardResult } = terminalResultGuard;
+          return { ...guardResult, alreadyFinished: true };
+        }
 
-      return { task: updatedTask, wasPaused };
-    })();
+        if (task.status !== "in_progress") {
+          return { success: true, task, alreadyFinished: true };
+        }
+
+        const wasPaused = task.wasPaused;
+
+        let updatedTask: typeof task;
+        if (parsed.body.status === "completed") {
+          const result = completeTask(
+            parsed.params.id,
+            parsed.body.output || "Completed by runner wrapper (no explicit output)",
+          );
+          if (!result) {
+            return { error: "Failed to complete task", status: 500 };
+          }
+          updatedTask = result;
+        } else {
+          const result = failTask(
+            parsed.params.id,
+            parsed.body.failureReason || "Process exited without explicit completion",
+          );
+          if (!result) {
+            return { error: "Failed to mark task as failed", status: 500 };
+          }
+          updatedTask = result;
+        }
+
+        if (task.agentId) {
+          updateAgentStatusFromCapacity(task.agentId);
+        }
+
+        return { task: updatedTask, wasPaused };
+      },
+    );
 
     if (hasFinishError(result)) {
       jsonError(res, result.error, result.status ?? 500);

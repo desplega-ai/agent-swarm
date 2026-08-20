@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
-import { getAgentById, getDb, getDbClient } from "@/be/db";
+import { getAgentById, getDbClient } from "@/be/db";
 import {
   createOAuthApp,
   deleteAuthorizationById,
@@ -1816,21 +1816,22 @@ function collectOAuthAppDeletionWarnings(app: OAuthApp): string[] {
   return warnings;
 }
 
-function deleteOAuthApp(idOrProvider: string): { deleted: boolean; warnings: string[] } {
+async function deleteOAuthApp(
+  idOrProvider: string,
+): Promise<{ deleted: boolean; warnings: string[] }> {
   // Resolve id first (exact — N apps per provider allowed), then provider slug
   // for old provider-keyed callers. Never touches DCR/MCP apps.
   const existing = getOAuthAppById(idOrProvider) ?? getOAuthApp(idOrProvider);
   if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
   const warnings = collectOAuthAppDeletionWarnings(existing);
-  const tx = getDb().transaction(() => {
+  await getDbClient().transaction(async (tx) => {
     // Revoke by THIS app's id — not the provider-keyed `deleteOAuthTokens`,
     // which targets the oldest same-provider app and would disconnect a
     // surviving sibling. The app DELETE also CASCADEs its authorizations; this
     // explicit delete keeps the scoping correct regardless of FK enforcement.
     deleteAuthorizationsForApp(existing.id);
-    getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
+    await tx.run("DELETE FROM oauth_apps WHERE id = ?", [existing.id]);
   });
-  tx();
   return { deleted: true, warnings };
 }
 
@@ -2244,7 +2245,7 @@ export async function handleScriptConnections(
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
-    const deletion = deleteOAuthApp(parsed.params.provider);
+    const deletion = await deleteOAuthApp(parsed.params.provider);
     if (!deletion.deleted) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;

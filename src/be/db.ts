@@ -13986,56 +13986,6 @@ export async function recordBudgetRefusalNotification(
 }
 
 /**
- * DEFERRED (transaction rule): sync counterpart of
- * `recordBudgetRefusalNotification`, kept for the budget-refusal dedup write
- * at `/api/poll`'s pre-assigned/pool gates — both run inside a raw synchronous
- * `getDb().transaction()` callback, which cannot await.
- */
-export function recordBudgetRefusalNotificationSync(input: RecordBudgetRefusalNotificationInput): {
-  inserted: boolean;
-  row: BudgetRefusalNotification;
-} {
-  const db = getDb();
-  const now = Date.now();
-  const result = db
-    .prepare(
-      `INSERT OR IGNORE INTO budget_refusal_notifications
-       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
-    )
-    .run(
-      input.taskId,
-      input.date,
-      input.agentId,
-      input.cause,
-      input.agentSpendUsd ?? null,
-      input.agentBudgetUsd ?? null,
-      input.globalSpendUsd ?? null,
-      input.globalBudgetUsd ?? null,
-      input.userSpendUsd ?? null,
-      input.userBudgetUsd ?? null,
-      now,
-    );
-
-  const existing = db
-    .prepare<BudgetRefusalNotificationRow, [string, string]>(
-      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    )
-    .get(input.taskId, input.date);
-
-  if (!existing) {
-    throw new Error(
-      `recordBudgetRefusalNotificationSync: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
-    );
-  }
-
-  return {
-    inserted: result.changes > 0,
-    row: rowToBudgetRefusalNotification(existing),
-  };
-}
-
-/**
  * Lookup helper used by tests and by the Phase 5 follow-up-task write-back.
  */
 export async function getBudgetRefusalNotification(

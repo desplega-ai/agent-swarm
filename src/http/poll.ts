@@ -12,15 +12,16 @@ import {
   claimTask,
   getAgentById,
   getAllChannelActivityCursors,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getTaskAttachments,
   getTaskById,
   getUnassignedTaskIdsForAgent,
+  getUserById,
   hasCapacity,
-  recordBudgetRefusalNotificationSync,
+  recordBudgetRefusalNotification,
   startTask,
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
@@ -260,7 +261,7 @@ export async function handlePoll(
         };
     let result: PollTxnResult;
     try {
-      result = getDb().transaction(() => {
+      result = await getDbClient().transaction(async () => {
         const agent = getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
@@ -295,7 +296,7 @@ export async function handlePoll(
             const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
-              const dedup = recordBudgetRefusalNotificationSync({
+              const dedup = await recordBudgetRefusalNotification({
                 taskId: pendingTask.id,
                 date: utcDate,
                 agentId: myAgentId,
@@ -339,26 +340,31 @@ export async function handlePoll(
             startTask(pendingTask.id);
             updateAgentStatusFromCapacity(myAgentId);
 
-            ensure({
-              id: "started",
-              flow: "task",
-              runId: pendingTask.id,
-              depIds: ["created"],
-              data: {
-                taskId: pendingTask.id,
-                agentId: myAgentId,
-                previousStatus: pendingTask.status,
-              },
-              validator: (data) => data.previousStatus === "pending",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
-            });
+            // Lifecycle announcements go through `afterSettled`, not straight
+            // line: they must not claim "this task started" for a claim the
+            // transaction can still roll back.
+            getDbClient().afterSettled(() => {
+              ensure({
+                id: "started",
+                flow: "task",
+                runId: pendingTask.id,
+                depIds: ["created"],
+                data: {
+                  taskId: pendingTask.id,
+                  agentId: myAgentId,
+                  previousStatus: pendingTask.status,
+                },
+                validator: (data) => data.previousStatus === "pending",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
+              });
 
-            telemetry.taskEvent("started", {
-              taskId: pendingTask.id,
-              source: pendingTask.source,
-              agentId: myAgentId,
+              telemetry.taskEvent("started", {
+                taskId: pendingTask.id,
+                source: pendingTask.source,
+                agentId: myAgentId,
+              });
             });
 
             // Resolve requesting user if available. If the task carries a
@@ -366,29 +372,8 @@ export async function handlePoll(
             // no requestedByUserId, render the explicit UNKNOWN sentinel
             // instead of silently omitting the section — never a substituted
             // human (Rule 33 / provenance-or-silence).
-            // NOTE: inline sync lookup (not the async `getUserById`) — this
-            // block runs inside a raw synchronous `db.transaction()`, which
-            // cannot await. Only the name/email/role/notes columns are needed.
-            const requestedByUserRow = pendingTask.requestedByUserId
-              ? getDb()
-                  .prepare<
-                    {
-                      name: string;
-                      email: string | null;
-                      role: string | null;
-                      notes: string | null;
-                    },
-                    [string]
-                  >("SELECT name, email, role, notes FROM users WHERE id = ?")
-                  .get(pendingTask.requestedByUserId)
-              : undefined;
-            const requestedByUser = requestedByUserRow
-              ? {
-                  name: requestedByUserRow.name,
-                  email: requestedByUserRow.email ?? undefined,
-                  role: requestedByUserRow.role ?? undefined,
-                  notes: requestedByUserRow.notes ?? undefined,
-                }
+            const requestedByUser = pendingTask.requestedByUserId
+              ? await getUserById(pendingTask.requestedByUserId)
               : undefined;
             const requestedByNotes = getRequesterNotes(requestedByUser?.notes);
             const requestedByUnknownName =
@@ -476,7 +461,7 @@ export async function handlePoll(
               const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
-                const dedup = recordBudgetRefusalNotificationSync({
+                const dedup = await recordBudgetRefusalNotification({
                   taskId: candidateId,
                   date: utcDate,
                   agentId: myAgentId,
@@ -522,10 +507,14 @@ export async function handlePoll(
               const claimed = claimTask(candidateId, myAgentId);
               if (claimed) {
                 updateAgentStatusFromCapacity(myAgentId);
-                telemetry.taskEvent("claimed", {
-                  taskId: claimed.id,
-                  source: claimed.source,
-                  agentId: myAgentId,
+                // Post-commit (see the `started` path above): a rolled-back
+                // claim must not report the task as claimed.
+                getDbClient().afterSettled(() => {
+                  telemetry.taskEvent("claimed", {
+                    taskId: claimed.id,
+                    source: claimed.source,
+                    agentId: myAgentId,
+                  });
                 });
                 return {
                   trigger: {
@@ -542,7 +531,7 @@ export async function handlePoll(
 
         // No trigger found
         return { trigger: null };
-      })();
+      });
     } catch (error) {
       console.error("[/api/poll] Database error:", error);
       jsonError(

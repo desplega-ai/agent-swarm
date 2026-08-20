@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   getAgentById,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
@@ -480,12 +480,10 @@ export async function handleCore(
       return true;
     }
 
-    const tx = getDb().transaction(() => {
+    const found = await getDbClient().transaction(async () => {
       const agent = getAgentById(myAgentId);
 
       if (!agent) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
       }
 
@@ -505,7 +503,9 @@ export async function handleCore(
       return true;
     });
 
-    if (!tx()) {
+    if (!found) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
     }
 
@@ -521,12 +521,10 @@ export async function handleCore(
       return true;
     }
 
-    const tx = getDb().transaction(() => {
+    const found = await getDbClient().transaction(async () => {
       const agent = getAgentById(myAgentId);
 
       if (!agent) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
       }
 
@@ -535,7 +533,9 @@ export async function handleCore(
       return true;
     });
 
-    if (!tx()) {
+    if (!found) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
     }
 

@@ -1,7 +1,7 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
 import {
-  getDb,
+  getDbClient,
   getDueScheduledTasks,
   getScheduledTaskById,
   getWorkflow,
@@ -171,7 +171,9 @@ export async function dispatchScheduleTarget(
         }
       }
       if (!triggeredWorkflows) {
-        const task = getDb().transaction(() => createStandaloneScheduleTask(schedule, extraTags))();
+        const task = await getDbClient().transaction(async () =>
+          createStandaloneScheduleTask(schedule, extraTags),
+        );
         return { triggeredWorkflows, task };
       }
       return { triggeredWorkflows, workflowRunIds };
