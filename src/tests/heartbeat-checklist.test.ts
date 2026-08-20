@@ -193,7 +193,7 @@ describe("Heartbeat Checklist", () => {
 
     test("skips when heartbeatMd is effectively empty (all comments/headers)", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n<!-- No items yet -->\n",
       });
 
@@ -207,7 +207,7 @@ describe("Heartbeat Checklist", () => {
 
     test("creates task when heartbeatMd has real content", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n- Check if any tasks are stuck\n",
       });
 
@@ -223,7 +223,7 @@ describe("Heartbeat Checklist", () => {
 
     test("dedup: skips when active heartbeat-checklist task exists for lead", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
@@ -241,7 +241,7 @@ describe("Heartbeat Checklist", () => {
 
     test("created task includes system status with [auto-generated] labels", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Review stalled tasks\n",
       });
 
@@ -257,7 +257,7 @@ describe("Heartbeat Checklist", () => {
 
     test("created task includes HEARTBEAT.md content", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n- Review blocked tasks\n",
       });
 
@@ -273,7 +273,7 @@ describe("Heartbeat Checklist", () => {
 
     test("created task enforces HEARTBEAT tracked-item cap and seeded audit call", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Watch PR #123 until 2026-06-07\n",
       });
 
@@ -293,7 +293,7 @@ describe("Heartbeat Checklist", () => {
 
     test("created task has correct tags", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
@@ -377,7 +377,7 @@ describe("Heartbeat Checklist", () => {
 
     test("includes heartbeatMd content when available", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n",
       });
 
@@ -407,7 +407,7 @@ describe("Heartbeat Checklist", () => {
 
     test("dedup: skips when active boot-triage task exists", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 
@@ -434,7 +434,7 @@ describe("Heartbeat Checklist", () => {
 
     test("boot-triage and heartbeat-checklist are independent (different taskTypes)", async () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
-      updateAgentProfile(lead.id, {
+      await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
 

@@ -549,7 +549,7 @@ describe("REST API Endpoints", () => {
       const task = createTaskExtended("Task with attachments", {
         creatorAgentId: "test-agent-attach",
       });
-      insertTaskAttachment({
+      await insertTaskAttachment({
         taskId: task.id,
         kind: "url",
         name: "report",
@@ -557,7 +557,7 @@ describe("REST API Endpoints", () => {
         intent: "primary deliverable",
         isPrimary: true,
       });
-      insertTaskAttachment({
+      await insertTaskAttachment({
         taskId: task.id,
         kind: "agent-fs",
         name: "doc",

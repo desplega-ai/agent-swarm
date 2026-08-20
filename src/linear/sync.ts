@@ -443,7 +443,7 @@ async function resolveLinearActor(
     valueType: "json",
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
-  incrKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`, 1);
+  await incrKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`, 1);
   return undefined;
 }
 

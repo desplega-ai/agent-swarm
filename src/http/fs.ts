@@ -360,7 +360,7 @@ async function sendUpload(
 
   try {
     const auth = getCurrentRequestAuth();
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: query.name,

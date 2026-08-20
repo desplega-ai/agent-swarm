@@ -79,7 +79,7 @@ export async function recordUnmappedIdentity(
     expiresAt,
   });
 
-  const incremented = incrKv(ns, countKey, 1);
+  const incremented = await incrKv(ns, countKey, 1);
 
   // First-mint TTL patch. Only patch when:
   //   * The pre-incr snapshot showed no row (or expired)

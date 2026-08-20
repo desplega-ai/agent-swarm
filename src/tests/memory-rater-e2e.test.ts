@@ -299,7 +299,7 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     expect(readPosterior(memA.id).alpha).toBeCloseTo(2.0, 5);
 
     // session_logs cite mem-A but NOT mem-B.
-    createSessionLogs({
+    await createSessionLogs({
       taskId,
       sessionId: "session-c",
       iteration: 1,

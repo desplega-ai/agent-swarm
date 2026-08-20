@@ -82,13 +82,13 @@ describe("update-profile agentId authorization", () => {
       expect(version!.changedByAgentId).toBe(leadId);
     });
 
-    test("lead updates worker name", () => {
+    test("lead updates worker name", async () => {
       const updated = updateAgentName(workerId, "Renamed Worker");
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("Renamed Worker");
 
       // Rename back for other tests
-      updateAgentName(workerId, "Test Worker");
+      await updateAgentName(workerId, "Test Worker");
     });
   });
 
@@ -176,8 +176,8 @@ describe("update-profile agentId authorization", () => {
   });
 
   describe("changeSource is correct for remote vs self updates", () => {
-    test("lead_coaching changeSource for lead updating worker identityMd", () => {
-      updateAgentProfile(
+    test("lead_coaching changeSource for lead updating worker identityMd", async () => {
+      await updateAgentProfile(
         otherWorkerId,
         { identityMd: "# Identity set by lead" },
         { changeSource: "lead_coaching", changedByAgentId: leadId },
@@ -189,8 +189,8 @@ describe("update-profile agentId authorization", () => {
       expect(version!.changedByAgentId).toBe(leadId);
     });
 
-    test("self_edit changeSource for agent updating own claudeMd", () => {
-      updateAgentProfile(
+    test("self_edit changeSource for agent updating own claudeMd", async () => {
+      await updateAgentProfile(
         workerId,
         { claudeMd: "# My notes" },
         { changeSource: "self_edit", changedByAgentId: workerId },
@@ -202,8 +202,8 @@ describe("update-profile agentId authorization", () => {
       expect(version!.changedByAgentId).toBe(workerId);
     });
 
-    test("lead_coaching changeSource for lead updating worker toolsMd", () => {
-      updateAgentProfile(
+    test("lead_coaching changeSource for lead updating worker toolsMd", async () => {
+      await updateAgentProfile(
         workerId,
         { toolsMd: "# Tools set by lead" },
         { changeSource: "lead_coaching", changedByAgentId: leadId },
@@ -215,8 +215,8 @@ describe("update-profile agentId authorization", () => {
       expect(version!.changedByAgentId).toBe(leadId);
     });
 
-    test("self_edit changeSource for agent updating own setupScript", () => {
-      updateAgentProfile(
+    test("self_edit changeSource for agent updating own setupScript", async () => {
+      await updateAgentProfile(
         otherWorkerId,
         { setupScript: "echo hello" },
         { changeSource: "self_edit", changedByAgentId: otherWorkerId },

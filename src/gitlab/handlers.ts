@@ -108,7 +108,7 @@ async function resolveGitLabSender(
     valueType: "json",
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
-  incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
+  await incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
   return undefined;
 }
 

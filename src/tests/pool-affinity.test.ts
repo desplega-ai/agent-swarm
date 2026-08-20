@@ -63,9 +63,9 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(agent, task)).toBe(true);
     });
 
-    test("sourceAgentId bypass: own work is eligible even with a mismatched role", () => {
+    test("sourceAgentId bypass: own work is eligible even with a mismatched role", async () => {
       const owner = createAgent({ name: "owner", isLead: false, status: "idle" });
-      updateAgentProfile(owner.id, { role: "researcher" });
+      await updateAgentProfile(owner.id, { role: "researcher" });
       const ownerAgent = getAgentById(owner.id)!;
       const task = createTaskExtended("Own work", {
         routingAffinity: affinity({ sourceAgentId: owner.id, role: "coder" }),
@@ -73,9 +73,9 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(ownerAgent, task)).toBe(true);
     });
 
-    test("exact role match is eligible", () => {
+    test("exact role match is eligible", async () => {
       const agent = createAgent({ name: "coder-1", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "coder" });
+      await updateAgentProfile(agent.id, { role: "coder" });
       const coderAgent = getAgentById(agent.id)!;
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
@@ -83,9 +83,9 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(coderAgent, task)).toBe(true);
     });
 
-    test("role mismatch is ineligible", () => {
+    test("role mismatch is ineligible", async () => {
       const agent = createAgent({ name: "researcher-1", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "researcher" });
+      await updateAgentProfile(agent.id, { role: "researcher" });
       const researcherAgent = getAgentById(agent.id)!;
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
@@ -101,9 +101,9 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(agent, task)).toBe(false);
     });
 
-    test("missing role on the task's affinity (capabilities-only) is ineligible for a non-owner — no fail-open", () => {
+    test("missing role on the task's affinity (capabilities-only) is ineligible for a non-owner — no fail-open", async () => {
       const agent = createAgent({ name: "coder-2", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "coder" });
+      await updateAgentProfile(agent.id, { role: "coder" });
       const coderAgent = getAgentById(agent.id)!;
       const task = createTaskExtended("Capability-only task", {
         routingAffinity: affinity({ capabilities: ["datadog"] }),
@@ -111,9 +111,9 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(coderAgent, task)).toBe(false);
     });
 
-    test("capability subset: missing a required capability is ineligible", () => {
+    test("capability subset: missing a required capability is ineligible", async () => {
       const agent = createAgent({ name: "coder-3", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "coder", capabilities: ["typescript"] });
+      await updateAgentProfile(agent.id, { role: "coder", capabilities: ["typescript"] });
       const coderAgent = getAgentById(agent.id)!;
       const task = createTaskExtended("Needs datadog", {
         routingAffinity: affinity({ role: "coder", capabilities: ["datadog"] }),
@@ -121,9 +121,12 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(coderAgent, task)).toBe(false);
     });
 
-    test("capability subset: a superset of required capabilities is eligible", () => {
+    test("capability subset: a superset of required capabilities is eligible", async () => {
       const agent = createAgent({ name: "coder-4", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "coder", capabilities: ["typescript", "datadog"] });
+      await updateAgentProfile(agent.id, {
+        role: "coder",
+        capabilities: ["typescript", "datadog"],
+      });
       const coderAgent = getAgentById(agent.id)!;
       const task = createTaskExtended("Needs datadog", {
         routingAffinity: affinity({ role: "coder", capabilities: ["datadog"] }),
@@ -131,12 +134,12 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(coderAgent, task)).toBe(true);
     });
 
-    test("kill-switch: POOL_AFFINITY_ENFORCEMENT=0 makes every task eligible", () => {
+    test("kill-switch: POOL_AFFINITY_ENFORCEMENT=0 makes every task eligible", async () => {
       const previous = process.env.POOL_AFFINITY_ENFORCEMENT;
       process.env.POOL_AFFINITY_ENFORCEMENT = "0";
       try {
         const agent = createAgent({ name: "researcher-2", isLead: false, status: "idle" });
-        updateAgentProfile(agent.id, { role: "researcher" });
+        await updateAgentProfile(agent.id, { role: "researcher" });
         const researcherAgent = getAgentById(agent.id)!;
         const task = createTaskExtended("Coding task", {
           routingAffinity: affinity({ role: "coder" }),
@@ -157,9 +160,9 @@ describe("Pool Affinity", () => {
   // ==========================================================================
 
   describe("claimTask", () => {
-    test("rejects an ineligible agent and logs task_claim_rejected_affinity", () => {
+    test("rejects an ineligible agent and logs task_claim_rejected_affinity", async () => {
       const researcher = createAgent({ name: "researcher-3", isLead: false, status: "idle" });
-      updateAgentProfile(researcher.id, { role: "researcher" });
+      await updateAgentProfile(researcher.id, { role: "researcher" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -178,11 +181,11 @@ describe("Pool Affinity", () => {
       expect(log?.eventType).toBe("task_claim_rejected_affinity");
     });
 
-    test("an eligible agent can claim after an ineligible agent was rejected", () => {
+    test("an eligible agent can claim after an ineligible agent was rejected", async () => {
       const researcher = createAgent({ name: "researcher-4", isLead: false, status: "idle" });
-      updateAgentProfile(researcher.id, { role: "researcher" });
+      await updateAgentProfile(researcher.id, { role: "researcher" });
       const coder = createAgent({ name: "coder-5", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -195,11 +198,11 @@ describe("Pool Affinity", () => {
       expect(claimed?.agentId).toBe(coder.id);
     });
 
-    test("only one of two eligible agents wins a race for the same task", () => {
+    test("only one of two eligible agents wins a race for the same task", async () => {
       const coderA = createAgent({ name: "coder-6a", isLead: false, status: "idle" });
-      updateAgentProfile(coderA.id, { role: "coder" });
+      await updateAgentProfile(coderA.id, { role: "coder" });
       const coderB = createAgent({ name: "coder-6b", isLead: false, status: "idle" });
-      updateAgentProfile(coderB.id, { role: "coder" });
+      await updateAgentProfile(coderB.id, { role: "coder" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -210,9 +213,9 @@ describe("Pool Affinity", () => {
       expect([first, second].filter((r) => r !== null).length).toBe(1);
     });
 
-    test("own sourceAgentId can reclaim its own affinity-tagged task", () => {
+    test("own sourceAgentId can reclaim its own affinity-tagged task", async () => {
       const agent = createAgent({ name: "owner-2", isLead: false, status: "idle" });
-      updateAgentProfile(agent.id, { role: "researcher" });
+      await updateAgentProfile(agent.id, { role: "researcher" });
       const task = createTaskExtended("Own resumed work", {
         routingAffinity: affinity({ sourceAgentId: agent.id, role: "coder" }),
       });
@@ -228,9 +231,9 @@ describe("Pool Affinity", () => {
   // ==========================================================================
 
   describe("assignUnassignedTaskPending", () => {
-    test("rejects an ineligible agent (defense in depth)", () => {
+    test("rejects an ineligible agent (defense in depth)", async () => {
       const researcher = createAgent({ name: "researcher-5", isLead: false, status: "idle" });
-      updateAgentProfile(researcher.id, { role: "researcher" });
+      await updateAgentProfile(researcher.id, { role: "researcher" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -240,9 +243,9 @@ describe("Pool Affinity", () => {
       expect(getTaskById(task.id)?.status).toBe("unassigned");
     });
 
-    test("assigns an eligible agent", () => {
+    test("assigns an eligible agent", async () => {
       const coder = createAgent({ name: "coder-7", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -258,9 +261,9 @@ describe("Pool Affinity", () => {
   // ==========================================================================
 
   describe("getUnassignedTaskIdsForAgent", () => {
-    test("filters out ineligible tasks and preserves priority/creation ordering", () => {
+    test("filters out ineligible tasks and preserves priority/creation ordering", async () => {
       const coder = createAgent({ name: "coder-8", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
 
       const researchTask = createTaskExtended("Research task", {
         routingAffinity: affinity({ role: "researcher" }),
@@ -296,7 +299,7 @@ describe("Pool Affinity", () => {
       expect(getUnassignedTaskIdsForAgent("00000000-0000-0000-0000-000000000000", 10)).toEqual([]);
     });
 
-    test("paginates past a wall of ineligible affinity tasks larger than the old fixed scan window", () => {
+    test("paginates past a wall of ineligible affinity tasks larger than the old fixed scan window", async () => {
       // PR #954 review: the old implementation fetched a single fixed window
       // (max(limit * 5, 25) = 50 rows for limit=10) and filtered in JS, so an
       // eligible task sorted past row 50 was invisible no matter how many
@@ -304,7 +307,7 @@ describe("Pool Affinity", () => {
       // ahead of one low-priority eligible task — more than the old window —
       // to prove the scan now pages through rather than stopping at row 50.
       const coder = createAgent({ name: "coder-9-pagination", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
 
       for (let i = 0; i < 55; i++) {
         createTaskExtended(`Ineligible research task ${i}`, {
@@ -330,7 +333,7 @@ describe("Pool Affinity", () => {
   describe("autoAssignPoolTasks eligibility", () => {
     test("skips an ineligible idle worker and leaves the task queued", async () => {
       const researcher = createAgent({ name: "idle-researcher", isLead: false, status: "idle" });
-      updateAgentProfile(researcher.id, { role: "researcher" });
+      await updateAgentProfile(researcher.id, { role: "researcher" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -343,9 +346,9 @@ describe("Pool Affinity", () => {
 
     test("assigns to the eligible worker, skipping an ineligible one that sorts first", async () => {
       const researcher = createAgent({ name: "idle-researcher-2", isLead: false, status: "idle" });
-      updateAgentProfile(researcher.id, { role: "researcher" });
+      await updateAgentProfile(researcher.id, { role: "researcher" });
       const coder = createAgent({ name: "idle-coder", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
       const task = createTaskExtended("Coding task", {
         routingAffinity: affinity({ role: "coder" }),
       });
@@ -379,7 +382,7 @@ describe("Pool Affinity", () => {
       // low-priority eligible task, to prove the scan now pages through the
       // pool rather than stopping at the first window.
       const coder = createAgent({ name: "idle-coder-pagination", isLead: false, status: "idle" });
-      updateAgentProfile(coder.id, { role: "coder" });
+      await updateAgentProfile(coder.id, { role: "coder" });
 
       for (let i = 0; i < 55; i++) {
         createTaskExtended(`Ineligible research task ${i}`, {

@@ -46,7 +46,7 @@ async function handleRequest(
     }
 
     try {
-      createSessionLogs({
+      await createSessionLogs({
         taskId: parsedBody.taskId || undefined,
         sessionId: parsedBody.sessionId,
         iteration: parsedBody.iteration,
@@ -146,12 +146,12 @@ describe("Session Logs API", () => {
   });
 
   describe("Database Functions", () => {
-    test("should create and retrieve session logs by taskId", () => {
+    test("should create and retrieve session logs by taskId", async () => {
       // Create a task first
       const task = createTaskExtended("Test task for session logs");
 
       // Create session logs for the task
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "test-session-1",
         iteration: 1,
@@ -173,8 +173,8 @@ describe("Session Logs API", () => {
       expect(logs[1]?.lineNumber).toBe(1);
     });
 
-    test("should create session logs without taskId", () => {
-      createSessionLogs({
+    test("should create session logs without taskId", async () => {
+      await createSessionLogs({
         sessionId: "ai-loop-session",
         iteration: 1,
         cli: "claude",
@@ -189,11 +189,11 @@ describe("Session Logs API", () => {
       expect(logs[0]?.sessionId).toBe("ai-loop-session");
     });
 
-    test("should order logs by iteration and lineNumber", () => {
+    test("should order logs by iteration and lineNumber", async () => {
       const task = createTaskExtended("Task for ordering test");
 
       // Create logs for multiple iterations
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "order-session",
         iteration: 1,
@@ -201,7 +201,7 @@ describe("Session Logs API", () => {
         lines: ["line1-iter1", "line2-iter1"],
       });
 
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "order-session",
         iteration: 2,
@@ -357,7 +357,7 @@ describe("Session Logs API", () => {
       const task = createTaskExtended("Task with logs for GET test");
 
       // Create some logs
-      createSessionLogs({
+      await createSessionLogs({
         taskId: task.id,
         sessionId: "get-test-session",
         iteration: 1,

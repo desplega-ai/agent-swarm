@@ -249,7 +249,7 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
-      createSessionLogs({
+      await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,

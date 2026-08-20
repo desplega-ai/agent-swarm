@@ -3540,13 +3540,15 @@ export interface InsertTaskAttachmentInput {
  *     (kind, path|url|page_id, name) tuple.
  * Returns the stored attachment (newly inserted or pre-existing duplicate).
  */
-export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAttachment {
-  return getDb().transaction(() => {
+export async function insertTaskAttachment(
+  input: InsertTaskAttachmentInput,
+): Promise<TaskAttachment> {
+  return await getDbClient().transaction(async () => {
     const attachment = insertTaskAttachmentRow(input);
     if (attachment.kind === "agent-fs" && attachment.providerId && attachment.providerKey) {
       const task = getTaskById(input.taskId);
       if (!task) throw new Error(`Task not found while mapping attachment: ${input.taskId}`);
-      upsertAssetKeyMapping({
+      await upsertAssetKeyMapping({
         providerId: attachment.providerId,
         providerOrgId: attachment.orgId,
         providerDriveId: attachment.driveId,
@@ -3559,7 +3561,7 @@ export function insertTaskAttachment(input: InsertTaskAttachmentInput): TaskAtta
       });
     }
     return attachment;
-  })();
+  });
 }
 
 function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachment {
@@ -3773,30 +3775,31 @@ export function getAssetKeyMappingByProvider(input: {
  * Idempotently project a provider tuple into a logical namespace. Updating the
  * namespace never calls the provider and never renames remote content.
  */
-export function upsertAssetKeyMapping(input: UpsertAssetKeyMappingInput): AssetKeyMapping {
+export async function upsertAssetKeyMapping(
+  input: UpsertAssetKeyMappingInput,
+): Promise<AssetKeyMapping> {
   if (!input.providerId.trim()) throw new Error("providerId is required");
   if (!input.providerKey.trim()) throw new Error("providerKey is required");
   const now = new Date().toISOString();
 
-  return getDb().transaction(() => {
+  return await getDbClient().transaction(async (tx) => {
     const existing = getAssetKeyMappingByProvider(input);
     if (existing) {
       const key = normalizeAssetKey(input.key ?? existing.key);
-      const row = getDb()
-        .prepare<AssetKeyMappingRow, (string | null)[]>(
-          `UPDATE asset_key_mappings
+      const row = await tx.get<AssetKeyMappingRow>(
+        `UPDATE asset_key_mappings
            SET "key" = ?, source_entity_type = ?, source_entity_id = ?,
                updated_at = ?, updated_by = ?
            WHERE id = ? RETURNING *`,
-        )
-        .get(
+        [
           key,
           input.sourceEntityType ?? existing.sourceEntityType ?? null,
           input.sourceEntityId ?? existing.sourceEntityId ?? null,
           now,
           input.updatedBy ?? input.createdBy ?? existing.updatedBy ?? null,
           existing.id,
-        );
+        ],
+      );
       if (!row) throw new Error("Failed to update asset key mapping");
       if (existing.key !== key) {
         insertAssetKeyHistory({
@@ -3814,15 +3817,13 @@ export function upsertAssetKeyMapping(input: UpsertAssetKeyMappingInput): AssetK
     const key = normalizeAssetKey(
       input.key ?? defaultAssetKey(`fs:${input.providerId.trim()}`, id),
     );
-    const row = getDb()
-      .prepare<AssetKeyMappingRow, (string | null)[]>(
-        `INSERT INTO asset_key_mappings (
+    const row = await tx.get<AssetKeyMappingRow>(
+      `INSERT INTO asset_key_mappings (
            id, provider_id, provider_org_id, provider_drive_id, provider_key,
            "key", source_entity_type, source_entity_id,
            created_at, updated_at, created_by, updated_by
          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      )
-      .get(
+      [
         id,
         input.providerId.trim(),
         input.providerOrgId ?? "",
@@ -3835,7 +3836,8 @@ export function upsertAssetKeyMapping(input: UpsertAssetKeyMappingInput): AssetK
         now,
         input.createdBy ?? null,
         input.updatedBy ?? input.createdBy ?? null,
-      );
+      ],
+    );
     if (!row) throw new Error("Failed to create asset key mapping");
     insertAssetKeyHistory({
       entityType: "file",
@@ -3844,7 +3846,7 @@ export function upsertAssetKeyMapping(input: UpsertAssetKeyMappingInput): AssetK
       changedBy: input.createdBy,
     });
     return rowToAssetKeyMapping(row);
-  })();
+  });
 }
 
 export function getAssetKeyMapping(id: string): AssetKeyMapping | null {
@@ -4017,12 +4019,12 @@ function currentAssetKey(entityType: AssetEntityType, id: string): string | null
   }
 }
 
-export function moveAssetKey(input: {
+export async function moveAssetKey(input: {
   entityType: AssetEntityType;
   id: string;
   key: string;
   changedBy?: string;
-}): boolean {
+}): Promise<boolean> {
   const key = normalizeAssetKey(input.key);
   const audit = auditAssetKeys(getDb());
   if (!audit.ok) {
@@ -4043,12 +4045,11 @@ export function moveAssetKey(input: {
   }
   const now = new Date().toISOString();
 
-  getDb().transaction(() => {
+  await getDbClient().transaction(async (tx) => {
     switch (input.entityType) {
       case "task": {
-        const mappedFiles = getDb()
-          .prepare<{ id: string; key: string }, [string]>(
-            `SELECT DISTINCT m.id, m."key" AS key
+        const mappedFiles = await tx.query<{ id: string; key: string }>(
+          `SELECT DISTINCT m.id, m."key" AS key
              FROM asset_key_mappings m
              JOIN task_attachments a
                ON m.provider_id = COALESCE(NULLIF(a.provider_id, ''), 'agent-fs')
@@ -4056,13 +4057,13 @@ export function moveAssetKey(input: {
               AND m.provider_drive_id = COALESCE(a.agent_fs_drive_id, '')
               AND m.provider_key = COALESCE(NULLIF(a.provider_key, ''), a.path)
              WHERE a.task_id = ?`,
-          )
-          .all(input.id);
-        getDb().run(
+          [input.id],
+        );
+        await tx.run(
           'UPDATE agent_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
           [key, now, input.changedBy ?? null, input.id],
         );
-        getDb().run(
+        await tx.run(
           `UPDATE asset_key_mappings
            SET "key" = ?, updated_at = ?, updated_by = ?
            WHERE EXISTS (
@@ -4088,19 +4089,19 @@ export function moveAssetKey(input: {
         break;
       }
       case "workflow":
-        getDb().run(
+        await tx.run(
           'UPDATE workflows SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
           [key, now, input.changedBy ?? null, input.id],
         );
         break;
       case "schedule":
-        getDb().run(
+        await tx.run(
           'UPDATE scheduled_tasks SET "key" = ?, lastUpdatedAt = ?, updated_by = ? WHERE id = ?',
           [key, now, input.changedBy ?? null, input.id],
         );
         break;
       case "page":
-        getDb().run('UPDATE pages SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
+        await tx.run('UPDATE pages SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
           key,
           now,
           input.changedBy ?? null,
@@ -4108,10 +4109,14 @@ export function moveAssetKey(input: {
         ]);
         break;
       case "app":
-        getDb().run('UPDATE apps SET "key" = ?, updated_at = ? WHERE id = ?', [key, now, input.id]);
+        await tx.run('UPDATE apps SET "key" = ?, updated_at = ? WHERE id = ?', [
+          key,
+          now,
+          input.id,
+        ]);
         break;
       case "script":
-        getDb().run('UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
+        await tx.run('UPDATE scripts SET "key" = ?, updatedAt = ?, updated_by = ? WHERE id = ?', [
           key,
           now,
           input.changedBy ?? null,
@@ -4119,7 +4124,7 @@ export function moveAssetKey(input: {
         ]);
         break;
       case "file":
-        getDb().run(
+        await tx.run(
           'UPDATE asset_key_mappings SET "key" = ?, updated_at = ?, updated_by = ? WHERE id = ?',
           [key, now, input.changedBy ?? null, input.id],
         );
@@ -4132,7 +4137,7 @@ export function moveAssetKey(input: {
       newKey: key,
       changedBy: input.changedBy,
     });
-  })();
+  });
   return true;
 }
 
@@ -4428,28 +4433,24 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 // Combined Queries (Agent with Tasks)
 // ============================================================================
 
-export function getAgentWithTasks(id: string): AgentWithTasks | null {
-  const txn = getDb().transaction(() => {
+export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
+  return await getDbClient().transaction(async () => {
     const agent = getAgentById(id);
     if (!agent) return null;
 
     const tasks = getTasksByAgentId(id);
     return { ...agent, tasks };
   });
-
-  return txn();
 }
 
-export function getAllAgentsWithTasks(opts?: { slim?: boolean }): AgentWithTasks[] {
-  const txn = getDb().transaction(() => {
+export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
+  return await getDbClient().transaction(async () => {
     const agents = getAllAgents({ slim: opts?.slim ?? false });
     return agents.map((agent) => ({
       ...agent,
       tasks: getTasksByAgentId(agent.id),
     }));
   });
-
-  return txn();
 }
 
 // ============================================================================
@@ -5412,7 +5413,7 @@ export {
   generateDefaultToolsMd,
 } from "../prompts/defaults.ts";
 
-export function updateAgentProfile(
+export async function updateAgentProfile(
   id: string,
   updates: {
     name?: string;
@@ -5429,14 +5430,10 @@ export function updateAgentProfile(
     avatar?: AgentAvatar | null;
   },
   meta?: VersionMeta,
-): Agent | null {
-  const database = getDb();
-
-  return database.transaction(() => {
+): Promise<Agent | null> {
+  return await getDbClient().transaction(async (tx) => {
     // Get current agent state for version comparison
-    const current = database
-      .prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?")
-      .get(id);
+    const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
@@ -5458,9 +5455,10 @@ export function updateAgentProfile(
     }
 
     if (updates.name !== undefined) {
-      const existingAgent = database
-        .prepare<AgentRow, [string, string]>("SELECT * FROM agents WHERE name = ? AND id != ?")
-        .get(updates.name, id);
+      const existingAgent = await tx.get<AgentRow>(
+        "SELECT * FROM agents WHERE name = ? AND id != ?",
+        [updates.name, id],
+      );
       if (existingAgent) throw new Error("Agent name already exists");
     }
 
@@ -5503,27 +5501,8 @@ export function updateAgentProfile(
     const avatarJson = updates.avatar ? JSON.stringify(updates.avatar) : null;
 
     const now = new Date().toISOString();
-    const row = database
-      .prepare<
-        AgentRow,
-        [
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          string | null,
-          number,
-          string | null,
-          string,
-          string,
-        ]
-      >(
-        `UPDATE agents SET
+    const row = await tx.get<AgentRow>(
+      `UPDATE agents SET
           name = COALESCE(?, name),
           description = COALESCE(?, description),
           role = COALESCE(?, role),
@@ -5537,8 +5516,7 @@ export function updateAgentProfile(
           avatar = CASE WHEN ? = 1 THEN ? ELSE avatar END,
           lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
-      )
-      .get(
+      [
         updates.name ?? null,
         updates.description ?? null,
         updates.role ?? null,
@@ -5553,14 +5531,15 @@ export function updateAgentProfile(
         avatarJson,
         now,
         id,
-      );
+      ],
+    );
 
     return row ? rowToAgent(row) : null;
-  })();
+  });
 }
 
-export function updateAgentName(id: string, newName: string): Agent | null {
-  return updateAgentProfile(id, { name: newName });
+export async function updateAgentName(id: string, newName: string): Promise<Agent | null> {
+  return await updateAgentProfile(id, { name: newName });
 }
 
 // ============================================================================
@@ -6449,33 +6428,36 @@ export const sessionLogQueries = {
     ),
 };
 
-export function createSessionLogs(logs: {
+export async function createSessionLogs(logs: {
   taskId?: string;
   sessionId: string;
   iteration: number;
   cli: string;
   lines: string[];
-}): void {
-  const stmt = sessionLogQueries.insertBatch();
-  getDb().transaction(() => {
+}): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
     for (let i = 0; i < logs.lines.length; i++) {
       const line = logs.lines[i];
       if (line === undefined) continue;
-      stmt.run(
-        crypto.randomUUID(),
-        logs.taskId ?? null,
-        logs.sessionId,
-        logs.iteration,
-        logs.cli,
-        // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
-        // content that is already scrubbed at the adapter emit site. We scrub
-        // again here so any future write path that bypasses the adapter still
-        // lands clean text in the persistent session_logs table.
-        scrubSecrets(line),
-        i,
+      await tx.run(
+        `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+        [
+          crypto.randomUUID(),
+          logs.taskId ?? null,
+          logs.sessionId,
+          logs.iteration,
+          logs.cli,
+          // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
+          // content that is already scrubbed at the adapter emit site. We scrub
+          // again here so any future write path that bypasses the adapter still
+          // lands clean text in the persistent session_logs table.
+          scrubSecrets(line),
+          i,
+        ],
       );
     }
-  })();
+  });
 }
 
 export async function getSessionLogsByTaskId(
@@ -9927,13 +9909,13 @@ export async function updatePage(
   return row ? rowToPage(row) : null;
 }
 
-export function deletePage(id: string): boolean {
-  const result = getDb().transaction(() => {
-    getDb().run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
-    getDb().run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
+export async function deletePage(id: string): Promise<boolean> {
+  const result = await getDbClient().transaction(async (tx) => {
+    await tx.run("DELETE FROM user_favorites WHERE itemType = 'page' AND itemId = ?", [id]);
+    await tx.run("DELETE FROM kv_entries WHERE namespace = ?", [`task:page:${id}`]);
     // ON DELETE CASCADE on page_versions.pageId handles history cleanup.
-    return getDb().run("DELETE FROM pages WHERE id = ?", [id]);
-  })();
+    return await tx.run("DELETE FROM pages WHERE id = ?", [id]);
+  });
   return result.changes > 0;
 }
 
@@ -11772,8 +11754,10 @@ function upsertSkillFileUnchecked(
 }
 
 /**
- * DEFERRED (transaction rule): own body contains `.transaction(` — skipped
- * entirely, left 100% sync.
+ * DEFERRED (boot path): called from `syncSeededSkillFiles`
+ * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
+ * synchronous `getDb().transaction()` callback, which cannot await — stays on
+ * the raw sync handle.
  */
 export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): SkillFile[] {
   if (files.length === 0) return [];
@@ -12217,24 +12201,24 @@ export type DeleteMcpServerResult = {
   deletedScriptConnectionCount: number;
 };
 
-export function deleteMcpServer(id: string): DeleteMcpServerResult {
-  const db = getDb();
-  const existing = db
-    .prepare<{ id: string }, [string]>("SELECT id FROM mcp_servers WHERE id = ?")
-    .get(id);
+export async function deleteMcpServer(id: string): Promise<DeleteMcpServerResult> {
+  const existing = await getDbClient().get<{ id: string }>(
+    "SELECT id FROM mcp_servers WHERE id = ?",
+    [id],
+  );
   if (!existing) return { deleted: false, deletedScriptConnectionCount: 0 };
 
-  const tx = db.transaction(() => {
-    const deletedConnections = db
-      .prepare("DELETE FROM script_connections WHERE mcp_server_id = ?")
-      .run(id);
-    const deletedServer = db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  return await getDbClient().transaction(async (tx) => {
+    const deletedConnections = await tx.run(
+      "DELETE FROM script_connections WHERE mcp_server_id = ?",
+      [id],
+    );
+    const deletedServer = await tx.run("DELETE FROM mcp_servers WHERE id = ?", [id]);
     return {
       deleted: deletedServer.changes > 0,
       deletedScriptConnectionCount: deletedConnections.changes,
     };
   });
-  return tx();
 }
 
 export async function getMcpServerById(id: string): Promise<McpServer | null> {
@@ -14424,18 +14408,16 @@ export class KvTypeCollisionError extends Error {
  * existing row's `value_type` is not 'integer' — the HTTP layer maps that to
  * 409.
  */
-export function incrKv(namespace: string, key: string, by: number): KvEntry {
+export async function incrKv(namespace: string, key: string, by: number): Promise<KvEntry> {
   if (!Number.isInteger(by) || !Number.isSafeInteger(by)) {
     throw new Error("INCR `by` must be a JS-safe integer");
   }
-  const database = getDb();
-  return database.transaction((): KvEntry => {
-    const existing = database
-      .prepare<KvRow, [string, string]>(
-        `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+  return await getDbClient().transaction(async (tx): Promise<KvEntry> => {
+    const existing = await tx.get<KvRow>(
+      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
            FROM kv_entries WHERE namespace = ? AND key = ?`,
-      )
-      .get(namespace, key);
+      [namespace, key],
+    );
 
     const now = Date.now();
     const expired =
@@ -14447,9 +14429,8 @@ export function incrKv(namespace: string, key: string, by: number): KvEntry {
     if (!existing || expired) {
       // Insert (or replace if expired). `upsertKv` re-enters the prepared
       // statement cache cheaply; inlining keeps this in one transaction.
-      const row = database
-        .prepare<KvRow, [string, string, string, number | null, number, number]>(
-          `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
+      const row = await tx.get<KvRow>(
+        `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
              VALUES (?, ?, ?, 'integer', ?, ?, ?)
            ON CONFLICT(namespace, key) DO UPDATE SET
              value = excluded.value,
@@ -14457,8 +14438,8 @@ export function incrKv(namespace: string, key: string, by: number): KvEntry {
              expires_at = excluded.expires_at,
              updated_at = excluded.updated_at
            RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-        )
-        .get(namespace, key, String(by), null, now, now);
+        [namespace, key, String(by), null, now, now],
+      );
       if (!row) throw new Error("Failed to insert kv entry on INCR");
       return decodeKvRow(row);
     }
@@ -14476,16 +14457,15 @@ export function incrKv(namespace: string, key: string, by: number): KvEntry {
       throw new Error("INCR would overflow JS-safe integer range");
     }
 
-    const row = database
-      .prepare<KvRow, [string, number, string, string]>(
-        `UPDATE kv_entries SET value = ?, updated_at = ?
+    const row = await tx.get<KvRow>(
+      `UPDATE kv_entries SET value = ?, updated_at = ?
            WHERE namespace = ? AND key = ?
          RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-      )
-      .get(String(next), now, namespace, key);
+      [String(next), now, namespace, key],
+    );
     if (!row) throw new Error("Failed to update kv entry on INCR");
     return decodeKvRow(row);
-  })();
+  });
 }
 
 /**

@@ -208,9 +208,9 @@ describe("kv-storage helpers", () => {
     expect(entry.valueType).toBe("integer");
   });
 
-  test("incrKv increments existing integer", () => {
-    incrKv(NS, "counter", 1);
-    incrKv(NS, "counter", 4);
+  test("incrKv increments existing integer", async () => {
+    await incrKv(NS, "counter", 1);
+    await incrKv(NS, "counter", 4);
     const entry = incrKv(NS, "counter", -2);
     expect(entry.value).toBe(3);
   });
@@ -232,7 +232,7 @@ describe("kv-storage helpers", () => {
     await upsertKv({ namespace: NS, key: "obj", value: { n: 1 }, valueType: "json" });
     let thrown: unknown;
     try {
-      incrKv(NS, "obj", 1);
+      await incrKv(NS, "obj", 1);
     } catch (err) {
       thrown = err;
     }

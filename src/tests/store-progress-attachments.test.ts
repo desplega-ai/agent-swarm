@@ -72,10 +72,10 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(rows[0].name).toBe("report.pdf");
   });
 
-  test("insert on completion call: attachments accumulate across calls", () => {
+  test("insert on completion call: attachments accumulate across calls", async () => {
     const task = newTask("attach across calls");
 
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "step1.png",
@@ -83,7 +83,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       path: "/runs/step1.png",
       intent: "progress snapshot",
     });
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "final.md",
@@ -146,16 +146,16 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(getTaskAttachments(task.id).length).toBe(1);
   });
 
-  test("dedup by tuple: name change is treated as a new attachment", () => {
+  test("dedup by tuple: name change is treated as a new attachment", async () => {
     const task = newTask("dedup by tuple name-sensitive");
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "page.html",
       kind: "url",
       url: "https://example.com/page",
     });
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "page-renamed.html",
@@ -166,10 +166,10 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(getTaskAttachments(task.id).length).toBe(2);
   });
 
-  test("dedup is scoped per task — same pointer on a different task inserts", () => {
+  test("dedup is scoped per task — same pointer on a different task inserts", async () => {
     const t1 = newTask("dedup scope task 1");
     const t2 = newTask("dedup scope task 2");
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: t1.id,
       agentId,
       name: "shared.pdf",
@@ -177,7 +177,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       path: "/shared/shared.pdf",
       sha256: "shared-sha",
     });
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: t2.id,
       agentId,
       name: "shared.pdf",
@@ -240,9 +240,9 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     }).toThrow();
   });
 
-  test("ON DELETE CASCADE: deleting parent task removes attachments", () => {
+  test("ON DELETE CASCADE: deleting parent task removes attachments", async () => {
     const task = newTask("cascade delete");
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "a.txt",
@@ -296,9 +296,9 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(rows[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
   });
 
-  test("created_at parses with a minimal-fields attachment too", () => {
+  test("created_at parses with a minimal-fields attachment too", async () => {
     const task = newTask("schema round-trip minimal");
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId: null,
       name: "x.txt",

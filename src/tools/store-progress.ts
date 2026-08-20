@@ -5,7 +5,7 @@ import {
   completeTask,
   failTask,
   getAgentById,
-  getDb,
+  getDbClient,
   getResolvedConfig,
   getSessionLogsByTaskId,
   getTaskById,
@@ -144,7 +144,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         };
       }
 
-      const txn = getDb().transaction(() => {
+      const result = await getDbClient().transaction(async () => {
         const agent = getAgentById(requestInfo.agentId ?? "");
 
         if (!agent) {
@@ -185,7 +185,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
               driveId = driveId || agentFsDefaults?.driveId;
             }
 
-            insertTaskAttachment({
+            await insertTaskAttachment({
               taskId,
               agentId: requestInfo.agentId ?? null,
               name: a.name,
@@ -328,8 +328,6 @@ export const registerStoreProgressTool = (server: McpServer) => {
           task: updatedTask,
         };
       });
-
-      const result = txn();
 
       const shouldRunTerminalSideEffects =
         (status === "completed" || status === "failed") &&

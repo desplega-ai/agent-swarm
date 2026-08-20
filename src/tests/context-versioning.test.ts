@@ -275,8 +275,8 @@ describe("Context Versioning", () => {
       createAgent({ id: dedupAgentId, name: "Dedup Agent", isLead: false, status: "idle" });
     });
 
-    test("creates a version when content changes", () => {
-      updateAgentProfile(dedupAgentId, { soulMd: "soul content A" }, { changeSource: "api" });
+    test("creates a version when content changes", async () => {
+      await updateAgentProfile(dedupAgentId, { soulMd: "soul content A" }, { changeSource: "api" });
 
       const latest = getLatestContextVersion(dedupAgentId, "soulMd");
       expect(latest).not.toBeNull();
@@ -285,8 +285,8 @@ describe("Context Versioning", () => {
       expect(latest!.changeSource).toBe("api");
     });
 
-    test("creates a new version when content changes again", () => {
-      updateAgentProfile(
+    test("creates a new version when content changes again", async () => {
+      await updateAgentProfile(
         dedupAgentId,
         { soulMd: "soul content B" },
         { changeSource: "self_edit", changedByAgentId: dedupAgentId },
@@ -300,9 +300,9 @@ describe("Context Versioning", () => {
       expect(latest!.changedByAgentId).toBe(dedupAgentId);
     });
 
-    test("skips version creation when content is unchanged (dedup)", () => {
+    test("skips version creation when content is unchanged (dedup)", async () => {
       // Update with the same content
-      updateAgentProfile(
+      await updateAgentProfile(
         dedupAgentId,
         { soulMd: "soul content B" },
         { changeSource: "session_sync" },
@@ -315,8 +315,8 @@ describe("Context Versioning", () => {
       expect(latest!.changeSource).toBe("self_edit"); // unchanged from before
     });
 
-    test("creates versions for multiple fields in one update", () => {
-      updateAgentProfile(
+    test("creates versions for multiple fields in one update", async () => {
+      await updateAgentProfile(
         dedupAgentId,
         {
           identityMd: "identity content",
@@ -337,17 +337,21 @@ describe("Context Versioning", () => {
       expect(toolsLatest!.version).toBe(1);
     });
 
-    test("defaults changeSource to 'api' when no meta provided", () => {
-      updateAgentProfile(dedupAgentId, { claudeMd: "claude content" });
+    test("defaults changeSource to 'api' when no meta provided", async () => {
+      await updateAgentProfile(dedupAgentId, { claudeMd: "claude content" });
 
       const latest = getLatestContextVersion(dedupAgentId, "claudeMd");
       expect(latest).not.toBeNull();
       expect(latest!.changeSource).toBe("api");
     });
 
-    test("chains previousVersionId correctly", () => {
+    test("chains previousVersionId correctly", async () => {
       // soulMd already has v1 and v2, create v3
-      updateAgentProfile(dedupAgentId, { soulMd: "soul content C" }, { changeSource: "self_edit" });
+      await updateAgentProfile(
+        dedupAgentId,
+        { soulMd: "soul content C" },
+        { changeSource: "self_edit" },
+      );
 
       const v3 = getLatestContextVersion(dedupAgentId, "soulMd");
       expect(v3).not.toBeNull();

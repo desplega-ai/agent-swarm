@@ -27,13 +27,13 @@ afterAll(async () => {
 });
 
 describe("reassociateSessionLogs", () => {
-  test("updates taskId on session logs matching the runnerSessionId", () => {
+  test("updates taskId on session logs matching the runnerSessionId", async () => {
     const runnerSessionId = "runner-sess-1";
     const randomUuid = crypto.randomUUID();
     const realTaskId = crypto.randomUUID();
 
     // Insert session logs under random UUID
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -58,12 +58,12 @@ describe("reassociateSessionLogs", () => {
     expect(oldLogs.length).toBe(0);
   });
 
-  test("is idempotent — second call returns 0 changes", () => {
+  test("is idempotent — second call returns 0 changes", async () => {
     const runnerSessionId = "runner-sess-2";
     const randomUuid = crypto.randomUUID();
     const realTaskId = crypto.randomUUID();
 
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -86,7 +86,7 @@ describe("reassociateSessionLogs", () => {
     const realTaskId = crypto.randomUUID();
 
     // Insert logs for our session
-    createSessionLogs({
+    await createSessionLogs({
       taskId: randomUuid,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -95,7 +95,7 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Insert logs for a different session
-    createSessionLogs({
+    await createSessionLogs({
       taskId: otherTaskId,
       sessionId: otherSessionId,
       iteration: 1,
@@ -154,7 +154,7 @@ describe("pool task claim flow", () => {
     });
 
     // 3. Simulate session logs being flushed with the random effectiveTaskId
-    createSessionLogs({
+    await createSessionLogs({
       taskId: effectiveTaskId,
       sessionId: runnerSessionId,
       iteration: 1,
@@ -180,7 +180,7 @@ describe("pool task claim flow", () => {
 
     // 7. Simulate more logs arriving after claim (with old effectiveTaskId)
     //    These would be caught by store-progress reinforcement
-    createSessionLogs({
+    await createSessionLogs({
       taskId: effectiveTaskId,
       sessionId: runnerSessionId,
       iteration: 1,

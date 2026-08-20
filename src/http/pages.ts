@@ -740,7 +740,7 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const ok = deletePage(parsed.params.id);
+    const ok = await deletePage(parsed.params.id);
     if (!ok) {
       res.writeHead(404);
       res.end();

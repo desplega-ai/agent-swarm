@@ -615,7 +615,7 @@ async function handleIncr(
   const respond: PutKvRespond = explicit ? incrKvExplicit.respond : incrKvHeader.respond;
   const by = body?.by ?? 1;
   try {
-    const entry = incrKv(namespace, key, by);
+    const entry = await incrKv(namespace, key, by);
     respond(res, 200, entry);
   } catch (err) {
     if (err instanceof KvTypeCollisionError) {

@@ -53,7 +53,7 @@ export const registerKvIncrTool = (server: McpServer) => {
         });
       }
       try {
-        const entry = incrKv(resolved.namespace, key, by ?? 1);
+        const entry = await incrKv(resolved.namespace, key, by ?? 1);
         return toolOk(`"${key}" now ${entry.value} in "${resolved.namespace}".`, {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace, entry },
         });

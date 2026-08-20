@@ -71,7 +71,7 @@ export const registerDeletePageTool = (server: McpServer) => {
       }
 
       try {
-        const deleted = deletePage(page.id);
+        const deleted = await deletePage(page.id);
         if (!deleted) {
           return toolErr("Failed to delete page.", {
             data: { yourAgentId: requestInfo.agentId },

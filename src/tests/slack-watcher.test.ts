@@ -428,14 +428,14 @@ describe("buildTreeNodes", () => {
     completeTask(parent.id, "done");
     completeTask(child.id, "done");
 
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: parent.id,
       agentId: lead.id,
       name: "parent-report.pdf",
       kind: "url",
       url: "https://example.com/parent.pdf",
     });
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: child.id,
       agentId: worker.id,
       name: "child-log.txt",
@@ -470,7 +470,7 @@ describe("buildTreeNodes", () => {
       slackUserId: "U_NOFETCH",
     });
     // Pre-populate an attachment even though the task is still pending.
-    insertTaskAttachment({
+    await insertTaskAttachment({
       taskId: task.id,
       agentId: agent.id,
       name: "should-not-render.pdf",

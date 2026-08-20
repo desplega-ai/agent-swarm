@@ -490,7 +490,7 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks ? getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
+    const agents = includeTasks ? await getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
     const agentsWithCapacity = agents.map(agentWithCapacity);
     listAgents.respond(res, 200, { agents: agentsWithCapacity });
     return true;
@@ -501,7 +501,7 @@ export async function handleAgentsRest(
     if (!parsed) return true;
 
     try {
-      const agent = updateAgentName(parsed.params.id, parsed.body.name.trim());
+      const agent = await updateAgentName(parsed.params.id, parsed.body.name.trim());
       if (!agent) {
         jsonError(res, "Agent not found", 404);
         return true;
@@ -571,7 +571,7 @@ export async function handleAgentsRest(
 
     let agent: Agent | null;
     try {
-      agent = updateAgentProfile(
+      agent = await updateAgentProfile(
         parsed.params.id,
         {
           role: body.role,
@@ -896,7 +896,7 @@ export async function handleAgentsRest(
     if (!parsed) return true;
     const includeTasks = parsed.query.include === "tasks";
     const agent = includeTasks
-      ? getAgentWithTasks(parsed.params.id)
+      ? await getAgentWithTasks(parsed.params.id)
       : getAgentById(parsed.params.id);
 
     if (!agent) {

@@ -254,7 +254,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         // update failures cannot leave a partially-applied combined payload.
         // `avatar` is spread in only when present so `null` (reset) stays
         // distinguishable from "not provided".
-        agent = updateAgentProfile(
+        agent = await updateAgentProfile(
           targetAgentId,
           {
             name,

@@ -275,7 +275,7 @@ describe("cross-entity asset namespace invariants", () => {
     expect(matches.map((asset) => asset.id)).not.toContain(neighbor.id);
   });
 
-  test("provider drift remains readable, blocks moves, and can be repaired idempotently", () => {
+  test("provider drift remains readable, blocks moves, and can be repaired idempotently", async () => {
     const mapping = getAssetKeyMappingByProvider({
       providerId: "agent-fs",
       providerOrgId: "org-1",
@@ -293,7 +293,7 @@ describe("cross-entity asset namespace invariants", () => {
       moveAssetKey({ entityType: "task", id: anyTask.id, key: "shared/blocked/" }),
     ).toThrow("blocked until");
 
-    upsertAssetKeyMapping({
+    await upsertAssetKeyMapping({
       providerId: mapping!.providerId,
       providerOrgId: mapping!.providerOrgId,
       providerDriveId: mapping!.providerDriveId,

@@ -46,14 +46,14 @@ describe("list-endpoint slimming", () => {
     }
   });
 
-  test("getAllAgents — slim omits identity markdown, full keeps it", () => {
+  test("getAllAgents — slim omits identity markdown, full keeps it", async () => {
     const agent = createAgent({
       id: "slim-agent-1",
       name: "Slim Agent",
       isLead: false,
       status: "idle",
     });
-    updateAgentProfile(agent.id, {
+    await updateAgentProfile(agent.id, {
       claudeMd: "C".repeat(500),
       soulMd: "S".repeat(500),
       identityMd: "I".repeat(500),
@@ -85,7 +85,7 @@ describe("list-endpoint slimming", () => {
     expect(full?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
   });
 
-  test("updateAgentProfile — avatar set/reset round-trip", () => {
+  test("updateAgentProfile — avatar set/reset round-trip", async () => {
     const agent = createAgent({
       id: "avatar-agent-1",
       name: "Avatar Agent",
@@ -97,7 +97,7 @@ describe("list-endpoint slimming", () => {
     expect(getAgentById(agent.id)?.avatar).toBeNull();
 
     // Set a custom avatar.
-    updateAgentProfile(agent.id, {
+    await updateAgentProfile(agent.id, {
       avatar: { type: "lucide", icon: "cat", color: "#ff00aa" },
     });
     expect(getAgentById(agent.id)?.avatar).toEqual({
@@ -110,7 +110,7 @@ describe("list-endpoint slimming", () => {
     // the COALESCE(?, col) pattern used for other fields can never write a
     // literal NULL back, so avatar needs its own explicit-set branch that
     // must also correctly no-op when the key is simply absent.
-    updateAgentProfile(agent.id, { role: "QA" });
+    await updateAgentProfile(agent.id, { role: "QA" });
     expect(getAgentById(agent.id)?.avatar).toEqual({
       type: "lucide",
       icon: "cat",
@@ -119,7 +119,7 @@ describe("list-endpoint slimming", () => {
 
     // Explicit `avatar: null` resets to the deterministic fallback — this is
     // the case COALESCE(?, avatar) can never express.
-    updateAgentProfile(agent.id, { avatar: null });
+    await updateAgentProfile(agent.id, { avatar: null });
     expect(getAgentById(agent.id)?.avatar).toBeNull();
   });
 

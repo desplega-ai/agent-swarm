@@ -247,7 +247,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     ]);
 
     // 2. During the task: session_logs accumulate text mentioning ONE of them.
-    createSessionLogs({
+    await createSessionLogs({
       taskId,
       sessionId: "session-1",
       iteration: 1,
@@ -296,7 +296,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
   test("negative path: no citation in session_logs → only beta moves", async () => {
     const m = makeMemory("never-cited");
     recordRetrievals(taskIdMiss, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
-    createSessionLogs({
+    await createSessionLogs({
       taskId: taskIdMiss,
       sessionId: "session-2",
       iteration: 1,
