@@ -87,7 +87,7 @@ export const DEFERRED_TOOLS = new Set([
   "context-history",
   "context-diff",
 
-  // Slack (9)
+  // Slack (12)
   "slack-reply",
   "slack-read",
   "slack-upload-file",
@@ -95,6 +95,9 @@ export const DEFERRED_TOOLS = new Set([
   "slack-list-channels",
   "slack-post",
   "slack-start-thread",
+  "slack-create-channel",
+  "slack-invite-to-channel",
+  "slack-archive-channel",
   "slack-delete",
   "slack-update",
 

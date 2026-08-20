@@ -4,7 +4,7 @@ const logger = console;
 
 // @slack/web-api platform errors set message to "An API error occurred: <code>"
 // and store the raw Slack API code at error.data.error.
-function slackCode(error: unknown): string | undefined {
+export function slackCode(error: unknown): string | undefined {
   if (!(error instanceof Error)) return undefined;
   const d = (error as { data?: { error?: unknown } }).data;
   return typeof d?.error === "string" ? d.error : undefined;

@@ -119,8 +119,11 @@ import {
   registerSkillUninstallTool,
   registerSkillUpdateTool,
 } from "./tools/skills";
+import { registerSlackArchiveChannelTool } from "./tools/slack-archive-channel";
+import { registerSlackCreateChannelTool } from "./tools/slack-create-channel";
 import { registerSlackDeleteTool } from "./tools/slack-delete";
 import { registerSlackDownloadFileTool } from "./tools/slack-download-file";
+import { registerSlackInviteToChannelTool } from "./tools/slack-invite-to-channel";
 import { registerSlackListChannelsTool } from "./tools/slack-list-channels";
 import { registerSlackPostTool } from "./tools/slack-post";
 import { registerSlackReadTool } from "./tools/slack-read";
@@ -504,6 +507,9 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
     registerSlackReadTool(server);
     registerSlackPostTool(server);
     registerSlackStartThreadTool(server);
+    registerSlackCreateChannelTool(server);
+    registerSlackInviteToChannelTool(server);
+    registerSlackArchiveChannelTool(server);
     registerSlackListChannelsTool(server);
     registerSlackUploadFileTool(server);
     registerSlackDownloadFileTool(server);

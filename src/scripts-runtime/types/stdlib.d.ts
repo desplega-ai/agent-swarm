@@ -326,6 +326,9 @@ declare module "swarm-sdk" {
       message: string;
       blocks?: unknown;
     }): Promise<unknown>;
+    slack_createChannel(args: { name: string; isPrivate?: boolean }): Promise<unknown>;
+    slack_inviteToChannel(args: { channelId: string; userIds: string[] }): Promise<unknown>;
+    slack_archiveChannel(args: { channelId: string }): Promise<unknown>;
     slack_uploadFile(args: Record<string, unknown>): Promise<unknown>;
     slack_downloadFile(args: { url: string }): Promise<unknown>;
     slack_delete(args: { channelId: string; messageTs: string }): Promise<unknown>;
