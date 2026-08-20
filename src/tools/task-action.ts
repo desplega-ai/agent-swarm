@@ -15,14 +15,14 @@ import {
   getActiveSessions,
   getActiveTaskCount,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskById,
   hasCapacity,
   isAgentEligibleForTask,
   moveTaskFromBacklog,
   moveTaskToBacklog,
   reassociateSessionLogs,
-  recordBudgetRefusalNotificationSync,
+  recordBudgetRefusalNotification,
   rejectTask,
   releaseTask,
   updateTaskClaudeSessionId,
@@ -177,53 +177,55 @@ export async function taskActionHandler(
       return agentOnlyActionResult();
     }
 
-    const result = getDb().transaction((): TaskActionResult | SwarmToolResult => {
-      if (!taskId) {
-        return { success: false, message: `Task ID is required for '${action}' action.` };
-      }
+    const result = await getDbClient().transaction(
+      async (): Promise<TaskActionResult | SwarmToolResult> => {
+        if (!taskId) {
+          return { success: false, message: `Task ID is required for '${action}' action.` };
+        }
 
-      const existingTask = getTaskById(taskId);
-      if (!existingTask) {
-        return { success: false, message: `Task "${taskId}" not found.` };
-      }
+        const existingTask = getTaskById(taskId);
+        if (!existingTask) {
+          return { success: false, message: `Task "${taskId}" not found.` };
+        }
 
-      const ownershipError = assertOwnsTask(ctx, existingTask, "task.action.own");
-      if (ownershipError) return ownershipError;
+        const ownershipError = assertOwnsTask(ctx, existingTask, "task.action.own");
+        if (ownershipError) return ownershipError;
 
-      if (action === "to_backlog") {
-        if (existingTask.status !== "unassigned") {
+        if (action === "to_backlog") {
+          if (existingTask.status !== "unassigned") {
+            return {
+              success: false,
+              message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
+            };
+          }
+          const backlogTask = moveTaskToBacklog(taskId);
+          if (!backlogTask) {
+            return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
+          }
           return {
-            success: false,
-            message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
+            success: true,
+            message: `Moved task "${taskId}" to backlog.`,
+            task: backlogTask,
           };
         }
-        const backlogTask = moveTaskToBacklog(taskId);
-        if (!backlogTask) {
-          return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
+
+        if (existingTask.status !== "backlog") {
+          return {
+            success: false,
+            message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
+          };
+        }
+        const unassignedTask = moveTaskFromBacklog(taskId);
+        if (!unassignedTask) {
+          return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
         }
         return {
           success: true,
-          message: `Moved task "${taskId}" to backlog.`,
-          task: backlogTask,
+          message: `Moved task "${taskId}" from backlog to pool.`,
+          task: unassignedTask,
         };
-      }
-
-      if (existingTask.status !== "backlog") {
-        return {
-          success: false,
-          message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
-        };
-      }
-      const unassignedTask = moveTaskFromBacklog(taskId);
-      if (!unassignedTask) {
-        return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
-      }
-      return {
-        success: true,
-        message: `Moved task "${taskId}" from backlog to pool.`,
-        task: unassignedTask,
-      };
-    })();
+      },
+    );
 
     return "ok" in result ? result : taskActionResult(result);
   }
@@ -250,7 +252,7 @@ export async function taskActionHandler(
     }
   }
 
-  const txn = getDb().transaction((): TaskActionResult => {
+  const result = await getDbClient().transaction(async (): Promise<TaskActionResult> => {
     switch (action) {
       case "create": {
         if (!task) {
@@ -333,10 +335,21 @@ export async function taskActionHandler(
           };
         }
 
-        // Session-log reassociation is async (getActiveSessions/reassociateSessionLogs
-        // now go through the async DbClient seam) and this whole switch runs inside a
-        // synchronous getDb().transaction() callback, so it happens after txn() commits
-        // below instead of here.
+        // Reassociate session logs from pool trigger's random UUID to real task ID
+        const sessions = await getActiveSessions(agentId);
+        const activeSession = sessions.find((s) => s.runnerSessionId);
+        if (activeSession?.runnerSessionId) {
+          const count = await reassociateSessionLogs(activeSession.runnerSessionId, taskId);
+          if (count > 0) {
+            console.log(
+              `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
+            );
+          }
+          // Propagate provider session ID (e.g. claudeSessionId) to the task
+          if (activeSession.providerSessionId) {
+            updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
+          }
+        }
 
         return {
           success: true,
@@ -408,7 +421,7 @@ export async function taskActionHandler(
                 ? "user daily budget exceeded"
                 : "global daily budget exceeded";
           const utcDate = new Date().toISOString().slice(0, 10);
-          const dedup = recordBudgetRefusalNotificationSync({
+          const dedup = await recordBudgetRefusalNotification({
             taskId,
             date: utcDate,
             agentId,
@@ -548,29 +561,6 @@ export async function taskActionHandler(
         return { success: false, message: `Unknown action: ${action}` };
     }
   });
-
-  const result = txn();
-
-  if (action === "claim" && result.success && taskId) {
-    // Reassociate session logs from pool trigger's random UUID to real task ID.
-    // Runs after the atomic claim transaction commits above — getActiveSessions/
-    // reassociateSessionLogs are async and the claim itself must stay inside the
-    // synchronous transaction.
-    const sessions = await getActiveSessions(agentId);
-    const activeSession = sessions.find((s) => s.runnerSessionId);
-    if (activeSession?.runnerSessionId) {
-      const count = await reassociateSessionLogs(activeSession.runnerSessionId, taskId);
-      if (count > 0) {
-        console.log(
-          `[task-action] Reassociated ${count} session logs for claimed task ${taskId.slice(0, 8)}`,
-        );
-      }
-      // Propagate provider session ID (e.g. claudeSessionId) to the task
-      if (activeSession.providerSessionId) {
-        updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
-      }
-    }
-  }
 
   // Phase 5: when the accept gate refused, run after-commit side
   // effects (lead follow-up + workflow bus). The dedup row was recorded

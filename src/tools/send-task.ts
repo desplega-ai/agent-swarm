@@ -9,7 +9,7 @@ import {
   findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskById,
   hasCapacity,
 } from "@/be/db";
@@ -364,7 +364,7 @@ export async function sendTaskHandler(
     }
   }
 
-  const txn = getDb().transaction(() => {
+  const result = await getDbClient().transaction(async () => {
     const finalTags = tags;
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
@@ -508,7 +508,6 @@ export async function sendTaskHandler(
     };
   });
 
-  const result = txn();
   const data = {
     yourAgentId: creatorAgentId,
     task: result.task,

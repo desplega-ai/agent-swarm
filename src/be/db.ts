@@ -13988,9 +13988,8 @@ export async function recordBudgetRefusalNotification(
 /**
  * DEFERRED (transaction rule): sync counterpart of
  * `recordBudgetRefusalNotification`, kept for the budget-refusal dedup write
- * at `/api/poll`'s pre-assigned/pool gates and MCP `task-action` `accept` —
- * all three run inside a raw synchronous `getDb().transaction()` callback,
- * which cannot await.
+ * at `/api/poll`'s pre-assigned/pool gates — both run inside a raw synchronous
+ * `getDb().transaction()` callback, which cannot await.
  */
 export function recordBudgetRefusalNotificationSync(input: RecordBudgetRefusalNotificationInput): {
   inserted: boolean;

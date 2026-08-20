@@ -3,7 +3,7 @@ import { addMinutes } from "date-fns";
 import * as z from "zod";
 import {
   getAgentById,
-  getDb,
+  getDbClient,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
@@ -104,7 +104,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const startedTask = getDb().transaction(() => {
+        const startedTask = await getDbClient().transaction(async () => {
           const agentNow = getAgentById(agentId)!;
 
           if (agentNow.status !== "busy") {
@@ -122,7 +122,7 @@ export const registerPollTaskTool = (server: McpServer) => {
           }
 
           return maybeTask;
-        })();
+        });
 
         if (startedTask) {
           // Reset empty poll count when task is assigned
