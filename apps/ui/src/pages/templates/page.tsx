@@ -64,10 +64,18 @@ export default function TemplatesPage() {
       { field: "version", headerName: "Version", width: 90 },
       {
         field: "isDefault",
-        headerName: "Default",
-        width: 100,
-        cellRenderer: (params: { value: boolean }) =>
-          params.value ? (
+        headerName: "Default status",
+        width: 140,
+        cellRenderer: (params: { data: PromptTemplate | undefined }) =>
+          params.data?.defaultDrifted ? (
+            <Badge
+              variant="outline"
+              size="tag"
+              className="border-status-warning/30 text-status-warning-strong"
+            >
+              Drifted
+            </Badge>
+          ) : params.data?.isDefault ? (
             <Badge variant="secondary" size="tag">
               Default
             </Badge>
