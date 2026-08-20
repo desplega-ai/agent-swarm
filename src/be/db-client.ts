@@ -33,6 +33,15 @@ export interface DbClient extends DbExecutor {
    * `transaction` calls become SAVEPOINTs.
    */
   transaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T>;
+  /**
+   * Schedule `fn` to run strictly after the currently-open transaction (if
+   * any) has committed or rolled back. With no transaction open it runs on
+   * the next microtask-ish turn. This is the post-commit hook point: under
+   * synchronous bun:sqlite transactions a queueMicrotask always observed
+   * settled state, but an async transaction callback drains microtasks
+   * before COMMIT — hooks that must see committed state go through here.
+   */
+  afterSettled(fn: () => void): void;
 }
 
 /**
@@ -109,6 +118,17 @@ class BunSqliteClient implements DbClient {
       ctx.closed = true;
       release();
     }
+  }
+
+  afterSettled(fn: () => void): void {
+    // Queueing behind the FIFO lock guarantees the hook runs after any open
+    // transaction's COMMIT/ROLLBACK (the transaction holds the lock for its
+    // whole span). The hook runs outside the lock so its own client calls
+    // re-acquire normally.
+    void this.lock.acquire().then((release) => {
+      release();
+      fn();
+    });
   }
 
   private async savepoint<T>(ctx: TxContext, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {

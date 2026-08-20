@@ -122,6 +122,96 @@ describe("db-client transactions", () => {
     ).rejects.toThrow("after the transaction closed");
   });
 
+  test("afterSettled hook scheduled inside a transaction observes committed state", async () => {
+    let observed: string[] | null = null;
+    let hookDone: (() => void) | undefined;
+    const done = new Promise<void>((resolve) => {
+      hookDone = resolve;
+    });
+    await client.transaction(async (tx) => {
+      await tx.run("INSERT INTO items (name) VALUES (?)", ["committed"]);
+      client.afterSettled(() => {
+        void names().then((n) => {
+          observed = n;
+          hookDone?.();
+        });
+      });
+      // The hook must NOT have run yet, even across microtask turns.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(observed).toBeNull();
+    });
+    await done;
+    expect(observed).toEqual(["committed"]);
+  });
+
+  test("afterSettled hook after a rollback observes the rolled-back state", async () => {
+    let observed: string[] | null = null;
+    let hookDone: (() => void) | undefined;
+    const done = new Promise<void>((resolve) => {
+      hookDone = resolve;
+    });
+    await expect(
+      client.transaction(async (tx) => {
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["doomed"]);
+        client.afterSettled(() => {
+          void names().then((n) => {
+            observed = n;
+            hookDone?.();
+          });
+        });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await done;
+    expect(observed).toEqual([]);
+  });
+
+  test("afterSettled with no open transaction runs promptly", async () => {
+    let ran = false;
+    const done = new Promise<void>((resolve) => {
+      client.afterSettled(() => {
+        ran = true;
+        resolve();
+      });
+    });
+    await done;
+    expect(ran).toBe(true);
+  });
+
+  test("concurrency soak: interleaved transactions and top-level ops, no deadlock, no interleaving", async () => {
+    const work: Promise<unknown>[] = [];
+    for (let i = 0; i < 50; i++) {
+      work.push(
+        client
+          .transaction(async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES (?)", [`tx-${i}-a`]);
+            await Promise.resolve();
+            await tx.run("INSERT INTO items (name) VALUES (?)", [`tx-${i}-b`]);
+            if (i % 5 === 0) throw new Error(`abort-${i}`);
+            return i;
+          })
+          .catch((e: Error) => e.message),
+      );
+      for (let j = 0; j < 4; j++) {
+        work.push(client.run("INSERT INTO items (name) VALUES (?)", [`top-${i}-${j}`]));
+      }
+    }
+    await Promise.all(work);
+    const all = await names();
+    // Aborted transactions (i % 5 === 0) contribute nothing; committed ones
+    // contribute both rows, adjacent (no top-level write between a & b).
+    const txRows = all.filter((n) => n.startsWith("tx-"));
+    expect(txRows.length).toBe(40 * 2);
+    for (const n of txRows) expect(n.endsWith("-a") || n.endsWith("-b")).toBe(true);
+    for (let k = 0; k < all.length; k++) {
+      if (all[k].startsWith("tx-") && all[k].endsWith("-a")) {
+        expect(all[k + 1]).toBe(all[k].replace(/-a$/, "-b"));
+      }
+    }
+    expect(all.filter((n) => n.startsWith("top-")).length).toBe(200);
+  });
+
   test("post-commit continuation with stale context falls back to top level", async () => {
     // Simulates emitTaskLifecycleTelemetryAfterCommit-style queueMicrotask
     // work that inherits the ALS context but runs after COMMIT.
