@@ -463,7 +463,7 @@ async function shutdown() {
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
-    transport.close();
+    void transport.close();
     delete transports[id];
     delete mcpSessionAgents[id];
     delete transportActivity[id];
@@ -471,7 +471,7 @@ async function shutdown() {
 
   for (const [id, transport] of Object.entries(transportsUser)) {
     console.log(`[HTTP] Closing user transport ${id}`);
-    transport.close();
+    void transport.close();
     delete transportsUser[id];
     delete sessionUsers[id];
     delete transportActivityUser[id];

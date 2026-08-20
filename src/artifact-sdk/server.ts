@@ -170,7 +170,7 @@ export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServe
         tunnel = null;
       }
       if (server) {
-        server.stop();
+        void server.stop();
         server = null;
       }
     },

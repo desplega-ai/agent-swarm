@@ -44,7 +44,7 @@ export function closeIdleMcpTransports(
     if (now - lastActivity < idleTimeoutMs) continue;
 
     try {
-      transport.close();
+      void transport.close();
     } catch (err) {
       console.warn(`[HTTP] Failed to close idle ${options.label ?? "MCP"} transport ${id}: ${err}`);
     } finally {

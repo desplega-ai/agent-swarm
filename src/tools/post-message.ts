@@ -59,7 +59,7 @@ export const registerPostMessageTool = (server: McpServer) => {
         });
 
         // Auto-mark channel as read after posting (so you don't see your own message as unread)
-        updateReadState(requestInfo.agentId, targetChannel.id);
+        await updateReadState(requestInfo.agentId, targetChannel.id);
 
         return toolOk(`Posted message to #${targetChannel.name}.`, {
           data: { yourAgentId: requestInfo.agentId, posted },
