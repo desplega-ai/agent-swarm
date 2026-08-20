@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { slackMissingScopeMessage } from "@/slack/channel-join";
 import { inviteToChannel } from "@/slack/channel-lifecycle";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -65,6 +66,10 @@ export const registerSlackInviteToChannelTool = (server: McpServer) => {
           },
         );
       } catch (error) {
+        const missingScopeMessage = slackMissingScopeMessage(error);
+        if (missingScopeMessage) {
+          return toolErr(`Failed to invite users to Slack channel: ${missingScopeMessage}`);
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return toolErr(`Failed to invite users to Slack channel: ${errorMsg}`);
       }

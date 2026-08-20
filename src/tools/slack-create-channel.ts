@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { slackMissingScopeMessage } from "@/slack/channel-join";
 import { createChannel } from "@/slack/channel-lifecycle";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -61,6 +62,10 @@ export const registerSlackCreateChannelTool = (server: McpServer) => {
           data: { ...result, isPrivate },
         });
       } catch (error) {
+        const missingScopeMessage = slackMissingScopeMessage(error);
+        if (missingScopeMessage) {
+          return toolErr(`Failed to create Slack channel: ${missingScopeMessage}`);
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return toolErr(`Failed to create Slack channel: ${errorMsg}`);
       }

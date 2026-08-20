@@ -3,6 +3,7 @@ import * as z from "zod";
 import { getAgentById } from "@/be/db";
 import { can } from "@/rbac";
 import { getSlackApp } from "@/slack/app";
+import { slackMissingScopeMessage } from "@/slack/channel-join";
 import { archiveChannel } from "@/slack/channel-lifecycle";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -57,6 +58,10 @@ export const registerSlackArchiveChannelTool = (server: McpServer) => {
           { data: { channelId, ...result } },
         );
       } catch (error) {
+        const missingScopeMessage = slackMissingScopeMessage(error);
+        if (missingScopeMessage) {
+          return toolErr(`Failed to archive Slack channel: ${missingScopeMessage}`);
+        }
         const errorMsg = error instanceof Error ? error.message : String(error);
         return toolErr(`Failed to archive Slack channel: ${errorMsg}`);
       }
