@@ -28,6 +28,8 @@ ALLOWLIST=(
   src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
   src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)
   src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
+  src/http/db-query-shared.ts                   # same columnNames guard (in-process fallback path)
+  src/http/db-query-bounded.ts                  # child process opens its own connection outside the seam; parent only reads getDb().filename
   src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys (wrapped in a client transaction at the call site)
 )
 
