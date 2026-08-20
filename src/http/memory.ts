@@ -20,6 +20,7 @@ import { rerank } from "../be/memory/reranker";
 import { getRetrievalsForAgent, hasRetrievalForTask } from "../be/memory/retrieval-store";
 import { getUsefulnessStats } from "../be/memory/usefulness-stats";
 import { shouldPersistAutomaticTaskMemory } from "../memory/automatic-task-gate";
+import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import { AgentMemorySchema, AgentMemoryScopeSchema, AgentMemorySourceSchema } from "../types";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { route } from "./route-def";
@@ -810,7 +811,9 @@ export async function handleMemory(
       if (intent) {
         try {
           const consumed =
-            consumptionMode === "prompt" ? ranked.filter((r) => r.similarity > 0.4) : ranked;
+            consumptionMode === "prompt"
+              ? ranked.filter((r) => r.similarity > SIMILARITY_THRESHOLD)
+              : ranked;
           recordMemoryAccesses(consumed.map((r) => r.id));
         } catch (err) {
           console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
@@ -831,7 +834,9 @@ export async function handleMemory(
           tags: r.tags,
           accessCount:
             (r.accessCount ?? 0) +
-            (intent && (consumptionMode !== "prompt" || r.similarity > 0.4) ? 1 : 0),
+            (intent && (consumptionMode !== "prompt" || r.similarity > SIMILARITY_THRESHOLD)
+              ? 1
+              : 0),
         })),
       });
     } catch (err) {
