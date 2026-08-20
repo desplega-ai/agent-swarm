@@ -99,15 +99,20 @@ async function makeWorkflow(
 // ─── Setup / Teardown ────────────────────────────────────────
 
 let registry: ExecutorRegistry;
+let teardownResumeListener: (() => void) | undefined;
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
   registry = createTestRegistry();
   // Wire up resume listener
-  setupWorkflowResumeListener(workflowEventBus, registry);
+  teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
 });
 
 afterAll(async () => {
+  // Detach from the process-wide singleton bus: `bun test` runs every file in
+  // one process, and a leaked resume listener claims waiting steps in LATER
+  // files' databases with this file's registry (shard-order foreach failures).
+  teardownResumeListener?.();
   // Cleanup workflows
   for (const id of createdWorkflowIds) {
     try {

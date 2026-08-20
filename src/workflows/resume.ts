@@ -49,12 +49,19 @@ interface ApprovalEvent {
 
 /**
  * Wire up event bus listeners for workflow resume on task lifecycle events.
+ *
+ * Returns a teardown that detaches every handler this call attached. The
+ * server never calls it, but tests attaching to the process-wide singleton
+ * bus MUST call it in their afterAll: `bun test` runs every file in one
+ * process, and a listener left on the singleton resumes runs in later files'
+ * databases — it claims their waiting steps with a registry whose executors
+ * don't exist there, silently stranding steps in `running`.
  */
 export function setupWorkflowResumeListener(
   eventBus: WorkflowEventBus,
   registry: ExecutorRegistry,
-): void {
-  eventBus.on("task.completed", async (data: unknown) => {
+): () => void {
+  const onTaskCompleted = async (data: unknown) => {
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
@@ -62,9 +69,10 @@ export function setupWorkflowResumeListener(
     } catch (err) {
       console.error("[workflows] Resume from task completion failed:", err);
     }
-  });
+  };
+  eventBus.on("task.completed", onTaskCompleted);
 
-  eventBus.on("task.failed", async (data: unknown) => {
+  const onTaskFailed = async (data: unknown) => {
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
@@ -72,9 +80,10 @@ export function setupWorkflowResumeListener(
     } catch (err) {
       console.error("[workflows] Handle task failure error:", err);
     }
-  });
+  };
+  eventBus.on("task.failed", onTaskFailed);
 
-  eventBus.on("task.cancelled", async (data: unknown) => {
+  const onTaskCancelled = async (data: unknown) => {
     try {
       const event = data as TaskEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
@@ -82,9 +91,10 @@ export function setupWorkflowResumeListener(
     } catch (err) {
       console.error("[workflows] Handle task cancellation error:", err);
     }
-  });
+  };
+  eventBus.on("task.cancelled", onTaskCancelled);
 
-  eventBus.on("approval.resolved", async (data: unknown) => {
+  const onApprovalResolved = async (data: unknown) => {
     try {
       const event = data as ApprovalEvent;
       if (!event.workflowRunId || !event.workflowRunStepId) return;
@@ -92,7 +102,15 @@ export function setupWorkflowResumeListener(
     } catch (err) {
       console.error("[workflows] Resume from approval resolution failed:", err);
     }
-  });
+  };
+  eventBus.on("approval.resolved", onApprovalResolved);
+
+  return () => {
+    eventBus.off("task.completed", onTaskCompleted);
+    eventBus.off("task.failed", onTaskFailed);
+    eventBus.off("task.cancelled", onTaskCancelled);
+    eventBus.off("approval.resolved", onApprovalResolved);
+  };
 }
 
 /**
