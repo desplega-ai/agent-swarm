@@ -239,6 +239,42 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check async DB seam
+        id: async-db-seam
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-async-db-seam.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check floating promises
+        id: floating-promises
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-floating-promises.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check promise sinks
+        id: promise-sinks
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-promise-sinks.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
       - name: Check API_KEY env-access boundary
         id: api-key-boundary
         run: |

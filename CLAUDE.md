@@ -12,6 +12,16 @@ The swarm API key MUST be read via `getApiKey()` from `src/utils/api-key.ts` —
 
 System prompt and task prompt text MUST go through the prompt-template registry in `src/prompts/`; do not hardcode new prompt sections with string concatenation in runners, hooks, or providers. Add or update a registered template, then resolve it from the call site.
 
+<important if="you are writing or modifying API-server code that reads or writes the database (src/be, src/http, src/tools, src/apps, src/workflows, src/heartbeat, src/scheduler)">
+
+All runtime DB access goes through the async seam: `getDbClient()` from `src/be/db.ts`. Use `await client.query<Row>(sql, params)` / `get<Row>` / `run`, and `await client.transaction(async (tx) => ...)`. Raw sync access (`getDb()`, `.prepare(`, `bun:sqlite` imports) is allowed only for the boot-path files listed in `scripts/check-async-db-seam.sh` (CI-enforced).
+
+- Client-level calls made inside a transaction callback join that transaction automatically (AsyncLocalStorage routing). Nested `transaction` calls become SAVEPOINTs.
+- Post-commit hooks (telemetry, workflow event-bus emits) MUST use `getDbClient().afterSettled(fn)`, never `queueMicrotask` or a bare `.then()`. Microtasks drain BEFORE COMMIT under async transaction callbacks, so they can observe or publish uncommitted state.
+- A missing `await` on an async DB call compiles clean in many positions and fails silently at runtime. CI catches this class via `bun scripts/check-floating-promises.ts` (statement position) and `bun scripts/check-promise-sinks.ts` (truthiness, serialization, object-literal sinks). Run both locally before pushing, next to the usual gates.
+
+</important>
+
 <important if="you are adding, changing, or using task/schedule/workflow model selection">
 
 Prefer portable `modelTier` (`smol` / `regular` / `smart` / `ultra`) for cross-harness task intent and reserve `model` for concrete provider-specific overrides. Tier defaults, env/JSON overrides, legacy alias normalization, and claim-time resolution are documented in [runbooks/model-tiers.md](./runbooks/model-tiers.md).
