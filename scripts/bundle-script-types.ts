@@ -29,7 +29,7 @@ async function main() {
   // but the generated SDK covers the full tool universe — a disabled server
   // rejects task_steer at call time with a clear 403.
   process.env.STEERING_ENABLED = "true";
-  const server = createServer({ fullSurface: true });
+  const server = await createServer({ fullSurface: true });
   const tools = (server as unknown as { _registeredTools: RegisteredTools })._registeredTools;
   const missing = SDK_ALLOWLIST.map((name) => mcpToolNameForSdkMethod(name)).filter(
     (name) => !(name in tools),
