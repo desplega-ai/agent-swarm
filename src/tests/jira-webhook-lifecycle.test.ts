@@ -190,7 +190,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("handles 200 + expirationDate — applies new expiry to all webhooks", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [
         { id: 1, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" },
         { id: 2, expiresAt: "2026-04-15T00:00:00.000Z", jql: "p=B" },
@@ -223,7 +223,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("handles 204 No Content — leaves local expiries unchanged", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 7, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 
@@ -238,7 +238,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("throws on Atlassian non-OK response", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 8, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 
@@ -250,7 +250,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("malformed JSON response leaves expiries untouched (no crash)", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 9, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 

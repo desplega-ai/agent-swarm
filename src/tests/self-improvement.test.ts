@@ -59,7 +59,7 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("store-progress memory indexing", () => {
-    test("completed task creates agent-scoped memory with output", () => {
+    test("completed task creates agent-scoped memory with output", async () => {
       const task = createTaskExtended("Test task for completion", {
         agentId: workerId,
         source: "mcp",
@@ -67,7 +67,7 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const output = "Successfully completed the task with great results";
-      completeTask(task.id, output);
+      await completeTask(task.id, output);
 
       // Simulate what store-progress does: create memory for completed task
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output}`;
@@ -88,7 +88,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(memory.content).not.toContain("undefined");
     });
 
-    test("completed task with undefined output uses fallback", () => {
+    test("completed task with undefined output uses fallback", async () => {
       const task = createTaskExtended("Task without output", {
         agentId: workerId,
         source: "mcp",
@@ -96,7 +96,7 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const output: string | undefined = undefined;
-      completeTask(task.id, output);
+      await completeTask(task.id, output);
 
       // Simulate store-progress logic with undefined guard
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output || "(no output)"}`;
@@ -105,7 +105,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(taskContent).not.toContain("undefined");
     });
 
-    test("failed task creates memory with failure reason", () => {
+    test("failed task creates memory with failure reason", async () => {
       const task = createTaskExtended("Task that will fail", {
         agentId: workerId,
         source: "mcp",
@@ -113,7 +113,7 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const failureReason = "Could not connect to external API";
-      failTask(task.id, failureReason);
+      await failTask(task.id, failureReason);
 
       // Simulate store-progress failed task memory creation
       const taskContent = `Task: ${task.task}\n\nFailure reason:\n${failureReason}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
@@ -239,7 +239,7 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("swarm memory auto-promotion", () => {
-    test("research task type promotes to swarm scope", () => {
+    test("research task type promotes to swarm scope", async () => {
       const task = createTaskExtended("Research best practices for testing", {
         agentId: workerId,
         source: "mcp",
@@ -247,7 +247,7 @@ describe("Self-Improvement Mechanisms", () => {
         taskType: "research",
       });
 
-      completeTask(task.id, "Found several useful patterns");
+      await completeTask(task.id, "Found several useful patterns");
 
       // Simulate the shouldShareWithSwarm logic
       const shouldShareWithSwarm =

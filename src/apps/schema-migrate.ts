@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { getDb, getDbClient } from "../be/db";
+import { getDbClient } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
@@ -1046,7 +1046,7 @@ export async function migrateAppSchema<T>(input: {
     );
     if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
 
-    const transaction = getDb().transaction(() => {
+    const result = await getDbClient().transaction(async () => {
       input.snapshot();
       for (const modelPlan of plan.models) {
         for (const row of modelPlan.changedRows) {
@@ -1071,6 +1071,6 @@ export async function migrateAppSchema<T>(input: {
       invalidateChangedSyncStatus(input.appId, input.previousDefinition, input.nextDefinition);
       return written;
     });
-    return { result: transaction(), migration: plan.report };
+    return { result, migration: plan.report };
   });
 }

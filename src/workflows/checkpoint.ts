@@ -1,17 +1,17 @@
-import { getDb, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
+import { getDbClient, updateWorkflowRun, updateWorkflowRunStep } from "../be/db";
 import type { RetryPolicy } from "../types";
 
 /**
  * Checkpoint a successful step — atomic DB write of step result + run context.
  */
-export function checkpointStep(
+export async function checkpointStep(
   runId: string,
   stepId: string,
   nodeId: string,
   result: { output?: unknown; nextPort?: string },
   ctx: Record<string, unknown>,
-): void {
-  const txn = getDb().transaction(() => {
+): Promise<void> {
+  await getDbClient().transaction(async () => {
     updateWorkflowRunStep(stepId, {
       status: "completed",
       output: result.output,
@@ -25,7 +25,6 @@ export function checkpointStep(
       context: ctx,
     });
   });
-  txn();
 }
 
 /**
@@ -80,12 +79,12 @@ export function checkpointStepFailure(
 /**
  * Checkpoint a step entering waiting state (async executor).
  */
-export function checkpointStepWaiting(
+export async function checkpointStepWaiting(
   runId: string,
   stepId: string,
   ctx: Record<string, unknown>,
-): void {
-  const txn = getDb().transaction(() => {
+): Promise<void> {
+  await getDbClient().transaction(async () => {
     updateWorkflowRunStep(stepId, {
       status: "waiting",
     });
@@ -95,7 +94,6 @@ export function checkpointStepWaiting(
       context: ctx,
     });
   });
-  txn();
 }
 
 /**

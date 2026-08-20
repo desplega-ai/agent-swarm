@@ -463,7 +463,7 @@ describe("store-progress handler — attachments insert path", () => {
       priority: 50,
     });
     startTask(task.id);
-    completeTask(task.id, "first");
+    await completeTask(task.id, "first");
 
     const tool = buildServer();
     const result = (await tool.handler(

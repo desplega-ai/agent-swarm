@@ -147,7 +147,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       };
       const step = await getWorkflowRunStep(stuck.stepId);
       if (!step) continue;
-      const routing = completeTaskStepAndResolveSuccessors(
+      const routing = await completeTaskStepAndResolveSuccessors(
         workflow.definition,
         stuck.runId,
         step,
@@ -232,7 +232,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
         responses,
       };
 
-      checkpointStep(
+      await checkpointStep(
         stuck.runId,
         stuck.stepId,
         stuck.nodeId,

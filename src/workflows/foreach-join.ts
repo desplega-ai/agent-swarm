@@ -42,12 +42,12 @@ export interface ForeachJoinResult {
   successors: WorkflowNode[];
 }
 
-export function joinForeach(
+export async function joinForeach(
   def: WorkflowDefinition,
   runId: string,
   childStep: WorkflowRunStep,
   ctx: Record<string, unknown>,
-): ForeachJoinResult {
+): Promise<ForeachJoinResult> {
   const parent = resolveForeachParent(def, childStep.nodeId);
   if (!parent) {
     throw new Error(`Step "${childStep.nodeId}" is not a foreach child`);
@@ -73,7 +73,7 @@ export function joinForeach(
 
   const aggregate = buildForeachAggregate(children);
 
-  checkpointStep(runId, parentStep.id, parent.id, { output: aggregate }, ctx);
+  await checkpointStep(runId, parentStep.id, parent.id, { output: aggregate }, ctx);
   return {
     joined: true,
     parentNodeId: parent.id,

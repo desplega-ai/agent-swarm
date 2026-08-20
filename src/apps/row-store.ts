@@ -184,6 +184,12 @@ function prepareValues(
   return prepared;
 }
 
+/**
+ * Lock ordering: this per-app/model lock is always acquired BEFORE the DbClient
+ * transaction lock, never the other way round. Awaiting `withMutationLock` (or
+ * anything that calls it, such as `purgeAppRows`) from inside an open client
+ * transaction inverts that order and deadlocks.
+ */
 export function withMutationLock<T>(
   appId: string,
   model: string,

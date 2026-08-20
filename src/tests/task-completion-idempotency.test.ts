@@ -68,7 +68,7 @@ describe("completeTask idempotency", () => {
     expect(fresh!.finishedAt).toBe(firstFinishedAt);
   });
 
-  test("does not re-emit task_status_change log on duplicate completion", () => {
+  test("does not re-emit task_status_change log on duplicate completion", async () => {
     const agent = createAgent({
       name: "idempotency-worker-2",
       isLead: false,
@@ -79,7 +79,7 @@ describe("completeTask idempotency", () => {
     const task = createTaskExtended("Task B", { agentId: agent.id });
     startTask(task.id);
 
-    completeTask(task.id, "done");
+    await completeTask(task.id, "done");
     const logsAfterFirst = getLogsByTaskId(task.id);
     const completedLogsAfterFirst = logsAfterFirst.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "completed",
@@ -87,7 +87,7 @@ describe("completeTask idempotency", () => {
     expect(completedLogsAfterFirst.length).toBe(1);
 
     // Second completion should not log another status-change row
-    completeTask(task.id, "done again");
+    await completeTask(task.id, "done again");
     const logsAfterSecond = getLogsByTaskId(task.id);
     const completedLogsAfterSecond = logsAfterSecond.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "completed",
@@ -95,7 +95,7 @@ describe("completeTask idempotency", () => {
     expect(completedLogsAfterSecond.length).toBe(1);
   });
 
-  test("returns null when called on a failed task (cross-terminal)", () => {
+  test("returns null when called on a failed task (cross-terminal)", async () => {
     const agent = createAgent({
       name: "idempotency-worker-3",
       isLead: false,
@@ -105,7 +105,7 @@ describe("completeTask idempotency", () => {
 
     const task = createTaskExtended("Task C", { agentId: agent.id });
     startTask(task.id);
-    failTask(task.id, "boom");
+    await failTask(task.id, "boom");
 
     const result = completeTask(task.id, "trying to complete a failed task");
     expect(result).toBeNull();
@@ -116,7 +116,7 @@ describe("completeTask idempotency", () => {
     expect(fresh!.failureReason).toBe("boom");
   });
 
-  test("returns null when called on a cancelled task", () => {
+  test("returns null when called on a cancelled task", async () => {
     const agent = createAgent({
       name: "idempotency-worker-4",
       isLead: false,
@@ -126,7 +126,7 @@ describe("completeTask idempotency", () => {
 
     const task = createTaskExtended("Task D", { agentId: agent.id });
     startTask(task.id);
-    cancelTask(task.id, "user cancelled");
+    await cancelTask(task.id, "user cancelled");
 
     const result = completeTask(task.id, "trying to complete a cancelled task");
     expect(result).toBeNull();
@@ -169,7 +169,7 @@ describe("failTask idempotency", () => {
     expect(fresh!.finishedAt).toBe(firstFinishedAt);
   });
 
-  test("does not re-emit task_status_change log on duplicate failure", () => {
+  test("does not re-emit task_status_change log on duplicate failure", async () => {
     const agent = createAgent({
       name: "fail-idempotency-2",
       isLead: false,
@@ -180,14 +180,14 @@ describe("failTask idempotency", () => {
     const task = createTaskExtended("Fail Task B", { agentId: agent.id });
     startTask(task.id);
 
-    failTask(task.id, "boom");
+    await failTask(task.id, "boom");
     const logsAfterFirst = getLogsByTaskId(task.id);
     const failedLogsAfterFirst = logsAfterFirst.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "failed",
     );
     expect(failedLogsAfterFirst.length).toBe(1);
 
-    failTask(task.id, "boom again");
+    await failTask(task.id, "boom again");
     const logsAfterSecond = getLogsByTaskId(task.id);
     const failedLogsAfterSecond = logsAfterSecond.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "failed",
@@ -195,7 +195,7 @@ describe("failTask idempotency", () => {
     expect(failedLogsAfterSecond.length).toBe(1);
   });
 
-  test("returns null when called on a completed task", () => {
+  test("returns null when called on a completed task", async () => {
     const agent = createAgent({
       name: "fail-idempotency-3",
       isLead: false,
@@ -205,7 +205,7 @@ describe("failTask idempotency", () => {
 
     const task = createTaskExtended("Fail Task C", { agentId: agent.id });
     startTask(task.id);
-    completeTask(task.id, "all good");
+    await completeTask(task.id, "all good");
 
     const result = failTask(task.id, "now fail it");
     expect(result).toBeNull();
@@ -215,7 +215,7 @@ describe("failTask idempotency", () => {
     expect(fresh!.output).toBe("all good");
   });
 
-  test("returns null when called on a cancelled task", () => {
+  test("returns null when called on a cancelled task", async () => {
     const agent = createAgent({
       name: "fail-idempotency-4",
       isLead: false,
@@ -225,7 +225,7 @@ describe("failTask idempotency", () => {
 
     const task = createTaskExtended("Fail Task D", { agentId: agent.id });
     startTask(task.id);
-    cancelTask(task.id, "user cancelled");
+    await cancelTask(task.id, "user cancelled");
 
     const result = failTask(task.id, "now fail it");
     expect(result).toBeNull();
@@ -247,7 +247,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
   // returning null on terminal state), so these tests verify the underlying
   // contract that store-progress relies on.
 
-  test("completing an already-completed task is a no-op at the DB layer", () => {
+  test("completing an already-completed task is a no-op at the DB layer", async () => {
     const agent = createAgent({
       name: "sp-idempotency-1",
       isLead: false,
@@ -257,7 +257,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
 
     const task = createTaskExtended("SP Task A", { agentId: agent.id });
     startTask(task.id);
-    completeTask(task.id, "first output");
+    await completeTask(task.id, "first output");
 
     // Snapshot the row state
     const snapshot = getTaskById(task.id);
@@ -277,7 +277,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     expect(getLogsByTaskId(task.id).length).toBe(snapshotLogs);
   });
 
-  test("failing an already-failed task is a no-op at the DB layer", () => {
+  test("failing an already-failed task is a no-op at the DB layer", async () => {
     const agent = createAgent({
       name: "sp-idempotency-2",
       isLead: false,
@@ -287,7 +287,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
 
     const task = createTaskExtended("SP Task B", { agentId: agent.id });
     startTask(task.id);
-    failTask(task.id, "first reason");
+    await failTask(task.id, "first reason");
 
     const snapshot = getTaskById(task.id);
     const snapshotLogs = getLogsByTaskId(task.id).length;
@@ -462,7 +462,7 @@ describe("store-progress terminal result reporting", () => {
     });
     const task = createTaskExtended("terminal forced overwrite", { agentId: agent.id });
     startTask(task.id);
-    completeTask(task.id, "first output");
+    await completeTask(task.id, "first output");
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const before = getTaskById(task.id)!;

@@ -37,9 +37,12 @@ function rowToSwarmEvent(row: EventRow): SwarmEvent {
   };
 }
 
-// `insert` stays on the raw synchronous handle: it's shared with
-// createEventsBatch's sync `db.transaction(...)` callback below, so it can't
-// be converted to the async client without breaking that transaction.
+const INSERT_EVENT_SQL = `INSERT INTO events (id, category, event, status, source, agentId, taskId,
+       sessionId, parentEventId, numericValue, durationMs, data, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
+
+// `insert` stays on the raw synchronous handle: it backs `createEvent` below,
+// which is still synchronous.
 const eventQueries = {
   insert: () =>
     getDb().prepare<
@@ -58,11 +61,7 @@ const eventQueries = {
         number | null,
         string | null,
       ]
-    >(
-      `INSERT INTO events (id, category, event, status, source, agentId, taskId,
-       sessionId, parentEventId, numericValue, durationMs, data, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-    ),
+    >(INSERT_EVENT_SQL),
 };
 
 // ─── Create ─────────────────────────────────────────────────────────────────
@@ -116,13 +115,11 @@ export function createEvent(input: CreateEventInput): SwarmEvent {
   };
 }
 
-export function createEventsBatch(inputs: CreateEventInput[]): number {
-  const insert = eventQueries.insert();
-  const tx = getDb().transaction(() => {
+export async function createEventsBatch(inputs: CreateEventInput[]): Promise<number> {
+  await getDbClient().transaction(async (tx) => {
     for (const input of inputs) {
-      const id = crypto.randomUUID();
-      insert.run(
-        id,
+      await tx.run(INSERT_EVENT_SQL, [
+        crypto.randomUUID(),
         input.category,
         input.event,
         input.status ?? "ok",
@@ -134,10 +131,9 @@ export function createEventsBatch(inputs: CreateEventInput[]): number {
         input.numericValue ?? null,
         input.durationMs ?? null,
         input.data ? JSON.stringify(input.data) : null,
-      );
+      ]);
     }
   });
-  tx();
   return inputs.length;
 }
 

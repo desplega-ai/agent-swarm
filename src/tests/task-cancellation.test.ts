@@ -276,7 +276,7 @@ describe("Task Cancellation", () => {
   });
 
   describe("getRecentlyCancelledTasksForAgent", () => {
-    test("should return cancelled tasks for an agent", () => {
+    test("should return cancelled tasks for an agent", async () => {
       const agentId = "worker-recent-cancelled";
       createAgent({
         id: agentId,
@@ -294,8 +294,8 @@ describe("Task Cancellation", () => {
         agentId: agentId,
       });
 
-      cancelTask(task1.id, "Reason 1");
-      cancelTask(task2.id, "Reason 2");
+      await cancelTask(task1.id, "Reason 1");
+      await cancelTask(task2.id, "Reason 2");
 
       const cancelledTasks = getRecentlyCancelledTasksForAgent(agentId);
 
@@ -305,7 +305,7 @@ describe("Task Cancellation", () => {
       expect(taskIds).toContain(task2.id);
     });
 
-    test("should not return cancelled tasks from other agents", () => {
+    test("should not return cancelled tasks from other agents", async () => {
       const agentA = "agent-a-isolated";
       const agentB = "agent-b-isolated";
 
@@ -331,8 +331,8 @@ describe("Task Cancellation", () => {
         agentId: agentB,
       });
 
-      cancelTask(taskA.id, "Cancelled A");
-      cancelTask(taskB.id, "Cancelled B");
+      await cancelTask(taskA.id, "Cancelled A");
+      await cancelTask(taskB.id, "Cancelled B");
 
       const cancelledForA = getRecentlyCancelledTasksForAgent(agentA);
       const taskIdsA = cancelledForA.map((t) => t.id);
@@ -421,7 +421,7 @@ describe("Task Cancellation", () => {
         agentId: agentId,
       });
 
-      cancelTask(task.id, "Endpoint test reason");
+      await cancelTask(task.id, "Endpoint test reason");
 
       const response = await fetch(`${baseUrl}/cancelled-tasks`, {
         headers: { "X-Agent-ID": agentId },
@@ -452,7 +452,7 @@ describe("Task Cancellation", () => {
         agentId: agentId,
       });
 
-      cancelTask(task.id, "Specific task cancelled");
+      await cancelTask(task.id, "Specific task cancelled");
 
       // Check the specific cancelled task
       const response = await fetch(`${baseUrl}/cancelled-tasks?taskId=${task.id}`, {

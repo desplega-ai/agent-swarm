@@ -223,13 +223,13 @@ export interface HeartbeatFindings {
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
-let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void) | null = null;
+let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 
 /** Tasks auto-failed during the reboot sweep, consumed by boot triage */
 let rebootAffectedTasks: Array<{ original: AgentTask; retryTaskId: string | null }> = [];
 
 export function setBeforeHeartbeatSupersedeForTests(
-  hook: ((task: AgentTask) => void) | null,
+  hook: ((task: AgentTask) => void | Promise<void>) | null,
 ): void {
   beforeHeartbeatSupersedeForTests = hook;
 }
@@ -415,7 +415,7 @@ async function remediateCrashedWorkerTask(
     !skipAutoResume && !isWorkflowStep && (await hasNonTerminalResumeChild(task.id));
 
   if (isWorkflowStep) {
-    const failed = failTask(task.id, "superseded_workflow_task");
+    const failed = await failTask(task.id, "superseded_workflow_task");
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -433,7 +433,7 @@ async function remediateCrashedWorkerTask(
   }
 
   if (skipAutoResume || alreadyResumed) {
-    const failed = failTask(task.id, opts.legacyFailReason);
+    const failed = await failTask(task.id, opts.legacyFailReason);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -454,7 +454,7 @@ async function remediateCrashedWorkerTask(
 
   const nextResumeGeneration = getNextResumeGeneration(task);
   if (nextResumeGeneration > maxResumeGenerations()) {
-    const failed = failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
+    const failed = await failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -471,7 +471,7 @@ async function remediateCrashedWorkerTask(
     return;
   }
 
-  beforeHeartbeatSupersedeForTests?.(task);
+  await beforeHeartbeatSupersedeForTests?.(task);
 
   const superseded = await supersedeTask(task.id, {
     reason: opts.supersedeReason,
@@ -482,7 +482,7 @@ async function remediateCrashedWorkerTask(
   }
 
   try {
-    promotePendingSteeringForTask(
+    await promotePendingSteeringForTask(
       task.id,
       "Task was crash-recovered before steering was delivered",
     );
@@ -523,7 +523,7 @@ async function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
-    const failed = failTask(task.id, reason);
+    const failed = await failTask(task.id, reason);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -621,7 +621,7 @@ export async function runRebootSweep(): Promise<void> {
       if (session) await deleteActiveSession(task.id);
 
       // Auto-fail the task
-      const failed = failTask(task.id, reason);
+      const failed = await failTask(task.id, reason);
       if (!failed) continue;
 
       // Fix agent status

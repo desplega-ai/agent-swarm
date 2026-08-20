@@ -200,7 +200,7 @@ describe("handleIssueEvent — assignee→bot", () => {
 
     // Mark first task as completed
     if (firstTaskId) {
-      completeTask(firstTaskId);
+      await completeTask(firstTaskId);
     }
 
     // Re-assign — should create a follow-up via jira.issue.followup template
@@ -301,7 +301,7 @@ describe("handleCommentEvent — short-circuits", () => {
     const sync = getTrackerSyncByExternalId("jira", "task", "10015");
     const firstTaskId = sync?.swarmId;
     expect(firstTaskId).toBeTruthy();
-    if (firstTaskId) completeTask(firstTaskId);
+    if (firstTaskId) await completeTask(firstTaskId);
 
     await handleCommentEvent(
       makeCommentEvent("10015", "KAN-15", "user-other", "follow-up please", [BOT_ACCOUNT_ID]),

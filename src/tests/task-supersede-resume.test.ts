@@ -143,7 +143,7 @@ describe("Task Supersede + Resume", () => {
       const worker = freshAgent("worker-5");
       const task = createTaskExtended("Complete then supersede", { agentId: worker.id });
       startTask(task.id);
-      completeTask(task.id, "done");
+      await completeTask(task.id, "done");
       const result = await supersedeTask(task.id, {
         reason: "graceful_shutdown",
         resumeTaskId: null,

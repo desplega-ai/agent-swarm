@@ -131,7 +131,7 @@ async function resumeFromTaskCompletion(
   }
   const stepOutput = { taskId: event.taskId, taskOutput };
 
-  const routing = completeTaskStepAndResolveSuccessors(
+  const routing = await completeTaskStepAndResolveSuccessors(
     workflow.definition,
     run.id,
     step,
@@ -212,7 +212,7 @@ async function handleTaskFailure(
     taskId: event.taskId,
     taskOutput: `${FAILED_TASK_OUTPUT_PREFIX} ${reason}] This node failed or was cancelled.`,
   };
-  const routing = completeTaskStepAndResolveSuccessors(
+  const routing = await completeTaskStepAndResolveSuccessors(
     workflow.definition,
     run.id,
     step,
@@ -330,7 +330,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
     // Cancel any task linked to this step
     const task = await getTaskByWorkflowRunStepId(step.id);
     if (task) {
-      cancelTask(task.id, cancelReason);
+      await cancelTask(task.id, cancelReason);
     }
 
     updateWorkflowRunStep(step.id, {
@@ -381,7 +381,7 @@ async function resumeFromApprovalResolution(
     responses: event.responses,
   };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
+  await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
   updateWorkflowRun(run.id, { status: "running" });
 
   // Use port-based routing to determine the correct successors.
@@ -469,7 +469,7 @@ export async function resumeWaitState(
     payload: cappedPayload === undefined ? undefined : cappedPayload,
   };
 
-  checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
+  await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
   updateWorkflowRun(run.id, { status: "running" });
 
   // 5. Bus listener bookkeeping: this wait is no longer pending, so drop it

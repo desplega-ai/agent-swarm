@@ -2827,7 +2827,7 @@ export async function findRecentCancelledTaskInThread(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function completeTask(id: string, output?: string): AgentTask | null {
+export async function completeTask(id: string, output?: string): Promise<AgentTask | null> {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
@@ -2895,7 +2895,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
         );
     });
     try {
-      promotePendingSteeringForTask(id, "Task completed before steering was delivered");
+      await promotePendingSteeringForTask(id, "Task completed before steering was delivered");
     } catch (error) {
       console.error(
         "[completeTask] pending steering promotion error:",
@@ -2907,7 +2907,7 @@ export function completeTask(id: string, output?: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function failTask(id: string, reason: string): AgentTask | null {
+export async function failTask(id: string, reason: string): Promise<AgentTask | null> {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
@@ -2968,7 +2968,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
         );
     });
     try {
-      promotePendingSteeringForTask(id, "Task failed before steering was delivered");
+      await promotePendingSteeringForTask(id, "Task failed before steering was delivered");
     } catch (error) {
       console.error(
         "[failTask] pending steering promotion error:",
@@ -2979,7 +2979,7 @@ export function failTask(id: string, reason: string): AgentTask | null {
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
     try {
-      cascadeFailDependents(id, "failed");
+      await cascadeFailDependents(id, "failed");
     } catch (err) {
       console.error("[failTask] cascade-fail dependents error:", err);
     }
@@ -3016,7 +3016,7 @@ export function overwriteTerminalTaskResultText(
   return row ? rowToAgentTask(row) : task;
 }
 
-export function cancelTask(id: string, reason?: string): AgentTask | null {
+export async function cancelTask(id: string, reason?: string): Promise<AgentTask | null> {
   const oldTask = getTaskById(id);
   if (!oldTask) return null;
 
@@ -3077,7 +3077,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
         );
     });
     try {
-      promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
+      await promotePendingSteeringForTask(id, "Task was cancelled before steering was delivered");
     } catch (error) {
       console.error(
         "[cancelTask] pending steering promotion error:",
@@ -3086,7 +3086,7 @@ export function cancelTask(id: string, reason?: string): AgentTask | null {
     }
 
     try {
-      cascadeFailDependents(id, "cancelled");
+      await cascadeFailDependents(id, "cancelled");
     } catch (err) {
       console.error("[cancelTask] cascade-fail dependents error:", err);
     }
@@ -3176,7 +3176,7 @@ export async function supersedeTask(
     });
 
     try {
-      cascadeFailDependents(id, "superseded");
+      await cascadeFailDependents(id, "superseded");
     } catch (err) {
       console.error("[supersedeTask] cascade-fail dependents error:", err);
     }
@@ -5369,11 +5369,11 @@ export interface CascadeFailResult {
  * Returns the list of tasks that were actually cascade-failed (for follow-up
  * enrichment).
  */
-export function cascadeFailDependents(
+export async function cascadeFailDependents(
   parentId: string,
   parentStatus: string,
   visited?: Set<string>,
-): CascadeFailResult[] {
+): Promise<CascadeFailResult[]> {
   const seen = visited ?? new Set<string>();
   if (seen.has(parentId)) return [];
   seen.add(parentId);
@@ -5385,14 +5385,14 @@ export function cascadeFailDependents(
     if (seen.has(dep.id)) continue;
 
     const reason = `Blocked dependency ${parentId.slice(0, 8)} was ${parentStatus}`;
-    const failed = failTask(dep.id, reason);
+    const failed = await failTask(dep.id, reason);
     if (failed) {
       results.push({
         taskId: failed.id,
         taskSubject: failed.task.slice(0, 120),
       });
       // Recurse: this dependent may itself have dependents
-      const transitive = cascadeFailDependents(dep.id, "failed (cascade)", seen);
+      const transitive = await cascadeFailDependents(dep.id, "failed (cascade)", seen);
       results.push(...transitive);
     }
   }

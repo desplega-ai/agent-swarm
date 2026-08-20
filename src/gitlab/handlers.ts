@@ -204,7 +204,7 @@ export async function handleMergeRequest(
       if (existingTask) {
         const reason = action === "merge" ? "MR was merged" : "MR was closed";
         console.log(`[GitLab] Cancelling task ${existingTask.id} — ${reason}`);
-        failTask(existingTask.id, reason);
+        await failTask(existingTask.id, reason);
       }
       return { created: false };
     }
@@ -307,7 +307,7 @@ export async function handleIssue(
       const existingTask = await findTaskByVcs(repo, issue.iid);
       if (existingTask) {
         console.log(`[GitLab] Cancelling task ${existingTask.id} — issue closed`);
-        failTask(existingTask.id, "Issue was closed");
+        await failTask(existingTask.id, "Issue was closed");
       }
       return { created: false };
     }

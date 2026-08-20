@@ -145,7 +145,7 @@ export async function registerJiraWebhook(jqlFilter: string): Promise<RegisterJi
 
   // Persist via the read-modify-write helper so we don't clobber cloudId/siteUrl.
   // updateJiraMetadata's id-keyed merge preserves any other webhookIds rows.
-  updateJiraMetadata({
+  await updateJiraMetadata({
     webhookIds: [{ id: webhookId, expiresAt, jql: jqlFilter }],
   });
 
@@ -202,12 +202,11 @@ export async function deleteJiraWebhook(webhookId: number): Promise<void> {
 async function overwriteWebhookIds(
   next: Array<{ id: number; expiresAt: string; jql: string }>,
 ): Promise<void> {
-  const { getDb } = await import("../be/db");
-  const db = getDb();
-  const txn = db.transaction(() => {
-    const row = db.query("SELECT metadata FROM oauth_apps WHERE provider = 'jira'").get() as {
-      metadata: string | null;
-    } | null;
+  const { getDbClient } = await import("../be/db");
+  await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<{ metadata: string | null }>(
+      "SELECT metadata FROM oauth_apps WHERE provider = 'jira'",
+    );
 
     if (!row) {
       throw new Error(
@@ -226,11 +225,11 @@ async function overwriteWebhookIds(
     }
 
     const merged = { ...current, webhookIds: next };
-    db.query(
+    await tx.run(
       "UPDATE oauth_apps SET metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE provider = 'jira'",
-    ).run(JSON.stringify(merged));
+      [JSON.stringify(merged)],
+    );
   });
-  txn();
 }
 
 /**
@@ -293,7 +292,7 @@ export async function refreshJiraWebhooks(): Promise<void> {
     ...entry,
     expiresAt: expirationDate,
   }));
-  updateJiraMetadata({ webhookIds: updated });
+  await updateJiraMetadata({ webhookIds: updated });
 
   console.log(
     `[Jira webhook keepalive] Refreshed ${updated.length} webhook(s) → expiresAt=${expirationDate}`,

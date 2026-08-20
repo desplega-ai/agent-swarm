@@ -137,7 +137,7 @@ export async function handleEvents(
     if (!parsed) return true;
 
     try {
-      const count = createEventsBatch(parsed.body.events);
+      const count = await createEventsBatch(parsed.body.events);
       createEventsBatchRoute.respond(res, 201, { success: true, count });
     } catch (error) {
       console.error("[HTTP] Failed to create events batch:", error);

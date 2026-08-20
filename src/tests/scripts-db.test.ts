@@ -163,8 +163,8 @@ describe("scripts DB helpers", () => {
     ).toBe(2);
   });
 
-  test("scope uniqueness treats global null scopeId as one scope and isolates agent scopes", () => {
-    insertScript({
+  test("scope uniqueness treats global null scopeId as one scope and isolates agent scopes", async () => {
+    await insertScript({
       name: "shared-name",
       scope: "global",
       source: source(2),
@@ -216,8 +216,8 @@ describe("scripts DB helpers", () => {
     ).toThrow("scopeId is required");
   });
 
-  test("listScripts filters scratch scripts by default", () => {
-    insertScript({
+  test("listScripts filters scratch scripts by default", async () => {
+    await insertScript({
       name: "explicit",
       scope: "agent",
       scopeId: "agent-1",
@@ -226,7 +226,7 @@ describe("scripts DB helpers", () => {
       intent: "Explicit script",
       signatureJson,
     });
-    insertScript({
+    await insertScript({
       name: "scratch",
       scope: "agent",
       scopeId: "agent-1",

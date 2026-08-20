@@ -602,7 +602,7 @@ async function executeStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    checkpointStepWaiting(runId, stepId, ctx);
+    await checkpointStepWaiting(runId, stepId, ctx);
     return { outcome: "waiting", successors: [] };
   }
 
@@ -664,7 +664,7 @@ async function executeStep(
   }
 
   // 9. Checkpoint success
-  checkpointStep(runId, stepId, node.id, result, ctx);
+  await checkpointStep(runId, stepId, node.id, result, ctx);
 
   // 10. Determine successors based on nextPort
   // If executor returned a specific port, use it. Otherwise, get all successors

@@ -105,9 +105,9 @@ describe("query functions", () => {
   const sessionId = `query-test-session-${Date.now()}`;
   const taskId = `query-test-task-${Date.now()}`;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Seed events for query tests
-    createEventsBatch([
+    await createEventsBatch([
       {
         category: "tool",
         event: "tool.start",

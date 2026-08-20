@@ -32,7 +32,7 @@ afterAll(() => {
 });
 
 describe("findCompletedTaskInThread", () => {
-  test("finds completed tasks in a thread within the time window", () => {
+  test("finds completed tasks in a thread within the time window", async () => {
     const agent = createAgent({
       name: "dedup-worker-1",
       isLead: false,
@@ -47,7 +47,7 @@ describe("findCompletedTaskInThread", () => {
     });
 
     // Mark as completed
-    completeTask(task.id, "done");
+    await completeTask(task.id, "done");
 
     // Should find the completed task within a 2880-minute (48h) window
     const result = findCompletedTaskInThread("C_DEDUP_1", "1000.0001", 2880);
@@ -75,7 +75,7 @@ describe("findCompletedTaskInThread", () => {
     expect(result).toBeNull();
   });
 
-  test("returns null outside the time window", () => {
+  test("returns null outside the time window", async () => {
     const agent = createAgent({
       name: "dedup-worker-3",
       isLead: false,
@@ -89,7 +89,7 @@ describe("findCompletedTaskInThread", () => {
       slackThreadTs: "3000.0001",
     });
 
-    completeTask(task.id, "done long ago");
+    await completeTask(task.id, "done long ago");
 
     // Backdate the lastUpdatedAt to 49 hours ago (beyond the 48h window)
     const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
@@ -103,7 +103,7 @@ describe("findCompletedTaskInThread", () => {
     expect(result).toBeNull();
   });
 
-  test("returns null for a different thread", () => {
+  test("returns null for a different thread", async () => {
     const agent = createAgent({
       name: "dedup-worker-4",
       isLead: false,
@@ -117,7 +117,7 @@ describe("findCompletedTaskInThread", () => {
       slackThreadTs: "4000.0001",
     });
 
-    completeTask(task.id, "done");
+    await completeTask(task.id, "done");
 
     // Search in a different thread — should not find
     const result = findCompletedTaskInThread("C_DEDUP_4", "4000.9999", 2880);
@@ -145,14 +145,14 @@ describe("follow-up re-delegation guard logic", () => {
     });
   });
 
-  test("blocks re-delegation when source task is a follow-up and thread has completed work", () => {
+  test("blocks re-delegation when source task is a follow-up and thread has completed work", async () => {
     // Step 1: Create and complete a worker task in a Slack thread
     const workerTask = createTaskExtended("implement feature X", {
       agentId: workerAgent.id,
       slackChannelId: "C_GUARD_1",
       slackThreadTs: "5000.0001",
     });
-    completeTask(workerTask.id, "Feature X implemented");
+    await completeTask(workerTask.id, "Feature X implemented");
 
     // Step 2: Create a follow-up task (as store-progress would)
     const followUpTask = createTaskExtended("Worker task completed — review needed.", {
@@ -232,7 +232,7 @@ describe("follow-up re-delegation guard logic", () => {
     // → Guard does NOT block: first-time delegation is fine
   });
 
-  test("findRecentCancelledTaskInThread finds tasks with status='cancelled'", () => {
+  test("findRecentCancelledTaskInThread finds tasks with status='cancelled'", async () => {
     const agent = createAgent({
       name: "cancel-thread-worker-1",
       isLead: false,
@@ -244,7 +244,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: "C_CANCEL_1",
       slackThreadTs: "9000.0001",
     });
-    cancelTask(task.id, "user cancelled");
+    await cancelTask(task.id, "user cancelled");
 
     const result = findRecentCancelledTaskInThread("C_CANCEL_1", "9000.0001", 2880);
     expect(result).not.toBeNull();
@@ -252,7 +252,7 @@ describe("follow-up re-delegation guard logic", () => {
     expect(result!.status).toBe("cancelled");
   });
 
-  test("findRecentCancelledTaskInThread finds failed tasks with 'cancelled' failureReason", () => {
+  test("findRecentCancelledTaskInThread finds failed tasks with 'cancelled' failureReason", async () => {
     const agent = createAgent({
       name: "cancel-thread-worker-2",
       isLead: false,
@@ -264,7 +264,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: "C_CANCEL_2",
       slackThreadTs: "9000.0002",
     });
-    failTask(task.id, "cancelled");
+    await failTask(task.id, "cancelled");
 
     const result = findRecentCancelledTaskInThread("C_CANCEL_2", "9000.0002", 2880);
     expect(result).not.toBeNull();
@@ -272,7 +272,7 @@ describe("follow-up re-delegation guard logic", () => {
     expect(result!.failureReason).toBe("cancelled");
   });
 
-  test("findRecentCancelledTaskInThread finds failed tasks with 'exit 130' failureReason", () => {
+  test("findRecentCancelledTaskInThread finds failed tasks with 'exit 130' failureReason", async () => {
     const agent = createAgent({
       name: "cancel-thread-worker-3",
       isLead: false,
@@ -284,14 +284,14 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: "C_CANCEL_3",
       slackThreadTs: "9000.0003",
     });
-    failTask(task.id, "exit 130: aborted by user");
+    await failTask(task.id, "exit 130: aborted by user");
 
     const result = findRecentCancelledTaskInThread("C_CANCEL_3", "9000.0003", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
   });
 
-  test("findRecentCancelledTaskInThread ignores plain failed tasks (no cancellation marker)", () => {
+  test("findRecentCancelledTaskInThread ignores plain failed tasks (no cancellation marker)", async () => {
     const agent = createAgent({
       name: "cancel-thread-worker-4",
       isLead: false,
@@ -303,13 +303,13 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: "C_CANCEL_4",
       slackThreadTs: "9000.0004",
     });
-    failTask(task.id, "TypeError: cannot read property of undefined");
+    await failTask(task.id, "TypeError: cannot read property of undefined");
 
     const result = findRecentCancelledTaskInThread("C_CANCEL_4", "9000.0004", 2880);
     expect(result).toBeNull();
   });
 
-  test("guard bypasses re-delegation block when cancellation is more recent than completion", () => {
+  test("guard bypasses re-delegation block when cancellation is more recent than completion", async () => {
     const channel = "C_BYPASS_1";
     const thread = "10000.0001";
 
@@ -319,7 +319,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: channel,
       slackThreadTs: thread,
     });
-    completeTask(completedTask.id, "first attempt done");
+    await completeTask(completedTask.id, "first attempt done");
 
     // Backdate to 30 minutes ago so the cancellation is more recent.
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
@@ -334,7 +334,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: channel,
       slackThreadTs: thread,
     });
-    cancelTask(cancelledTask.id, "cancelled");
+    await cancelTask(cancelledTask.id, "cancelled");
 
     // Guard checks:
     const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
@@ -352,7 +352,7 @@ describe("follow-up re-delegation guard logic", () => {
     // → Guard does NOT block: re-delegation is allowed.
   });
 
-  test("guard still blocks when completion is more recent than any cancellation", () => {
+  test("guard still blocks when completion is more recent than any cancellation", async () => {
     const channel = "C_BYPASS_2";
     const thread = "11000.0001";
 
@@ -362,7 +362,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: channel,
       slackThreadTs: thread,
     });
-    cancelTask(cancelledTask.id, "cancelled");
+    await cancelTask(cancelledTask.id, "cancelled");
 
     // Backdate the cancellation to 30 minutes ago
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
@@ -377,7 +377,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackChannelId: channel,
       slackThreadTs: thread,
     });
-    completeTask(completedTask.id, "retry succeeded");
+    await completeTask(completedTask.id, "retry succeeded");
 
     // Guard:
     const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
@@ -394,14 +394,14 @@ describe("follow-up re-delegation guard logic", () => {
     // → Guard BLOCKS as before: the work was already redone successfully.
   });
 
-  test("allows delegation when source task is a follow-up but completed work is outside time window", () => {
+  test("allows delegation when source task is a follow-up but completed work is outside time window", async () => {
     // Create and complete a worker task, then backdate it
     const oldWorkerTask = createTaskExtended("old task", {
       agentId: workerAgent.id,
       slackChannelId: "C_GUARD_4",
       slackThreadTs: "8000.0001",
     });
-    completeTask(oldWorkerTask.id, "done long ago");
+    await completeTask(oldWorkerTask.id, "done long ago");
 
     // Backdate to 49 hours ago (beyond the 48h window)
     const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();

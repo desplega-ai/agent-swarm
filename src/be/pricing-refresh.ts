@@ -2,7 +2,6 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createLogEntry,
   getActivePricingRowSync,
-  getDb,
   getDbClient,
   type InsertPricingRowInput,
   insertPricingRowSync,
@@ -41,22 +40,22 @@ function logPricingRefreshError(message: string, err: unknown): void {
 }
 
 /**
- * DEFERRED (transaction rule): own body contains `.transaction(` — skipped
- * entirely, left 100% sync (uses `getActivePricingRowSync` /
- * `insertPricingRowSync`).
+ * The per-row reads and writes stay on the synchronous helpers
+ * (`getActivePricingRowSync` / `insertPricingRowSync`): they run on the shared
+ * connection inside the client transaction's open BEGIN.
  */
-function insertChangedPricingRows(
+async function insertChangedPricingRows(
   rows: PricingSeedRow[],
   now: number,
-): {
+): Promise<{
   inserted: number;
   unchanged: number;
-} {
-  let inserted = 0;
-  let unchanged = 0;
+}> {
+  return await getDbClient().transaction(async () => {
+    let inserted = 0;
+    let unchanged = 0;
 
-  const tx = getDb().transaction((seedRows: PricingSeedRow[]) => {
-    for (const row of seedRows) {
+    for (const row of rows) {
       const existing = getActivePricingRowSync(row.provider, row.model, row.tokenClass, now);
       if (existing?.pricePerMillionUsd === row.pricePerMillionUsd) {
         unchanged += 1;
@@ -70,10 +69,9 @@ function insertChangedPricingRows(
       insertPricingRowSync(input);
       inserted += 1;
     }
-  });
 
-  tx(rows);
-  return { inserted, unchanged };
+    return { inserted, unchanged };
+  });
 }
 
 async function prunePricingHistory(keepLatest = 2): Promise<number> {
@@ -156,7 +154,7 @@ export async function refreshPricingFromModelsDev(
   const etag = response.headers.get("etag");
   updateLiveModelsCatalog(cache, now);
   const rows = buildModelsDevSeedRows(cache);
-  const { inserted, unchanged } = insertChangedPricingRows(rows, now);
+  const { inserted, unchanged } = await insertChangedPricingRows(rows, now);
   const pruned = await prunePricingHistory(2);
   lastETag = etag;
 

@@ -105,7 +105,7 @@ describe("watcher DB queries", () => {
       slackUserId: "U_WATCHER2",
     });
 
-    cancelTask(task.id, "test cancel");
+    await cancelTask(task.id, "test cancel");
 
     const completed = await getCompletedSlackTasks();
     const found = completed.find((t) => t.id === task.id);
@@ -425,8 +425,8 @@ describe("buildTreeNodes", () => {
       parentTaskId: parent.id,
     });
     // Mark both completed so the watcher pulls their attachments.
-    completeTask(parent.id, "done");
-    completeTask(child.id, "done");
+    await completeTask(parent.id, "done");
+    await completeTask(child.id, "done");
 
     await insertTaskAttachment({
       taskId: parent.id,
@@ -609,7 +609,7 @@ describe("processTreeMessages", () => {
       newValue: "slack_reaction",
       metadata: { slackChannelId: "C_TERM1", slackMessageTs: "4040404040.000004" },
     });
-    completeTask(task.id, "All done");
+    await completeTask(task.id, "All done");
 
     const messageTs = "4040404040.000002";
     await registerTreeMessage(task.id, "C_TERM1", "4040404040.000001", messageTs);
@@ -654,7 +654,7 @@ describe("processTreeMessages", () => {
     const output = `### Findings\n\n${"Detailed result line. ".repeat(350)}${finalMarker}`;
 
     startTask(task.id);
-    completeTask(task.id, output);
+    await completeTask(task.id, output);
 
     const messageTs = "4141414141.000002";
     await registerTreeMessage(task.id, "C_FULL_OUTPUT", "4141414141.000001", messageTs);
@@ -707,8 +707,8 @@ describe("processTreeMessages", () => {
 
     startTask(parent.id);
     startTask(child.id);
-    failTask(child.id, "Child failed");
-    completeTask(parent.id, "Parent done");
+    await failTask(child.id, "Child failed");
+    await completeTask(parent.id, "Parent done");
 
     const messageTs = "5050505050.000002";
     await registerTreeMessage(parent.id, "C_TERM2", "5050505050.000001", messageTs);
@@ -752,7 +752,7 @@ describe("processTreeMessages", () => {
     startTask(parent.id);
     startTask(child.id);
     // Child completes but parent still in_progress
-    completeTask(child.id, "Child done");
+    await completeTask(child.id, "Child done");
 
     const messageTs = "6060606060.000002";
     await registerTreeMessage(parent.id, "C_ACTIVE1", "6060606060.000001", messageTs);
@@ -1021,7 +1021,7 @@ describe("DM unification — tree messages in DMs", () => {
     });
 
     startTask(task.id);
-    completeTask(task.id, "Done in DM");
+    await completeTask(task.id, "Done in DM");
 
     const messageTs = "1717171717.000002";
     await registerTreeMessage(task.id, "D_DM_TERM1", "1717171717.000001", messageTs);

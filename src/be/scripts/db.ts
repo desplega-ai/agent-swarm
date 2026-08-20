@@ -74,11 +74,10 @@ function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {
   };
 }
 
-// NOTE: kept synchronous (raw getDb()). insertScriptVersion runs inside the
-// synchronous getDb().transaction() callbacks of insertScript (below) and of
-// upsertScriptByName's content-changed branch — both transactions are
-// deferred to step 3, so this helper (and insertScript's own body) must stay
-// on the raw handle until then.
+// NOTE: kept synchronous (raw getDb()). insertScriptVersion only runs inside
+// the client transactions of insertScript (below) and of upsertScriptByName's
+// content-changed branch, so it writes on the shared connection inside the
+// already-open BEGIN.
 function insertScriptVersion(args: {
   scriptId: string;
   version: number;
@@ -113,7 +112,7 @@ function insertScriptVersion(args: {
     );
 }
 
-export function insertScript(args: ScriptWriteArgs): ScriptRecord {
+export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
@@ -122,41 +121,16 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
   const isScratch = args.isScratch ? 1 : 0;
   const typeChecked = args.typeChecked ? 1 : 0;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
-      .prepare<
-        ScriptRow,
-        [
-          string,
-          string,
-          string,
-          ScriptScope,
-          string | null,
-          string,
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          number,
-          number,
-          string,
-          string | null,
-          string,
-          string,
-          string | null,
-          string | null,
-        ]
-      >(
-        `INSERT INTO scripts (
+  return await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<ScriptRow>(
+      `INSERT INTO scripts (
           id, "key", name, scope, scopeId, source, description, intent, signatureJson,
           argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, createdByAgentId, createdAt, updatedAt,
           created_by, updated_by
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *`,
-      )
-      .get(
+      [
         id,
         defaultAssetKey("script", id),
         args.name,
@@ -176,7 +150,8 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
         now,
         args.createdBy ?? null,
         args.createdBy ?? null,
-      );
+      ],
+    );
 
     if (!row) throw new Error("Failed to insert script");
 
@@ -194,8 +169,6 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
 
     return rowToScript(row);
   });
-
-  return txn();
 }
 
 /**
@@ -207,7 +180,7 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const shouldEmbed = args.embeddingMode !== "skip";
   const existing = await getScript(args);
   if (!existing) {
-    const script = insertScript(args);
+    const script = await insertScript(args);
     if (!script.isScratch && shouldEmbed) {
       await embedScript(script);
     }
@@ -290,33 +263,14 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const argsJsonSchema =
     args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
-      .prepare<
-        ScriptRow,
-        [
-          string,
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          number,
-          number,
-          number,
-          string,
-          string,
-          string | null,
-          string,
-        ]
-      >(
-        `UPDATE scripts
+  const script = await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<ScriptRow>(
+      `UPDATE scripts
         SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
           contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
         WHERE id = ?
         RETURNING *`,
-      )
-      .get(
+      [
         args.source,
         args.description,
         args.intent,
@@ -330,7 +284,8 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
         now,
         args.createdBy ?? null,
         existing.id,
-      );
+      ],
+    );
 
     if (!row) throw new Error("Failed to update script");
 
@@ -349,7 +304,6 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
     return rowToScript(row);
   });
 
-  const script = txn();
   if (!script.isScratch && shouldEmbed) {
     await embedScript(script);
   }

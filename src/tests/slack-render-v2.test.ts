@@ -263,7 +263,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, "Done");
+    await completeTask(ask.id, "Done");
     calls.length = 0;
 
     await processSlackRenderV2();
@@ -297,7 +297,7 @@ describe("Slack renderer v2", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
     });
     startTask(ask.id);
-    completeTask(ask.id, "This historical result must not be replayed.");
+    await completeTask(ask.id, "This historical result must not be replayed.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?`, [
       "2025-01-01T00:00:00.000Z",
       "2025-01-01T00:01:00.000Z",
@@ -371,7 +371,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(oldAsk.id);
     const tree = await ensureSlackThreadTree([oldAsk.id]);
-    completeTask(oldAsk.id, "Old outcome must remain suppressed.");
+    await completeTask(oldAsk.id, "Old outcome must remain suppressed.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ? WHERE id = ?`, [
       "2025-03-01T00:00:00.000Z",
       oldAsk.id,
@@ -387,7 +387,7 @@ describe("Slack renderer v2", () => {
       contextKey,
     });
     startTask(newAsk.id);
-    completeTask(newAsk.id, "Only this new outcome should be rendered.");
+    await completeTask(newAsk.id, "Only this new outcome should be rendered.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -412,7 +412,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(oldAsk.id);
     const tree = await ensureSlackThreadTree([oldAsk.id]);
-    completeTask(oldAsk.id, "This old outcome must not trigger tree verification.");
+    await completeTask(oldAsk.id, "This old outcome must not trigger tree verification.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ? WHERE id = ?`, [
       "2025-04-01T00:00:00.000Z",
       oldAsk.id,
@@ -540,7 +540,7 @@ describe("Slack renderer v2", () => {
     ).toHaveLength(1);
 
     getDb().run("DROP TRIGGER fail_tree_timestamp_bind");
-    completeTask(ask.id, "The tree state changed while its timestamp was not bound.");
+    await completeTask(ask.id, "The tree state changed while its timestamp was not bound.");
     calls.length = 0;
     const recovered = await ensureSlackThreadTree([ask.id]);
 
@@ -585,8 +585,8 @@ describe("Slack renderer v2", () => {
 
     expect(reused?.id).toBe(tree?.id);
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
-    failTask(first.id, "test cleanup");
-    failTask(second.id, "test cleanup");
+    await failTask(first.id, "test cleanup");
+    await failTask(second.id, "test cleanup");
   });
 
   test("formats compact elapsed time without spaces", () => {
@@ -759,7 +759,7 @@ describe("Slack renderer v2", () => {
     expect(text.split("\n").filter((line) => line.startsWith(" ↳"))).not.toHaveLength(0);
     expect(text).not.toMatch(/[├└│]/);
 
-    for (const task of tasks) failTask(task.id, "test cleanup");
+    for (const task of tasks) await failTask(task.id, "test cleanup");
   });
 
   test("caps a pathological tree line and keeps the newest task in valid sections", async () => {
@@ -811,7 +811,7 @@ describe("Slack renderer v2", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
     });
     startTask(ask.id);
-    completeTask(ask.id, "Finished before the renderer observed the in-progress state.");
+    await completeTask(ask.id, "Finished before the renderer observed the in-progress state.");
 
     await processSlackRenderV2();
 
@@ -834,7 +834,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, "Recover this outcome through its deterministic task link.");
+    await completeTask(ask.id, "Recover this outcome through its deterministic task link.");
     getDb().run(`CREATE TRIGGER fail_outcome_timestamp_bind
       BEFORE UPDATE OF ts ON slack_messages
       WHEN OLD.kind = 'outcome' AND OLD.ts LIKE 'pending:%'
@@ -910,8 +910,8 @@ describe("Slack renderer v2", () => {
     expect(reusedTree?.id).toBe(firstTree?.id);
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
 
-    completeTask(child.id, "PRIVATE RAW WORKER OUTPUT THAT MUST NOT REACH SLACK");
-    completeTask(
+    await completeTask(child.id, "PRIVATE RAW WORKER OUTPUT THAT MUST NOT REACH SLACK");
+    await completeTask(
       ask.id,
       "Implemented the Slack renderer and opened a focused pull request.\n\n\n\nSecond paragraph that must be rendered.   ",
     );
@@ -1033,7 +1033,7 @@ describe("Slack renderer v2", () => {
     expect(output.length).toBeLessThan(12_000);
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, output);
+    await completeTask(ask.id, output);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1083,7 +1083,7 @@ describe("Slack renderer v2", () => {
     expect(output.length).toBeGreaterThan(12_000);
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, output);
+    await completeTask(ask.id, output);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1117,7 +1117,7 @@ describe("Slack renderer v2", () => {
     const tree = await ensureSlackThreadTree([ask.id]);
     await Bun.sleep(2);
     const reason = `expected test failure ${"detail ".repeat(200)}`;
-    failTask(ask.id, reason);
+    await failTask(ask.id, reason);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1150,7 +1150,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
-    cancelTask(ask.id, `requester changed direction ${"context ".repeat(200)}`);
+    await cancelTask(ask.id, `requester changed direction ${"context ".repeat(200)}`);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1190,7 +1190,7 @@ describe("Slack renderer v2", () => {
 
     await ensureSlackThreadTree([ask.id]);
     await barrier.started.promise;
-    completeTask(ask.id, "The serialized writer must retain this result link.");
+    await completeTask(ask.id, "The serialized writer must retain this result link.");
     const processing = processSlackRenderV2();
     await waitFor(() => calls.some((call) => call.method === "chat.stopStream"));
     barrier.released.resolve();
@@ -1218,7 +1218,7 @@ describe("Slack renderer v2", () => {
     startTask(ask.id);
     const original = await ensureSlackThreadTree([ask.id]);
     _resetSlackRenderV2ForTests();
-    completeTask(ask.id, "Create an outcome, then replace the deleted tree.");
+    await completeTask(ask.id, "Create an outcome, then replace the deleted tree.");
     missingMessageTs = original!.ts;
     calls.length = 0;
 
@@ -1252,7 +1252,7 @@ describe("Slack renderer v2", () => {
       followUpConfig: { disabled: true },
     });
     startTask(task.id);
-    failTask(task.id, "stable terminal snapshot");
+    await failTask(task.id, "stable terminal snapshot");
     const tree = await ensureSlackThreadTree([task.id]);
     await Bun.sleep(2);
     getDb().run(`UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?`, [
@@ -1282,7 +1282,7 @@ describe("Slack renderer v2", () => {
     startTask(task.id);
     const tree = await ensureSlackThreadTree([task.id]);
     _resetSlackRenderV2ForTests();
-    failTask(task.id, "state that must be retried");
+    await failTask(task.id, "state that must be retried");
     updateFailuresRemaining = 1;
     calls.length = 0;
 
@@ -1308,7 +1308,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(firstAsk.id);
     const tree = await ensureSlackThreadTree([firstAsk.id]);
-    failTask(firstAsk.id, "test setup");
+    await failTask(firstAsk.id, "test setup");
     _resetSlackRenderV2ForTests();
     await processSlackRenderV2();
 
@@ -1321,7 +1321,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     expect((await ensureSlackThreadTree([ask.id]))?.id).toBe(tree?.id);
-    completeTask(ask.id, "Recovered the outcome stream after a temporary interruption.");
+    await completeTask(ask.id, "Recovered the outcome stream after a temporary interruption.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
     stopCallsUntilFailure = 0;
@@ -1360,7 +1360,7 @@ describe("Slack renderer v2", () => {
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await markTaskSlackReplySent(ask.id);
-    completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
+    await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1400,7 +1400,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, "This output must reach Slack since no slack-reply was sent.");
+    await completeTask(ask.id, "This output must reach Slack since no slack-reply was sent.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -1424,7 +1424,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
+    await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
     // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
     const staleSnapshot = { ...getTaskById(ask.id)!, slackReplySent: false };
     await markTaskSlackReplySent(ask.id);
@@ -1450,7 +1450,7 @@ describe("Slack renderer v2", () => {
     });
     startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
-    completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT SURVIVE A LATE SLACK-REPLY");
+    await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT SURVIVE A LATE SLACK-REPLY");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
     // The stream starts with the full (pre-reply) output, then the process fails

@@ -364,7 +364,7 @@ describe("/api/script-runs HTTP", () => {
     const contextKey = `script-run:${runId}:implement`;
     const dispatched = getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(dispatched).not.toBeNull();
-    completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
+    await completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
 
     const first = await firstCallPromise;
     expect(first.status).toBe(200);
@@ -377,7 +377,7 @@ describe("/api/script-runs HTTP", () => {
       source: "system",
       parentTaskId: dispatched?.id,
     });
-    completeTask(followUp.id, "reviewed");
+    await completeTask(followUp.id, "reviewed");
     expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
 
     // Replay: same stepKey again (what ctx.step.agentTask's poll loop does,
@@ -420,7 +420,7 @@ describe("/api/script-runs HTTP", () => {
     const step = getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ plan: ["inspect", "implement", "verify"] });
-    completeTask((step as { id: string }).id, stepOutput);
+    await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
     const followUp = createTaskExtended("review the plan", {
@@ -428,7 +428,7 @@ describe("/api/script-runs HTTP", () => {
       source: "system",
       parentTaskId: step?.id,
     });
-    completeTask(followUp.id, "Reviewed the plan; proceed.");
+    await completeTask(followUp.id, "Reviewed the plan; proceed.");
     expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
 
     const response = await callPromise;
@@ -455,7 +455,7 @@ describe("/api/script-runs HTTP", () => {
     const step = getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ approved: true });
-    completeTask((step as { id: string }).id, stepOutput);
+    await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
     const followUp = createTaskExtended("review the review", {
@@ -463,7 +463,7 @@ describe("/api/script-runs HTTP", () => {
       source: "system",
       parentTaskId: step?.id,
     });
-    failTask(followUp.id, "Lead follow-up failed");
+    await failTask(followUp.id, "Lead follow-up failed");
     expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
 
     const response = await callPromise;

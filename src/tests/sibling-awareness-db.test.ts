@@ -146,7 +146,7 @@ describe("applySiblingAwareness — with siblings", () => {
     expect(result.description).toContain("<sibling_tasks_in_progress>");
   });
 
-  test("excludes terminal tasks (completed) from sibling results", () => {
+  test("excludes terminal tasks (completed) from sibling results", async () => {
     const agent = createAgent({
       name: "sib-agent-5",
       isLead: false,
@@ -158,7 +158,7 @@ describe("applySiblingAwareness — with siblings", () => {
       threadTs: "1700000000.000006",
     });
     const done = createTaskExtended("Done", { agentId: agent.id, contextKey: key });
-    completeTask(done.id, "ok");
+    await completeTask(done.id, "ok");
 
     const result = applySiblingAwareness({
       description: "Body",

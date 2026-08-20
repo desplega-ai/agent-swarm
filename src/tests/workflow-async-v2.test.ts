@@ -471,7 +471,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const taskA = getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-a")!.id,
       )!;
-      completeTask(taskA.id, "output-a");
+      await completeTask(taskA.id, "output-a");
       localBus.emit("task.completed", {
         taskId: taskA.id,
         output: "output-a",
@@ -488,7 +488,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const taskB = getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-b")!.id,
       )!;
-      completeTask(taskB.id, "output-b");
+      await completeTask(taskB.id, "output-b");
       localBus.emit("task.completed", {
         taskId: taskB.id,
         output: "output-b",
@@ -505,7 +505,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const taskC = getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-c")!.id,
       )!;
-      completeTask(taskC.id, "output-c");
+      await completeTask(taskC.id, "output-c");
       localBus.emit("task.completed", {
         taskId: taskC.id,
         output: "output-c",

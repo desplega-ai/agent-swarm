@@ -65,7 +65,7 @@ export async function resolveAndStoreJiraCloudId(
     throw new Error("Jira accessible-resources returned malformed entry (missing id/url)");
   }
 
-  updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
+  await updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
   return { cloudId: first.id, siteUrl: first.url };
 }
 

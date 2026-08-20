@@ -352,7 +352,7 @@ describe("workflow foreach", () => {
     for (const [index, step] of foreachChildren(runId).entries()) {
       const task = getTaskByWorkflowRunStepId(step.id)!;
       taskIds.push(task.id);
-      completeTask(task.id, JSON.stringify({ recovered: index }));
+      await completeTask(task.id, JSON.stringify({ recovered: index }));
     }
 
     const recovered = await recoverIncompleteRuns(registry);
@@ -487,10 +487,10 @@ describe("workflow foreach", () => {
     const children = foreachChildren(runId);
 
     const failedTask = getTaskByWorkflowRunStepId(children[0]!.id)!;
-    failTask(failedTask.id, "offline failure");
+    await failTask(failedTask.id, "offline failure");
     for (const [index, child] of children.slice(1).entries()) {
       const task = getTaskByWorkflowRunStepId(child.id)!;
-      completeTask(task.id, `offline-${index}`);
+      await completeTask(task.id, `offline-${index}`);
     }
 
     const recovered = await recoverIncompleteRuns(registry);
@@ -519,8 +519,8 @@ describe("workflow foreach", () => {
       registry,
     );
     const children = foreachChildren(runId);
-    failTask(getTaskByWorkflowRunStepId(children[0]!.id)!.id, "offline failure");
-    completeTask(getTaskByWorkflowRunStepId(children[1]!.id)!.id, "offline success");
+    await failTask(getTaskByWorkflowRunStepId(children[0]!.id)!.id, "offline failure");
+    await completeTask(getTaskByWorkflowRunStepId(children[1]!.id)!.id, "offline success");
 
     const recovered = await recoverIncompleteRuns(registry);
     expect(recovered).toBe(1);
@@ -1072,7 +1072,7 @@ async function completeChild(
   bus: InProcessEventBus,
 ): Promise<void> {
   const task = getTaskByWorkflowRunStepId(stepId)!;
-  completeTask(task.id, output);
+  await completeTask(task.id, output);
   bus.emit("task.completed", {
     taskId: task.id,
     output,
@@ -1089,7 +1089,7 @@ async function failChild(
   bus: InProcessEventBus,
 ): Promise<void> {
   const task = getTaskByWorkflowRunStepId(stepId)!;
-  failTask(task.id, reason);
+  await failTask(task.id, reason);
   bus.emit("task.failed", {
     taskId: task.id,
     failureReason: reason,

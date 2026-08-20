@@ -53,7 +53,7 @@ describe("getDependentTasks", () => {
     expect(deps.some((d) => d.id === child.id)).toBe(true);
   });
 
-  test("filters out terminal tasks by default", () => {
+  test("filters out terminal tasks by default", async () => {
     const agent = createAgent({
       name: "dep-lookup-worker-2",
       isLead: false,
@@ -72,7 +72,7 @@ describe("getDependentTasks", () => {
     });
 
     startTask(child1.id);
-    completeTask(child1.id, "done");
+    await completeTask(child1.id, "done");
 
     const nonTerminalDeps = getDependentTasks(parent.id);
     expect(nonTerminalDeps.some((d) => d.id === child1.id)).toBe(false);
@@ -98,7 +98,7 @@ describe("getDependentTasks", () => {
 });
 
 describe("cascadeFailDependents", () => {
-  test("single-level cascade: failing parent fails its dependent", () => {
+  test("single-level cascade: failing parent fails its dependent", async () => {
     const agent = createAgent({
       name: "cascade-worker-1",
       isLead: false,
@@ -113,7 +113,7 @@ describe("cascadeFailDependents", () => {
     });
 
     startTask(parent.id);
-    failTask(parent.id, "parent failed");
+    await failTask(parent.id, "parent failed");
 
     const childAfter = getTaskById(child.id);
     expect(childAfter!.status).toBe("failed");
@@ -121,7 +121,7 @@ describe("cascadeFailDependents", () => {
     expect(childAfter!.failureReason).toContain("was failed");
   });
 
-  test("multi-level recursive cascade: A→B→C all fail", () => {
+  test("multi-level recursive cascade: A→B→C all fail", async () => {
     const agent = createAgent({
       name: "cascade-worker-2",
       isLead: false,
@@ -140,7 +140,7 @@ describe("cascadeFailDependents", () => {
     });
 
     startTask(taskA.id);
-    failTask(taskA.id, "root failure");
+    await failTask(taskA.id, "root failure");
 
     const bAfter = getTaskById(taskB.id);
     expect(bAfter!.status).toBe("failed");
@@ -184,7 +184,7 @@ describe("cascadeFailDependents", () => {
     expect(results.some((r) => r.taskId === taskB.id)).toBe(true);
   });
 
-  test("already-completed dependent is left untouched", () => {
+  test("already-completed dependent is left untouched", async () => {
     const agent = createAgent({
       name: "cascade-worker-4",
       isLead: false,
@@ -199,17 +199,17 @@ describe("cascadeFailDependents", () => {
     });
 
     startTask(child.id);
-    completeTask(child.id, "finished before parent failed");
+    await completeTask(child.id, "finished before parent failed");
 
     startTask(parent.id);
-    failTask(parent.id, "parent failed late");
+    await failTask(parent.id, "parent failed late");
 
     const childAfter = getTaskById(child.id);
     expect(childAfter!.status).toBe("completed");
     expect(childAfter!.output).toBe("finished before parent failed");
   });
 
-  test("cancelTask cascades to dependents", () => {
+  test("cancelTask cascades to dependents", async () => {
     const agent = createAgent({
       name: "cascade-worker-5",
       isLead: false,
@@ -223,7 +223,7 @@ describe("cascadeFailDependents", () => {
       dependsOn: [parent.id],
     });
 
-    cancelTask(parent.id, "no longer needed");
+    await cancelTask(parent.id, "no longer needed");
 
     const childAfter = getTaskById(child.id);
     expect(childAfter!.status).toBe("failed");
@@ -252,7 +252,7 @@ describe("cascadeFailDependents", () => {
     expect(childAfter!.failureReason).toContain("was superseded");
   });
 
-  test("wide fan-out: multiple dependents all cascade-failed", () => {
+  test("wide fan-out: multiple dependents all cascade-failed", async () => {
     const agent = createAgent({
       name: "cascade-worker-7",
       isLead: false,
@@ -269,7 +269,7 @@ describe("cascadeFailDependents", () => {
     );
 
     startTask(parent.id);
-    failTask(parent.id, "parent gone");
+    await failTask(parent.id, "parent gone");
 
     for (const child of children) {
       const after = getTaskById(child.id);
@@ -278,7 +278,7 @@ describe("cascadeFailDependents", () => {
     }
   });
 
-  test("diamond dependency: C depends on both A and B, only A fails", () => {
+  test("diamond dependency: C depends on both A and B, only A fails", async () => {
     const agent = createAgent({
       name: "cascade-worker-8",
       isLead: false,
@@ -294,7 +294,7 @@ describe("cascadeFailDependents", () => {
     });
 
     startTask(taskA.id);
-    failTask(taskA.id, "A failed");
+    await failTask(taskA.id, "A failed");
 
     // C should be cascade-failed because one of its dependencies failed
     const cAfter = getTaskById(taskC.id);

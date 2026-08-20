@@ -193,7 +193,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.model).toBe("unknown");
   });
 
-  test("should not create session cost when costData is not provided", () => {
+  test("should not create session cost when costData is not provided", async () => {
     // Create a task without cost data
     const noCostTask = createTaskExtended("Test task without cost data", {
       agentId,
@@ -205,7 +205,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     updateTaskProgress(noCostTask.id, "Working on it...");
 
     // Complete the task without cost data
-    completeTask(noCostTask.id, "Done!");
+    await completeTask(noCostTask.id, "Done!");
 
     // No session costs should be created for this task
     const costs = getSessionCostsByTaskId(noCostTask.id);

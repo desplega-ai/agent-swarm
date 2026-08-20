@@ -131,7 +131,7 @@ export function registerActionHandlers(app: App): void {
     if (!task) return;
 
     // Cancel the task in DB
-    const cancelled = cancelTask(taskId, "Cancelled via Slack");
+    const cancelled = await cancelTask(taskId, "Cancelled via Slack");
     if (!cancelled) {
       // Task was already in a terminal state
       return;

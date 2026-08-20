@@ -155,9 +155,9 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
 
-    setBeforeHeartbeatSupersedeForTests((task) => {
+    setBeforeHeartbeatSupersedeForTests(async (task) => {
       expect(task.id).toBe(parent.id);
-      completeTask(parent.id, "finished by racing worker");
+      await completeTask(parent.id, "finished by racing worker");
     });
 
     const findings = await codeLevelTriage();

@@ -46,7 +46,7 @@ describe("contextKey persistence + lookup", () => {
     expect(siblings.map((t) => t.id)).toContain(task.id);
   });
 
-  test("getInProgressTasksByContextKey excludes terminal tasks", () => {
+  test("getInProgressTasksByContextKey excludes terminal tasks", async () => {
     const agent = createAgent({
       name: "ctx-key-agent-2",
       isLead: false,
@@ -58,7 +58,7 @@ describe("contextKey persistence + lookup", () => {
     const done = createTaskExtended("Done task", { agentId: agent.id, contextKey: key });
     const pending = createTaskExtended("Pending task", { agentId: agent.id, contextKey: key });
 
-    completeTask(done.id, "ok");
+    await completeTask(done.id, "ok");
 
     const siblings = getInProgressTasksByContextKey(key);
     const ids = siblings.map((t) => t.id);
@@ -108,7 +108,7 @@ describe("contextKey persistence + lookup", () => {
     expect(count.count).toBe(1);
   });
 
-  test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", () => {
+  test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", async () => {
     const agent = createAgent({
       name: "ctx-key-agent-linear-pr",
       isLead: false,
@@ -125,7 +125,7 @@ describe("contextKey persistence + lookup", () => {
       vcsNumber: 875,
       vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/875",
     });
-    completeTask(first.id, "PR opened");
+    await completeTask(first.id, "PR opened");
 
     const second = createTaskExtended("Duplicate Linear task after PR", {
       agentId: agent.id,

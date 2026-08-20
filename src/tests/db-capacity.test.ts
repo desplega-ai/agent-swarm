@@ -186,7 +186,7 @@ describe("Agent Capacity Functions", () => {
     expect(hasCapacity(agent.id)).toBe(false);
   });
 
-  test("completing tasks restores capacity", () => {
+  test("completing tasks restores capacity", async () => {
     const agent = createAgent({
       name: "test-agent-10",
       isLead: false,
@@ -204,7 +204,7 @@ describe("Agent Capacity Functions", () => {
     expect(getRemainingCapacity(agent.id)).toBe(0);
 
     // Complete one task
-    completeTask(task1.id, "done");
+    await completeTask(task1.id, "done");
 
     expect(hasCapacity(agent.id)).toBe(true);
     expect(getRemainingCapacity(agent.id)).toBe(1);

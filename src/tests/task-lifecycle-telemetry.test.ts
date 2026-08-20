@@ -101,7 +101,7 @@ describe("task lifecycle telemetry", () => {
     await flushMicrotasks();
     calls = [];
 
-    completeTask(completedTask.id, "done");
+    await completeTask(completedTask.id, "done");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("task lifecycle telemetry", () => {
     await flushMicrotasks();
     calls = [];
 
-    failTask(failedTask.id, "nope");
+    await failTask(failedTask.id, "nope");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -135,7 +135,7 @@ describe("task lifecycle telemetry", () => {
     await flushMicrotasks();
     calls = [];
 
-    cancelTask(cancelledTask.id, "not needed");
+    await cancelTask(cancelledTask.id, "not needed");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -169,7 +169,7 @@ describe("task lifecycle telemetry", () => {
     await flushMicrotasks();
     calls = [];
 
-    completeTask(task.id, "done");
+    await completeTask(task.id, "done");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);

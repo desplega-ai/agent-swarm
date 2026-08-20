@@ -87,16 +87,16 @@ describe("getJiraMetadata", () => {
 });
 
 describe("updateJiraMetadata", () => {
-  test("scalar keys: shallow merge preserves untouched keys", () => {
-    updateJiraMetadata({ cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" });
-    updateJiraMetadata({ cloudId: "cloud-2" });
+  test("scalar keys: shallow merge preserves untouched keys", async () => {
+    await updateJiraMetadata({ cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" });
+    await updateJiraMetadata({ cloudId: "cloud-2" });
     const meta = getJiraMetadata();
     expect(meta.cloudId).toBe("cloud-2");
     expect(meta.siteUrl).toBe("https://example.atlassian.net");
   });
 
-  test("webhookIds: id-keyed merge preserves untouched entries and replaces matching ids", () => {
-    updateJiraMetadata({
+  test("webhookIds: id-keyed merge preserves untouched entries and replaces matching ids", async () => {
+    await updateJiraMetadata({
       webhookIds: [
         { id: 1, expiresAt: "2026-12-01T00:00:00.000Z", jql: "project = A" },
         { id: 2, expiresAt: "2026-12-01T00:00:00.000Z", jql: "project = B" },
@@ -104,7 +104,7 @@ describe("updateJiraMetadata", () => {
     });
 
     // Update id=2 only — id=1 should be untouched.
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 2, expiresAt: "2026-12-31T00:00:00.000Z", jql: "project = B-updated" }],
     });
 
@@ -116,11 +116,11 @@ describe("updateJiraMetadata", () => {
     ]);
   });
 
-  test("concurrent-style updates preserve both writers' keys", () => {
+  test("concurrent-style updates preserve both writers' keys", async () => {
     // Phase 2 OAuth callback writes cloudId+siteUrl, Phase 5 webhook-register
     // writes webhookIds. Both should coexist after both have run.
-    updateJiraMetadata({ cloudId: "cloud-x", siteUrl: "https://x.atlassian.net" });
-    updateJiraMetadata({
+    await updateJiraMetadata({ cloudId: "cloud-x", siteUrl: "https://x.atlassian.net" });
+    await updateJiraMetadata({
       webhookIds: [{ id: 99, expiresAt: "2026-11-01T00:00:00.000Z", jql: "project = X" }],
     });
 
@@ -132,14 +132,14 @@ describe("updateJiraMetadata", () => {
     ]);
   });
 
-  test("throws when oauth_apps row for jira is missing", () => {
+  test("throws when oauth_apps row for jira is missing", async () => {
     getDb().query("DELETE FROM oauth_apps WHERE provider = 'jira'").run();
-    expect(() => updateJiraMetadata({ cloudId: "x" })).toThrow(/oauth_apps row missing/);
+    await expect(updateJiraMetadata({ cloudId: "x" })).rejects.toThrow(/oauth_apps row missing/);
   });
 
-  test("undefined partial keys do not clobber existing values", () => {
-    updateJiraMetadata({ cloudId: "cloud-keep", siteUrl: "https://keep.atlassian.net" });
-    updateJiraMetadata({}); // No keys passed
+  test("undefined partial keys do not clobber existing values", async () => {
+    await updateJiraMetadata({ cloudId: "cloud-keep", siteUrl: "https://keep.atlassian.net" });
+    await updateJiraMetadata({}); // No keys passed
     const meta = getJiraMetadata();
     expect(meta.cloudId).toBe("cloud-keep");
     expect(meta.siteUrl).toBe("https://keep.atlassian.net");

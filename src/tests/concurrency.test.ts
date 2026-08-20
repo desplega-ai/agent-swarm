@@ -86,7 +86,7 @@ describe("Concurrency Integration Tests", () => {
       expect(getRemainingCapacity(agent.id)).toBe(0);
     });
 
-    test("queued tasks wait in pending until capacity opens", () => {
+    test("queued tasks wait in pending until capacity opens", async () => {
       const agent = createAgent({
         name: "queue-agent",
         isLead: false,
@@ -110,7 +110,7 @@ describe("Concurrency Integration Tests", () => {
       expect(task3.status).toBe("pending");
 
       // Complete task1
-      completeTask(task1.id, "done");
+      await completeTask(task1.id, "done");
 
       // Now have capacity for task3
       expect(hasCapacity(agent.id)).toBe(true);
@@ -123,7 +123,7 @@ describe("Concurrency Integration Tests", () => {
   });
 
   describe("Status Accuracy", () => {
-    test("status reflects busy when any tasks in progress", () => {
+    test("status reflects busy when any tasks in progress", async () => {
       const agent = createAgent({
         name: "status-agent",
         isLead: false,
@@ -149,19 +149,19 @@ describe("Concurrency Integration Tests", () => {
       expect(getAgentById(agent.id)?.status).toBe("busy");
 
       // Complete first task - still busy (task2 running)
-      completeTask(task1.id, "done");
+      await completeTask(task1.id, "done");
       updateAgentStatusFromCapacity(agent.id);
 
       expect(getAgentById(agent.id)?.status).toBe("busy");
 
       // Complete second task - now idle
-      completeTask(task2.id, "done");
+      await completeTask(task2.id, "done");
       updateAgentStatusFromCapacity(agent.id);
 
       expect(getAgentById(agent.id)?.status).toBe("idle");
     });
 
-    test("failed tasks also free capacity", () => {
+    test("failed tasks also free capacity", async () => {
       const agent = createAgent({
         name: "fail-agent",
         isLead: false,
@@ -179,7 +179,7 @@ describe("Concurrency Integration Tests", () => {
       expect(hasCapacity(agent.id)).toBe(false);
 
       // Fail task1
-      failTask(task1.id, "error");
+      await failTask(task1.id, "error");
 
       // Capacity restored
       expect(hasCapacity(agent.id)).toBe(true);

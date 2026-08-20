@@ -254,7 +254,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // Handle status change
         if (status === "completed") {
-          const result = completeTask(taskId, output);
+          const result = await completeTask(taskId, output);
           if (result) {
             updatedTask = result;
 
@@ -281,7 +281,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             }
           }
         } else if (status === "failed") {
-          const result = failTask(taskId, failureReason ?? "Unknown failure");
+          const result = await failTask(taskId, failureReason ?? "Unknown failure");
           if (result) {
             updatedTask = result;
 

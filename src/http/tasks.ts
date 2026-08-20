@@ -856,7 +856,7 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = cancelTask(parsed.params.id, reason);
+    const cancelledTask = await cancelTask(parsed.params.id, reason);
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -1131,7 +1131,7 @@ export async function handleTasks(
       markSteeringUndeliverableRoute.respond(
         res,
         200,
-        markSteeringUndeliverable(message.id, parsed.body.reason),
+        await markSteeringUndeliverable(message.id, parsed.body.reason),
       );
     } catch (error) {
       if (error instanceof SteeringRequestError) {
@@ -1253,7 +1253,7 @@ export async function handleTasks(
 
         let updatedTask: typeof task;
         if (parsed.body.status === "completed") {
-          const result = completeTask(
+          const result = await completeTask(
             parsed.params.id,
             parsed.body.output || "Completed by runner wrapper (no explicit output)",
           );
@@ -1262,7 +1262,7 @@ export async function handleTasks(
           }
           updatedTask = result;
         } else {
-          const result = failTask(
+          const result = await failTask(
             parsed.params.id,
             parsed.body.failureReason || "Process exited without explicit completion",
           );
@@ -1508,7 +1508,7 @@ export async function handleTasks(
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
-      const failed = failTask(parsed.params.id, "superseded_workflow_task");
+      const failed = await failTask(parsed.params.id, "superseded_workflow_task");
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",

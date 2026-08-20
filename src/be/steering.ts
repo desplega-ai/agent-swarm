@@ -14,7 +14,7 @@ import {
   createSteeringMessage,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getPendingSteeringForTask,
   getSteeringMessageById,
   getTaskById,
@@ -92,10 +92,10 @@ export interface MarkSteeringUndeliverableResult {
  * transactional and idempotent, so terminal-status retries cannot create a
  * duplicate follow-up or recursively re-promote the same message.
  */
-export function promotePendingSteeringForTask(
+export async function promotePendingSteeringForTask(
   taskId: string,
   reason: string,
-): MarkSteeringUndeliverableResult[] {
+): Promise<MarkSteeringUndeliverableResult[]> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Promotion reason must not be empty", 400);
   }
@@ -103,7 +103,7 @@ export function promotePendingSteeringForTask(
   const results: MarkSteeringUndeliverableResult[] = [];
   for (const message of getPendingSteeringForTask(taskId)) {
     try {
-      results.push(markSteeringUndeliverable(message.id, reason));
+      results.push(await markSteeringUndeliverable(message.id, reason));
     } catch (error) {
       // One malformed or concurrently-deleted row must not keep the remaining
       // pending steers from being promoted after the parent reaches terminal.
@@ -122,15 +122,15 @@ export function promotePendingSteeringForTask(
  * Non-pending rows are returned unchanged so retries are safe. A successfully
  * promoted row always includes `promotedTaskId`.
  */
-export function markSteeringUndeliverable(
+export async function markSteeringUndeliverable(
   id: string,
   reason: string,
-): MarkSteeringUndeliverableResult {
+): Promise<MarkSteeringUndeliverableResult> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Undeliverable reason must not be empty", 400);
   }
 
-  return getDb().transaction(() => {
+  return await getDbClient().transaction(async () => {
     const message = getSteeringMessageById(id);
     if (!message) {
       throw new SteeringRequestError("Steering message not found", 404);
@@ -156,7 +156,7 @@ export function markSteeringUndeliverable(
       message: promotedMessage,
       promotedTaskId: promotedTask.id,
     };
-  })();
+  });
 }
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
