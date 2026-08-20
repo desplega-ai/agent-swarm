@@ -111,6 +111,7 @@ describe("Tool Annotations & Classification", () => {
       "delete-page",
       "unregister-service",
       "slack-delete",
+      "slack-archive-channel",
     ];
 
     for (const name of expectedDestructive) {
@@ -164,6 +165,9 @@ describe("Tool Annotations & Classification", () => {
       "slack-read",
       "slack-post",
       "slack-start-thread",
+      "slack-create-channel",
+      "slack-invite-to-channel",
+      "slack-archive-channel",
       "slack-upload-file",
       "slack-download-file",
       "slack-list-channels",

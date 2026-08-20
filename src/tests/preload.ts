@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { afterEach } from "bun:test";
 import { existsSync } from "node:fs";
 import { closeDb, getDb, initDb } from "../be/db";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
 // streamableHttp transport) replaces globalThis.Response/Request with its own
@@ -15,6 +16,7 @@ import { closeDb, getDb, initDb } from "../be/db";
 const nativeResponse = globalThis.Response;
 const nativeRequest = globalThis.Request;
 afterEach(() => {
+  clearVolatileSecretsForTesting();
   if (globalThis.Response !== nativeResponse) {
     globalThis.Response = nativeResponse;
   }

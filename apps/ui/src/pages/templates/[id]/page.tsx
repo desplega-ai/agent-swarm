@@ -316,6 +316,15 @@ export default function TemplateDetailPage() {
                   Default
                 </Badge>
               )}
+              {template.defaultDrifted && (
+                <Badge
+                  variant="outline"
+                  size="tag"
+                  className="border-status-warning/30 text-status-warning-strong"
+                >
+                  Default drifted
+                </Badge>
+              )}
             </div>
           }
           action={
@@ -437,6 +446,9 @@ export default function TemplateDetailPage() {
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                   Edit
+                </Button>
+                <Button variant="destructive-outline" size="sm" onClick={() => setResetOpen(true)}>
+                  Reset to default
                 </Button>
               </div>
               <div className="flex-1 min-h-0 border border-border rounded-md overflow-hidden">

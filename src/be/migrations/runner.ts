@@ -226,21 +226,27 @@ export function runMigrations(db: Database): void {
     }
 
     // Apply migration in a transaction
-    console.debug(`[migrations] Applying: ${migration.name}`);
+    console.log(`[migrations] Applying: ${migration.name}`);
     const start = performance.now();
 
-    db.transaction(() => {
-      db.exec(migration.sql);
-      db.run("INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)", [
-        migration.version,
-        migration.name,
-        new Date().toISOString(),
-        migration.checksum,
-      ]);
-    })();
+    try {
+      db.transaction(() => {
+        db.exec(migration.sql);
+        db.run(
+          "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
+          [migration.version, migration.name, new Date().toISOString(), migration.checksum],
+        );
+      })();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `[migrations] Migration ${migration.version} (${migration.name}) failed: ${detail}`,
+        { cause: error },
+      );
+    }
 
     const elapsed = (performance.now() - start).toFixed(1);
-    console.debug(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
+    console.log(`[migrations] Applied: ${migration.name} (${elapsed}ms)`);
   }
 
   db.run("PRAGMA foreign_keys = ON");

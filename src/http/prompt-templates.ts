@@ -11,9 +11,10 @@ import {
   resolvePromptTemplate,
   upsertPromptTemplate,
 } from "../be/db";
+import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import { getAllTemplateDefinitions, getTemplateDefinition } from "../prompts/registry";
 import { resolveTemplate } from "../prompts/resolver";
-import { PromptTemplateHistorySchema, PromptTemplateSchema } from "../types";
+import { type PromptTemplate, PromptTemplateHistorySchema, PromptTemplateSchema } from "../types";
 import { interpolate } from "../utils/template";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
@@ -36,6 +37,19 @@ const EventTemplateDefinitionResponseSchema = z.object({
   category: z.enum(["event", "system", "common", "task_lifecycle", "session"]),
 });
 
+const PromptTemplateResponseSchema = PromptTemplateSchema.extend({
+  defaultDrifted: z.boolean(),
+}).openapi("PromptTemplateResponse");
+
+function toPromptTemplateResponse(template: PromptTemplate) {
+  const definition = getTemplateDefinition(template.eventType);
+  const defaultDrifted = definition
+    ? getPromptTemplateDefaultDrift(template, definition.defaultBody).defaultDrifted
+    : false;
+
+  return { ...template, defaultDrifted };
+}
+
 /** Mirrors `ResolveResult` from src/prompts/resolver.ts */
 const ResolveResultSchema = z.object({
   text: z.string(),
@@ -47,7 +61,10 @@ const ResolveResultSchema = z.object({
 
 /** Mirrors the return type of `resolvePromptTemplate` in src/be/db.ts */
 const DbResolveResultSchema = z
-  .union([z.object({ template: PromptTemplateSchema }), z.object({ skip: z.literal(true) })])
+  .union([
+    z.object({ template: PromptTemplateResponseSchema }),
+    z.object({ skip: z.literal(true) }),
+  ])
   .nullable();
 
 // ─── Route Definitions ───────────────────────────────────────────────────────
@@ -143,7 +160,7 @@ const checkoutRoute = route({
   responses: {
     200: {
       description: "Checked-out template",
-      schema: z.object({ template: PromptTemplateSchema }),
+      schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     400: { description: "Validation error" },
     404: { description: "Template or version not found" },
@@ -159,7 +176,10 @@ const resetRoute = route({
   tags: ["PromptTemplates"],
   params: z.object({ id: z.string() }),
   responses: {
-    200: { description: "Reset template", schema: z.object({ template: PromptTemplateSchema }) },
+    200: {
+      description: "Reset template",
+      schema: z.object({ template: PromptTemplateResponseSchema }),
+    },
     404: { description: "Template not found or no code default available" },
   },
   auth: { apiKey: true },
@@ -176,7 +196,7 @@ const getByIdRoute = route({
     200: {
       description: "Template with history",
       schema: z.object({
-        template: PromptTemplateSchema,
+        template: PromptTemplateResponseSchema,
         history: z.array(PromptTemplateHistorySchema),
       }),
     },
@@ -218,7 +238,7 @@ const listRoute = route({
   responses: {
     200: {
       description: "List of prompt templates",
-      schema: z.object({ templates: z.array(PromptTemplateSchema) }),
+      schema: z.object({ templates: z.array(PromptTemplateResponseSchema) }),
     },
   },
   auth: { apiKey: true },
@@ -242,7 +262,7 @@ const upsertRoute = route({
   responses: {
     200: {
       description: "Upserted template",
-      schema: z.object({ template: PromptTemplateSchema }),
+      schema: z.object({ template: PromptTemplateResponseSchema }),
     },
     400: { description: "Validation error" },
   },
@@ -274,7 +294,10 @@ export async function handlePromptTemplates(
 
     resolvedRoute.respond(res, 200, {
       resolution: result,
-      dbResult,
+      dbResult:
+        dbResult && "template" in dbResult
+          ? { template: toPromptTemplateResponse(dbResult.template) }
+          : dbResult,
       definition: definition
         ? {
             eventType: definition.eventType,
@@ -340,7 +363,7 @@ export async function handlePromptTemplates(
 
     try {
       const template = await checkoutPromptTemplate(parsed.params.id, parsed.body.version);
-      checkoutRoute.respond(res, 200, { template });
+      checkoutRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       if (message.includes("not found")) {
@@ -376,7 +399,7 @@ export async function handlePromptTemplates(
       const template = await getDbClient().transaction(async () =>
         resetPromptTemplateToDefault(parsed.params.id, definition.defaultBody),
       );
-      resetRoute.respond(res, 200, { template });
+      resetRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       jsonError(res, message, 400);
@@ -396,7 +419,7 @@ export async function handlePromptTemplates(
     }
 
     const history = await getPromptTemplateHistory(parsed.params.id);
-    getByIdRoute.respond(res, 200, { template, history });
+    getByIdRoute.respond(res, 200, { template: toPromptTemplateResponse(template), history });
     return true;
   }
 
@@ -431,7 +454,7 @@ export async function handlePromptTemplates(
       isDefault: parsed.query.isDefault ? parsed.query.isDefault === "true" : undefined,
     });
 
-    listRoute.respond(res, 200, { templates });
+    listRoute.respond(res, 200, { templates: templates.map(toPromptTemplateResponse) });
     return true;
   }
 
@@ -474,7 +497,7 @@ export async function handlePromptTemplates(
           changeReason,
         }),
       );
-      upsertRoute.respond(res, 200, { template });
+      upsertRoute.respond(res, 200, { template: toPromptTemplateResponse(template) });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       jsonError(res, message, 500);

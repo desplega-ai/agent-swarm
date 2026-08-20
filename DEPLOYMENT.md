@@ -555,7 +555,8 @@ Enable Slack for task creation and agent communication via direct messages.
 1. Create a Slack App at https://api.slack.com/apps (or import `slack-manifest.json` from the repo root)
 2. Enable Socket Mode (for real-time events without public webhooks)
 3. Enable Interactivity and Assistant View
-4. Add required scopes: `app_mentions:read`, `assistant:write`, `channels:history`, `channels:read`, `chat:write`, `chat:write.customize`, `chat:write.public`, `commands`, `files:read`, `files:write`, `groups:history`, `groups:read`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `mpim:write`, `reactions:write`, `users:read`
+4. Add required scopes: `app_mentions:read`, `assistant:write`, `channels:history`, `channels:manage`, `channels:read`, `chat:write`, `chat:write.customize`, `chat:write.public`, `commands`, `files:read`, `files:write`, `groups:history`, `groups:read`, `groups:write`, `im:history`, `im:read`, `im:write`, `mpim:history`, `mpim:read`, `mpim:write`, `reactions:write`, `users:read`
+   After changing scopes in `slack-manifest.json`, apply the updated manifest to the Slack app and reinstall the app to the workspace for the changes to take effect.
 5. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
 6. Install to workspace and copy tokens
 

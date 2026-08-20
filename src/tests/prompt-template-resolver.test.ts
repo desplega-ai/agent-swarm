@@ -1,7 +1,12 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { Readable } from "node:stream";
 import { closeDb, getPromptTemplates, initDb, upsertPromptTemplate } from "../be/db";
 import { seedDefaultTemplates } from "../be/seed-prompt-templates";
+import { handlePromptTemplates } from "../http/prompt-templates";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { getPromptTemplateDefaultDrift } from "../prompts/default-drift";
 import {
   clearTemplateDefinitions,
   getAllTemplateDefinitions,
@@ -12,6 +17,37 @@ import { resolveTemplate } from "../prompts/resolver";
 import { restoreAllTemplateDefinitions } from "./template-registry-helpers";
 
 const TEST_DB_PATH = "./test-prompt-resolver.sqlite";
+
+async function dispatchPromptTemplates(path: string): Promise<unknown> {
+  const req = Readable.from([]) as IncomingMessage;
+  req.method = "GET";
+  req.url = path;
+
+  let body = "";
+  const res = {
+    headersSent: false,
+    writableEnded: false,
+    setHeader() {},
+    writeHead() {
+      this.headersSent = true;
+      return this;
+    },
+    end(chunk?: unknown) {
+      if (chunk !== undefined) body += String(chunk);
+      this.writableEnded = true;
+      return this;
+    },
+  } as unknown as ServerResponse;
+
+  const handled = await handlePromptTemplates(
+    req,
+    res,
+    getPathSegments(path),
+    parseQueryParams(path),
+  );
+  expect(handled).toBe(true);
+  return JSON.parse(body);
+}
 
 describe("Prompt Template Resolver", () => {
   beforeAll(async () => {
@@ -568,7 +604,8 @@ describe("Prompt Template Resolver", () => {
       expect(after[0].body).toBe("Updated default");
     });
 
-    test("re-seeding does not touch user customizations (isDefault=false)", () => {
+    test("re-seeding does not touch user customizations (isDefault=false)", async () => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
       registerTemplate({
         eventType: "seed.test.custom",
         header: "",
@@ -583,7 +620,7 @@ describe("Prompt Template Resolver", () => {
       upsertPromptTemplate({
         eventType: "seed.test.custom",
         scope: "global",
-        body: "User custom body",
+        body: "Default body v1",
         changedBy: "user-123",
       });
 
@@ -594,14 +631,14 @@ describe("Prompt Template Resolver", () => {
       });
       expect(customized.length).toBe(1);
       expect(customized[0].isDefault).toBe(false);
-      expect(customized[0].body).toBe("User custom body");
+      expect(customized[0].body).toBe("Default body v1");
 
       // Re-seed with updated code
       clearTemplateDefinitions();
       registerTemplate({
         eventType: "seed.test.custom",
         header: "",
-        defaultBody: "Default body v2",
+        defaultBody: "Default body version 2",
         variables: [],
         category: "event",
       });
@@ -614,8 +651,142 @@ describe("Prompt Template Resolver", () => {
         scope: "global",
       });
       expect(afterReseed.length).toBe(1);
-      expect(afterReseed[0].body).toBe("User custom body");
+      expect(afterReseed[0].body).toBe("Default body v1");
       expect(afterReseed[0].isDefault).toBe(false);
+      expect(
+        getPromptTemplateDefaultDrift(afterReseed[0], "Default body version 2").defaultDrifted,
+      ).toBe(true);
+      const response = (await dispatchPromptTemplates(
+        "/api/prompt-templates?eventType=seed.test.custom",
+      )) as { templates: Array<{ defaultDrifted: boolean }> };
+      expect(response.templates).toHaveLength(1);
+      expect(response.templates[0]?.defaultDrifted).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('"seed.test.custom"');
+      expect(warn.mock.calls[0]?.[0]).toContain("frozen for 0 hours");
+      expect(warn.mock.calls[0]?.[0]).toContain(
+        "byte delta +7 (code default 22 bytes, customization 15 bytes)",
+      );
+      warn.mockRestore();
+    });
+
+    test("customized templates matching the code default self-heal as defaults", async () => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      registerTemplate({
+        eventType: "seed.test.custom-matching",
+        header: "",
+        defaultBody: "Still current",
+        variables: [],
+        category: "event",
+      });
+
+      seedDefaultTemplates();
+      upsertPromptTemplate({
+        eventType: "seed.test.custom-matching",
+        scope: "global",
+        body: "Still current",
+        changedBy: "user-123",
+      });
+      seedDefaultTemplates();
+
+      const customized = getPromptTemplates({
+        eventType: "seed.test.custom-matching",
+        scope: "global",
+      });
+      expect(customized).toHaveLength(1);
+      expect(customized[0].isDefault).toBe(true);
+      expect(getPromptTemplateDefaultDrift(customized[0], "Still current").defaultDrifted).toBe(
+        false,
+      );
+      const response = (await dispatchPromptTemplates(
+        "/api/prompt-templates?eventType=seed.test.custom-matching",
+      )) as { templates: Array<{ defaultDrifted: boolean; isDefault: boolean }> };
+      expect(response.templates).toHaveLength(1);
+      expect(response.templates[0]?.defaultDrifted).toBe(false);
+      expect(response.templates[0]?.isDefault).toBe(true);
+
+      clearTemplateDefinitions();
+      registerTemplate({
+        eventType: "seed.test.custom-matching",
+        header: "",
+        defaultBody: "Next code default",
+        variables: [],
+        category: "event",
+      });
+      seedDefaultTemplates();
+      const reconciled = getPromptTemplates({
+        eventType: "seed.test.custom-matching",
+        scope: "global",
+      });
+      expect(reconciled).toHaveLength(1);
+      expect(reconciled[0].body).toBe("Next code default");
+      expect(reconciled[0].isDefault).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    test("customized templates matching the code default preserve skip_event state", () => {
+      registerTemplate({
+        eventType: "seed.test.custom-matching-skipped",
+        header: "",
+        defaultBody: "Still current",
+        variables: [],
+        category: "event",
+      });
+
+      seedDefaultTemplates();
+      const skipped = upsertPromptTemplate({
+        eventType: "seed.test.custom-matching-skipped",
+        scope: "global",
+        state: "skip_event",
+        body: "Still current",
+        changedBy: "user-123",
+      });
+      expect(skipped.isDefault).toBe(false);
+      expect(skipped.state).toBe("skip_event");
+
+      seedDefaultTemplates();
+
+      const afterReseed = getPromptTemplates({
+        eventType: "seed.test.custom-matching-skipped",
+        scope: "global",
+      });
+      expect(afterReseed).toHaveLength(1);
+      expect(afterReseed[0].body).toBe("Still current");
+      expect(afterReseed[0].state).toBe("skip_event");
+      expect(afterReseed[0].isDefault).toBe(false);
+      expect(afterReseed[0].version).toBe(skipped.version);
+    });
+
+    test("unchanged default templates remain defaults without warnings", () => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      registerTemplate({
+        eventType: "seed.test.default-unchanged",
+        header: "",
+        defaultBody: "Current default",
+        variables: [],
+        category: "event",
+      });
+
+      seedDefaultTemplates();
+      const seeded = getPromptTemplates({
+        eventType: "seed.test.default-unchanged",
+        scope: "global",
+      });
+      expect(seeded).toHaveLength(1);
+      expect(seeded[0].body).toBe("Current default");
+      expect(seeded[0].isDefault).toBe(true);
+
+      seedDefaultTemplates();
+      const unchanged = getPromptTemplates({
+        eventType: "seed.test.default-unchanged",
+        scope: "global",
+      });
+      expect(unchanged).toHaveLength(1);
+      expect(unchanged[0].body).toBe("Current default");
+      expect(unchanged[0].isDefault).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
     });
 
     test("seeding with no registered templates is a no-op", () => {

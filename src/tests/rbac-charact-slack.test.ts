@@ -28,6 +28,9 @@ import {
   registerRegisterKapsoNumberTool,
   registerUnregisterKapsoNumberTool,
 } from "../tools/register-kapso-number";
+import { registerSlackArchiveChannelTool } from "../tools/slack-archive-channel";
+import { registerSlackCreateChannelTool } from "../tools/slack-create-channel";
+import { registerSlackInviteToChannelTool } from "../tools/slack-invite-to-channel";
 import { registerSlackPostTool } from "../tools/slack-post";
 import { registerSlackReadTool } from "../tools/slack-read";
 import { registerSlackStartThreadTool } from "../tools/slack-start-thread";
@@ -102,6 +105,9 @@ beforeAll(async () => {
   server = new McpServer({ name: "test-rbac-charact-slack", version: "1.0.0" });
   registerSlackPostTool(server);
   registerSlackStartThreadTool(server);
+  registerSlackCreateChannelTool(server);
+  registerSlackInviteToChannelTool(server);
+  registerSlackArchiveChannelTool(server);
   registerSlackReadTool(server);
   registerSlackUploadFileTool(server);
   registerDeleteChannelTool(server);
@@ -163,6 +169,29 @@ describe("slack tool gates (characterization)", () => {
       channelId: "C0CHARACT01",
       message: "hi",
     });
+
+    expect(result.structuredContent.message).not.toContain("requires lead privileges");
+  });
+
+  test.each([
+    ["slack-create-channel", { name: "project-channel" }],
+    ["slack-invite-to-channel", { channelId: "C0CHARACT01", userIds: ["U0CHARACT01"] }],
+    ["slack-archive-channel", { channelId: "C0CHARACT01" }],
+  ])("worker cannot use %s", async (toolName, args) => {
+    const result = await callTool(toolName, WORKER_ID, args);
+
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toBe(
+      "Managing Slack channels requires lead privileges.",
+    );
+  });
+
+  test.each([
+    ["slack-create-channel", { name: "project-channel" }],
+    ["slack-invite-to-channel", { channelId: "C0CHARACT01", userIds: ["U0CHARACT01"] }],
+    ["slack-archive-channel", { channelId: "C0CHARACT01" }],
+  ])("lead %s is not blocked by the lead gate", async (toolName, args) => {
+    const result = await callTool(toolName, LEAD_ID, args);
 
     expect(result.structuredContent.message).not.toContain("requires lead privileges");
   });

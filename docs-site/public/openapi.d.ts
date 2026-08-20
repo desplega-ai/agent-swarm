@@ -9779,7 +9779,7 @@ export interface paths {
                                 unresolved: string[];
                             };
                             dbResult: {
-                                template: components["schemas"]["PromptTemplate"];
+                                template: components["schemas"]["PromptTemplateResponse"];
                             } | {
                                 /** @enum {boolean} */
                                 skip: true;
@@ -10021,7 +10021,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            template: components["schemas"]["PromptTemplate"];
+                            template: components["schemas"]["PromptTemplateResponse"];
                         };
                     };
                 };
@@ -10079,7 +10079,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            template: components["schemas"]["PromptTemplate"];
+                            template: components["schemas"]["PromptTemplateResponse"];
                         };
                     };
                 };
@@ -10126,7 +10126,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            template: components["schemas"]["PromptTemplate"];
+                            template: components["schemas"]["PromptTemplateResponse"];
                             history: components["schemas"]["PromptTemplateHistory"][];
                         };
                     };
@@ -10222,7 +10222,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            templates: components["schemas"]["PromptTemplate"][];
+                            templates: components["schemas"]["PromptTemplateResponse"][];
                         };
                     };
                 };
@@ -10259,7 +10259,7 @@ export interface paths {
                     };
                     content: {
                         "application/json": {
-                            template: components["schemas"]["PromptTemplate"];
+                            template: components["schemas"]["PromptTemplateResponse"];
                         };
                     };
                 };
@@ -20148,6 +20148,9 @@ export interface components {
             passwordHash?: string;
             body: string;
             needsCredentials?: string[];
+        };
+        PromptTemplateResponse: components["schemas"]["PromptTemplate"] & {
+            defaultDrifted: boolean;
         };
         PromptTemplate: {
             id: string;
