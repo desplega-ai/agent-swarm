@@ -24,7 +24,8 @@ import "../tools/templates";
  * For each registered EventTemplateDefinition:
  * - If no global record exists at all, insert one as default (isDefault=true, state=enabled)
  * - If a global default (isDefault=true) exists and its body differs from code, update it
- * - Warn, but never overwrite, when a customized record differs from the code default
+ * - Reclassify a customized record as default when its body is byte-identical to code
+ * - Warn, but never overwrite, when a genuinely customized record differs from code
  */
 export function seedDefaultTemplates(): void {
   const definitions = getAllTemplateDefinitions();
@@ -71,9 +72,13 @@ export function seedDefaultTemplates(): void {
         console.warn(
           `[prompt-templates] Customized template "${def.eventType}" has drifted from its code default; frozen for ${frozenFor} since ${globalRecord.updatedAt}; byte delta ${signedByteDelta} (code default ${drift.defaultBytes} bytes, customization ${drift.customizedBytes} bytes). The customization was preserved; reset it manually to reconcile.`,
         );
+      } else {
+        // The row was marked customized without any content change. Restore default ownership so
+        // future code-default updates continue to reconcile it.
+        resetPromptTemplateToDefault(globalRecord.id, def.defaultBody);
       }
     }
-    // If record exists with isDefault=false (user customization): never overwrite it
+    // If record exists with isDefault=false and a different body: never overwrite it
     // If record exists with isDefault=true and body matches: leave it alone
   }
 }

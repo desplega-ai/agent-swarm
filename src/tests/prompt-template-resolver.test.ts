@@ -670,7 +670,7 @@ describe("Prompt Template Resolver", () => {
       warn.mockRestore();
     });
 
-    test("customized templates matching the code default are not reported as drifted", async () => {
+    test("customized templates matching the code default self-heal as defaults", async () => {
       const warn = spyOn(console, "warn").mockImplementation(() => {});
       registerTemplate({
         eventType: "seed.test.custom-matching",
@@ -694,15 +694,64 @@ describe("Prompt Template Resolver", () => {
         scope: "global",
       });
       expect(customized).toHaveLength(1);
-      expect(customized[0].isDefault).toBe(false);
+      expect(customized[0].isDefault).toBe(true);
       expect(getPromptTemplateDefaultDrift(customized[0], "Still current").defaultDrifted).toBe(
         false,
       );
       const response = (await dispatchPromptTemplates(
         "/api/prompt-templates?eventType=seed.test.custom-matching",
-      )) as { templates: Array<{ defaultDrifted: boolean }> };
+      )) as { templates: Array<{ defaultDrifted: boolean; isDefault: boolean }> };
       expect(response.templates).toHaveLength(1);
       expect(response.templates[0]?.defaultDrifted).toBe(false);
+      expect(response.templates[0]?.isDefault).toBe(true);
+
+      clearTemplateDefinitions();
+      registerTemplate({
+        eventType: "seed.test.custom-matching",
+        header: "",
+        defaultBody: "Next code default",
+        variables: [],
+        category: "event",
+      });
+      seedDefaultTemplates();
+      const reconciled = getPromptTemplates({
+        eventType: "seed.test.custom-matching",
+        scope: "global",
+      });
+      expect(reconciled).toHaveLength(1);
+      expect(reconciled[0].body).toBe("Next code default");
+      expect(reconciled[0].isDefault).toBe(true);
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    test("unchanged default templates remain defaults without warnings", () => {
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      registerTemplate({
+        eventType: "seed.test.default-unchanged",
+        header: "",
+        defaultBody: "Current default",
+        variables: [],
+        category: "event",
+      });
+
+      seedDefaultTemplates();
+      const seeded = getPromptTemplates({
+        eventType: "seed.test.default-unchanged",
+        scope: "global",
+      });
+      expect(seeded).toHaveLength(1);
+      expect(seeded[0].body).toBe("Current default");
+      expect(seeded[0].isDefault).toBe(true);
+
+      seedDefaultTemplates();
+      const unchanged = getPromptTemplates({
+        eventType: "seed.test.default-unchanged",
+        scope: "global",
+      });
+      expect(unchanged).toHaveLength(1);
+      expect(unchanged[0].body).toBe("Current default");
+      expect(unchanged[0].isDefault).toBe(true);
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
