@@ -238,7 +238,7 @@ export async function completeGenericOAuthCallback(
       idToken: tokens.idToken,
     });
     if (identity) {
-      updateAuthorizationIdentity(authorization.id, {
+      await updateAuthorizationIdentity(authorization.id, {
         accountEmail: identity.accountEmail,
         identityJson: identity.identityJson,
       });
@@ -315,17 +315,21 @@ export async function handleOAuthCallback(
 
 let gcTimer: ReturnType<typeof setInterval> | null = null;
 
+async function runOAuthPendingGcTick(): Promise<void> {
+  try {
+    const removed = (await gcOAuthPending()) + gcMcpOAuthPending();
+    if (removed > 0) {
+      console.debug(`[oauth] GC removed ${removed} expired pending session(s)`);
+    }
+  } catch (err) {
+    console.error("[oauth] pending GC failed:", err);
+  }
+}
+
 export function startOAuthPendingGc(intervalMs = 5 * 60 * 1000): void {
   if (gcTimer) return;
   gcTimer = setInterval(() => {
-    try {
-      const removed = gcOAuthPending() + gcMcpOAuthPending();
-      if (removed > 0) {
-        console.debug(`[oauth] GC removed ${removed} expired pending session(s)`);
-      }
-    } catch (err) {
-      console.error("[oauth] pending GC failed:", err);
-    }
+    void runOAuthPendingGcTick();
   }, intervalMs);
   if (typeof gcTimer?.unref === "function") gcTimer.unref();
 }

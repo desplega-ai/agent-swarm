@@ -2202,10 +2202,10 @@ export async function handleScriptConnections(
       // update exactly that row (existence + non-MCP already checked above).
       let savedId: string;
       if (editing) {
-        updateOAuthAppById(editing.id, appData);
+        await updateOAuthAppById(editing.id, appData);
         savedId = editing.id;
       } else {
-        savedId = createOAuthApp(provider, appData);
+        savedId = await createOAuthApp(provider, appData);
       }
       const app = listOAuthApps().find((row) => row.id === savedId);
       upsertOAuthAppRoute.respond(res, 200, {
@@ -2310,7 +2310,7 @@ export async function handleScriptConnections(
     if (app && authorization.accessToken && authorization.status !== "revoked") {
       revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
     }
-    deleteAuthorizationById(authorization.id);
+    await deleteAuthorizationById(authorization.id);
     deleteAuthorizationRoute.respond(res, 200, { deleted: true, revocationAttempted });
     return true;
   }
@@ -2430,7 +2430,7 @@ export async function handleScriptConnections(
       jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
       return true;
     }
-    const tokens = getOAuthTokens(parsed.params.provider);
+    const tokens = await getOAuthTokens(parsed.params.provider);
     if (!tokens) {
       disconnectOAuthAppRoute.respond(res, 200, {
         disconnected: false,
@@ -2439,7 +2439,7 @@ export async function handleScriptConnections(
       return true;
     }
     const revocationAttempted = await attemptRemoteRevocation(app, tokens.accessToken);
-    deleteOAuthTokens(parsed.params.provider);
+    await deleteOAuthTokens(parsed.params.provider);
     disconnectOAuthAppRoute.respond(res, 200, { disconnected: true, revocationAttempted });
     return true;
   }
@@ -2454,7 +2454,7 @@ export async function handleScriptConnections(
       jsonError(res, `OAuth app ${provider} is not configured.`, 404);
       return true;
     }
-    const tokens = getOAuthTokens(provider);
+    const tokens = await getOAuthTokens(provider);
     if (!tokens) {
       jsonError(res, "Nothing to refresh — authorize first.", 400);
       return true;
@@ -2479,7 +2479,7 @@ export async function handleScriptConnections(
     refreshOAuthAppTokensRoute.respond(res, 200, {
       refreshed: true,
       tokenStatus: getOAuthBindingTokenStatus(tokens.id),
-      expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,
+      expiresAt: (await getOAuthTokens(provider))?.expiresAt ?? null,
     });
     return true;
   }

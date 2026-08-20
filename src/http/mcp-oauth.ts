@@ -682,7 +682,7 @@ export async function completeMcpOAuthCallback(
     if (isInvalidClientError(query.error) || query.error === "unauthorized_client") {
       const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
-        invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
+        await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
     }
     const target = new URL(dashboardBaseUrl);
@@ -749,7 +749,7 @@ export async function completeMcpOAuthCallback(
     });
 
     // Flip authMethod=oauth so resolveSecrets picks this up.
-    setMcpServerAuthMethod(pending.mcpServerId, "oauth");
+    await setMcpServerAuthMethod(pending.mcpServerId, "oauth");
 
     const target = new URL(dashboardBaseUrl);
     target.searchParams.set("oauth", "success");
@@ -768,7 +768,7 @@ export async function completeMcpOAuthCallback(
       // invalidating it would corrupt a working connection.
       const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
-        invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
+        await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
     }
     const target = new URL(dashboardBaseUrl);
@@ -936,7 +936,7 @@ export async function handleMcpOAuth(
         refreshToken: existing.refreshToken,
         resource: existing.resourceUrl,
       });
-      applyMcpOAuthRefresh(existing.id, {
+      await applyMcpOAuthRefresh(existing.id, {
         accessToken: refreshed.access_token,
         refreshToken: refreshed.refresh_token ?? undefined,
         expiresAt: computeExpiresAt(refreshed.expires_in),
@@ -954,8 +954,8 @@ export async function handleMcpOAuth(
         // The provider has disowned this client — invalidate it so the next
         // /authorize call re-registers exactly once instead of continuing to
         // refresh against a client_id the provider now rejects.
-        invalidateMcpOAuthClient(parsed.params.mcpServerId, userId);
-        markMcpOAuthTokenStatus(existing.id, "error", message);
+        await invalidateMcpOAuthClient(parsed.params.mcpServerId, userId);
+        await markMcpOAuthTokenStatus(existing.id, "error", message);
       }
       jsonError(res, `Refresh failed: ${message}`, 500);
     }
@@ -992,9 +992,9 @@ export async function handleMcpOAuth(
       }
     }
 
-    deleteMcpOAuthToken(parsed.params.mcpServerId, userId);
+    await deleteMcpOAuthToken(parsed.params.mcpServerId, userId);
     // Flip back to static so resolveSecrets stops trying to inject Bearer.
-    setMcpServerAuthMethod(parsed.params.mcpServerId, "static");
+    await setMcpServerAuthMethod(parsed.params.mcpServerId, "static");
     disconnectRoute.respond(res, 200, { ok: true });
     return true;
   }

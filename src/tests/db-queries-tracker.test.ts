@@ -67,9 +67,9 @@ describe("Tracker Sync CRUD", () => {
     expect(sync!.swarmId).toBe("task-001");
   });
 
-  test("updateTrackerSync updates fields", () => {
+  test("updateTrackerSync updates fields", async () => {
     const sync = getTrackerSync("linear", "task", "task-001")!;
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastDeliveryId: "delivery-abc",
       syncDirection: "bidirectional",
@@ -130,9 +130,9 @@ describe("Tracker Sync CRUD", () => {
     expect(tasks.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("deleteTrackerSync removes the mapping", () => {
+  test("deleteTrackerSync removes the mapping", async () => {
     const sync = getTrackerSyncByExternalId("jira", "task", "JIRA-456")!;
-    deleteTrackerSync(sync.id);
+    await deleteTrackerSync(sync.id);
     expect(getTrackerSyncByExternalId("jira", "task", "JIRA-456")).toBeNull();
   });
 });
@@ -211,8 +211,8 @@ describe("Tracker Agent Mapping CRUD", () => {
     expect(linear.length).toBe(1);
   });
 
-  test("deleteTrackerAgentMapping removes the mapping", () => {
-    deleteTrackerAgentMapping("jira", "agent-001");
+  test("deleteTrackerAgentMapping removes the mapping", async () => {
+    await deleteTrackerAgentMapping("jira", "agent-001");
     expect(getTrackerAgentMapping("jira", "agent-001")).toBeNull();
   });
 });

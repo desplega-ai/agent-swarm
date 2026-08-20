@@ -141,7 +141,7 @@ afterAll(async () => {
 });
 
 describe("OAuth credential bindings", () => {
-  test("migration columns round-trip through credential binding persistence", () => {
+  test("migration columns round-trip through credential binding persistence", async () => {
     const columns = getDb()
       .query<{ name: string }, []>("PRAGMA table_info(script_credential_bindings)")
       .all()
@@ -149,8 +149,8 @@ describe("OAuth credential bindings", () => {
     expect(columns).toContain("auth_kind");
     expect(columns).toContain("oauth_authorization_id");
 
-    upsertOAuthApp("phase2-roundtrip", testApp("phase2-roundtrip"));
-    storeOAuthTokens("phase2-roundtrip", {
+    await upsertOAuthApp("phase2-roundtrip", testApp("phase2-roundtrip"));
+    await storeOAuthTokens("phase2-roundtrip", {
       accessToken: "roundtrip-access",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
@@ -175,8 +175,8 @@ describe("OAuth credential bindings", () => {
   });
 
   test("OAuth binding resolves through the stored access token", async () => {
-    upsertOAuthApp("phase2-resolve", testApp("phase2-resolve"));
-    storeOAuthTokens("phase2-resolve", {
+    await upsertOAuthApp("phase2-resolve", testApp("phase2-resolve"));
+    await storeOAuthTokens("phase2-resolve", {
       accessToken: "stored-oauth-access",
       refreshToken: "stored-oauth-refresh",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
@@ -201,8 +201,8 @@ describe("OAuth credential bindings", () => {
   });
 
   test("expiring OAuth binding token is refreshed before resolution", async () => {
-    upsertOAuthApp("phase2-refresh", testApp("phase2-refresh"));
-    storeOAuthTokens("phase2-refresh", {
+    await upsertOAuthApp("phase2-refresh", testApp("phase2-refresh"));
+    await storeOAuthTokens("phase2-refresh", {
       accessToken: "old-access-token",
       refreshToken: "old-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -247,11 +247,11 @@ describe("OAuth credential bindings", () => {
   });
 
   test("basic tokenAuthStyle + json tokenBodyFormat reach the token endpoint (Notion-style)", async () => {
-    upsertOAuthApp("phase2-basic", {
+    await upsertOAuthApp("phase2-basic", {
       ...testApp("phase2-basic"),
       metadata: JSON.stringify({ tokenAuthStyle: "basic", tokenBodyFormat: "json" }),
     });
-    storeOAuthTokens("phase2-basic", {
+    await storeOAuthTokens("phase2-basic", {
       accessToken: "old-basic-access",
       refreshToken: "old-basic-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -306,7 +306,7 @@ describe("OAuth credential bindings", () => {
   });
 
   test("generic OAuth authorize URL uses space-separated scopes", async () => {
-    upsertOAuthApp("phase2-scopes", testApp("phase2-scopes"));
+    await upsertOAuthApp("phase2-scopes", testApp("phase2-scopes"));
     const config = getOAuthProviderConfig("phase2-scopes");
     expect(config).not.toBeNull();
     if (!config) throw new Error("missing provider config");
@@ -315,8 +315,8 @@ describe("OAuth credential bindings", () => {
     expect(url).not.toContain("scope=read%2Cwrite");
   });
 
-  test("metadata actor remains an authorization parameter without lifted extras", () => {
-    upsertOAuthApp("phase2-actor", {
+  test("metadata actor remains an authorization parameter without lifted extras", async () => {
+    await upsertOAuthApp("phase2-actor", {
       ...testApp("phase2-actor"),
       metadata: JSON.stringify({ actor: "app" }),
     });
@@ -382,8 +382,8 @@ describe("OAuth credential bindings", () => {
   });
 
   test("failed OAuth token refresh skips only that binding, others still resolve", async () => {
-    upsertOAuthApp("phase2-broken", testApp("phase2-broken"));
-    storeOAuthTokens("phase2-broken", {
+    await upsertOAuthApp("phase2-broken", testApp("phase2-broken"));
+    await storeOAuthTokens("phase2-broken", {
       accessToken: "stale-access-token",
       refreshToken: "stale-refresh-token",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -424,8 +424,8 @@ describe("OAuth credential bindings", () => {
   });
 
   test("revoked OAuth token skips binding resolution and list reports revoked", async () => {
-    upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
-    storeOAuthTokens("phase2-missing", {
+    await upsertOAuthApp("phase2-missing", testApp("phase2-missing"));
+    await storeOAuthTokens("phase2-missing", {
       accessToken: "soon-deleted",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
@@ -437,7 +437,7 @@ describe("OAuth credential bindings", () => {
       authKind: "oauth",
       oauthAuthorizationId: authorizationId,
     });
-    deleteOAuthTokens("phase2-missing");
+    await deleteOAuthTokens("phase2-missing");
     process.env.PHASE2_MISSING_OAUTH = "env-must-not-win";
 
     const bindings = await buildScriptCredentialBindings({});
@@ -458,7 +458,7 @@ describe("OAuth credential bindings", () => {
 
   test("generic OAuth callback exchanges code and stores tokens", async () => {
     const provider = "phase2-callback";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const config = getOAuthProviderConfig(provider);
     if (!config) throw new Error("missing test oauth config");
     const { state } = await buildAuthorizationUrl(config);

@@ -176,13 +176,13 @@ describe("memory_link DB surface", () => {
     expect(pr?.targetId).toBe("pr:123");
   });
 
-  test("refreshLinks drops removed links, keeps surviving and sequel links", () => {
+  test("refreshLinks drops removed links, keeps surviving and sequel links", async () => {
     const b = seed("b-target", "target memory B");
     const c = seed("c-target", "target memory C");
     const a = seed("a-source", "See [[b-target]] and [[c-target]], fixed in #77.");
 
     storeLinks(a.id, agentX, a.content);
-    storeSequelLink(a.id, b.id);
+    await storeSequelLink(a.id, b.id);
     expect(linkRowsFor(a.id)).toHaveLength(4);
     const survivorId = linkRowsFor(a.id).find(
       (r) => r.linkType === "wikilink" && r.targetId === b.id,
@@ -201,11 +201,11 @@ describe("memory_link DB surface", () => {
     expect(rows.some((r) => r.targetId === "pr:77")).toBe(false);
   });
 
-  test("refreshLinks with linkless content clears all content-derived links", () => {
+  test("refreshLinks with linkless content clears all content-derived links", async () => {
     const b = seed("b-target", "target memory B");
     const a = seed("a-source", "See [[b-target]] and #42.");
     storeLinks(a.id, agentX, a.content);
-    storeSequelLink(a.id, b.id);
+    await storeSequelLink(a.id, b.id);
 
     refreshLinks(a.id, agentX, "Plain text without any references.");
 

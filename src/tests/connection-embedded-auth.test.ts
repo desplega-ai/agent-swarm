@@ -187,7 +187,7 @@ describe("embedded connection auth", () => {
   });
 
   test("oauth auth validates the authorization and derives a bearer binding", async () => {
-    upsertOAuthApp("embeddedvendor", {
+    await upsertOAuthApp("embeddedvendor", {
       clientId: "cid",
       clientSecret: "csecret",
       authorizeUrl: "https://vendor.test/authorize",
@@ -333,7 +333,7 @@ describe("embedded connection auth", () => {
 
   test("switching an inline-secret connection to oauth deletes the derived inline secret", async () => {
     createdConfigKeys.push("connection.switchVendor.secret");
-    upsertOAuthApp("switchvendor", {
+    await upsertOAuthApp("switchvendor", {
       clientId: "cid",
       clientSecret: "csecret",
       authorizeUrl: "https://vendor.test/authorize",

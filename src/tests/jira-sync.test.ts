@@ -24,10 +24,10 @@ const TEST_DB_PATH = "./test-jira-sync.sqlite";
 const BOT_ACCOUNT_ID = "bot-account-12345";
 const SITE_URL = "https://example.atlassian.net";
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Seed an oauth_apps row + cloudId/siteUrl so URL helpers don't blow up
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -154,7 +154,7 @@ describe("handleIssueEvent — assignee→bot", () => {
 
   test("UNIQUE-gates concurrent inserts (second call no-ops)", async () => {
     // Prime: create the sync row first as if a previous identical event already won.
-    createTrackerSync({
+    await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "",
@@ -238,7 +238,7 @@ describe("handleCommentEvent — short-circuits", () => {
       lastSyncOrigin: "swarm",
       syncDirection: "bidirectional",
     });
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "swarm",
       lastSyncedAt: new Date().toISOString(),
     });
@@ -263,7 +263,7 @@ describe("handleCommentEvent — short-circuits", () => {
       syncDirection: "bidirectional",
     });
     // 6s ago — outside the 5s window.
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "swarm",
       lastSyncedAt: new Date(Date.now() - 6_000).toISOString(),
     });

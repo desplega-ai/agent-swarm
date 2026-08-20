@@ -5,7 +5,7 @@
  * PR references, agent-UI URLs) and resolves them to typed `memory_link` rows.
  * Phase 1: capture layer only — no traversal tools, no reranker integration.
  */
-import { getDb } from "@/be/db";
+import { getDb, getDbClient } from "@/be/db";
 
 export type LinkType =
   | "wikilink"
@@ -279,12 +279,12 @@ export function refreshLinks(memoryId: string, agentId: string, content: string)
   })();
 }
 
-export function storeSequelLink(fromMemoryId: string, toMemoryId: string): void {
-  const db = getDb();
+export async function storeSequelLink(fromMemoryId: string, toMemoryId: string): Promise<void> {
   const now = new Date().toISOString();
-  db.prepare(
+  await getDbClient().run(
     `INSERT OR IGNORE INTO memory_link
        (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
      VALUES (?, ?, 'sequel', 'memory', ?, 1.0, 'sequel-auto', NULL, NULL, ?, ?)`,
-  ).run(crypto.randomUUID(), fromMemoryId, toMemoryId, now, now);
+    [crypto.randomUUID(), fromMemoryId, toMemoryId, now, now],
+  );
 }

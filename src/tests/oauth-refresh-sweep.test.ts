@@ -30,11 +30,11 @@ function appConfig(provider: string) {
   };
 }
 
-function seedTokens(
+async function seedTokens(
   provider: string,
   opts: { expiresInMs: number; refreshToken?: string | null } = { expiresInMs: 3_600_000 },
-): void {
-  storeOAuthTokens(provider, {
+): Promise<void> {
+  await storeOAuthTokens(provider, {
     accessToken: `${provider}-old-access-token`,
     refreshToken: opts.refreshToken === undefined ? `${provider}-refresh-token` : opts.refreshToken,
     expiresAt: new Date(Date.now() + opts.expiresInMs).toISOString(),
@@ -102,8 +102,8 @@ afterAll(async () => {
 
 describe("sweepOAuthTokenRefresh", () => {
   test("refreshes a row whose access token expires within 30 minutes", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000 }); // expires in 10 min
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000 }); // expires in 10 min
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
@@ -116,8 +116,8 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("skips rows with no refresh token", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000, refreshToken: null });
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000, refreshToken: null });
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
@@ -128,12 +128,12 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("skips a non-expiring (NULL expiry) row instead of proactively refreshing it", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
     // GitHub-preset shape: a live token WITH a refresh token but NO expiry.
     // NULL expiry means "does not expire" — the sweep must not treat it as
     // expiring, must not refresh it proactively, and must never mark it
     // refresh-failed.
-    storeOAuthTokens("vendor_a", {
+    await storeOAuthTokens("vendor_a", {
       accessToken: "vendor_a-old-access-token",
       refreshToken: "vendor_a-refresh-token",
       expiresAt: null,
@@ -150,8 +150,8 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("skips fresh rows that are neither expiring nor stale", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 }); // expires in 24h, just updated
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 }); // expires in 24h, just updated
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
@@ -161,8 +161,8 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("keep-alives a stale row even when the access token is far from expiry", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 30 * 24 * 60 * 60 * 1000 }); // expires in 30 days
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 30 * 24 * 60 * 60 * 1000 }); // expires in 30 days
     backdateTokenRow("vendor_a", 8 * 24 * 60 * 60 * 1000); // untouched for 8 days
 
     const captured = mockTokenEndpoint();
@@ -175,10 +175,10 @@ describe("sweepOAuthTokenRefresh", () => {
 
   test("survives a failing provider and still refreshes the others", async () => {
     // "a_broken" sorts before "b_healthy", proving the sweep continues past a failure.
-    upsertOAuthApp("a_broken", appConfig("a_broken"));
-    upsertOAuthApp("b_healthy", appConfig("b_healthy"));
-    seedTokens("a_broken", { expiresInMs: 10 * 60 * 1000 });
-    seedTokens("b_healthy", { expiresInMs: 10 * 60 * 1000 });
+    await upsertOAuthApp("a_broken", appConfig("a_broken"));
+    await upsertOAuthApp("b_healthy", appConfig("b_healthy"));
+    await seedTokens("a_broken", { expiresInMs: 10 * 60 * 1000 });
+    await seedTokens("b_healthy", { expiresInMs: 10 * 60 * 1000 });
 
     const captured = mockTokenEndpoint(["https://oauth.a_broken.test/token"]);
     const result = await sweepOAuthTokenRefresh();
@@ -200,10 +200,10 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("a refresh-failed authorization stays in the sweep and heals on the next pass", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
     // Not expiring on its own — the only reason it should be swept is the
     // persisted refresh-failed status.
-    seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 });
+    await seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 });
 
     // Pass 1: provider is down → status flips to refresh-failed.
     mockTokenEndpoint(["https://oauth.vendor_a.test/token"]);

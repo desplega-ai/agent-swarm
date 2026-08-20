@@ -228,8 +228,8 @@ function getRedirectUri(req: IncomingMessage): string {
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 
-function buildJiraStatusPayload(req: IncomingMessage): JiraStatusPayload {
-  const tokens = getOAuthTokens("jira");
+async function buildJiraStatusPayload(req: IncomingMessage): Promise<JiraStatusPayload> {
+  const tokens = await getOAuthTokens("jira");
   const meta = getJiraMetadata();
   const scope = tokens?.scope ?? null;
   // Atlassian returns scopes space-separated in the token response.
@@ -320,7 +320,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    jiraStatus.respond(res, 200, buildJiraStatusPayload(req));
+    jiraStatus.respond(res, 200, await buildJiraStatusPayload(req));
     return true;
   }
 
@@ -334,7 +334,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const authorizationId = getDefaultAuthorizationIdForProvider("jira");
+    const authorizationId = await getDefaultAuthorizationIdForProvider("jira");
     const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
     if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
@@ -357,7 +357,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    jiraRefresh.respond(res, 200, buildJiraStatusPayload(req));
+    jiraRefresh.respond(res, 200, await buildJiraStatusPayload(req));
     return true;
   }
 
@@ -481,7 +481,7 @@ export async function handleJiraTracker(
       }
     }
 
-    deleteOAuthTokens("jira");
+    await deleteOAuthTokens("jira");
     clearJiraMetadata();
 
     console.log(

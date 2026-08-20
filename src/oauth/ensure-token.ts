@@ -246,16 +246,19 @@ export async function ensureAuthorizationTokenOrThrow(
       if (!current.refreshToken) {
         const label = authorizationLabelFor(app, current);
         const message = `OAuth authorization '${label}' cannot refresh: no refresh token stored`;
-        markAuthorizationRefreshFailed(authorizationId, message);
+        await markAuthorizationRefreshFailed(authorizationId, message);
         throw new OAuthRefreshError(authorizationId, app.id, "no_refresh_token", label, message);
       }
 
-      const lockOwner = acquireOAuthRefreshLock(`authz:${authorizationId}`, REFRESH_LOCK_TTL_MS);
+      const lockOwner = await acquireOAuthRefreshLock(
+        `authz:${authorizationId}`,
+        REFRESH_LOCK_TTL_MS,
+      );
       if (!lockOwner) {
         if (Date.now() - waitStartedAt > REFRESH_LOCK_WAIT_MS) {
           const label = authorizationLabelFor(app, current);
           const message = `Timed out waiting for OAuth refresh lock for '${label}'`;
-          markAuthorizationRefreshFailed(authorizationId, message);
+          await markAuthorizationRefreshFailed(authorizationId, message);
           throw new OAuthRefreshError(authorizationId, app.id, "lock_timeout", label, message);
         }
         await sleep(REFRESH_LOCK_POLL_MS);
@@ -276,7 +279,7 @@ export async function ensureAuthorizationTokenOrThrow(
         if (!locked.refreshToken) {
           const label = authorizationLabelFor(lockedApp, locked);
           const message = `OAuth authorization '${label}' cannot refresh: no refresh token stored`;
-          markAuthorizationRefreshFailed(authorizationId, message);
+          await markAuthorizationRefreshFailed(authorizationId, message);
           throw new OAuthRefreshError(
             authorizationId,
             lockedApp.id,
@@ -289,7 +292,7 @@ export async function ensureAuthorizationTokenOrThrow(
         const config = oauthAppRowToProviderConfig(lockedApp);
         try {
           const refreshed = await performTokenRefreshRequest(config, locked.refreshToken);
-          const persisted = updateAuthorizationTokens(authorizationId, {
+          const persisted = await updateAuthorizationTokens(authorizationId, {
             accessToken: refreshed.accessToken,
             refreshToken: refreshed.refreshToken ?? locked.refreshToken,
             expiresAt: refreshed.expiresAt,
@@ -320,7 +323,7 @@ export async function ensureAuthorizationTokenOrThrow(
           if (lockedApp.clientSecret)
             registerVolatileSecret(lockedApp.clientSecret, "oauth-client-secret");
           const message = scrubSecrets(err instanceof Error ? err.message : String(err));
-          markAuthorizationRefreshFailed(authorizationId, message);
+          await markAuthorizationRefreshFailed(authorizationId, message);
           if (err instanceof OAuthRefreshError) throw err;
           throw new OAuthRefreshError(
             authorizationId,
@@ -331,7 +334,7 @@ export async function ensureAuthorizationTokenOrThrow(
           );
         }
       } finally {
-        releaseOAuthRefreshLock(`authz:${authorizationId}`, lockOwner);
+        await releaseOAuthRefreshLock(`authz:${authorizationId}`, lockOwner);
       }
     }
   });
@@ -398,7 +401,7 @@ export async function ensureToken(provider: string, bufferMs?: number): Promise<
  * oauth-access-token callers. A genuine provider rejection still throws.
  */
 export async function ensureTokenOrThrow(provider: string, bufferMs?: number): Promise<void> {
-  const authorizationId = getDefaultAuthorizationIdForProvider(provider);
+  const authorizationId = await getDefaultAuthorizationIdForProvider(provider);
   if (!authorizationId) return;
   try {
     await ensureAuthorizationTokenOrThrow(authorizationId, bufferMs);
@@ -416,7 +419,7 @@ export async function ensureTokenOrThrow(provider: string, bufferMs?: number): P
  * Force-refresh a provider's default authorization. Silent when not connected.
  */
 export async function forceRefreshTokenOrThrow(provider: string): Promise<void> {
-  const authorizationId = getDefaultAuthorizationIdForProvider(provider);
+  const authorizationId = await getDefaultAuthorizationIdForProvider(provider);
   if (!authorizationId) return;
   try {
     await forceRefreshAuthorizationOrThrow(authorizationId);

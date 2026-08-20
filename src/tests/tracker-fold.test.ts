@@ -111,8 +111,11 @@ function setEnv(key: string, value: string): void {
 }
 
 /** Seed a tracker OAuth app whose token endpoint is the localhost mock. */
-function seedMockTrackerApp(provider: "linear" | "jira", scopeSeparator: string): string {
-  upsertOAuthApp(provider, {
+async function seedMockTrackerApp(
+  provider: "linear" | "jira",
+  scopeSeparator: string,
+): Promise<string> {
+  await upsertOAuthApp(provider, {
     clientId: `${provider}-client`,
     clientSecret: `${provider}-secret`,
     authorizeUrl: `${providerBase}/authorize`,
@@ -227,7 +230,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   test("initLinear boot seeding preserves foreign metadata keys (idempotent, no clobber)", async () => {
     // A pre-existing row carrying an operator/runtime-added metadata key — now
     // possible since the carve-out removal made the linear row user-manageable.
-    upsertOAuthApp("linear", {
+    await upsertOAuthApp("linear", {
       clientId: "pre-existing",
       clientSecret: "pre-existing-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
@@ -268,7 +271,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("linear authorize→callback wrapper lands tokens on the default authorization", async () => {
-    const appId = seedMockTrackerApp("linear", ",");
+    const appId = await seedMockTrackerApp("linear", ",");
 
     const authorizeUrl = await getLinearAuthorizationUrl();
     expect(authorizeUrl).toBeTruthy();
@@ -296,7 +299,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("jira authorize→callback wrapper lands tokens AND resolves cloudId into metadata", async () => {
-    const appId = seedMockTrackerApp("jira", " ");
+    const appId = await seedMockTrackerApp("jira", " ");
 
     const authorizeUrl = await getJiraAuthorizationUrl();
     const state = stateFromAuthorizeUrl(authorizeUrl as string);
@@ -318,7 +321,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("jira callback cloudId-resolution failure surfaces an error but still lands the (half-connected) authorization", async () => {
-    const appId = seedMockTrackerApp("jira", " ");
+    const appId = await seedMockTrackerApp("jira", " ");
     cloudIdResolves = false; // accessible-resources returns 503
 
     const authorizeUrl = await getJiraAuthorizationUrl();
@@ -341,7 +344,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("jira refresh enforces rotation strictness — missing rotated refresh_token throws + marks refresh-failed", async () => {
-    seedMockTrackerApp("jira", " ");
+    await seedMockTrackerApp("jira", " ");
     const appId = getOAuthAppIdByProvider("jira") as string;
     const authorization = upsertAuthorization({
       appId,
@@ -385,7 +388,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     // real linear app; override the token endpoint to the localhost mock.
     const { initLinear } = await import("../linear/app");
     expect(initLinear()).toBe(true);
-    const appId = seedMockTrackerApp("linear", ",");
+    const appId = await seedMockTrackerApp("linear", ",");
 
     const authorization = upsertAuthorization({
       appId,

@@ -27,9 +27,9 @@ const exchangeCodeSpy = spyOn(wrapperModule, "exchangeCode");
 
 const originalFetch = globalThis.fetch;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",

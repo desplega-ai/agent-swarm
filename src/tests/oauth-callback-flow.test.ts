@@ -165,7 +165,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("two labeled authorizations land independently with captured identity", async () => {
     const provider = "flow-multi";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider);
     expect(appId).toBeTruthy();
     const config = getOAuthProviderConfig(provider);
@@ -209,7 +209,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
     const provider = "flow-noexpiry";
     // Long-lived token, no refresh token (GitHub-preset shape). Point the token
     // URL at the endpoint that omits expires_in.
-    upsertOAuthApp(provider, {
+    await upsertOAuthApp(provider, {
       ...testApp(provider),
       tokenUrl: `${providerBase}/token-noexpiry`,
     });
@@ -244,7 +244,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
     const provider = "flow-scrub";
     // clientSecret is `${provider}-secret` = "flow-scrub-secret" (testApp). Point
     // the token URL at the failing endpoint that echoes the posted secrets.
-    upsertOAuthApp(provider, {
+    await upsertOAuthApp(provider, {
       ...testApp(provider),
       tokenUrl: `${providerBase}/token-fail`,
     });
@@ -266,7 +266,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("POST /api/oauth-apps/{id}/authorize-url (lead) issues a state the callback completes", async () => {
     const provider = "flow-http-route";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
 
     const authRes = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
@@ -300,7 +300,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("state is single-use — replay is rejected", async () => {
     const provider = "flow-replay";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const config = getOAuthProviderConfig(provider)!;
     const { state } = await buildAuthorizationUrl(config, { appId, flow: "generic" });
@@ -313,9 +313,9 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("expired pending rows are garbage-collected", async () => {
     const provider = "flow-gc";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
-    createOAuthPending({
+    await createOAuthPending({
       state: "gc-state",
       appId,
       flow: "generic",
@@ -331,7 +331,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("legacy per-provider callback still completes a flow", async () => {
     const provider = "flow-legacy";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const config = getOAuthProviderConfig(provider)!;
     const { state } = await buildAuthorizationUrl(config, { appId, flow: "generic" });
@@ -345,7 +345,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("pending state is persisted in the DB (restart-safe, not an in-memory map)", async () => {
     const provider = "flow-restart";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const config = getOAuthProviderConfig(provider)!;
     const { state, codeVerifier } = await buildAuthorizationUrl(config, {
@@ -401,7 +401,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("RBAC: non-lead agent is denied on the authorize-url manage route", async () => {
     const provider = "flow-rbac";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const res = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
       method: "POST",
@@ -489,7 +489,7 @@ describe("step-4 security hardening", () => {
 
   test("success page HTML-escapes a hostile authorization label (XSS)", async () => {
     const provider = "sec-xss";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const config = getOAuthProviderConfig(provider)!;
     const label = "</h1><script>alert(1)</script>";
@@ -503,7 +503,7 @@ describe("step-4 security hardening", () => {
 
   test("authorize-url rejects a non-http(s) finalRedirect (open redirect)", async () => {
     const provider = "sec-redirect";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
     const res = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
       method: "POST",
@@ -515,9 +515,9 @@ describe("step-4 security hardening", () => {
 
   test("consume enforces the 10-minute pending TTL", async () => {
     const provider = "sec-ttl";
-    upsertOAuthApp(provider, testApp(provider));
+    await upsertOAuthApp(provider, testApp(provider));
     const appId = getOAuthAppIdByProvider(provider)!;
-    createOAuthPending({
+    await createOAuthPending({
       state: "ttl-state",
       appId,
       flow: "generic",

@@ -146,10 +146,10 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   if (isGitLabEnabled()) integrations.push("gitlab");
 
   resetLinear();
-  if (initLinear()) integrations.push("linear");
+  if (await initLinear()) integrations.push("linear");
 
   resetJira();
-  if (initJira()) integrations.push("jira");
+  if (await initJira()) integrations.push("jira");
 
   await stopSlackApp();
   await startSlackApp();

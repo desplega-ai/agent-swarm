@@ -314,7 +314,7 @@ describe("Task Supersede + Resume", () => {
       startTask(parent.id);
 
       // Simulate the Linear sync row created when the issue was inbound-claimed.
-      createTrackerSync({
+      await createTrackerSync({
         provider: "linear",
         entityType: "task",
         swarmId: parent.id,

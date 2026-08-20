@@ -10,7 +10,7 @@ import { getJiraMetadata } from "./metadata";
  */
 export async function getJiraAccessToken(): Promise<string> {
   await ensureToken("jira");
-  const tokens = getOAuthTokens("jira");
+  const tokens = await getOAuthTokens("jira");
   if (!tokens) {
     throw new Error("Jira not connected — no OAuth tokens stored");
   }

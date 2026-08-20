@@ -87,8 +87,12 @@ afterAll(async () => {
   }
 });
 
-function seedDefault(provider: string, refreshToken: string | null, expiresInMs: number): string {
-  storeOAuthTokens(provider, {
+async function seedDefault(
+  provider: string,
+  refreshToken: string | null,
+  expiresInMs: number,
+): Promise<string> {
+  await storeOAuthTokens(provider, {
     accessToken: `${provider}-access`,
     refreshToken,
     expiresAt: new Date(Date.now() + expiresInMs).toISOString(),
@@ -107,8 +111,8 @@ function seedDefault(provider: string, refreshToken: string | null, expiresInMs:
 
 describe("OAuth refresh failure semantics", () => {
   test("a rejected refresh persists refresh-failed + lastErrorMessage and throws typed error", async () => {
-    upsertOAuthApp("acme", appConfig("acme"));
-    const authId = seedDefault("acme", "acme-refresh", 60 * 1000);
+    await upsertOAuthApp("acme", appConfig("acme"));
+    const authId = await seedDefault("acme", "acme-refresh", 60 * 1000);
     mockTokenEndpoint(["acme-refresh"]);
 
     await expect(forceRefreshAuthorizationOrThrow(authId)).rejects.toBeInstanceOf(
@@ -122,8 +126,8 @@ describe("OAuth refresh failure semantics", () => {
   });
 
   test("a recovered provider flips a refresh-failed authorization back to active", async () => {
-    upsertOAuthApp("acme", appConfig("acme"));
-    const authId = seedDefault("acme", "acme-refresh", 60 * 1000);
+    await upsertOAuthApp("acme", appConfig("acme"));
+    const authId = await seedDefault("acme", "acme-refresh", 60 * 1000);
 
     mockTokenEndpoint(["acme-refresh"]);
     await expect(forceRefreshAuthorizationOrThrow(authId)).rejects.toBeInstanceOf(
@@ -141,8 +145,8 @@ describe("OAuth refresh failure semantics", () => {
   });
 
   test("the broker surfaces a failed OAuth binding while other bindings still resolve", async () => {
-    upsertOAuthApp("acme", { ...appConfig("acme"), displayName: "Acme Corp" });
-    const authId = seedDefault("acme", "acme-refresh", 60 * 1000);
+    await upsertOAuthApp("acme", { ...appConfig("acme"), displayName: "Acme Corp" });
+    const authId = await seedDefault("acme", "acme-refresh", 60 * 1000);
     upsertCredentialBinding({
       configKey: "ACME_OAUTH",
       allowedHosts: ["api.acme.test"],
@@ -221,7 +225,7 @@ describe("OAuth refresh failure semantics", () => {
   });
 
   test("two authorizations under one app refresh independently (per-authorization isolation)", async () => {
-    upsertOAuthApp("acme", appConfig("acme"));
+    await upsertOAuthApp("acme", appConfig("acme"));
     const app = getOAuthApp("acme");
     if (!app) throw new Error("app not created");
 

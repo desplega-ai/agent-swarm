@@ -31,8 +31,8 @@ describe("tracker-status (DB layer)", () => {
     expect(app === null || typeof app === "object").toBe(true);
   });
 
-  test("returns token info after storing tokens", () => {
-    upsertOAuthApp("linear", {
+  test("returns token info after storing tokens", async () => {
+    await upsertOAuthApp("linear", {
       clientId: "test-client",
       clientSecret: "test-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
@@ -41,7 +41,7 @@ describe("tracker-status (DB layer)", () => {
       scopes: "read,write",
     });
 
-    storeOAuthTokens("linear", {
+    await storeOAuthTokens("linear", {
       accessToken: "test-token",
       refreshToken: "test-refresh",
       expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
@@ -86,7 +86,7 @@ describe("tracker-link-task (DB layer)", () => {
 });
 
 describe("tracker-unlink (DB layer)", () => {
-  test("removes a sync mapping", () => {
+  test("removes a sync mapping", async () => {
     const sync = createTrackerSync({
       provider: "linear",
       entityType: "task",
@@ -96,7 +96,7 @@ describe("tracker-unlink (DB layer)", () => {
 
     expect(getTrackerSync("linear", "task", "tool-task-unlink")).not.toBeNull();
 
-    deleteTrackerSync(sync.id);
+    await deleteTrackerSync(sync.id);
 
     expect(getTrackerSync("linear", "task", "tool-task-unlink")).toBeNull();
   });

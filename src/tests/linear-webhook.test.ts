@@ -284,7 +284,7 @@ describe("handleAgentSessionEvent", () => {
     const { getDb } = await import("../be/db");
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(originalTask.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       providerEntityType: "Issue",
@@ -334,7 +334,7 @@ describe("handleAgentSessionEvent", () => {
     const { getDb } = await import("../be/db");
     getDb().query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?").run(originalTask.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       providerEntityType: "Issue",
@@ -382,7 +382,7 @@ describe("handleIssueUpdate", () => {
   test("updates tracker_sync metadata on tracked issue status change", async () => {
     // Create a task + tracker_sync first
     const task = createTaskExtended("Test issue update task", { source: "linear" });
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -412,7 +412,7 @@ describe("handleIssueUpdate", () => {
 
   test("cancels task when Linear issue is cancelled", async () => {
     const task = createTaskExtended("Test cancel task", { source: "linear" });
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -456,7 +456,7 @@ describe("handleIssueUpdate", () => {
 
   test("ignores update without updatedFrom field", async () => {
     const task = createTaskExtended("Test no-updatedFrom task", { source: "linear" });
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -485,7 +485,7 @@ describe("handleIssueUpdate", () => {
 describe("handleIssueDelete", () => {
   test("cancels task when tracked issue is deleted", async () => {
     const task = createTaskExtended("Test delete task", { source: "linear" });
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,
@@ -526,7 +526,7 @@ describe("handleIssueDelete", () => {
     const { getDb } = await import("../be/db");
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(task.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: task.id,

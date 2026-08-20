@@ -57,7 +57,7 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
   let skipped = 0;
   const failed: string[] = [];
 
-  for (const row of listAuthorizationSweepRows()) {
+  for (const row of await listAuthorizationSweepRows()) {
     checked++;
 
     if (row.status === "revoked" || !row.hasRefreshToken) {

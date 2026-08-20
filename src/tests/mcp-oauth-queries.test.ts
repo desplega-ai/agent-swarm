@@ -152,11 +152,11 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
 });
 
 describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
-  test("status flip writes status and error message", () => {
+  test("status flip writes status and error message", async () => {
     const server = makeServer("mcp-status-flip");
     upsertMcpOAuthToken(base(server.id));
     const original = getMcpOAuthToken(server.id)!;
-    markMcpOAuthTokenStatus(original.id, "expired", "refresh token missing");
+    await markMcpOAuthTokenStatus(original.id, "expired", "refresh token missing");
 
     const updated = getMcpOAuthToken(server.id)!;
     expect(updated.status).toBe("expired");
@@ -478,12 +478,12 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
   });
 
-  test("invalidate flips the flag; a subsequent lookup misses until the next legitimate write", () => {
+  test("invalidate flips the flag; a subsequent lookup misses until the next legitimate write", async () => {
     const server = makeServer("mcp-reuse-invalidate");
     upsertMcpOAuthToken(base(server.id));
     expect(findReusableMcpOAuthClient(server.id)).not.toBeNull();
 
-    invalidateMcpOAuthClient(server.id);
+    await invalidateMcpOAuthClient(server.id);
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
 
     // A fresh legitimate write (e.g. re-registering after invalidation)
@@ -496,11 +496,11 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(() => invalidateMcpOAuthClient("00000000-0000-0000-0000-000000000000")).not.toThrow();
   });
 
-  test("invalidate is idempotent for an already-invalidated client", () => {
+  test("invalidate is idempotent for an already-invalidated client", async () => {
     const server = makeServer("mcp-reuse-invalidate-idempotent");
     upsertMcpOAuthToken(base(server.id));
 
-    invalidateMcpOAuthClient(server.id);
+    await invalidateMcpOAuthClient(server.id);
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
 
     // A second invalidate call against the SAME still-invalidated client
@@ -596,11 +596,11 @@ describe("mcp_servers.authMethod accessor", () => {
     expect(getMcpServerAuthMethod(server.id)).toBe("static");
   });
 
-  test("setMcpServerAuthMethod persists", () => {
+  test("setMcpServerAuthMethod persists", async () => {
     const server = makeServer("mcp-auth-set");
-    setMcpServerAuthMethod(server.id, "oauth");
+    await setMcpServerAuthMethod(server.id, "oauth");
     expect(getMcpServerAuthMethod(server.id)).toBe("oauth");
-    setMcpServerAuthMethod(server.id, "static");
+    await setMcpServerAuthMethod(server.id, "static");
     expect(getMcpServerAuthMethod(server.id)).toBe("static");
   });
 

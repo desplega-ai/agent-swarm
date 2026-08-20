@@ -21,10 +21,10 @@ const testConfig: OAuthProviderConfig = {
   extraParams: { actor: "app" },
 };
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Create an oauth_app row so pending persistence works (FK constraint on appId).
-  upsertOAuthApp("test-provider", {
+  await upsertOAuthApp("test-provider", {
     clientId: testConfig.clientId,
     clientSecret: testConfig.clientSecret,
     authorizeUrl: testConfig.authorizeUrl,

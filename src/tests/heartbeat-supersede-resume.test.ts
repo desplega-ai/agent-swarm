@@ -143,7 +143,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     });
     startTask(parent.id);
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: parent.id,

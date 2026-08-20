@@ -243,7 +243,7 @@ describe("memory editing", () => {
         source: "manual",
       });
       storeLinks(a.id, agentId, a.content);
-      storeSequelLink(a.id, b.id);
+      await storeSequelLink(a.id, b.id);
       expect(linkRowsFor(a.id)).toHaveLength(3);
 
       const result = (await buildTool().handler(

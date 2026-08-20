@@ -29,13 +29,13 @@ mock.module("../jira/client", () => ({
   getJiraCloudId: () => "cloud-1",
 }));
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   process.env.JIRA_WEBHOOK_TOKEN = "test-token-32-chars-deadbeef-cafe-99";
   delete process.env.PUBLIC_MCP_BASE_URL;
   process.env.MCP_BASE_URL = "https://test.example.com";
 
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",

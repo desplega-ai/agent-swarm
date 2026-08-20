@@ -79,7 +79,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "bearer-live-123",
@@ -120,7 +120,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "lowercase-token-xyz",
@@ -159,7 +159,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "mac-token-xyz",
@@ -195,7 +195,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
 
     const result = await agentMcpServers(agent.id);
     const match = result.servers.find((s) => s.id === mcp.id);
@@ -219,7 +219,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       ownerAgentId: agent.id,
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "stale",
@@ -259,7 +259,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       headerConfigKeys: JSON.stringify({ Authorization: "STATIC_BEARER" }),
     });
     await installMcpServer(agent.id, mcp.id);
-    setMcpServerAuthMethod(mcp.id, "oauth");
+    await setMcpServerAuthMethod(mcp.id, "oauth");
     upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "new-bearer",

@@ -143,7 +143,7 @@ export async function resolveBotAccountId(): Promise<string | null> {
 
   try {
     await ensureToken("jira");
-    let tokens = getOAuthTokens("jira");
+    let tokens = await getOAuthTokens("jira");
     if (!tokens?.accessToken) {
       console.warn("[Jira Sync] No Jira access token; cannot resolve bot accountId");
       return null;
@@ -160,7 +160,7 @@ export async function resolveBotAccountId(): Promise<string | null> {
     // proactive ensureToken call and the request reaching Atlassian.
     if (res.status === 401) {
       await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
-      tokens = getOAuthTokens("jira");
+      tokens = await getOAuthTokens("jira");
       if (!tokens?.accessToken) {
         console.warn("[Jira Sync] /me returned 401 and refresh produced no token");
         return null;
@@ -299,7 +299,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
 
   // Step 1: claim the sync row UNIQUE-gated. Pass empty swarmId placeholder;
   // we update it once the task is created.
-  const claim = createTrackerSyncIfAbsent({
+  const claim = await createTrackerSyncIfAbsent({
     provider: "jira",
     entityType: "task",
     providerEntityType: "Issue",
@@ -400,7 +400,7 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
   }
 
   // 2. Outbound-echo skip (race window).
-  const existing = getTrackerSyncByExternalId("jira", "task", issue.id);
+  const existing = await getTrackerSyncByExternalId("jira", "task", issue.id);
   if (
     existing &&
     existing.lastSyncOrigin === "swarm" &&
@@ -434,7 +434,7 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
 
   if (!existing) {
     // Comment-mention into existence.
-    const claim = createTrackerSyncIfAbsent({
+    const claim = await createTrackerSyncIfAbsent({
       provider: "jira",
       entityType: "task",
       providerEntityType: "Issue",
@@ -526,7 +526,7 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
   const issue = event.issue as IssueShape | undefined;
   if (!issue?.id) return;
 
-  const sync = getTrackerSyncByExternalId("jira", "task", issue.id);
+  const sync = await getTrackerSyncByExternalId("jira", "task", issue.id);
   if (!sync) return;
 
   const task = sync.swarmId ? getTaskById(sync.swarmId) : null;
@@ -588,7 +588,7 @@ async function createInitialJiraTask(input: {
     contextKey: buildJiraContextKey(input.issueKey),
   });
 
-  updateTrackerSyncSwarmId(input.syncRowId, task.id);
+  await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 
   const action = input.followup ? "follow-up" : "new";
   console.log(
@@ -633,7 +633,7 @@ async function createCommentMentionTask(input: {
     contextKey: buildJiraContextKey(input.issueKey),
   });
 
-  updateTrackerSyncSwarmId(input.syncRowId, task.id);
+  await updateTrackerSyncSwarmId(input.syncRowId, task.id);
 
   console.log(
     `[Jira Sync] Created comment-mention task ${task.id} for ${input.issueKey} -> ${lead?.name ?? "unassigned"}`,

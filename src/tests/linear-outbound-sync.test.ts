@@ -58,7 +58,7 @@ describe("Linear Outbound Sync", () => {
   });
 
   test("task.completed posts comment to Linear when mapping exists", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-completed",
@@ -88,7 +88,7 @@ describe("Linear Outbound Sync", () => {
   });
 
   test("task.failed posts failure comment to Linear", async () => {
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-failed",
@@ -132,7 +132,7 @@ describe("Linear Outbound Sync", () => {
     });
 
     // Simulate a recent external sync
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastSyncedAt: new Date().toISOString(),
     });
@@ -157,7 +157,7 @@ describe("Linear Outbound Sync", () => {
     });
 
     // Set a lastSyncedAt well in the past (10 seconds ago)
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "external",
       lastSyncedAt: new Date(Date.now() - 10_000).toISOString(),
     });
@@ -181,7 +181,7 @@ describe("Linear Outbound Sync", () => {
       syncDirection: "bidirectional",
     });
 
-    updateTrackerSync(sync.id, {
+    await updateTrackerSync(sync.id, {
       lastSyncOrigin: "swarm",
       lastSyncedAt: new Date().toISOString(),
     });
@@ -289,7 +289,7 @@ describe("Linear Outbound Sync", () => {
   test("teardown removes event listeners", async () => {
     teardownLinearOutboundSync();
 
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-teardown",

@@ -106,7 +106,7 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
   const { taskId, output } = data as { taskId: string; output?: string };
   if (!taskId) return;
 
-  const sync = getTrackerSync("linear", "task", taskId);
+  const sync = await getTrackerSync("linear", "task", taskId);
   if (!sync) return;
 
   if (shouldSkipForLoopPrevention(sync)) return;
@@ -128,7 +128,7 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
     try {
       await ensureToken("linear");
       resetLinearClient(); // Clear cached client so it picks up refreshed token
-      const client = getLinearClient();
+      const client = await getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
         return;
@@ -146,7 +146,7 @@ async function handleTaskCompleted(data: unknown): Promise<void> {
     }
   }
 
-  updateTrackerSync(sync.id, {
+  await updateTrackerSync(sync.id, {
     lastSyncOrigin: "swarm",
     lastSyncedAt: new Date().toISOString(),
   });
@@ -156,7 +156,7 @@ async function handleTaskFailed(data: unknown): Promise<void> {
   const { taskId, failureReason } = data as { taskId: string; failureReason?: string };
   if (!taskId) return;
 
-  const sync = getTrackerSync("linear", "task", taskId);
+  const sync = await getTrackerSync("linear", "task", taskId);
   if (!sync) return;
 
   if (shouldSkipForLoopPrevention(sync)) return;
@@ -178,7 +178,7 @@ async function handleTaskFailed(data: unknown): Promise<void> {
     try {
       await ensureToken("linear");
       resetLinearClient(); // Clear cached client so it picks up refreshed token
-      const client = getLinearClient();
+      const client = await getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
         return;
@@ -196,7 +196,7 @@ async function handleTaskFailed(data: unknown): Promise<void> {
     }
   }
 
-  updateTrackerSync(sync.id, {
+  await updateTrackerSync(sync.id, {
     lastSyncOrigin: "swarm",
     lastSyncedAt: new Date().toISOString(),
   });
@@ -206,7 +206,7 @@ async function handleTaskCancelled(data: unknown): Promise<void> {
   const { taskId } = data as { taskId: string };
   if (!taskId) return;
 
-  const sync = getTrackerSync("linear", "task", taskId);
+  const sync = await getTrackerSync("linear", "task", taskId);
   if (!sync) return;
 
   if (shouldSkipForLoopPrevention(sync)) return;
@@ -227,7 +227,7 @@ async function handleTaskCancelled(data: unknown): Promise<void> {
     try {
       await ensureToken("linear");
       resetLinearClient(); // Clear cached client so it picks up refreshed token
-      const client = getLinearClient();
+      const client = await getLinearClient();
       if (!client) {
         console.log("[Linear Outbound] No Linear client available, skipping sync for", taskId);
         return;
@@ -242,7 +242,7 @@ async function handleTaskCancelled(data: unknown): Promise<void> {
     }
   }
 
-  updateTrackerSync(sync.id, {
+  await updateTrackerSync(sync.id, {
     lastSyncOrigin: "swarm",
     lastSyncedAt: new Date().toISOString(),
   });

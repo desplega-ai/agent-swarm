@@ -369,7 +369,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const agentB = createAgent({ name: "coder-B", isLead: false, status: "idle" });
     const original = createTaskExtended("tracked crashed work", { agentId: agentA.id });
     startTask(original.id);
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: original.id,

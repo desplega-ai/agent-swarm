@@ -345,10 +345,10 @@ describe("setup milestones", () => {
     expect(getMilestone(b, "github").state).toBe("verified");
   });
 
-  test("linear: authorization row flips to verified", () => {
+  test("linear: authorization row flips to verified", async () => {
     expect(getMilestone(buildStatusPayload(), "linear").state).toBe("unverified");
 
-    upsertOAuthApp("linear", {
+    await upsertOAuthApp("linear", {
       clientId: "cid",
       clientSecret: "csec",
       authorizeUrl: "https://linear.app/oauth/authorize",
@@ -356,7 +356,7 @@ describe("setup milestones", () => {
       redirectUri: "https://app.example/callback",
       scopes: "read",
     });
-    storeOAuthTokens("linear", {
+    await storeOAuthTokens("linear", {
       accessToken: "lin-tok-xyz",
       refreshToken: "ref",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -365,8 +365,8 @@ describe("setup milestones", () => {
     expect(getMilestone(buildStatusPayload(), "linear").state).toBe("verified");
   });
 
-  test("jira: requires both an authorization row and oauth_apps.metadata.cloudId", () => {
-    upsertOAuthApp("jira", {
+  test("jira: requires both an authorization row and oauth_apps.metadata.cloudId", async () => {
+    await upsertOAuthApp("jira", {
       clientId: "cid",
       clientSecret: "csec",
       authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -375,7 +375,7 @@ describe("setup milestones", () => {
       scopes: "read:jira-work",
       // metadata intentionally omitted on first upsert
     });
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "jira-tok",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -384,7 +384,7 @@ describe("setup milestones", () => {
     // Without cloudId yet — still unverified.
     expect(getMilestone(buildStatusPayload(), "jira").state).toBe("unverified");
 
-    upsertOAuthApp("jira", {
+    await upsertOAuthApp("jira", {
       clientId: "cid",
       clientSecret: "csec",
       authorizeUrl: "https://auth.atlassian.com/authorize",

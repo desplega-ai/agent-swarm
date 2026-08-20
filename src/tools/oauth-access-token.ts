@@ -37,7 +37,7 @@ export async function resolveOAuthAccessToken(
   const minValidityMs = minValiditySeconds * 1000;
   await ensureTokenOrThrow(provider, minValidityMs);
 
-  const tokens = getOAuthTokens(provider);
+  const tokens = await getOAuthTokens(provider);
   if (!tokens) {
     throw new Error(`${provider} OAuth tokens are not connected`);
   }

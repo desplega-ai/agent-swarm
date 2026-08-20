@@ -638,10 +638,10 @@ httpServer
     initAgentMail();
 
     // Initialize Linear tracker integration (if configured)
-    initLinear();
+    await initLinear();
 
     // Initialize Jira tracker integration (if configured)
-    initJira();
+    await initJira();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
     await initWorkflows();

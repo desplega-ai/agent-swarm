@@ -329,7 +329,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         // The MCP surface has no by-id targeting, so every call creates a fresh
         // row (N apps per provider) rather than clobbering an existing one.
         const redirectUri = staticOAuthCallbackUri();
-        createOAuthApp(provider, {
+        await createOAuthApp(provider, {
           clientId: args.clientId,
           clientSecret: args.clientSecret,
           authorizeUrl,

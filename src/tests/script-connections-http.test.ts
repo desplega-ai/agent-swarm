@@ -421,7 +421,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("oauth-apps GET never includes clientSecret", async () => {
-    upsertOAuthApp("vendor_oauth", {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -447,7 +447,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("oauth-apps GET includes lastRefreshedAt when tokens are stored", async () => {
-    upsertOAuthApp("vendor_oauth", {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -455,7 +455,7 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read,write",
     });
-    storeOAuthTokens("vendor_oauth", {
+    await storeOAuthTokens("vendor_oauth", {
       accessToken: "access-token-should-not-leak",
       refreshToken: "refresh-token-should-not-leak",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -538,7 +538,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("DELETE oauth app removes app and tokens", async () => {
-    upsertOAuthApp("vendor_oauth", {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "oauth-client-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -546,7 +546,7 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read,write",
     });
-    storeOAuthTokens("vendor_oauth", {
+    await storeOAuthTokens("vendor_oauth", {
       accessToken: "access-token",
       refreshToken: "refresh-token",
       expiresAt: "2035-01-01T00:00:00.000Z",
@@ -565,7 +565,7 @@ describe("/api/script-connections HTTP", () => {
 
   test("DELETE oauth app by id does not revoke a same-provider sibling", async () => {
     // First (oldest) app for the provider + its default authorization.
-    upsertOAuthApp("sibling_oauth", {
+    await upsertOAuthApp("sibling_oauth", {
       clientId: "first-client",
       clientSecret: "first-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -618,7 +618,7 @@ describe("/api/script-connections HTTP", () => {
   });
 
   test("manual authorization refresh failure scrubs echoed secrets from the error", async () => {
-    upsertOAuthApp("leaky_oauth", {
+    await upsertOAuthApp("leaky_oauth", {
       clientId: "leaky-client",
       clientSecret: "leaky-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -659,7 +659,7 @@ describe("/api/script-connections HTTP", () => {
   test("oauth app edit (by id) without clientSecret keeps existing secret", async () => {
     // Editing an existing row (id supplied) may inherit the stored secret. A
     // no-id create must NOT — that path always inserts (see the create tests).
-    upsertOAuthApp("vendor_oauth", {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "existing-client-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -785,7 +785,7 @@ describe("/api/script-connections HTTP", () => {
   test("POST without id and without clientSecret is rejected (create requires a secret)", async () => {
     // A pre-existing sibling for the same provider must NOT be used as a secret
     // fallback for a no-id create.
-    upsertOAuthApp("needs_secret", {
+    await upsertOAuthApp("needs_secret", {
       clientId: "sibling-client",
       clientSecret: "sibling-secret",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -1194,8 +1194,8 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
     globalThis.fetch = realFetch;
   });
 
-  function seedOAuthApp(metadata?: Record<string, unknown>) {
-    upsertOAuthApp("vendor_oauth", {
+  async function seedOAuthApp(metadata?: Record<string, unknown>) {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -1206,8 +1206,8 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
     });
   }
 
-  function seedTokens() {
-    storeOAuthTokens("vendor_oauth", {
+  async function seedTokens() {
+    await storeOAuthTokens("vendor_oauth", {
       accessToken: ACCESS_TOKEN,
       refreshToken: "refresh-token-should-not-leak",
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -1224,7 +1224,7 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
   });
 
   test("returns disconnected:false when no stored tokens", async () => {
-    seedOAuthApp();
+    await seedOAuthApp();
     const res = await dispatch("/api/oauth-apps/vendor_oauth/tokens", {
       method: "DELETE",
       agentId: leadAgentId,
@@ -1234,8 +1234,8 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
   });
 
   test("deletes the oauth_tokens row and returns disconnected:true", async () => {
-    seedOAuthApp();
-    seedTokens();
+    await seedOAuthApp();
+    await seedTokens();
     const res = await dispatch("/api/oauth-apps/vendor_oauth/tokens", {
       method: "DELETE",
       agentId: leadAgentId,
@@ -1247,8 +1247,8 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
   });
 
   test("attempts remote revocation when metadata.revocationUrl is set", async () => {
-    seedOAuthApp({ revocationUrl: "https://oauth.vendor.test/revoke" });
-    seedTokens();
+    await seedOAuthApp({ revocationUrl: "https://oauth.vendor.test/revoke" });
+    await seedTokens();
 
     let captured: { url: string; method?: string; body?: string } | null = null;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1289,8 +1289,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
     globalThis.fetch = realFetch;
   });
 
-  function seedOAuthApp() {
-    upsertOAuthApp("vendor_oauth", {
+  async function seedOAuthApp() {
+    await upsertOAuthApp("vendor_oauth", {
       clientId: "vendor-client",
       clientSecret: "oauth-client-secret-should-not-leak",
       authorizeUrl: "https://oauth.vendor.test/authorize",
@@ -1300,8 +1300,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
     });
   }
 
-  function seedTokens(refreshToken: string | null) {
-    storeOAuthTokens("vendor_oauth", {
+  async function seedTokens(refreshToken: string | null) {
+    await storeOAuthTokens("vendor_oauth", {
       accessToken: ACCESS_TOKEN,
       refreshToken,
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
@@ -1318,7 +1318,7 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   });
 
   test("400 when no tokens are stored", async () => {
-    seedOAuthApp();
+    await seedOAuthApp();
     const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
       method: "POST",
       agentId: leadAgentId,
@@ -1328,8 +1328,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   });
 
   test("400 when no refresh token is stored", async () => {
-    seedOAuthApp();
-    seedTokens(null);
+    await seedOAuthApp();
+    await seedTokens(null);
     const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
       method: "POST",
       agentId: leadAgentId,
@@ -1339,8 +1339,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   });
 
   test("forces a refresh regardless of expiry and never leaks token values", async () => {
-    seedOAuthApp();
-    seedTokens(REFRESH_TOKEN); // token still valid for an hour — refresh is forced anyway
+    await seedOAuthApp();
+    await seedTokens(REFRESH_TOKEN); // token still valid for an hour — refresh is forced anyway
 
     let captured: { url: string; body?: string } | null = null;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1394,8 +1394,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   });
 
   test("502 when the provider token endpoint rejects the refresh", async () => {
-    seedOAuthApp();
-    seedTokens(REFRESH_TOKEN);
+    await seedOAuthApp();
+    await seedTokens(REFRESH_TOKEN);
     globalThis.fetch = (async () =>
       new Response("nope", { status: 400 })) as unknown as typeof fetch;
 
@@ -1408,8 +1408,8 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
   });
 
   test("403 for non-lead agent", async () => {
-    seedOAuthApp();
-    seedTokens(REFRESH_TOKEN);
+    await seedOAuthApp();
+    await seedTokens(REFRESH_TOKEN);
     const res = await dispatch("/api/oauth-apps/vendor_oauth/refresh", {
       method: "POST",
       agentId: workerAgentId,
@@ -1425,8 +1425,8 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     globalThis.fetch = realFetch;
   });
 
-  function seedRotatingAuthorization() {
-    upsertOAuthApp("rotator", {
+  async function seedRotatingAuthorization() {
+    await upsertOAuthApp("rotator", {
       clientId: "rotator-client",
       clientSecret: "rotator-secret-should-not-leak",
       authorizeUrl: "https://rotator.test/authorize",
@@ -1446,7 +1446,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
   }
 
   test("502 and does NOT persist when a rotating provider omits the new refresh_token", async () => {
-    const authorization = seedRotatingAuthorization();
+    const authorization = await seedRotatingAuthorization();
     // 200 with a new access token but no rotated refresh_token — the rotation
     // core must reject rather than silently keep the (possibly invalidated) old
     // refresh token.
@@ -1475,7 +1475,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
   });
 
   test("200 and rotates when the provider returns a new refresh_token", async () => {
-    const authorization = seedRotatingAuthorization();
+    const authorization = await seedRotatingAuthorization();
     globalThis.fetch = (async () =>
       new Response(
         JSON.stringify({

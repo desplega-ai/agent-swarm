@@ -1,7 +1,7 @@
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
 import { normalizeDateRequired } from "../date-utils";
-import { getDb } from "../db";
+import { getDb, getDbClient } from "../db";
 import {
   type OAuthAuthorizationStatus,
   updateAuthorizationTokens,
@@ -330,15 +330,16 @@ export function getMcpOAuthToken(
   return row ? decryptTokenRow(row) : null;
 }
 
-export function getMcpOAuthTokenById(id: string): McpOAuthToken | null {
-  const row = getDb().query(tokenSelect("z.id = ?")).get(id) as UnifiedMcpTokenRow | null;
+export async function getMcpOAuthTokenById(id: string): Promise<McpOAuthToken | null> {
+  const row = await getDbClient().get<UnifiedMcpTokenRow>(tokenSelect("z.id = ?"), [id]);
   return row ? decryptTokenRow(row) : null;
 }
 
-export function listMcpOAuthTokensForMcp(mcpServerId: string): McpOAuthToken[] {
-  const rows = getDb()
-    .query(`${tokenSelect("a.mcpServerId = ?")} ORDER BY z.createdAt ASC, z.id ASC`)
-    .all(mcpServerId) as UnifiedMcpTokenRow[];
+export async function listMcpOAuthTokensForMcp(mcpServerId: string): Promise<McpOAuthToken[]> {
+  const rows = await getDbClient().query<UnifiedMcpTokenRow>(
+    `${tokenSelect("a.mcpServerId = ?")} ORDER BY z.createdAt ASC, z.id ASC`,
+    [mcpServerId],
+  );
   return rows.map(decryptTokenRow);
 }
 
@@ -492,21 +493,21 @@ export function findReusableMcpOAuthClient(
  * before the next /authorize re-registers — are no-ops instead of redundant
  * writes.
  */
-function invalidateMcpOAuthApp(appId: string): void {
-  const row = getDb().query("SELECT metadata FROM oauth_apps WHERE id = ?").get(appId) as {
-    metadata: string;
-  } | null;
+async function invalidateMcpOAuthApp(appId: string): Promise<void> {
+  const row = await getDbClient().get<{ metadata: string }>(
+    "SELECT metadata FROM oauth_apps WHERE id = ?",
+    [appId],
+  );
   if (!row) return;
 
   const meta = parseObject(row.metadata);
   if (meta.invalidated === true) return;
 
   const metadata = JSON.stringify({ ...meta, invalidated: true });
-  getDb()
-    .query(
-      "UPDATE oauth_apps SET metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-    )
-    .run(metadata, appId);
+  await getDbClient().run(
+    "UPDATE oauth_apps SET metadata = ?, updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    [metadata, appId],
+  );
 }
 
 /**
@@ -514,11 +515,14 @@ function invalidateMcpOAuthApp(appId: string): void {
  * /authorize call's findReusableMcpOAuthClient will skip it and register
  * fresh exactly once.
  */
-export function invalidateMcpOAuthClient(mcpServerId: string, userId: string | null = null): void {
+export async function invalidateMcpOAuthClient(
+  mcpServerId: string,
+  userId: string | null = null,
+): Promise<void> {
   const tokenRow = rawMcpToken(mcpServerId, userId);
   const appId = tokenRow?.appId ?? rawPendingAppIdForUser(mcpServerId, userId);
   if (!appId) return;
-  invalidateMcpOAuthApp(appId);
+  await invalidateMcpOAuthApp(appId);
 }
 
 export interface UpsertMcpOAuthTokenInput {
@@ -589,7 +593,7 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
   })();
 }
 
-export function applyMcpOAuthRefresh(
+export async function applyMcpOAuthRefresh(
   id: string,
   data: {
     accessToken: string;
@@ -598,8 +602,8 @@ export function applyMcpOAuthRefresh(
     scope?: string | null;
     expectedTokenVersion?: number;
   },
-): void {
-  const updated = updateAuthorizationTokens(id, {
+): Promise<void> {
+  const updated = await updateAuthorizationTokens(id, {
     accessToken: data.accessToken,
     ...(data.refreshToken !== undefined ? { refreshToken: data.refreshToken } : {}),
     ...(data.expiresAt != null ? { expiresAt: data.expiresAt } : {}),
@@ -615,40 +619,41 @@ export function applyMcpOAuthRefresh(
   throw new Error(message);
 }
 
-export function markMcpOAuthTokenStatus(
+export async function markMcpOAuthTokenStatus(
   id: string,
   status: McpOAuthStatus,
   errorMessage?: string | null,
-): void {
-  getDb()
-    .query(
-      `UPDATE oauth_authorizations
+): Promise<void> {
+  await getDbClient().run(
+    `UPDATE oauth_authorizations
        SET status = ?, lastErrorMessage = ?,
            updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ?`,
-    )
-    .run(statusToUnified(status), errorMessage ?? null, id);
+    [statusToUnified(status), errorMessage ?? null, id],
+  );
 }
 
-export function deleteMcpOAuthToken(mcpServerId: string, userId: string | null = null): boolean {
+export async function deleteMcpOAuthToken(
+  mcpServerId: string,
+  userId: string | null = null,
+): Promise<boolean> {
   const existing = rawMcpToken(mcpServerId, userId);
   if (!existing) return false;
-  const result = getDb()
-    .query(
-      `UPDATE oauth_authorizations SET
+  const result = await getDbClient().run(
+    `UPDATE oauth_authorizations SET
          accessToken = ?, refreshToken = NULL, expiresAt = NULL, scope = NULL,
          tokensEncrypted = 1, tokenVersion = tokenVersion + 1,
          status = 'revoked', lastErrorMessage = NULL, lastRefreshedAt = NULL,
          updatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ?`,
-    )
-    .run(encryptSecret("", getEncryptionKey()), existing.id);
+    [encryptSecret("", getEncryptionKey()), existing.id],
+  );
   if (result.changes === 1) {
     // Disconnect is the canonical user recovery gesture. Clear the stored
     // DCR client too, or Reconnect silently hands back the same client_id —
     // rawMcpToken has no status filter, so findReusableMcpOAuthClient would
     // otherwise still surface a "revoked" token's client as reusable.
-    invalidateMcpOAuthApp(existing.appId);
+    await invalidateMcpOAuthApp(existing.appId);
   }
   return result.changes === 1;
 }
@@ -875,17 +880,20 @@ export function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): number {
 
 export type McpAuthMethod = "static" | "oauth" | "auto";
 
-export function getMcpServerAuthMethod(mcpServerId: string): McpAuthMethod | null {
-  const row = getDb().query("SELECT authMethod FROM mcp_servers WHERE id = ?").get(mcpServerId) as {
-    authMethod: McpAuthMethod;
-  } | null;
+export async function getMcpServerAuthMethod(mcpServerId: string): Promise<McpAuthMethod | null> {
+  const row = await getDbClient().get<{ authMethod: McpAuthMethod }>(
+    "SELECT authMethod FROM mcp_servers WHERE id = ?",
+    [mcpServerId],
+  );
   return row?.authMethod ?? null;
 }
 
-export function setMcpServerAuthMethod(mcpServerId: string, authMethod: McpAuthMethod): void {
-  getDb()
-    .query(
-      "UPDATE mcp_servers SET authMethod = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
-    )
-    .run(authMethod, mcpServerId);
+export async function setMcpServerAuthMethod(
+  mcpServerId: string,
+  authMethod: McpAuthMethod,
+): Promise<void> {
+  await getDbClient().run(
+    "UPDATE mcp_servers SET authMethod = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+    [authMethod, mcpServerId],
+  );
 }

@@ -66,7 +66,7 @@ async function postAgentActivity(
     | { type: "action"; action: string; parameter?: string; result?: string },
 ): Promise<boolean> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot post AgentSession activity");
     return false;
@@ -117,7 +117,7 @@ async function updateAgentSession(
   input: Record<string, unknown>,
 ): Promise<boolean> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log("[Linear Sync] No OAuth tokens, cannot update AgentSession");
     return false;
@@ -301,7 +301,7 @@ const ISSUE_GATE_QUERY = `
  */
 export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGateInput> {
   await ensureToken("linear");
-  const tokens = getOAuthTokens("linear");
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     console.log(
       `[Linear Sync] No OAuth tokens; cannot fetch issue ${issueId} gating info — defaulting to allow.`,
@@ -501,7 +501,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   );
 
   // Check if we already track this issue
-  const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+  const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
   const sessionId = agentSession ? String(agentSession.id ?? "") : "";
 
   if (existing) {
@@ -586,7 +586,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
       `[Linear Sync] Issue ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
     );
     if (!existing) {
-      createTrackerSync({
+      await createTrackerSync({
         provider: "linear",
         entityType: "task",
         providerEntityType: "Issue",
@@ -622,10 +622,10 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
 
   // Delete old tracker_sync before creating new one (UNIQUE constraint)
   if (existing) {
-    deleteTrackerSync(existing.id);
+    await deleteTrackerSync(existing.id);
   }
 
-  createTrackerSync({
+  await createTrackerSync({
     provider: "linear",
     entityType: "task",
     providerEntityType: "Issue",
@@ -680,7 +680,7 @@ export async function handleIssueUpdate(
   const issueId = String(data.id ?? "");
   if (!issueId) return;
 
-  const sync = getTrackerSyncByExternalId("linear", "task", issueId);
+  const sync = await getTrackerSyncByExternalId("linear", "task", issueId);
   if (!sync) {
     // We don't track this issue — ignore
     return;
@@ -704,7 +704,7 @@ export async function handleIssueUpdate(
   }
 
   // Update tracker_sync metadata
-  updateTrackerSync(sync.id, {
+  await updateTrackerSync(sync.id, {
     lastSyncOrigin: "external",
     lastSyncedAt: new Date().toISOString(),
     lastDeliveryId: deliveryId ?? null,
@@ -747,7 +747,7 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
   const issueId = String(data.id ?? "");
   if (!issueId) return;
 
-  const sync = getTrackerSyncByExternalId("linear", "task", issueId);
+  const sync = await getTrackerSyncByExternalId("linear", "task", issueId);
   if (!sync) return;
 
   const task = getTaskById(sync.swarmId);
@@ -789,7 +789,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
 
   // Handle stop signal — cancel the active task
   if (activitySignal === "stop") {
-    const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+    const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
     if (existing) {
       const existingTask = getTaskById(existing.swarmId);
       if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
@@ -811,7 +811,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   }
 
   // Look up existing tracker_sync for this issue
-  const existing = getTrackerSyncByExternalId("linear", "task", issueId);
+  const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
 
   if (existing) {
     const existingTask = getTaskById(existing.swarmId);
@@ -871,7 +871,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
       `[Linear Sync] Prompted event for ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
     );
     if (!existing) {
-      createTrackerSync({
+      await createTrackerSync({
         provider: "linear",
         entityType: "task",
         providerEntityType: "Issue",
@@ -906,9 +906,9 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   // Repoint the existing tracker_sync to the new follow-up task (can't create a
   // duplicate due to UNIQUE(provider, entityType, externalId) constraint)
   if (existing) {
-    deleteTrackerSync(existing.id);
+    await deleteTrackerSync(existing.id);
   }
-  createTrackerSync({
+  await createTrackerSync({
     provider: "linear",
     entityType: "task",
     providerEntityType: "Issue",

@@ -17,10 +17,10 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Reset the oauth_apps row before each test so prior writes can't leak.
   getDb().query("DELETE FROM oauth_apps WHERE provider = 'jira'").run();
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",

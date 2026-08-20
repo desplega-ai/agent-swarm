@@ -763,7 +763,7 @@ export async function handleMemory(
       });
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
-      const expanded = expandCandidatesWithGraph(candidates, myAgentId, {
+      const expanded = await expandCandidatesWithGraph(candidates, myAgentId, {
         scope,
         source,
         isLead: false,
@@ -1156,7 +1156,7 @@ export async function handleMemory(
     if (!parsed) return true;
 
     const { memoryId } = parsed.query;
-    const edges = listEdgesForAgent(myAgentId, memoryId);
+    const edges = await listEdgesForAgent(myAgentId, memoryId);
     getMemoryEdges.respond(res, 200, { edges });
     return true;
   }
