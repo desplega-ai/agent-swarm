@@ -456,7 +456,7 @@ function jiraMilestone(): SetupMilestone {
   };
 }
 
-function workersMilestone(): SetupMilestone {
+async function workersMilestone(): Promise<SetupMilestone> {
   // `configured` if ≥1 row in agents; `verified` if both lead+worker alive
   // within the last 5 minutes.
   const totalRow = getDb()
@@ -464,7 +464,7 @@ function workersMilestone(): SetupMilestone {
     .get();
   const totalAgents = totalRow?.count ?? 0;
 
-  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
+  const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
   if (leads_alive > 0 && workers_alive > 0) {
     return {
       id: "workers",
@@ -496,8 +496,8 @@ function workersMilestone(): SetupMilestone {
   };
 }
 
-function firstTaskMilestone(): SetupMilestone {
-  if (hasFirstCompletedTask()) {
+async function firstTaskMilestone(): Promise<SetupMilestone> {
+  if (await hasFirstCompletedTask()) {
     return {
       id: "first_task",
       label: "First task completed",
@@ -521,8 +521,8 @@ async function buildSetup(): Promise<SetupMilestone[]> {
     githubMilestone(),
     linearMilestone(),
     jiraMilestone(),
-    workersMilestone(),
-    firstTaskMilestone(),
+    await workersMilestone(),
+    await firstTaskMilestone(),
   ];
 }
 
@@ -574,7 +574,7 @@ export async function buildStatusPayload(): Promise<StatusResponse> {
   return {
     identity: buildIdentity(),
     setup,
-    activity: getInstanceActivity(),
+    activity: await getInstanceActivity(),
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,

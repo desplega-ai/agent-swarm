@@ -61,7 +61,7 @@ export async function enrichSlackUserEmail(
   slackUserId: string,
 ): Promise<string | null> {
   // Cache hit — return the persisted email straight through.
-  const cached = getKv(ENRICHMENT_NAMESPACE, slackUserId);
+  const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
   if (cached !== null) {
     const payload = cached.value as EnrichedSlackUser;
     if (payload?.email) {
@@ -88,7 +88,7 @@ export async function enrichSlackUserEmail(
     return null;
   }
 
-  upsertKv({
+  await upsertKv({
     namespace: ENRICHMENT_NAMESPACE,
     key: slackUserId,
     value: {
@@ -136,7 +136,7 @@ export async function resolveSlackUserId(
   if (email) {
     // Pull the cached name back out for the user-row hints. The kv read is
     // cheap (single primary-key lookup) and avoids a second `users.info`.
-    const cached = getKv(ENRICHMENT_NAMESPACE, slackUserId);
+    const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
     const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
 
     const { user } = findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
@@ -161,7 +161,7 @@ export async function resolveSlackUserId(
   }
 
   // 3. No email — track as unmapped.
-  recordUnmappedIdentity("slack", slackUserId, eventContext);
+  await recordUnmappedIdentity("slack", slackUserId, eventContext);
   return undefined;
 }
 

@@ -159,7 +159,7 @@ export async function handleSessions(
         : await listRecentSessions({ ...baseOpts, slim: true });
     // Filter-aware total: same `source`/`q`/`requestedByUserId` WHERE as the
     // list query, so the UI pager reflects the filtered result set.
-    const total = countSessions({
+    const total = await countSessions({
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,

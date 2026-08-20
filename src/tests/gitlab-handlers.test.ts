@@ -701,20 +701,20 @@ describe("handlePipeline", () => {
 
 const UNMAPPED_NS = "integration:unmapped:gitlab";
 
-function clearUnmapped(username: string) {
-  deleteKv(UNMAPPED_NS, `${username}:meta`);
-  deleteKv(UNMAPPED_NS, `${username}:count`);
+async function clearUnmapped(username: string) {
+  await deleteKv(UNMAPPED_NS, `${username}:meta`);
+  await deleteKv(UNMAPPED_NS, `${username}:count`);
 }
 
-function getUnmappedCount(username: string): number {
-  const row = getKv(UNMAPPED_NS, `${username}:count`);
+async function getUnmappedCount(username: string): Promise<number> {
+  const row = await getKv(UNMAPPED_NS, `${username}:count`);
   if (!row) return 0;
   if (row.valueType !== "integer") throw new Error("unexpected valueType");
   return row.value as number;
 }
 
-function getUnmappedMeta(username: string): Record<string, unknown> | null {
-  const row = getKv(UNMAPPED_NS, `${username}:meta`);
+async function getUnmappedMeta(username: string): Promise<Record<string, unknown> | null> {
+  const row = await getKv(UNMAPPED_NS, `${username}:meta`);
   if (!row) return null;
   return row.value as Record<string, unknown>;
 }
@@ -726,11 +726,11 @@ function countExternalIds(): number {
 }
 
 describe("identity resolution — MR handler", () => {
-  beforeEach(() => {
-    clearUnmapped("knownuser");
-    clearUnmapped("inlineuser");
-    clearUnmapped("ghostuser");
-    clearUnmapped("emptyemail");
+  beforeEach(async () => {
+    await clearUnmapped("knownuser");
+    await clearUnmapped("inlineuser");
+    await clearUnmapped("ghostuser");
+    await clearUnmapped("emptyemail");
   });
 
   test("known GitLab user → requestedByUserId populated, no unmapped entry", async () => {
@@ -760,8 +760,8 @@ describe("identity resolution — MR handler", () => {
     const task = getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBe(known.id);
 
-    expect(getUnmappedMeta("knownuser")).toBeNull();
-    expect(getUnmappedCount("knownuser")).toBe(0);
+    expect(await getUnmappedMeta("knownuser")).toBeNull();
+    expect(await getUnmappedCount("knownuser")).toBe(0);
   });
 
   test("unknown user WITH inline email → auto-create user + link identity, no unmapped entry", async () => {
@@ -806,8 +806,8 @@ describe("identity resolution — MR handler", () => {
     expect(countExternalIds()).toBe(beforeExt + 1);
 
     // No unmapped entry written.
-    expect(getUnmappedMeta("inlineuser")).toBeNull();
-    expect(getUnmappedCount("inlineuser")).toBe(0);
+    expect(await getUnmappedMeta("inlineuser")).toBeNull();
+    expect(await getUnmappedCount("inlineuser")).toBe(0);
   });
 
   test("unknown user WITHOUT email → unmapped kv rows, requestedByUserId undefined", async () => {
@@ -834,13 +834,13 @@ describe("identity resolution — MR handler", () => {
     const task = getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
 
-    const meta = getUnmappedMeta("ghostuser");
+    const meta = await getUnmappedMeta("ghostuser");
     expect(meta).not.toBeNull();
     expect(meta?.sampleEventType).toBe("merge_request");
     expect(typeof meta?.lastSeenAt).toBe("string");
     expect((meta?.sampleContext as string).startsWith("MR !903:")).toBe(true);
 
-    expect(getUnmappedCount("ghostuser")).toBe(1);
+    expect(await getUnmappedCount("ghostuser")).toBe(1);
   });
 
   test("repeat unmapped events bump count to 2", async () => {
@@ -864,7 +864,7 @@ describe("identity resolution — MR handler", () => {
       await handleMergeRequest(event);
     }
 
-    expect(getUnmappedCount("ghostuser")).toBe(2);
+    expect(await getUnmappedCount("ghostuser")).toBe(2);
   });
 
   test("empty-string email falls through to unmapped (Q17 manual-verify guard)", async () => {
@@ -898,14 +898,14 @@ describe("identity resolution — MR handler", () => {
     expect(findUserByExternalId("gitlab", "emptyemail")).toBeNull();
 
     // Unmapped kv rows should be present.
-    expect(getUnmappedMeta("emptyemail")).not.toBeNull();
-    expect(getUnmappedCount("emptyemail")).toBe(1);
+    expect(await getUnmappedMeta("emptyemail")).not.toBeNull();
+    expect(await getUnmappedCount("emptyemail")).toBe(1);
   });
 });
 
 describe("identity resolution — Issue handler", () => {
-  beforeEach(() => {
-    clearUnmapped("issueghost");
+  beforeEach(async () => {
+    await clearUnmapped("issueghost");
   });
 
   test("unknown user WITHOUT email → unmapped entry tagged 'issue'", async () => {
@@ -929,17 +929,17 @@ describe("identity resolution — Issue handler", () => {
     const task = getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
 
-    const meta = getUnmappedMeta("issueghost");
+    const meta = await getUnmappedMeta("issueghost");
     expect(meta).not.toBeNull();
     expect(meta?.sampleEventType).toBe("issue");
     expect((meta?.sampleContext as string).startsWith("Issue #950:")).toBe(true);
-    expect(getUnmappedCount("issueghost")).toBe(1);
+    expect(await getUnmappedCount("issueghost")).toBe(1);
   });
 });
 
 describe("identity resolution — Note handler", () => {
-  beforeEach(() => {
-    clearUnmapped("noteghost");
+  beforeEach(async () => {
+    await clearUnmapped("noteghost");
   });
 
   test("unknown user WITHOUT email → unmapped entry tagged 'note'", async () => {
@@ -973,12 +973,12 @@ describe("identity resolution — Note handler", () => {
     const result = await handleNote(event);
     expect(result.created).toBe(true);
 
-    const meta = getUnmappedMeta("noteghost");
+    const meta = await getUnmappedMeta("noteghost");
     expect(meta).not.toBeNull();
     expect(meta?.sampleEventType).toBe("note");
     expect((meta?.sampleContext as string).length).toBeLessThanOrEqual(100);
     expect((meta?.sampleContext as string).startsWith(`@${GITLAB_BOT_NAME}`)).toBe(true);
-    expect(getUnmappedCount("noteghost")).toBe(1);
+    expect(await getUnmappedCount("noteghost")).toBe(1);
 
     // The dead-coded `_requestedByUserId` is now wired: undefined for an
     // unresolvable sender, and the UNKNOWN sentinel (never the raw

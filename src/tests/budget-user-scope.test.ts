@@ -239,13 +239,13 @@ describe("user budget scope", () => {
       model: "test-model",
     });
 
-    expect(getDailySpendForUser(userA.id, TODAY)).toBe(4);
-    expect(getDailySpendForUser(userB.id, TODAY)).toBe(10);
+    expect(await getDailySpendForUser(userA.id, TODAY)).toBe(4);
+    expect(await getDailySpendForUser(userB.id, TODAY)).toBe(10);
   });
 
   test("canClaim refuses with cause='user' when requested user's spend is at the cap", async () => {
     const user = createUser({ name: "Budgeted User" });
-    upsertBudget("user", user.id, 2);
+    await upsertBudget("user", user.id, 2);
     await insertUserTaskSpend(user.id, 2);
 
     const result = canClaim("agent-1", NOW, user.id);
@@ -261,7 +261,7 @@ describe("user budget scope", () => {
 
   test("canClaim allows user-scoped tasks when user spend is below the cap", async () => {
     const user = createUser({ name: "Budgeted User" });
-    upsertBudget("user", user.id, 2);
+    await upsertBudget("user", user.id, 2);
     await insertUserTaskSpend(user.id, 1.99);
 
     const result = canClaim("agent-1", NOW, user.id);
@@ -271,9 +271,9 @@ describe("user budget scope", () => {
 
   test("agent and global gates keep their existing precedence", async () => {
     const user = createUser({ name: "Budgeted User" });
-    upsertBudget("global", "", 1);
-    upsertBudget("agent", "agent-1", 1);
-    upsertBudget("user", user.id, 1);
+    await upsertBudget("global", "", 1);
+    await upsertBudget("agent", "agent-1", 1);
+    await upsertBudget("user", user.id, 1);
     await insertUserTaskSpend(user.id, 1);
 
     const globalResult = canClaim("agent-1", NOW, user.id);
@@ -288,9 +288,9 @@ describe("user budget scope", () => {
     expect(agentResult.cause).toBe("agent");
   });
 
-  test("user gate is skipped when the candidate task has no requested user", () => {
+  test("user gate is skipped when the candidate task has no requested user", async () => {
     const user = createUser({ name: "Budgeted User" });
-    upsertBudget("user", user.id, 0);
+    await upsertBudget("user", user.id, 0);
 
     const result = canClaim("agent-1", NOW);
 
@@ -304,7 +304,7 @@ describe("user budget scope", () => {
       const lead = createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
       const worker = createAgent({ name: "worker", isLead: false, status: "idle", maxTasks: 1 });
       const user = createUser({ name: "MCP Budget User", dailyBudgetUsd: 0.5 });
-      upsertBudget("user", user.id, 0.5);
+      await upsertBudget("user", user.id, 0.5);
       const token = mintToken(user.id, "qa", ACTOR);
       const baseUrl = `http://127.0.0.1:${port}`;
       const sessionId = await initializeMcpUser(baseUrl, token.plaintext);

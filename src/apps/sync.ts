@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { deleteKv, getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
+import { getAllTasks, getKv, type TaskFilters, upsertKv } from "../be/db";
 import { listScriptConnections } from "../be/script-connections";
 import { getScriptById } from "../be/scripts/db";
 import { runSavedScriptAsAgent } from "../be/scripts/run-saved";
@@ -18,6 +18,7 @@ import {
   type AppRow,
   appsNamespace,
   createAppRowUnlocked,
+  deleteKvSync,
   listAllAppRowsForMigrationUnlocked,
   patchAppRowUnlocked,
   withMutationLock,
@@ -114,7 +115,11 @@ function syncStatusKey(model: string, source: string): string {
   return `sync-status:${model}:${source}`;
 }
 
-function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: string): void {
+async function writeSyncStatus(
+  appId: string,
+  pass: SyncPassResult,
+  lastStartedAt: string,
+): Promise<void> {
   // A pass can outlive its app: deletion purges the apps:<id> namespace while
   // a pull is in flight, and writing here would resurrect it as an orphan.
   if (!getApp(appId)) return;
@@ -128,7 +133,7 @@ function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: str
     markedStale: pass.markedStale,
     ...(pass.error === undefined ? {} : { error: pass.error }),
   };
-  upsertKv({
+  await upsertKv({
     namespace: appsNamespace(appId),
     key: syncStatusKey(pass.model, pass.source),
     value: status,
@@ -137,12 +142,12 @@ function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: str
 }
 
 /** Last completed pass for a pair, or null when none has run. */
-export function getAppSyncStatus(
+export async function getAppSyncStatus(
   appId: string,
   model: string,
   source: string,
-): AppSyncStatus | null {
-  const entry = getKv(appsNamespace(appId), syncStatusKey(model, source));
+): Promise<AppSyncStatus | null> {
+  const entry = await getKv(appsNamespace(appId), syncStatusKey(model, source));
   const value = entry?.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as AppSyncStatus;
@@ -153,13 +158,13 @@ export function getAppSyncStatus(
  * `<model>:<source>` — the per-source freshness surface the app payload and
  * `app-get` expose so UI/agents can render "last synced / last error".
  */
-export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatus> {
+export async function collectAppSyncStatus(appId: string): Promise<Record<string, AppSyncStatus>> {
   const statuses: Record<string, AppSyncStatus> = {};
   const app = getApp(appId);
   if (!app || appDefinitionNeedsRepair(app)) return statuses;
   for (const [modelName, model] of Object.entries(app.definition.models)) {
     for (const sourceName of Object.keys(model.sources ?? {})) {
-      const status = getAppSyncStatus(appId, modelName, sourceName);
+      const status = await getAppSyncStatus(appId, modelName, sourceName);
       if (status) statuses[`${modelName}:${sourceName}`] = status;
     }
   }
@@ -171,6 +176,10 @@ export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatu
  * projection dependencies changed between two definitions, or whose pair is
  * gone: the stored freshness described the OLD configuration, and presenting
  * it for the new one would claim a pass that never ran.
+ *
+ * DEFERRED (transaction rule): called from `migrateAppSchema`'s synchronous
+ * `getDb().transaction()` callback (schema-migrate.ts) — stays on the raw
+ * sync handle via `deleteKvSync`.
  */
 export function invalidateChangedSyncStatus(
   appId: string,
@@ -187,7 +196,7 @@ export function invalidateChangedSyncStatus(
         nextSource !== undefined &&
         pairFingerprint(nextModel, sourceName, nextSource) ===
           pairFingerprint(oldModel, sourceName, oldSource);
-      if (!unchanged) deleteKv(appsNamespace(appId), syncStatusKey(modelName, sourceName));
+      if (!unchanged) deleteKvSync(appsNamespace(appId), syncStatusKey(modelName, sourceName));
     }
   }
 }
@@ -593,7 +602,7 @@ function reconcile(args: {
   counts: ReconcileCounts;
 }): Promise<void> {
   const { appId, model, sourceName, joinKey, pull, warnings, counts } = args;
-  return withMutationLock(appId, model, () => {
+  return withMutationLock(appId, model, async () => {
     // Re-read under the lock: the pull ran unlocked, so the definition it was
     // planned against may be gone. Anything that moves the identity or the
     // projection rules of this pair aborts before the first write.
@@ -620,7 +629,7 @@ function reconcile(args: {
     // Reconcile holds the mutation lock, so the unbounded pager is safe. The
     // plain listAppRows cap (100k) would hide rows past it: pulled keys would
     // duplicate and the hidden rows would never be swept stale.
-    for (const row of listAllAppRowsForMigrationUnlocked(appId, model)) {
+    for (const row of await listAllAppRowsForMigrationUnlocked(appId, model)) {
       if (row.source !== sourceName) continue;
       const key = row[joinKey];
       if (typeof key === "string") mine.set(key, row);
@@ -641,7 +650,7 @@ function reconcile(args: {
       const existing = mine.get(record.key);
       if (!existing) {
         // No adoption: a row with no source of its own is not ours to take.
-        const created = createAppRowUnlocked(appId, model, modelDef, values, {
+        const created = await createAppRowUnlocked(appId, model, modelDef, values, {
           allowSourceManaged: true,
           envelope,
           actor,
@@ -653,7 +662,7 @@ function reconcile(args: {
       const differs = Object.entries(values).some(
         ([name, value]) => !sameValue(existing[name], value),
       );
-      const updated = patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
+      const updated = await patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
         allowSourceManaged: true,
         envelope,
         actor,
@@ -685,7 +694,7 @@ function reconcile(args: {
         counts.unchanged += 1;
         continue;
       }
-      patchAppRowUnlocked(
+      await patchAppRowUnlocked(
         appId,
         model,
         modelDef,
@@ -759,14 +768,14 @@ async function executePass(args: {
   // for a pair that changed or vanished while it was in flight.
   let plannedFingerprint: string | null = null;
 
-  const finish = (result: SyncPassResult): SyncPassResult => {
+  const finish = async (result: SyncPassResult): Promise<SyncPassResult> => {
     const scrubbed = scrubObject({ ...result, warnings, durationMs: Date.now() - startedMs });
     const current = resolvePair(args.appId, args.model, args.sourceName);
     const stillCurrent =
       plannedFingerprint !== null &&
       current !== null &&
       pairFingerprint(current.model, args.sourceName, current.source) === plannedFingerprint;
-    if (stillCurrent) writeSyncStatus(args.appId, scrubbed, lastStartedAt);
+    if (stillCurrent) await writeSyncStatus(args.appId, scrubbed, lastStartedAt);
     return scrubbed;
   };
 

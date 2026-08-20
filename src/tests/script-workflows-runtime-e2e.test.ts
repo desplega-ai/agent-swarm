@@ -163,7 +163,7 @@ describe("script workflow runtime", () => {
       second: { result: 14, exitCode: 0 },
     });
 
-    const journal = listScriptRunJournalSteps(id);
+    const journal = await listScriptRunJournalSteps(id);
     expect(journal).toHaveLength(1);
     expect(journal[0]?.stepKey).toBe("double");
     expect(journal[0]?.stepType).toBe("swarm-script");

@@ -753,7 +753,7 @@ export async function handleScripts(
         scriptName: parsed.body.name ?? null,
         executedAt: new Date().toISOString(),
       };
-      upsertKv({
+      await upsertKv({
         namespace: kvNamespace,
         key: kvKey,
         value: kvValue,
@@ -799,7 +799,7 @@ export async function handleScripts(
             .join(" — ") || `Script exited with code ${output.exitCode}`,
         );
     try {
-      recordInlineScriptRun({
+      await recordInlineScriptRun({
         id: crypto.randomUUID(),
         agentId: agent.id,
         source: source as string,

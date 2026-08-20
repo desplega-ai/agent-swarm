@@ -257,7 +257,7 @@ describe("apps spike 5 lifecycle", () => {
       }),
     });
     expect(hidden.status).toBe(200);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe("Preserved");
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe("Preserved");
 
     const rolledBack = await request<{
       app: {
@@ -271,7 +271,7 @@ describe("apps spike 5 lifecycle", () => {
     expect(rolledBack.status).toBe(200);
     expect(rolledBack.body.app.definition.models.note.columns.title.hidden).toBeUndefined();
     expect(rolledBack.body.migration.scanned).toBe(1);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe("Preserved");
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe("Preserved");
 
     const versions = await request<{
       versions: Array<{ version: number; snapshot: { definition: { models: unknown } } }>;
@@ -293,7 +293,7 @@ describe("apps spike 5 lifecycle", () => {
       }),
     });
     expect(changed.status).toBe(200);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe(12);
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe(12);
 
     const rejected = await request<{ issues: Array<{ path: string; message: string }> }>(
       `/api/apps/${appId}/rollback`,
@@ -314,7 +314,7 @@ describe("apps spike 5 lifecycle", () => {
     );
     expect(restored.status).toBe(200);
     expect(restored.body.migration.coerced).toBe(1);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe("12");
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe("12");
   });
 
   test("rolls back a definitionError app while preserving rows and reporting orphans", async () => {
@@ -325,8 +325,8 @@ describe("apps spike 5 lifecycle", () => {
       body: JSON.stringify({ description: "creates the good snapshot" }),
     });
     expect(initialWrite.status).toBe(200);
-    const row = getAppRow(appId, "note", created.id)!;
-    upsertKv({
+    const row = (await getAppRow(appId, "note", created.id))!;
+    await upsertKv({
       namespace: appsNamespace(appId),
       key: `note/row/${created.id}`,
       value: { ...row, legacyPayload: "keep" },
@@ -347,7 +347,7 @@ describe("apps spike 5 lifecycle", () => {
     expect(restored.body.app.definitionError).toBeUndefined();
     expect(restored.body.app.definition.models.note).toBeDefined();
     expect(restored.body.migration.orphanFields).toEqual(["legacyPayload"]);
-    expect(getAppRow(appId, "note", created.id)).toMatchObject({
+    expect(await getAppRow(appId, "note", created.id)).toMatchObject({
       title: "Repair me",
       legacyPayload: "keep",
     });
@@ -704,7 +704,7 @@ describe("apps spike 5 lifecycle", () => {
         )
         .get(namespace, rowKey)!.value,
     ).toBe(rawBefore);
-    expect(getKv(namespace, appIndexKey("note", "title", "Keep me", row.id))).toBeNull();
+    expect(await getKv(namespace, appIndexKey("note", "title", "Keep me", row.id))).toBeNull();
 
     expect(
       (await request(`/api/apps/${appId}/models/note/rows?filter.title=Keep%20me`)).status,
@@ -743,7 +743,7 @@ describe("apps spike 5 lifecycle", () => {
       }),
     });
     expect(unhidden.status).toBe(200);
-    expect(getKv(namespace, appIndexKey("note", "title", "Keep me", row.id))).not.toBeNull();
+    expect(await getKv(namespace, appIndexKey("note", "title", "Keep me", row.id))).not.toBeNull();
     expect(
       getDb()
         .prepare<{ value: string }, [string, string]>(
@@ -782,8 +782,8 @@ describe("apps spike 5 lifecycle", () => {
 
     expect(removed.status).toBe(200);
     expect(removed.body.migration).toMatchObject({ purgedValues: 1, idxRebuilt: 1 });
-    expect(getAppRow(appId, "note", row.id)).not.toHaveProperty("title");
-    expect(countKv(namespace, { prefix: "note/idx/title/" })).toBe(0);
+    expect(await getAppRow(appId, "note", row.id)).not.toHaveProperty("title");
+    expect(await countKv(namespace, { prefix: "note/idx/title/" })).toBe(0);
     expect(getApp(appId)?.definition.models.note?.columns).not.toHaveProperty("title");
 
     const emptyAppId = await createApp({
@@ -935,7 +935,7 @@ describe("apps spike 5 lifecycle", () => {
       message:
         "unhiding required column would leave 1 row without a value — provide migration.category {set: ...} or unhide without required",
     });
-    expect(getAppRow(appId, "note", created.id)).not.toHaveProperty("category");
+    expect(await getAppRow(appId, "note", created.id)).not.toHaveProperty("category");
     expect(getApp(appId)?.definition.models.note?.columns.category?.hidden).toBe(true);
 
     const satisfiedDefinition = structuredClone(hiddenRequiredDefinition);
@@ -1058,8 +1058,10 @@ describe("apps spike 5 lifecycle", () => {
 
     expect(applied.status).toBe(200);
     expect(applied.body.migration.mapped).toBe(1);
-    expect(getAppRow(appId, "note", note.id)?.priority).toBe("urgent");
-    expect(getAppRow(appId, "ticket", ticketResult.body.row.id)?.priority).toBe("leave-alone");
+    expect((await getAppRow(appId, "note", note.id))?.priority).toBe("urgent");
+    expect((await getAppRow(appId, "ticket", ticketResult.body.row.id))?.priority).toBe(
+      "leave-alone",
+    );
   });
 
   test("rejects from chains but uses else for absent and target-incompatible sources", async () => {
@@ -1114,8 +1116,8 @@ describe("apps spike 5 lifecycle", () => {
     );
     expect(applied.status).toBe(200);
     expect(applied.body.migration).toMatchObject({ elsed: 2, mapped: 0 });
-    expect(getAppRow(appId, "note", absent.id)?.score).toBe(7);
-    expect(getAppRow(appId, "note", incompatible.id)?.score).toBe(7);
+    expect((await getAppRow(appId, "note", absent.id))?.score).toBe(7);
+    expect((await getAppRow(appId, "note", incompatible.id))?.score).toBe(7);
   });
 
   test("migration scans every row and removes every stale index entry beyond the list cap", async () => {
@@ -1146,7 +1148,7 @@ describe("apps spike 5 lifecycle", () => {
        FROM seq`,
     );
 
-    expect(listAppRows(appId, "note")).toHaveLength(100_000);
+    expect(await listAppRows(appId, "note")).toHaveLength(100_000);
     const hidden = await request<{ migration: { scanned: number } }>(`/api/apps/${appId}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -1222,11 +1224,11 @@ describe("apps spike 5 lifecycle", () => {
     });
     expect(purged.status).toBe(200);
     expect(purged.body.migration).toMatchObject({ purgedValues: 1, idxRebuilt: 1 });
-    const stored = getAppRow(appId, "note", created.id)!;
+    const stored = (await getAppRow(appId, "note", created.id))!;
     expect(stored).not.toHaveProperty("title");
     expect(stored.updatedAt).toBe(created.updatedAt);
     expect(stored.updatedBy).toBe(created.updatedBy);
-    expect(countKv(appsNamespace(appId), { prefix: "note/idx/title/" })).toBe(0);
+    expect(await countKv(appsNamespace(appId), { prefix: "note/idx/title/" })).toBe(0);
   });
 
   test("dry-runs kind changes with counts then coerces with else without touching freshness", async () => {
@@ -1265,7 +1267,7 @@ describe("apps spike 5 lifecycle", () => {
       message:
         '1 row cannot migrate "not-a-number" in models.note.columns.title — provide an else value',
     });
-    expect(getAppRow(appId, "note", absent.id)).not.toHaveProperty("title");
+    expect(await getAppRow(appId, "note", absent.id)).not.toHaveProperty("title");
 
     const invalidElse = await request<{ issues: Array<{ message: string }> }>(
       `/api/apps/${appId}`,
@@ -1297,12 +1299,12 @@ describe("apps spike 5 lifecycle", () => {
     });
     expect(applied.status).toBe(200);
     expect(applied.body.migration).toMatchObject({ coerced: 1, elsed: 1, scanned: 3 });
-    expect(getAppRow(appId, "note", numeric.id)).toMatchObject({
+    expect(await getAppRow(appId, "note", numeric.id)).toMatchObject({
       title: 12,
       updatedAt: numeric.updatedAt,
       updatedBy: numeric.updatedBy,
     });
-    const invalidStored = getAppRow(appId, "note", invalid.id)!;
+    const invalidStored = (await getAppRow(appId, "note", invalid.id))!;
     expect(invalidStored).not.toHaveProperty("title");
     expect(invalidStored.updatedAt).toBe(invalid.updatedAt);
     expect(invalidStored.updatedBy).toBe(invalid.updatedBy);
@@ -1333,7 +1335,7 @@ describe("apps spike 5 lifecycle", () => {
         (issue) => issue.path === "migration.title" && issue.message.includes("provide an else"),
       ),
     ).toBe(true);
-    expect(getAppRow(appId, "note", absent.id)).not.toHaveProperty("title");
+    expect(await getAppRow(appId, "note", absent.id)).not.toHaveProperty("title");
 
     // With else the missing row is filled, so required holds on every row.
     const applied = await request<{
@@ -1347,8 +1349,8 @@ describe("apps spike 5 lifecycle", () => {
     });
     expect(applied.status).toBe(200);
     expect(applied.body.migration).toMatchObject({ coerced: 1, elsed: 1, scanned: 2 });
-    expect(getAppRow(appId, "note", present.id)).toMatchObject({ title: 12 });
-    expect(getAppRow(appId, "note", absent.id)).toMatchObject({ title: 0 });
+    expect(await getAppRow(appId, "note", present.id)).toMatchObject({ title: 12 });
+    expect(await getAppRow(appId, "note", absent.id)).toMatchObject({ title: 0 });
 
     // An optional target still leaves absent rows absent (no materialized else).
     const optionalApp = await createApp(migrationDefinition);
@@ -1365,7 +1367,7 @@ describe("apps spike 5 lifecycle", () => {
     );
     expect(optionalApplied.status).toBe(200);
     expect(optionalApplied.body.migration.elsed).toBe(0);
-    expect(getAppRow(optionalApp, "note", optionalAbsent.id)).not.toHaveProperty("title");
+    expect(await getAppRow(optionalApp, "note", optionalAbsent.id)).not.toHaveProperty("title");
   });
 
   test("accepts migration directives through HTTP PUT", async () => {
@@ -1387,7 +1389,7 @@ describe("apps spike 5 lifecycle", () => {
 
     expect(result.status).toBe(200);
     expect(result.body.migration).toMatchObject({ coerced: 1, scanned: 1 });
-    expect(getAppRow(appId, "note", row.id)?.title).toBe(42);
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe(42);
     expect(getApp(appId)?.definition.models.note?.columns.title?.kind).toBe("number");
   });
 
@@ -1415,17 +1417,17 @@ describe("apps spike 5 lifecycle", () => {
     );
     expect(applied.status).toBe(200);
     expect(applied.body.migration).toMatchObject({ mapped: 2, idxRebuilt: 1 });
-    expect(getAppRow(appId, "note", urgent.id)?.status).toBe("high");
-    expect(getAppRow(appId, "note", open.id)?.status).toBe("open");
-    expect(getKv(namespace, appIndexKey("note", "status", "urgent", urgent.id))).toBeNull();
-    expect(getKv(namespace, appIndexKey("note", "status", "high", urgent.id))).not.toBeNull();
+    expect((await getAppRow(appId, "note", urgent.id))?.status).toBe("high");
+    expect((await getAppRow(appId, "note", open.id))?.status).toBe("open");
+    expect(await getKv(namespace, appIndexKey("note", "status", "urgent", urgent.id))).toBeNull();
+    expect(await getKv(namespace, appIndexKey("note", "status", "high", urgent.id))).not.toBeNull();
   });
 
   test("auto-backfills required defaults and reports preserved orphan fields", async () => {
     const appId = await createApp(migrationDefinition);
     const created = await createRow(appId, { title: "Existing", status: "open" });
-    const row = getAppRow(appId, "note", created.id)!;
-    upsertKv({
+    const row = (await getAppRow(appId, "note", created.id))!;
+    await upsertKv({
       namespace: appsNamespace(appId),
       key: `note/row/${created.id}`,
       value: { ...row, legacyPayload: "preserve" },
@@ -1451,7 +1453,7 @@ describe("apps spike 5 lifecycle", () => {
       backfilled: 1,
       orphanFields: ["legacyPayload"],
     });
-    expect(getAppRow(appId, "note", created.id)).toMatchObject({
+    expect(await getAppRow(appId, "note", created.id)).toMatchObject({
       category: "general",
       legacyPayload: "preserve",
       updatedAt: created.updatedAt,
@@ -1476,8 +1478,8 @@ describe("apps spike 5 lifecycle", () => {
 
     expect(applied.status).toBe(200);
     expect(applied.body.migration.backfilled).toBe(2);
-    expect(getAppRow(appId, "note", first.id)?.title).toBe("Replaced");
-    expect(getAppRow(appId, "note", second.id)?.title).toBe("Replaced");
+    expect((await getAppRow(appId, "note", first.id))?.title).toBe("Replaced");
+    expect((await getAppRow(appId, "note", second.id))?.title).toBe("Replaced");
   });
 
   test("caps distinct-value issues and orphan-field reports", async () => {
@@ -1517,11 +1519,11 @@ describe("apps spike 5 lifecycle", () => {
 
     const orphanAppId = await createApp(migrationDefinition);
     const orphanRow = await createRow(orphanAppId, { title: "Orphans", status: "open" });
-    const stored = getAppRow(orphanAppId, "note", orphanRow.id)!;
+    const stored = (await getAppRow(orphanAppId, "note", orphanRow.id))!;
     const legacyFields = Object.fromEntries(
       Array.from({ length: 105 }, (_, index) => [`legacy${String(index).padStart(3, "0")}`, index]),
     );
-    upsertKv({
+    await upsertKv({
       namespace: appsNamespace(orphanAppId),
       key: `note/row/${orphanRow.id}`,
       value: { ...stored, ...legacyFields },
@@ -1593,7 +1595,7 @@ describe("apps spike 5 lifecycle", () => {
         "required column is missing on 1 row while repairing an unparseable definition",
       ),
     });
-    expect(getAppRow(appId, "note", created.id)).not.toHaveProperty("category");
+    expect(await getAppRow(appId, "note", created.id)).not.toHaveProperty("category");
 
     const repaired = await request<{ migration: { backfilled: number } }>(`/api/apps/${appId}`, {
       method: "PUT",
@@ -1604,7 +1606,7 @@ describe("apps spike 5 lifecycle", () => {
     });
     expect(repaired.status).toBe(200);
     expect(repaired.body.migration.backfilled).toBe(1);
-    expect(getAppRow(appId, "note", created.id)?.category).toBe("assigned");
+    expect((await getAppRow(appId, "note", created.id))?.category).toBe("assigned");
 
     getDb()
       .prepare("UPDATE apps SET definition = ? WHERE id = ?")
@@ -1741,10 +1743,10 @@ describe("apps spike 5 lifecycle", () => {
     const stored = getApp(appId)!;
     expect(stored.definition.models.note?.columns.title?.kind).toBe("boolean");
     expect(stored.definition.pages.main?.title).toBe("Concurrent title");
-    expect(getAppRow(appId, "note", row.id)?.title).toBe(true);
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe(true);
     const namespace = appsNamespace(appId);
-    expect(getKv(namespace, appIndexKey("note", "title", true, row.id))).not.toBeNull();
-    expect(countKv(namespace, { prefix: "note/idx/title/" })).toBe(1);
+    expect(await getKv(namespace, appIndexKey("note", "title", true, row.id))).not.toBeNull();
+    expect(await countKv(namespace, { prefix: "note/idx/title/" })).toBe(1);
   });
 
   test("returns migration reports through app-patch and app-upsert", async () => {
@@ -1770,7 +1772,7 @@ describe("apps spike 5 lifecycle", () => {
     expect(patched.isError).not.toBe(true);
     expect(patched.structuredContent.migration.scanned).toBe(1);
     expect(patched.structuredContent.migration.coerced).toBe(1);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe(12);
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe(12);
 
     const upserted = (await tools["app-upsert"]!.handler(
       {
@@ -1789,7 +1791,7 @@ describe("apps spike 5 lifecycle", () => {
     expect(upserted.structuredContent.migration.coerced).toBe(1);
     expect(upserted.structuredContent.migration.idxRebuilt).toBe(1);
     expect(upserted.structuredContent.details).toBe(`App: /apps/${appId}`);
-    expect(getAppRow(appId, "note", row.id)?.title).toBe("12");
+    expect((await getAppRow(appId, "note", row.id))?.title).toBe("12");
 
     const withoutAppId = (await tools["app-upsert"]!.handler(
       {
@@ -1847,7 +1849,7 @@ describe("apps spike 5 lifecycle", () => {
         expect(result.structuredContent.details).toContain("[REDACTED:SPIKE5_MIGRATION_SECRET]");
         expect(result.structuredContent.details).not.toContain(secret);
       }
-      expect(getAppRow(appId, "note", row.id)?.title).toBe("MCP failure");
+      expect((await getAppRow(appId, "note", row.id))?.title).toBe("MCP failure");
       expect(getApp(appId)?.definition.models.note?.columns.title?.hidden).not.toBe(true);
     } finally {
       getDb().run("DROP TRIGGER IF EXISTS fail_schema_migration");

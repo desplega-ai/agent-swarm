@@ -315,7 +315,7 @@ export async function handleSessionData(
       // Keep the adapter's report even when the pricing-table branch replaces
       // totalCostUsd with the server's canonical recomputation.
       const harnessCostUsd = parsed.body.totalCostUsd;
-      const recomputed = recomputeSessionCost(
+      const recomputed = await recomputeSessionCost(
         {
           provider: parsed.body.provider,
           model,
@@ -330,9 +330,9 @@ export async function handleSessionData(
           durationMs: parsed.body.durationMs,
           atEpochMs: parsed.body.createdAt ?? Date.now(),
         },
-        (provider, lookupModel, tokenClass, atEpochMs) =>
-          getActivePricingRow(provider, lookupModel, tokenClass, atEpochMs)?.pricePerMillionUsd ??
-          null,
+        async (provider, lookupModel, tokenClass, atEpochMs) =>
+          (await getActivePricingRow(provider, lookupModel, tokenClass, atEpochMs))
+            ?.pricePerMillionUsd ?? null,
       );
       const { totalCostUsd, costSource } = recomputed;
 

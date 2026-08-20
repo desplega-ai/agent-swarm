@@ -283,7 +283,7 @@ describe("apps spike", () => {
       },
     );
     const notesIndexKey = appIndexKey("idea", "notes", "temporary", created.body.row.id);
-    expect(getKv(appsNamespace(appId), notesIndexKey)).not.toBeNull();
+    expect(await getKv(appsNamespace(appId), notesIndexKey)).not.toBeNull();
 
     const cleared = await request<{ row: Record<string, unknown> }>(
       `/api/apps/${appId}/models/idea/rows/${created.body.row.id}`,
@@ -291,7 +291,7 @@ describe("apps spike", () => {
     );
     expect(cleared.status).toBe(200);
     expect(Object.hasOwn(cleared.body.row, "notes")).toBe(false);
-    expect(getKv(appsNamespace(appId), notesIndexKey)).toBeNull();
+    expect(await getKv(appsNamespace(appId), notesIndexKey)).toBeNull();
 
     const required = await request<{ issues: Array<{ path: string }> }>(
       `/api/apps/${appId}/models/idea/rows/${created.body.row.id}`,
@@ -339,17 +339,17 @@ describe("apps spike", () => {
     const namespace = appsNamespace(appId);
     const openKey = appIndexKey("idea", "status", "open", rowId);
     const doneKey = appIndexKey("idea", "status", "done", rowId);
-    expect(getKv(namespace, openKey)).not.toBeNull();
+    expect(await getKv(namespace, openKey)).not.toBeNull();
 
     await request(`/api/apps/${appId}/models/idea/rows/${rowId}`, {
       method: "PATCH",
       body: JSON.stringify({ values: { status: "done" } }),
     });
-    expect(getKv(namespace, openKey)).toBeNull();
-    expect(getKv(namespace, doneKey)).not.toBeNull();
+    expect(await getKv(namespace, openKey)).toBeNull();
+    expect(await getKv(namespace, doneKey)).not.toBeNull();
 
     await request(`/api/apps/${appId}/models/idea/rows/${rowId}`, { method: "DELETE" });
-    expect(getKv(namespace, doneKey)).toBeNull();
+    expect(await getKv(namespace, doneKey)).toBeNull();
 
     const escapedDefinition = {
       ...ideasDefinition,
@@ -374,8 +374,8 @@ describe("apps spike", () => {
     );
     const escapedKey = appIndexKey("idea", "notes", escapedValue, escaped.body.row.id);
     expect(escapedKey).toMatch(/^[a-zA-Z0-9._:/%-]{1,512}$/);
-    expect(getKv(appsNamespace(escapedAppId), escapedKey)).not.toBeNull();
-    expect(countKv(appsNamespace(escapedAppId), { prefix: "idea/idx/toString/" })).toBe(0);
+    expect(await getKv(appsNamespace(escapedAppId), escapedKey)).not.toBeNull();
+    expect(await countKv(appsNamespace(escapedAppId), { prefix: "idea/idx/toString/" })).toBe(0);
   });
 
   test("row delete removes exactly the deleted row's computed index keys", async () => {
@@ -399,20 +399,24 @@ describe("apps spike", () => {
       body: JSON.stringify({ values: { title: "Second", notes: "shared" } }),
     });
     const namespace = appsNamespace(appId);
-    expect(countKv(namespace, { prefix: "idea/idx/" })).toBe(4);
+    expect(await countKv(namespace, { prefix: "idea/idx/" })).toBe(4);
 
     const deleted = await request(`/api/apps/${appId}/models/idea/rows/${first.body.row.id}`, {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
-    expect(countKv(namespace, { prefix: "idea/idx/" })).toBe(2);
-    expect(getKv(namespace, appIndexKey("idea", "status", "open", first.body.row.id))).toBeNull();
-    expect(getKv(namespace, appIndexKey("idea", "notes", "shared", first.body.row.id))).toBeNull();
+    expect(await countKv(namespace, { prefix: "idea/idx/" })).toBe(2);
     expect(
-      getKv(namespace, appIndexKey("idea", "status", "open", second.body.row.id)),
+      await getKv(namespace, appIndexKey("idea", "status", "open", first.body.row.id)),
+    ).toBeNull();
+    expect(
+      await getKv(namespace, appIndexKey("idea", "notes", "shared", first.body.row.id)),
+    ).toBeNull();
+    expect(
+      await getKv(namespace, appIndexKey("idea", "status", "open", second.body.row.id)),
     ).not.toBeNull();
     expect(
-      getKv(namespace, appIndexKey("idea", "notes", "shared", second.body.row.id)),
+      await getKv(namespace, appIndexKey("idea", "notes", "shared", second.body.row.id)),
     ).not.toBeNull();
   });
 
@@ -427,8 +431,8 @@ describe("apps spike", () => {
       ),
     );
     expect(responses.every((response) => response.status === 201)).toBe(true);
-    expect(countKv(appsNamespace(appId), { prefix: "idea/row/" })).toBe(30);
-    expect(countKv(appsNamespace(appId), { prefix: "idea/idx/status/open/" })).toBe(30);
+    expect(await countKv(appsNamespace(appId), { prefix: "idea/row/" })).toBe(30);
+    expect(await countKv(appsNamespace(appId), { prefix: "idea/idx/status/open/" })).toBe(30);
   });
 
   test("same-millisecond creates preserve creation order when sorted by createdAt", async () => {
@@ -547,7 +551,7 @@ describe("apps spike", () => {
 
     const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
     expect(deleted).toEqual({ status: 200, body: { ok: true } });
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
     expect((await request(`/api/apps/${appId}`)).status).toBe(404);
   });
 
@@ -561,10 +565,10 @@ describe("apps spike", () => {
         }),
       ),
     );
-    expect(countKv(appsNamespace(appId), {})).toBeGreaterThan(0);
+    expect(await countKv(appsNamespace(appId), {})).toBeGreaterThan(0);
     const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
     expect(deleted).toEqual({ status: 200, body: { ok: true } });
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
     expect((await request(`/api/apps/${appId}`)).status).toBe(404);
   });
 
@@ -585,6 +589,6 @@ describe("apps spike", () => {
 
     expect(lateCreateOutcome).toBeDefined();
     expect(await lateCreateOutcome).toBe(true);
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
   });
 });

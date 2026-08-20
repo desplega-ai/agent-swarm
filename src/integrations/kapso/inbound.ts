@@ -80,14 +80,16 @@ function resolveKapsoIdentity(externalId: string): IdentityResolution {
   return kapsoResolution;
 }
 
-function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
+async function resolveKapsoRequestedByUserId(
+  payload: KapsoWebhookPayload,
+): Promise<string | undefined> {
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 
   const resolution = resolveKapsoIdentity(externalId);
   if (resolution.status === "resolved") return resolution.userId;
 
-  recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
+  await recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
     sampleEventType: "kapso.message.received",
     sampleContext: [
       payload.conversation?.contact_name ? `contact=${payload.conversation.contact_name}` : null,
@@ -113,7 +115,7 @@ function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | u
  *      or creates a native `kapso-inbound` task,
  *   5. returns `no_mapping` when the number isn't registered (caller logs a warning).
  */
-export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
+export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<KapsoRouting> {
   const message = payload.message;
   const direction = message?.kapso?.direction;
   if (direction !== "inbound") {
@@ -125,7 +127,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     return { kind: "skip", reason: "missing_message_id" };
   }
 
-  if (!markKapsoMessageSeen(messageId)) {
+  if (!(await markKapsoMessageSeen(messageId))) {
     return { kind: "duplicate", messageId };
   }
 
@@ -141,7 +143,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     text: extractText(message ?? {}),
   });
 
-  const mapping = phoneNumberId ? getKapsoNumberMapping(phoneNumberId) : null;
+  const mapping = phoneNumberId ? await getKapsoNumberMapping(phoneNumberId) : null;
   if (!mapping) {
     return { kind: "no_mapping", phoneNumberId };
   }
@@ -156,7 +158,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],
     priority: 70,
-    requestedByUserId: resolveKapsoRequestedByUserId(payload),
+    requestedByUserId: await resolveKapsoRequestedByUserId(payload),
     contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
   });
 

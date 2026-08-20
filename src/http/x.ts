@@ -272,7 +272,7 @@ export async function handleX(
     // ignore
   }
   try {
-    recordInlineScriptRun({
+    await recordInlineScriptRun({
       id: crypto.randomUUID(),
       agentId: endpoint.agentId,
       source: script.source,

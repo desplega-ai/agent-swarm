@@ -106,21 +106,21 @@ interface CreatedCostResponse {
 describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
   test("provider=codex with all three pricing rows present → recompute uses DB prices, costSource='pricing-table'", async () => {
     // Mid-range custom rates: input=2.0/M, cached=0.2/M, output=10.0/M
-    insertPricingRow({
+    await insertPricingRow({
       provider: "codex",
       model: "codex-test-synth",
       tokenClass: "input",
       effectiveFrom: 1,
       pricePerMillionUsd: 2.0,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "codex",
       model: "codex-test-synth",
       tokenClass: "cached_input",
       effectiveFrom: 1,
       pricePerMillionUsd: 0.2,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "codex",
       model: "codex-test-synth",
       tokenClass: "output",
@@ -181,7 +181,7 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
   test("provider=codex but input/output rows missing → 'unpriced', worker value preserved", async () => {
     // Only seed cached_input. Missing input + output blocks recompute and
     // Phase 2 tags the row 'unpriced' (no rates means we can't trust harness USD either).
-    insertPricingRow({
+    await insertPricingRow({
       provider: "codex",
       model: "codex-test-synth",
       tokenClass: "cached_input",
@@ -237,14 +237,14 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
 
   test("provider=pi with seeded pricing rows → recomputes (Phase 2)", async () => {
     // Phase 2 widens recompute beyond codex. Seed pi rows so we get a hit.
-    insertPricingRow({
+    await insertPricingRow({
       provider: "pi",
       model: "pi-test",
       tokenClass: "input",
       effectiveFrom: 1,
       pricePerMillionUsd: 0.5,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "pi",
       model: "pi-test",
       tokenClass: "output",
@@ -318,21 +318,21 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     test("createdAt = T0+1 → uses price A (the only row at that time)", async () => {
       // Seed price A at T0, and the cached/output rows at the same time so all
       // three classes resolve.
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "input",
         effectiveFrom: T0,
         pricePerMillionUsd: PRICE_A,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "cached_input",
         effectiveFrom: T0,
         pricePerMillionUsd: 0,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "output",
@@ -347,21 +347,21 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     });
 
     test("createdAt = T0+200 with new row at T0+100 → uses price B", async () => {
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "input",
         effectiveFrom: T0,
         pricePerMillionUsd: PRICE_A,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "cached_input",
         effectiveFrom: T0,
         pricePerMillionUsd: 0,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "output",
@@ -369,7 +369,7 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
         pricePerMillionUsd: 0,
       });
       // Newer input row supersedes A from T0+100 onward.
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "input",
@@ -384,21 +384,21 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
     });
 
     test("createdAt = T0+50 with new row at T0+100 → STILL uses price A (older effective_from)", async () => {
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "input",
         effectiveFrom: T0,
         pricePerMillionUsd: PRICE_A,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "cached_input",
         effectiveFrom: T0,
         pricePerMillionUsd: 0,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "output",
@@ -406,7 +406,7 @@ describe("Phase 6 — POST /api/session-costs: Codex USD recompute", () => {
         pricePerMillionUsd: 0,
       });
       // Newer row exists, but the session_cost is older than T0+100.
-      insertPricingRow({
+      await insertPricingRow({
         provider: "codex",
         model: "codex-test-synth",
         tokenClass: "input",

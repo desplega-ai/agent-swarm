@@ -195,14 +195,14 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
     const task = getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
 
-    const meta = getKv(UNMAPPED_NAMESPACE, `${linearUserId}:meta`);
+    const meta = await getKv(UNMAPPED_NAMESPACE, `${linearUserId}:meta`);
     expect(meta).not.toBeNull();
     expect(meta!.valueType).toBe("json");
     const metaValue = meta!.value as { sampleEventType: string; sampleContext: string | null };
     expect(metaValue.sampleEventType).toBe("AgentSessionEvent.created");
     expect(metaValue.sampleContext).toBe("I need help with deploys");
 
-    const count = getKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`);
+    const count = await getKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`);
     expect(count).not.toBeNull();
     expect(count!.value).toBe(1);
 
@@ -213,7 +213,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
   test("appUserId guard: creator.id === storedAppUserId → no user, no unmapped", async () => {
     const issue = makeIssue();
     const appUserId = "lin-app-user-bot-001";
-    upsertKv({
+    await upsertKv({
       namespace: APP_USER_ID_NAMESPACE,
       key: "org-1",
       value: appUserId,
@@ -245,8 +245,8 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
     // Crucially: no users row, no unmapped entry. The swarm doesn't hear itself.
     expect(usersCount()).toBe(before.users);
     expect(externalIdsCount()).toBe(before.ext);
-    expect(getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, `${appUserId}:count`)).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:count`)).toBeNull();
   });
 
   test("regression: OLD event.actor shape no longer enrolls a user", async () => {
@@ -277,7 +277,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
     expect(task?.requestedByUserId).toBeUndefined();
     expect(usersCount()).toBe(before.users);
     expect(externalIdsCount()).toBe(before.ext);
-    expect(getKv(UNMAPPED_NAMESPACE, `lin-user-regression-001:meta`)).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, `lin-user-regression-001:meta`)).toBeNull();
   });
 });
 
@@ -381,14 +381,14 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     await handleAgentSessionPrompted(event);
 
-    const meta = getKv(UNMAPPED_NAMESPACE, `${linearUserId}:meta`);
+    const meta = await getKv(UNMAPPED_NAMESPACE, `${linearUserId}:meta`);
     expect(meta).not.toBeNull();
     const metaValue = meta!.value as { sampleEventType: string; sampleContext: string | null };
     expect(metaValue.sampleEventType).toBe("AgentSessionEvent.prompted");
     expect(metaValue.sampleContext).toBe("anonymous follow-up");
 
     // Cleanup ledger so this test is hermetic across reruns.
-    deleteKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`);
+    await deleteKv(UNMAPPED_NAMESPACE, `${linearUserId}:count`);
   });
 
   test("appUserId guard on prompted: user.id === storedAppUserId → no enrollment", async () => {
@@ -396,7 +396,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
     await seedCompletedTask(issue.id, issue.identifier);
 
     const appUserId = "lin-app-user-bot-prompted-001";
-    upsertKv({
+    await upsertKv({
       namespace: APP_USER_ID_NAMESPACE,
       key: "org-1",
       value: appUserId,
@@ -422,6 +422,6 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     expect(usersCount()).toBe(before.users);
     expect(externalIdsCount()).toBe(before.ext);
-    expect(getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
   });
 });

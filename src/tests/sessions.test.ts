@@ -194,7 +194,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(all.some((s) => s.root.requestedByUserId === userB.id)).toBe(true);
   });
 
-  test("custom title — surfaces in listRecentSessions (slim + full) and is searchable via q", () => {
+  test("custom title — surfaces in listRecentSessions (slim + full) and is searchable via q", async () => {
     const agent = createAgent({
       id: "sessions-test-agent-title",
       name: "Sessions Test Agent Title",
@@ -210,31 +210,31 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(updated?.title).toBe("Flaky deploy investigation");
 
     // Full mode carries the title through untruncated.
-    const full = listRecentSessions({ limit: 50 });
+    const full = await listRecentSessions({ limit: 50 });
     const fullMatch = full.find((s) => s.root.id === root.id);
     expect(fullMatch?.root.title).toBe("Flaky deploy investigation");
 
     // Slim mode carries the title through untruncated too (only `task` is truncated).
-    const slim = listRecentSessions({ limit: 50, slim: true });
+    const slim = await listRecentSessions({ limit: 50, slim: true });
     const slimMatch = slim.find((s) => s.root.id === root.id);
     expect(slimMatch?.root.title).toBe("Flaky deploy investigation");
 
     // q matches the custom title even though it shares no words with the prompt.
-    const byTitle = listRecentSessions({ limit: 50, q: "flaky deploy investigation" });
+    const byTitle = await listRecentSessions({ limit: 50, q: "flaky deploy investigation" });
     expect(byTitle.some((s) => s.root.id === root.id)).toBe(true);
 
     // q still matches the original prompt after rename.
-    const byPrompt = listRecentSessions({ limit: 50, q: "flaky deploy pipeline" });
+    const byPrompt = await listRecentSessions({ limit: 50, q: "flaky deploy pipeline" });
     expect(byPrompt.some((s) => s.root.id === root.id)).toBe(true);
 
     // countSessions agrees with the filtered list length for both queries.
-    expect(countSessions({ q: "flaky deploy investigation" })).toBe(byTitle.length);
-    expect(countSessions({ q: "flaky deploy pipeline" })).toBe(byPrompt.length);
+    expect(await countSessions({ q: "flaky deploy investigation" })).toBe(byTitle.length);
+    expect(await countSessions({ q: "flaky deploy pipeline" })).toBe(byPrompt.length);
 
     // Clearing (empty string) reverts to the prompt fallback.
     const cleared = updateTaskTitle(root.id, "");
     expect(cleared?.title).toBeUndefined();
-    const afterClear = listRecentSessions({ limit: 50 }).find((s) => s.root.id === root.id);
+    const afterClear = (await listRecentSessions({ limit: 50 })).find((s) => s.root.id === root.id);
     expect(afterClear?.root.title).toBeUndefined();
   });
 });

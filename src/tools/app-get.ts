@@ -56,7 +56,7 @@ export const registerAppGetTool = (server: McpServer) => {
       const app = getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
-      const syncStatus = collectAppSyncStatus(app.id);
+      const syncStatus = await collectAppSyncStatus(app.id);
       const hasSyncStatus = Object.keys(syncStatus).length > 0;
       // Supplying `details` suppresses the registrar's JSON-data fallback, so
       // text-only harnesses must get the sync freshness surface here too.
@@ -115,7 +115,7 @@ export const registerAppQueryTool = (server: McpServer) => {
       if (!model) return toolErr(`Model "${query.model}" not found.`);
       let rows: AppRow[];
       try {
-        rows = applyQuery(listAppRows(app.id, query.model), query, model, params, queryName);
+        rows = applyQuery(await listAppRows(app.id, query.model), query, model, params, queryName);
       } catch (error) {
         if (!(error instanceof AppQueryParamsError)) throw error;
         return toolErr(error.message, {

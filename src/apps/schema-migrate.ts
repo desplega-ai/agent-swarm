@@ -703,7 +703,7 @@ function planSources(
   }
 }
 
-function planModel(
+async function planModel(
   appId: string,
   modelName: string,
   oldModel: ModelDef | undefined,
@@ -713,8 +713,8 @@ function planModel(
   report: AppMigrationReport,
   orphanFields: Set<string>,
   appliedDirectives: Set<string>,
-): ModelMigrationPlan & { issues: AppValidationIssue[] } {
-  const persistedRows = listAllAppRowsForMigrationUnlocked(appId, modelName);
+): Promise<ModelMigrationPlan & { issues: AppValidationIssue[] }> {
+  const persistedRows = await listAllAppRowsForMigrationUnlocked(appId, modelName);
   const rows = persistedRows.map((row) => structuredClone(row));
   const issues: AppValidationIssue[] = [];
   const changedColumns = changedColumnNames(oldModel, nextModel);
@@ -904,14 +904,14 @@ function planModel(
   };
 }
 
-function buildPlan(
+async function buildPlan(
   appId: string,
   previousDefinition: AppDefinition | undefined,
   previousRawDefinition: unknown,
   nextDefinition: AppDefinition,
   migration: AppMigration,
   forceElementBreak: string[],
-): MigrationPlan {
+): Promise<MigrationPlan> {
   const issues = [
     ...validateDirectiveOrder(migration),
     ...exportedElementCompatibilityIssues(
@@ -940,10 +940,11 @@ function buildPlan(
   const affected = affectedModelNames(previousDefinition, nextDefinition, migration);
   const orphanFields = new Set<string>();
   const appliedDirectives = new Set<string>();
-  const models = affected.map((modelName) => {
+  const models: (ModelMigrationPlan & { issues: AppValidationIssue[] })[] = [];
+  for (const modelName of affected) {
     const previousModel = modelAt(previousDefinition, modelName);
     const nextModel = modelAt(nextDefinition, modelName);
-    const plan = planModel(
+    const plan = await planModel(
       appId,
       modelName,
       previousModel,
@@ -956,8 +957,8 @@ function buildPlan(
     );
     issues.push(...plan.issues);
     report.idxRebuilt += plan.rebuildColumns.length;
-    return plan;
-  });
+    models.push(plan);
+  }
   for (const [columnName, directive] of Object.entries(migration)) {
     if (Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName) || appliedDirectives.has(columnName)) {
       continue;
@@ -1033,8 +1034,8 @@ export async function migrateAppSchema<T>(input: {
 }): Promise<{ result: T; migration: AppMigrationReport }> {
   const migration = input.migration ?? {};
   const modelNames = affectedModelNames(input.previousDefinition, input.nextDefinition, migration);
-  return withModelLocks(input.appId, modelNames, () => {
-    const plan = buildPlan(
+  return withModelLocks(input.appId, modelNames, async () => {
+    const plan = await buildPlan(
       input.appId,
       input.previousDefinition,
       input.previousRawDefinition,

@@ -9,7 +9,12 @@
 // `budget_refused` trigger envelope.
 
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getBudget, getDailySpendForAgent, getDailySpendForUser, getDailySpendGlobal } from "./db";
+import {
+  getBudgetSync,
+  getDailySpendForAgentSync,
+  getDailySpendForUserSync,
+  getDailySpendGlobalSync,
+} from "./db";
 
 export interface BudgetAdmissionAllowed {
   allowed: true;
@@ -69,6 +74,12 @@ function nextUtcMidnight(now: Date): string {
  * Global is checked first by design: a tripped global budget halts the entire
  * swarm regardless of any single agent's spend.
  */
+/**
+ * DEFERRED (transaction rule): every call site (`/api/poll`'s pre-assigned
+ * and pool gates, MCP `task-action` `accept`) runs inside a raw synchronous
+ * `getDb().transaction()` callback, which cannot await — stays on the raw
+ * sync handle via `getBudgetSync` / `getDailySpend*Sync`.
+ */
 export function canClaim(
   agentId: string,
   nowUtc: Date,
@@ -88,9 +99,9 @@ export function canClaim(
   const resetAt = nextUtcMidnight(nowUtc);
 
   // 1. Global budget gate.
-  const globalBudget = getBudget("global", "");
+  const globalBudget = getBudgetSync("global", "");
   if (globalBudget !== null) {
-    const globalSpend = getDailySpendGlobal(dateUtc);
+    const globalSpend = getDailySpendGlobalSync(dateUtc);
     if (globalSpend >= globalBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -103,9 +114,9 @@ export function canClaim(
   }
 
   // 2. Per-agent budget gate.
-  const agentBudget = getBudget("agent", agentId);
+  const agentBudget = getBudgetSync("agent", agentId);
   if (agentBudget !== null) {
-    const agentSpend = getDailySpendForAgent(agentId, dateUtc);
+    const agentSpend = getDailySpendForAgentSync(agentId, dateUtc);
     if (agentSpend >= agentBudget.dailyBudgetUsd) {
       return {
         allowed: false,
@@ -119,9 +130,9 @@ export function canClaim(
 
   // 3. Per-user budget gate. Only applies to tasks tied to a canonical user.
   if (requestedByUserId) {
-    const userBudget = getBudget("user", requestedByUserId);
+    const userBudget = getBudgetSync("user", requestedByUserId);
     if (userBudget !== null) {
-      const userSpend = getDailySpendForUser(requestedByUserId, dateUtc);
+      const userSpend = getDailySpendForUserSync(requestedByUserId, dateUtc);
       if (userSpend >= userBudget.dailyBudgetUsd) {
         return {
           allowed: false,

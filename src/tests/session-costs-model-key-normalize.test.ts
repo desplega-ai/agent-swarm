@@ -157,14 +157,14 @@ describe("Phase 2 fix — POST /api/session-costs normalizes routing prefixes", 
   test("opencode `openrouter/anthropic/claude-sonnet-4.5` resolves the seeded `anthropic/claude-sonnet-4.5` row", async () => {
     // Seed mirrors what models.dev → seed-pricing.ts produces for the
     // openrouter section: bare `anthropic/<id>` under the `opencode` provider.
-    insertPricingRow({
+    await insertPricingRow({
       provider: "opencode",
       model: "anthropic/claude-sonnet-4.5",
       tokenClass: "input",
       effectiveFrom: 1,
       pricePerMillionUsd: 3,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "opencode",
       model: "anthropic/claude-sonnet-4.5",
       tokenClass: "output",
@@ -197,14 +197,14 @@ describe("Phase 2 fix — POST /api/session-costs normalizes routing prefixes", 
   });
 
   test("pi `github-copilot/gpt-5.4` resolves the seeded bare `gpt-5.4` row", async () => {
-    insertPricingRow({
+    await insertPricingRow({
       provider: "pi",
       model: "gpt-5.4",
       tokenClass: "input",
       effectiveFrom: 1,
       pricePerMillionUsd: 2,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "pi",
       model: "gpt-5.4",
       tokenClass: "output",
@@ -237,14 +237,14 @@ describe("Phase 2 fix — POST /api/session-costs normalizes routing prefixes", 
   test("claude `claude-opus-4-7` (no prefix) still resolves — regression guard", async () => {
     // The bug report flagged claude-adapter as already-working. Make sure
     // we did not regress its bare-id lookup.
-    insertPricingRow({
+    await insertPricingRow({
       provider: "claude",
       model: "claude-opus-4-7",
       tokenClass: "input",
       effectiveFrom: 1,
       pricePerMillionUsd: 15,
     });
-    insertPricingRow({
+    await insertPricingRow({
       provider: "claude",
       model: "claude-opus-4-7",
       tokenClass: "output",

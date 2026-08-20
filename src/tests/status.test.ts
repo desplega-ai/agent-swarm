@@ -439,8 +439,8 @@ describe("setup milestones", () => {
 // ─── DB helpers ──────────────────────────────────────────────────────────────
 
 describe("getLiveAgentCounts", () => {
-  test("0/0 on empty DB", () => {
-    expect(getLiveAgentCounts(5)).toEqual({ leads_alive: 0, workers_alive: 0 });
+  test("0/0 on empty DB", async () => {
+    expect(await getLiveAgentCounts(5)).toEqual({ leads_alive: 0, workers_alive: 0 });
   });
 
   test("counts agents with recent activity, excludes offline", async () => {
@@ -455,21 +455,21 @@ describe("getLiveAgentCounts", () => {
     await updateAgentActivity(lead.id);
     await updateAgentActivity(w1.id);
     await updateAgentActivity(w2.id);
-    expect(getLiveAgentCounts(5)).toEqual({ leads_alive: 1, workers_alive: 1 });
+    expect(await getLiveAgentCounts(5)).toEqual({ leads_alive: 1, workers_alive: 1 });
   });
 
-  test("excludes agents with stale lastActivityAt", () => {
+  test("excludes agents with stale lastActivityAt", async () => {
     const w1 = createAgent({ name: "stale-w", isLead: false, status: "idle", capabilities: [] });
     // Backdate to 1h ago (well outside the 5min window).
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     getDb().prepare(`UPDATE agents SET lastActivityAt = ? WHERE id = ?`).run(past, w1.id);
-    expect(getLiveAgentCounts(5).workers_alive).toBe(0);
+    expect((await getLiveAgentCounts(5)).workers_alive).toBe(0);
   });
 });
 
 describe("getInstanceActivity", () => {
-  test("empty DB returns zeroes", () => {
-    expect(getInstanceActivity()).toEqual({
+  test("empty DB returns zeroes", async () => {
+    expect(await getInstanceActivity()).toEqual({
       agents_online: 0,
       leads_online: 0,
       recent_tasks_count: 0,
@@ -496,7 +496,7 @@ describe("getInstanceActivity", () => {
       )
       .run("task-recent-1", "fresh task");
 
-    const a = getInstanceActivity();
+    const a = await getInstanceActivity();
     expect(a.agents_online).toBe(2);
     expect(a.leads_online).toBe(1);
     expect(a.recent_tasks_count).toBe(1);
@@ -504,11 +504,11 @@ describe("getInstanceActivity", () => {
 });
 
 describe("hasFirstCompletedTask", () => {
-  test("false on empty DB", () => {
-    expect(hasFirstCompletedTask()).toBe(false);
+  test("false on empty DB", async () => {
+    expect(await hasFirstCompletedTask()).toBe(false);
   });
 
-  test("flips on first completed task", () => {
+  test("flips on first completed task", async () => {
     getDb()
       .prepare(
         `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
@@ -517,7 +517,7 @@ describe("hasFirstCompletedTask", () => {
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
       )
       .run("task-pend-1", "pending task");
-    expect(hasFirstCompletedTask()).toBe(false);
+    expect(await hasFirstCompletedTask()).toBe(false);
 
     getDb()
       .prepare(
@@ -527,7 +527,7 @@ describe("hasFirstCompletedTask", () => {
                  strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
       )
       .run("task-done-1", "done task");
-    expect(hasFirstCompletedTask()).toBe(true);
+    expect(await hasFirstCompletedTask()).toBe(true);
   });
 });
 

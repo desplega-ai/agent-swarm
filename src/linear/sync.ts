@@ -372,9 +372,9 @@ const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
  * Read the bot's persisted appUserId for the given workspace (or the default
  * slot). Returns null when not yet captured (early OAuth installs).
  */
-function getStoredAppUserId(workspaceId: string | null): string | null {
+async function getStoredAppUserId(workspaceId: string | null): Promise<string | null> {
   const key = workspaceId && workspaceId !== "" ? workspaceId : "default";
-  const entry = getKv(APP_USER_ID_NAMESPACE, key);
+  const entry = await getKv(APP_USER_ID_NAMESPACE, key);
   if (!entry) return null;
   return typeof entry.value === "string" ? entry.value : null;
 }
@@ -392,14 +392,14 @@ function getStoredAppUserId(workspaceId: string | null): string | null {
  * Returns `undefined` when no mapping could be established — callers pass
  * that straight to `requestedByUserId`.
  */
-function resolveLinearActor(
+async function resolveLinearActor(
   linearUserId: string,
   email: string,
   name: string,
   workspaceId: string | null,
   sampleEventType: string,
   sampleContext: string | null,
-): string | undefined {
+): Promise<string | undefined> {
   if (!linearUserId) {
     // No identifier — nothing to map. We don't even know what to track as
     // unmapped, so just return undefined.
@@ -407,7 +407,7 @@ function resolveLinearActor(
   }
 
   // Q21.C bot-self-link guard.
-  const storedAppUserId = getStoredAppUserId(workspaceId);
+  const storedAppUserId = await getStoredAppUserId(workspaceId);
   if (storedAppUserId && linearUserId === storedAppUserId) {
     return undefined;
   }
@@ -432,7 +432,7 @@ function resolveLinearActor(
   }
 
   // No mapping + no inline email → unmapped tracker (Q14/Q17.D).
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${linearUserId}:meta`,
     value: {
@@ -491,7 +491,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const workspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
   const sampleContext =
     (session?.comment as { body?: string } | undefined)?.body ?? issueTitle ?? null;
-  const requestedByUserId = resolveLinearActor(
+  const requestedByUserId = await resolveLinearActor(
     linearUserId,
     actorEmail,
     actorName,
@@ -844,7 +844,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   const promptedWorkspaceId = (event.organizationId ?? event.workspaceId) as string | undefined;
   const promptedSampleContext =
     (activity?.content as { body?: string } | undefined)?.body ?? userMessage ?? null;
-  const promptedRequestedByUserId = resolveLinearActor(
+  const promptedRequestedByUserId = await resolveLinearActor(
     promptedActorLinearId,
     promptedActorEmail,
     promptedActorName,

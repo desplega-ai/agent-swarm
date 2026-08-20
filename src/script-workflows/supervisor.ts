@@ -41,7 +41,7 @@ export async function startScriptRunProcess(
 
   const execution = await scriptExecutor.start({ run, baseUrl, apiKey });
   managed.set(run.id, { execution });
-  updateScriptRun(run.id, {
+  await updateScriptRun(run.id, {
     status: "running",
     pid: execution.pid,
     lastHeartbeatAt: new Date().toISOString(),
@@ -49,14 +49,14 @@ export async function startScriptRunProcess(
 
   execution.exited
     .then(async ({ exitCode, stderr }) => {
-      const current = getScriptRun(run.id);
+      const current = await getScriptRun(run.id);
       if (current && current.status === "running") {
         if (exitCode !== 0) {
           console.error(
             `[script-workflows] run ${run.id} subprocess exited ${exitCode}: ${stderr.trim() || "(no stderr)"}`,
           );
         }
-        updateScriptRun(run.id, {
+        await updateScriptRun(run.id, {
           status: exitCode === 0 ? "completed" : "failed",
           pid: null,
           finishedAt: new Date().toISOString(),
@@ -73,9 +73,9 @@ export async function startScriptRunProcess(
     });
 }
 
-export function terminateScriptRunProcess(runId: string): boolean {
+export async function terminateScriptRunProcess(runId: string): Promise<boolean> {
   const managedRun = managed.get(runId);
-  const run = getScriptRun(runId);
+  const run = await getScriptRun(runId);
   if (managedRun) {
     managedRun.execution.terminate("SIGTERM");
     managed.delete(runId);
@@ -88,14 +88,14 @@ export function terminateScriptRunProcess(runId: string): boolean {
   return false;
 }
 
-export function pauseScriptRunProcess(runId: string): void {
-  terminateScriptRunProcess(runId);
-  updateScriptRun(runId, { status: "paused", pid: null });
+export async function pauseScriptRunProcess(runId: string): Promise<void> {
+  await terminateScriptRunProcess(runId);
+  await updateScriptRun(runId, { status: "paused", pid: null });
 }
 
-export function abortScriptRunLimit(runId: string, reason: string): void {
-  terminateScriptRunProcess(runId);
-  updateScriptRun(runId, {
+export async function abortScriptRunLimit(runId: string, reason: string): Promise<void> {
+  await terminateScriptRunProcess(runId);
+  await updateScriptRun(runId, {
     status: "aborted_limit",
     pid: null,
     finishedAt: new Date().toISOString(),
@@ -103,18 +103,21 @@ export function abortScriptRunLimit(runId: string, reason: string): void {
   });
 }
 
-export function reconcileScriptRuns(baseUrl: string): void {
+export async function reconcileScriptRuns(baseUrl: string): Promise<void> {
   if (supervisorDisabled()) return;
-  for (const run of getRunningScriptRuns()) {
+  for (const run of await getRunningScriptRuns()) {
     if (run.status === "paused") continue;
     const current = managed.get(run.id);
     if (current && Date.now() - current.execution.startedAtMs > scriptRunMaxWallMs()) {
-      abortScriptRunLimit(run.id, `SCRIPT_RUN_MAX_WALL_MS exceeded (${scriptRunMaxWallMs()})`);
+      await abortScriptRunLimit(
+        run.id,
+        `SCRIPT_RUN_MAX_WALL_MS exceeded (${scriptRunMaxWallMs()})`,
+      );
       continue;
     }
     if (!current && (!run.pid || !scriptExecutor.isRunning(run.pid))) {
-      startScriptRunProcess(run, baseUrl).catch((err) => {
-        updateScriptRun(run.id, {
+      startScriptRunProcess(run, baseUrl).catch(async (err) => {
+        await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
           finishedAt: new Date().toISOString(),
@@ -125,15 +128,17 @@ export function reconcileScriptRuns(baseUrl: string): void {
   }
 }
 
-export function startScriptRunSupervisor(baseUrl: string): void {
+export async function startScriptRunSupervisor(baseUrl: string): Promise<void> {
   if (supervisorDisabled() || reconcileTimer) return;
-  reconcileScriptRuns(baseUrl);
-  reconcileTimer = setInterval(() => reconcileScriptRuns(baseUrl), 15_000);
+  await reconcileScriptRuns(baseUrl);
+  reconcileTimer = setInterval(() => {
+    void reconcileScriptRuns(baseUrl);
+  }, 15_000);
   reconcileTimer.unref?.();
 }
 
-export function stopScriptRunSupervisor(): void {
+export async function stopScriptRunSupervisor(): Promise<void> {
   if (reconcileTimer) clearInterval(reconcileTimer);
   reconcileTimer = null;
-  for (const runId of [...managed.keys()]) terminateScriptRunProcess(runId);
+  for (const runId of [...managed.keys()]) await terminateScriptRunProcess(runId);
 }

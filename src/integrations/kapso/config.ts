@@ -64,14 +64,18 @@ export async function getKapsoConfig(): Promise<KapsoConfig> {
 }
 
 /** Look up the routing mapping for a phone-number-id, or null if unregistered. */
-export function getKapsoNumberMapping(phoneNumberId: string): KapsoNumberMapping | null {
-  const row = getKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
+export async function getKapsoNumberMapping(
+  phoneNumberId: string,
+): Promise<KapsoNumberMapping | null> {
+  const row = await getKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
   return row ? (row.value as KapsoNumberMapping) : null;
 }
 
 /** Upsert a routing mapping (no TTL). */
-export function putKapsoNumberMapping(mapping: KapsoNumberMapping): KapsoNumberMapping {
-  upsertKv({
+export async function putKapsoNumberMapping(
+  mapping: KapsoNumberMapping,
+): Promise<KapsoNumberMapping> {
+  await upsertKv({
     namespace: KAPSO_NUMBERS_NAMESPACE,
     key: mapping.phoneNumberId,
     value: mapping,
@@ -82,7 +86,7 @@ export function putKapsoNumberMapping(mapping: KapsoNumberMapping): KapsoNumberM
 }
 
 /** Delete a routing mapping. Returns true if a row was removed. */
-export function deleteKapsoNumberMapping(phoneNumberId: string): boolean {
+export async function deleteKapsoNumberMapping(phoneNumberId: string): Promise<boolean> {
   return deleteKv(KAPSO_NUMBERS_NAMESPACE, phoneNumberId);
 }
 
@@ -91,9 +95,9 @@ export function deleteKapsoNumberMapping(phoneNumberId: string): boolean {
  * seen and false on every subsequent delivery within the TTL window — so the
  * caller drops duplicates (Kapso retries deliveries).
  */
-export function markKapsoMessageSeen(messageId: string): boolean {
-  if (getKv(KAPSO_DEDUPE_NAMESPACE, messageId)) return false;
-  upsertKv({
+export async function markKapsoMessageSeen(messageId: string): Promise<boolean> {
+  if (await getKv(KAPSO_DEDUPE_NAMESPACE, messageId)) return false;
+  await upsertKv({
     namespace: KAPSO_DEDUPE_NAMESPACE,
     key: messageId,
     value: 1,

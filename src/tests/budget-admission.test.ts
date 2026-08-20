@@ -161,14 +161,14 @@ describe("canClaim — budget admission predicate", () => {
     expect(result.cause).toBe("global");
   });
 
-  test("spend on a different UTC day does NOT count toward today", () => {
+  test("spend on a different UTC day does NOT count toward today", async () => {
     insertBudget("agent", "agent-1", 5.0);
     // Backdated cost from yesterday — should not contribute to today's total.
     insertSpendForAgent("agent-1", 50.0, { createdAt: "2026-04-27T23:59:59.999Z" });
     // A small cost today that does not blow the budget.
     insertSpendForAgent("agent-1", 1.0, { createdAt: "2026-04-28T01:00:00.000Z" });
 
-    const todaySpend = getDailySpendForAgent("agent-1", TODAY);
+    const todaySpend = await getDailySpendForAgent("agent-1", TODAY);
     expect(todaySpend).toBe(1.0);
 
     const result = canClaim("agent-1", NOW);
@@ -223,7 +223,7 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
     getDb().prepare("DELETE FROM budget_refusal_notifications").run();
   });
 
-  test("first call inserts; second call with same (taskId, date) returns existing row with inserted=false", () => {
+  test("first call inserts; second call with same (taskId, date) returns existing row with inserted=false", async () => {
     const args = {
       taskId: "task-1",
       date: "2026-04-28",
@@ -233,7 +233,7 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
       agentBudgetUsd: 5.0,
     };
 
-    const first = recordBudgetRefusalNotification(args);
+    const first = await recordBudgetRefusalNotification(args);
     expect(first.inserted).toBe(true);
     expect(first.row.taskId).toBe("task-1");
     expect(first.row.date).toBe("2026-04-28");
@@ -242,7 +242,7 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
     expect(first.row.agentBudgetUsd).toBe(5.0);
     expect(first.row.followUpTaskId).toBeUndefined();
 
-    const second = recordBudgetRefusalNotification({
+    const second = await recordBudgetRefusalNotification({
       ...args,
       // Different cause/spend — should still be ignored, returning the original row.
       cause: "global",
@@ -256,8 +256,8 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
     expect(second.row.createdAt).toBe(first.row.createdAt);
   });
 
-  test("same task on a different date inserts a new row", () => {
-    const first = recordBudgetRefusalNotification({
+  test("same task on a different date inserts a new row", async () => {
+    const first = await recordBudgetRefusalNotification({
       taskId: "task-1",
       date: "2026-04-28",
       agentId: "agent-1",
@@ -265,7 +265,7 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
     });
     expect(first.inserted).toBe(true);
 
-    const next = recordBudgetRefusalNotification({
+    const next = await recordBudgetRefusalNotification({
       taskId: "task-1",
       date: "2026-04-29",
       agentId: "agent-1",
@@ -275,10 +275,10 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
     expect(next.row.date).toBe("2026-04-29");
   });
 
-  test("hasBudgetRefusalNotificationToday observes presence/absence", () => {
-    expect(hasBudgetRefusalNotificationToday("task-1", "2026-04-28")).toBe(false);
+  test("hasBudgetRefusalNotificationToday observes presence/absence", async () => {
+    expect(await hasBudgetRefusalNotificationToday("task-1", "2026-04-28")).toBe(false);
 
-    recordBudgetRefusalNotification({
+    await recordBudgetRefusalNotification({
       taskId: "task-1",
       date: "2026-04-28",
       agentId: "agent-1",
@@ -287,12 +287,12 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
       globalBudgetUsd: 10.0,
     });
 
-    expect(hasBudgetRefusalNotificationToday("task-1", "2026-04-28")).toBe(true);
-    expect(hasBudgetRefusalNotificationToday("task-1", "2026-04-29")).toBe(false);
+    expect(await hasBudgetRefusalNotificationToday("task-1", "2026-04-28")).toBe(true);
+    expect(await hasBudgetRefusalNotificationToday("task-1", "2026-04-29")).toBe(false);
   });
 
-  test("getBudgetRefusalNotification round-trips global-cause fields", () => {
-    recordBudgetRefusalNotification({
+  test("getBudgetRefusalNotification round-trips global-cause fields", async () => {
+    await recordBudgetRefusalNotification({
       taskId: "task-2",
       date: "2026-04-28",
       agentId: "agent-1",
@@ -301,7 +301,7 @@ describe("recordBudgetRefusalNotification — idempotent dedup", () => {
       globalBudgetUsd: 10.0,
     });
 
-    const row = getBudgetRefusalNotification("task-2", "2026-04-28");
+    const row = await getBudgetRefusalNotification("task-2", "2026-04-28");
     expect(row).not.toBeNull();
     expect(row?.cause).toBe("global");
     expect(row?.globalSpendUsd).toBe(12.5);

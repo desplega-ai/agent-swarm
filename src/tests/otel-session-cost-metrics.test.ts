@@ -224,9 +224,9 @@ function authedPost(body: Record<string, unknown>): Promise<Response> {
 }
 
 // Helper to seed a minimal two-class pricing row for recompute tests.
-function seedRates(provider: string, model: string, inputRate = 1, outputRate = 2) {
+async function seedRates(provider: string, model: string, inputRate = 1, outputRate = 2) {
   for (const tokenClass of ["input", "output"] as const) {
-    insertPricingRow({
+    await insertPricingRow({
       provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
       model,
       tokenClass,
@@ -257,7 +257,7 @@ describe("handleSessionData → recordSessionCost forwarding", () => {
   });
 
   test("pricing-table costSource: forwards recomputed totalCostUsd", async () => {
-    seedRates("claude", "claude-sonnet", 1, 5);
+    await seedRates("claude", "claude-sonnet", 1, 5);
 
     const res = await authedPost({
       sessionId: "otel-pricing-table-test",

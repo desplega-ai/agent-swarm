@@ -108,7 +108,7 @@ describe("slack-read response boundaries", () => {
 
     const namespace = mcpOverflowNamespace(AGENT_ID);
     const key = result.structuredContent.truncation.fullValueAt.replace(`kv://${namespace}/`, "");
-    const stored = getKv(namespace, key);
+    const stored = await getKv(namespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: { data: { messages: unknown[] } };
     };

@@ -173,16 +173,16 @@ const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
  * Returns `undefined` when no mapping exists — callers pass that straight to
  * `requestedByUserId`.
  */
-function resolveGitHubSender(
+async function resolveGitHubSender(
   login: string,
   sampleEventType: string,
   sampleContext: string,
-): string | undefined {
+): Promise<string | undefined> {
   const existing = findUserByExternalId("github", login);
   if (existing) return existing.id;
 
   // No mapping → unmapped tracker.
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${login}:meta`,
     value: {
@@ -214,7 +214,7 @@ export async function handlePullRequest(
   } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "pull_request",
     `PR #${pr.number}: ${pr.title}`,
@@ -613,7 +613,7 @@ export async function handleIssue(
   const { action, issue, repository, sender, installation, assignee } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "issues",
     `Issue #${issue.number}: ${issue.title}`,
@@ -876,7 +876,7 @@ export async function handleComment(
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     eventType,
     comment.body.slice(0, 100),
@@ -1168,7 +1168,7 @@ export async function handlePullRequestReview(
   }
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "pull_request_review",
     `Review on PR #${pr.number}: ${review.state}`,

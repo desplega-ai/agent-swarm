@@ -36,7 +36,7 @@ export const registerKvDeleteTool = (server: McpServer) => {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
         });
       }
-      const deleted = deleteKv(resolved.namespace, key);
+      const deleted = await deleteKv(resolved.namespace, key);
       return toolOk(
         deleted
           ? `Deleted "${key}" from "${resolved.namespace}".`

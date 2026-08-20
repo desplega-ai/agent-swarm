@@ -22,7 +22,7 @@ import {
   moveTaskFromBacklog,
   moveTaskToBacklog,
   reassociateSessionLogs,
-  recordBudgetRefusalNotification,
+  recordBudgetRefusalNotificationSync,
   rejectTask,
   releaseTask,
   updateTaskClaudeSessionId,
@@ -408,7 +408,7 @@ export async function taskActionHandler(
                 ? "user daily budget exceeded"
                 : "global daily budget exceeded";
           const utcDate = new Date().toISOString().slice(0, 10);
-          const dedup = recordBudgetRefusalNotification({
+          const dedup = recordBudgetRefusalNotificationSync({
             taskId,
             date: utcDate,
             agentId,

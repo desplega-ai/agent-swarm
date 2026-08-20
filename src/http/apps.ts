@@ -1152,7 +1152,7 @@ export async function handleApps(
       json(res, { error: "invalid row query", issues }, 400);
       return true;
     }
-    const rows = listAppRows(parsed.params.id, parsed.params.model).filter((row) =>
+    const rows = (await listAppRows(parsed.params.id, parsed.params.model)).filter((row) =>
       filters.every((filter) => rowValue(row, filter.column) === filter.value),
     );
     const sortRaw = parsed.query.sort;
@@ -1198,7 +1198,7 @@ export async function handleApps(
     if (!parsed) return true;
     if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
     if (!resolveModel(parsed.params.id, parsed.params.model, res)) return true;
-    const row = getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
+    const row = await getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
     if (!row) {
       jsonError(res, "row not found", 404);
       return true;
@@ -1276,7 +1276,7 @@ export async function handleApps(
     try {
       runNamedQueryRoute.respond(res, 200, {
         rows: applyQuery(
-          listAppRows(app.id, query.model),
+          await listAppRows(app.id, query.model),
           query,
           model,
           appQueryParamsFromRequest(queryParams),
@@ -1656,7 +1656,7 @@ export async function handleApps(
     }
     // Per-source freshness for the runtime payload — present only once a
     // declared source has completed at least one pass.
-    const syncStatus = collectAppSyncStatus(app.id);
+    const syncStatus = await collectAppSyncStatus(app.id);
     getAppRoute.respond(res, 200, {
       app,
       ...(Object.keys(syncStatus).length > 0 ? { syncStatus } : {}),

@@ -72,13 +72,16 @@ async function composeUser(userId: string, recentEventLimit = 5) {
   };
 }
 
-function syncUserBudgetMirror(userId: string, dailyBudgetUsd: number | null | undefined): void {
+async function syncUserBudgetMirror(
+  userId: string,
+  dailyBudgetUsd: number | null | undefined,
+): Promise<void> {
   if (dailyBudgetUsd === undefined) return;
   if (dailyBudgetUsd === null) {
-    deleteBudget("user", userId);
+    await deleteBudget("user", userId);
     return;
   }
-  upsertBudget("user", userId, dailyBudgetUsd);
+  await upsertBudget("user", userId, dailyBudgetUsd);
 }
 
 // ─── Response schemas ────────────────────────────────────────────────────────
@@ -453,11 +456,11 @@ const UNMAPPED_KINDS = ["slack", "github", "gitlab", "linear", "kapso"] as const
  * `<externalId>:count` integer) under a single `externalId` and return a
  * unified shape ready for the People-page Unmapped tab.
  */
-function collectUnmappedForKind(kind: string, limit: number) {
+async function collectUnmappedForKind(kind: string, limit: number) {
   const namespace = `integration:unmapped:${kind}`;
   // listKv is bounded internally; we ask for 2x the cap so meta+count pairs
   // produce up to `limit` unique externalIds.
-  const rows = listKv(namespace, { limit: Math.min(limit * 2, 1000), offset: 0 });
+  const rows = await listKv(namespace, { limit: Math.min(limit * 2, 1000), offset: 0 });
   const byId = new Map<
     string,
     {
@@ -557,7 +560,7 @@ export async function handleUsers(
     try {
       const { identities, ...userFields } = parsed.body;
       const user = await createUser(userFields);
-      syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
+      await syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
       for (const ident of identities ?? []) {
         linkIdentity(user.id, ident.kind, ident.externalId, actor);
       }
@@ -581,7 +584,7 @@ export async function handleUsers(
     if (!parsed) return true;
     const limit = parsed.query.limit ?? 100;
     const kinds = parsed.query.kind ? [parsed.query.kind] : UNMAPPED_KINDS;
-    const rows = kinds.flatMap((k) => collectUnmappedForKind(k, limit));
+    const rows = (await Promise.all(kinds.map((k) => collectUnmappedForKind(k, limit)))).flat();
     rows.sort((a, b) => {
       if (b.count !== a.count) return b.count - a.count;
       const al = a.lastSeenAt ?? "";
@@ -625,8 +628,8 @@ export async function handleUsers(
       linkIdentity(targetUserId, kind, externalId, actor);
       // Clear both kv rows (best-effort — DELETE is idempotent).
       const ns = `integration:unmapped:${kind}`;
-      deleteKv(ns, `${externalId}:meta`);
-      deleteKv(ns, `${externalId}:count`);
+      await deleteKv(ns, `${externalId}:meta`);
+      await deleteKv(ns, `${externalId}:count`);
       const user = await composeUser(targetUserId);
       resolveUnmapped.respond(res, 200, { user });
     } catch (err) {
@@ -875,7 +878,7 @@ export async function handleUsers(
         jsonError(res, "User not found", 404);
         return true;
       }
-      syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
+      await syncUserBudgetMirror(parsed.params.id, parsed.body.dailyBudgetUsd);
 
       // Budget event
       if (

@@ -114,7 +114,7 @@ export const registerKvSetTool = (server: McpServer) => {
       const expiresAt = expiresInSec !== undefined ? Date.now() + expiresInSec * 1000 : null;
 
       try {
-        const entry = upsertKv({
+        const entry = await upsertKv({
           namespace: resolved.namespace,
           key,
           value,

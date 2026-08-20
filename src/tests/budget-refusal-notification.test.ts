@@ -223,7 +223,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     expect(followUps).toHaveLength(1);
     const followUpId = followUps[0]!.id;
 
-    const dedupRow = getBudgetRefusalNotification(parentTask.id, todayUtc());
+    const dedupRow = await getBudgetRefusalNotification(parentTask.id, todayUtc());
     expect(dedupRow).not.toBeNull();
     expect(dedupRow?.followUpTaskId).toBe(followUpId);
   });
@@ -251,15 +251,15 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       .run(yesterday, parentTask.id, todayUtc());
 
     // Verify we moved the row.
-    expect(getBudgetRefusalNotification(parentTask.id, todayUtc())).toBeNull();
-    expect(getBudgetRefusalNotification(parentTask.id, yesterday)).not.toBeNull();
+    expect(await getBudgetRefusalNotification(parentTask.id, todayUtc())).toBeNull();
+    expect(await getBudgetRefusalNotification(parentTask.id, yesterday)).not.toBeNull();
 
     // Second refusal — fresh PK, fresh follow-up.
     await callPoll(worker.id);
     const followUps = listFollowUpTasks(parentTask.id);
     expect(followUps).toHaveLength(2);
     // The newer dedup row exists for today.
-    expect(getBudgetRefusalNotification(parentTask.id, todayUtc())).not.toBeNull();
+    expect(await getBudgetRefusalNotification(parentTask.id, todayUtc())).not.toBeNull();
   });
 
   test("workflow event bus receives task.budget_refused on every refusal (not just first)", async () => {
@@ -317,7 +317,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     // won't run when there's no follow-up to link, but the row's existence
     // is what serves as the operator's "the lead was already notified
     // (theoretically)" audit signal.
-    const dedupRow = getBudgetRefusalNotification(parentTask.id, todayUtc());
+    const dedupRow = await getBudgetRefusalNotification(parentTask.id, todayUtc());
     expect(dedupRow).not.toBeNull();
     expect(dedupRow?.followUpTaskId).toBeUndefined();
   });

@@ -75,11 +75,11 @@ const GITLAB_WEBHOOK_ACTOR = { kind: "system", id: "webhook:gitlab" } as const;
  * Returns `undefined` when no mapping could be established — callers pass
  * that straight to `requestedByUserId`.
  */
-function resolveGitLabSender(
+async function resolveGitLabSender(
   user: GitLabUser,
   sampleEventType: string,
   sampleContext: string,
-): string | undefined {
+): Promise<string | undefined> {
   const existing = findUserByExternalId("gitlab", user.username);
   if (existing) return existing.id;
 
@@ -97,7 +97,7 @@ function resolveGitLabSender(
   }
 
   // No mapping + no inline email → unmapped tracker.
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${user.username}:meta`,
     value: {
@@ -130,7 +130,7 @@ export async function handleMergeRequest(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveGitLabSender(
+  const requestedByUserId = await resolveGitLabSender(
     user,
     "merge_request",
     `MR !${mr.iid}: ${mr.title}`,
@@ -234,7 +234,7 @@ export async function handleIssue(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveGitLabSender(
+  const requestedByUserId = await resolveGitLabSender(
     user,
     "issue",
     `Issue #${issue.iid}: ${issue.title}`,
@@ -322,7 +322,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender.
-  const requestedByUserId = resolveGitLabSender(user, "note", note.note);
+  const requestedByUserId = await resolveGitLabSender(user, "note", note.note);
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {
@@ -422,7 +422,7 @@ export async function handlePipeline(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender — whoever triggered the pipeline.
-  const requestedByUserId = resolveGitLabSender(user, "pipeline", `Pipeline #${pipeline.id}`);
+  const requestedByUserId = await resolveGitLabSender(user, "pipeline", `Pipeline #${pipeline.id}`);
 
   // Only handle failed pipelines that are associated with a merge request
   if (pipeline.status !== "failed") {

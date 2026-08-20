@@ -242,7 +242,7 @@ export async function handleStats(
   }
 
   if (getMetrics.match(req.method, pathSegments)) {
-    getMetrics.respond(res, 200, getSwarmMetrics());
+    getMetrics.respond(res, 200, await getSwarmMetrics());
     return true;
   }
 

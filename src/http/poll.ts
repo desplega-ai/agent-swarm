@@ -20,7 +20,7 @@ import {
   getTaskById,
   getUnassignedTaskIdsForAgent,
   hasCapacity,
-  recordBudgetRefusalNotification,
+  recordBudgetRefusalNotificationSync,
   startTask,
   updateAgentStatusFromCapacity,
   upsertChannelActivityCursor,
@@ -295,7 +295,7 @@ export async function handlePoll(
             const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
-              const dedup = recordBudgetRefusalNotification({
+              const dedup = recordBudgetRefusalNotificationSync({
                 taskId: pendingTask.id,
                 date: utcDate,
                 agentId: myAgentId,
@@ -476,7 +476,7 @@ export async function handlePoll(
               const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
-                const dedup = recordBudgetRefusalNotification({
+                const dedup = recordBudgetRefusalNotificationSync({
                   taskId: candidateId,
                   date: utcDate,
                   agentId: myAgentId,

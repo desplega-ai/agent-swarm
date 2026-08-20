@@ -54,13 +54,13 @@ const JIRA_WEBHOOK_ACTOR: IdentityActor = { kind: "system", id: "webhook:jira" }
  *
  * Returns `undefined` when no mapping could be established.
  */
-function resolveJiraActor(
+async function resolveJiraActor(
   accountId: string | undefined,
   email: string | undefined,
   name: string | undefined,
   sampleEventType: string,
   sampleContext: string,
-): string | undefined {
+): Promise<string | undefined> {
   if (!accountId) return undefined;
 
   const existing = findUserByExternalId("jira", accountId);
@@ -84,7 +84,7 @@ function resolveJiraActor(
     return user.id;
   }
 
-  recordUnmappedIdentity("jira", accountId, { sampleEventType, sampleContext });
+  await recordUnmappedIdentity("jira", accountId, { sampleEventType, sampleContext });
   return undefined;
 }
 
@@ -287,7 +287,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   const issueKey = issue.key;
   const summary = issue.fields?.summary ?? "(no summary)";
   const reporterAccountId = issue.fields?.reporter?.accountId;
-  const requestedByUserId = resolveJiraActor(
+  const requestedByUserId = await resolveJiraActor(
     reporterAccountId,
     issue.fields?.reporter?.emailAddress,
     issue.fields?.reporter?.displayName,
@@ -423,7 +423,7 @@ export async function handleCommentEvent(event: Record<string, unknown>): Promis
   const descriptionText = extractText(issue.fields?.description);
   const commentText = extractText(comment.body);
   const commentAuthorAccountId = comment.author?.accountId ?? comment.updateAuthor?.accountId;
-  const requestedByUserId = resolveJiraActor(
+  const requestedByUserId = await resolveJiraActor(
     commentAuthorAccountId,
     comment.author?.emailAddress ?? comment.updateAuthor?.emailAddress,
     comment.author?.displayName ?? comment.updateAuthor?.displayName,

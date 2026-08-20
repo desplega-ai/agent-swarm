@@ -78,15 +78,19 @@ describe("models.dev runtime pricing refresh", () => {
     });
 
     expect(
-      getActivePricingRow("claude", "claude-opus-5", "cache_write_1h", 500)?.pricePerMillionUsd,
-    ).toBe(10);
-    expect(
-      getActivePricingRow("claude-managed", "claude-opus-5", "cache_write_1h", 500)
+      (await getActivePricingRow("claude", "claude-opus-5", "cache_write_1h", 500))
         ?.pricePerMillionUsd,
     ).toBe(10);
-    expect(getActivePricingRow("pi", "opus", "cache_write_1h", 500)?.pricePerMillionUsd).toBe(10);
     expect(
-      getActivePricingRow("claude", "claude-opus-5", "cache_write", 500)?.pricePerMillionUsd,
+      (await getActivePricingRow("claude-managed", "claude-opus-5", "cache_write_1h", 500))
+        ?.pricePerMillionUsd,
+    ).toBe(10);
+    expect(
+      (await getActivePricingRow("pi", "opus", "cache_write_1h", 500))?.pricePerMillionUsd,
+    ).toBe(10);
+    expect(
+      (await getActivePricingRow("claude", "claude-opus-5", "cache_write", 500))
+        ?.pricePerMillionUsd,
     ).toBe(6.25);
   });
 
@@ -107,7 +111,7 @@ describe("models.dev runtime pricing refresh", () => {
     expect(first.inserted).toBe(4);
     expect(first.unchanged).toBe(0);
 
-    const activeChanged = getActivePricingRow("codex", "gpt-refresh-test", "input", 1_000);
+    const activeChanged = await getActivePricingRow("codex", "gpt-refresh-test", "input", 1_000);
     expect(activeChanged?.effectiveFrom).toBe(1_000);
     expect(activeChanged?.pricePerMillionUsd).toBe(2);
 

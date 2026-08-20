@@ -429,7 +429,7 @@ async function shutdown() {
   stopQueueStallAlarm();
 
   // Stop durable script workflow subprocesses
-  stopScriptRunSupervisor();
+  await stopScriptRunSupervisor();
 
   // Stop Slack bot
   await stopSlackApp();
@@ -647,7 +647,7 @@ httpServer
     await initWorkflows();
 
     // Reconcile durable script workflow subprocesses
-    startScriptRunSupervisor(getMcpBaseUrl());
+    await startScriptRunSupervisor(getMcpBaseUrl());
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {

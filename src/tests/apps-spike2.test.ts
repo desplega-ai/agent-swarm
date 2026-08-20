@@ -907,7 +907,7 @@ describe("reserved apps KV namespace", () => {
       expect(result.structuredContent.message).toMatch(/reserved for swarm apps/);
     }
 
-    upsertKv({ namespace, key: "debug", value: "visible", valueType: "string" });
+    await upsertKv({ namespace, key: "debug", value: "visible", valueType: "string" });
     const getResult = (await tools["kv-get"]!.handler(
       { namespace, key: "debug" },
       toolMeta(),

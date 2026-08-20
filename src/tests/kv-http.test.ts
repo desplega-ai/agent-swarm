@@ -303,7 +303,7 @@ describe("/api/kv REST — auth on writes", () => {
 
   test("MCP overflow namespace allows only its owning agent to read, list, or write", async () => {
     const namespace = mcpOverflowNamespace(otherAgentId);
-    upsertKv({
+    await upsertKv({
       namespace,
       key: "v1/private-tool/hash",
       value: "private business content",

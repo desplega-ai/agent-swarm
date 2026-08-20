@@ -253,7 +253,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
 
     test("GET /api/budgets/refusals returns recent refusals newest first", async () => {
       // Seed three refusals across two days/agents.
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-old",
         date: "2026-04-26",
         agentId: "agent-A",
@@ -263,7 +263,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
       });
       // Force a small gap so createdAt ordering is deterministic.
       await new Promise((r) => setTimeout(r, 5));
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-mid",
         date: "2026-04-27",
         agentId: "agent-B",
@@ -272,7 +272,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
         globalBudgetUsd: 40,
       });
       await new Promise((r) => setTimeout(r, 5));
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-new",
         date: "2026-04-28",
         agentId: "agent-A",
@@ -296,7 +296,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
 
     test("GET /api/budgets/refusals respects limit query param", async () => {
       for (let i = 0; i < 5; i++) {
-        recordBudgetRefusalNotification({
+        await recordBudgetRefusalNotification({
           taskId: `task-${i}`,
           date: "2026-04-28",
           agentId: "agent-A",

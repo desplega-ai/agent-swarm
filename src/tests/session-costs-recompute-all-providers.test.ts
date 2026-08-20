@@ -107,15 +107,15 @@ interface CostResponse {
   };
 }
 
-function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
-  insertPricingRow({
+async function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "input",
     effectiveFrom: 1,
     pricePerMillionUsd: inputRate,
   });
-  insertPricingRow({
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "output",
@@ -135,18 +135,18 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     "gemini",
   ] as const) {
     test(`provider=${provider} with seeded rows → costSource='pricing-table'`, async () => {
-      seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
+      await seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
       // The payload below explicitly says 75% of writes used a 1h TTL. Phase 3
       // treats a missing 1h row as unpriced, so seed both cache classes at a
       // zero rate to keep this test focused on provider coverage.
-      insertPricingRow({
+      await insertPricingRow({
         provider,
         model: `${provider}-test-model`,
         tokenClass: "cache_write",
         effectiveFrom: 1,
         pricePerMillionUsd: 0,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider,
         model: `${provider}-test-model`,
         tokenClass: "cache_write_1h",
@@ -228,7 +228,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
 
 describe("Migration 128 — modelBreakdown persistence", () => {
   test("breakdown + harness fields survive the DB round-trip through GET", async () => {
-    seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
+    await seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
     const models = [
       {
         model: "claude-breakdown-model",

@@ -324,20 +324,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function assertRunWithinLimits(runId: string): { ok: true } | { ok: false; error: string } {
+async function assertRunWithinLimits(
+  runId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const maxSteps = scriptRunMaxSteps();
-  const stepCount = countScriptRunJournalSteps(runId);
+  const stepCount = await countScriptRunJournalSteps(runId);
   if (stepCount > maxSteps) {
     const error = `SCRIPT_RUN_MAX_STEPS exceeded (${stepCount}/${maxSteps})`;
-    abortScriptRunLimit(runId, error);
+    await abortScriptRunLimit(runId, error);
     return { ok: false, error };
   }
 
   const maxAgentTasks = scriptRunMaxAgentTasks();
-  const agentTaskCount = countScriptRunJournalAgentTaskSteps(runId);
+  const agentTaskCount = await countScriptRunJournalAgentTaskSteps(runId);
   if (agentTaskCount > maxAgentTasks) {
     const error = `SCRIPT_RUN_MAX_AGENT_TASKS exceeded (${agentTaskCount}/${maxAgentTasks})`;
-    abortScriptRunLimit(runId, error);
+    await abortScriptRunLimit(runId, error);
     return { ok: false, error };
   }
 
@@ -372,7 +374,7 @@ export async function handleScriptRuns(
     }
 
     if (parsed.body.idempotencyKey) {
-      const existingRun = getScriptRunByIdempotencyKey(parsed.body.idempotencyKey);
+      const existingRun = await getScriptRunByIdempotencyKey(parsed.body.idempotencyKey);
       if (existingRun) {
         json(
           res,
@@ -384,12 +386,12 @@ export async function handleScriptRuns(
     }
 
     const cap = scriptRunConcurrencyCap();
-    if (countActiveScriptRuns() >= cap) {
+    if ((await countActiveScriptRuns()) >= cap) {
       json(res, { error: "script_run_concurrency_cap", cap }, 429);
       return true;
     }
 
-    const { run, existing } = createScriptRun({
+    const { run, existing } = await createScriptRun({
       id: crypto.randomUUID(),
       agentId: agent.id,
       source: parsed.body.source,
@@ -401,8 +403,8 @@ export async function handleScriptRuns(
     });
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch((err) => {
-        updateScriptRun(run.id, {
+      startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch(async (err) => {
+        await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
           finishedAt: new Date().toISOString(),
@@ -438,8 +440,8 @@ export async function handleScriptRuns(
       offset: parsed.query.offset ?? 0,
     };
     listScriptRunsRoute.respond(res, 200, {
-      runs: listScriptRuns(opts),
-      total: countScriptRuns({
+      runs: await listScriptRuns(opts),
+      total: await countScriptRuns({
         status: opts.status,
         agentId: opts.agentId,
         scriptName: opts.scriptName,
@@ -451,19 +453,19 @@ export async function handleScriptRuns(
   if (getScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await getScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.id);
+    const run = await getScriptRun(parsed.params.id);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    getScriptRunRoute.respond(res, 200, { run, journal: listScriptRunJournalSteps(run.id) });
+    getScriptRunRoute.respond(res, 200, { run, journal: await listScriptRunJournalSteps(run.id) });
     return true;
   }
 
   if (deleteScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await deleteScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.id);
+    const run = await getScriptRun(parsed.params.id);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
@@ -473,8 +475,8 @@ export async function handleScriptRuns(
       res.end();
       return true;
     }
-    terminateScriptRunProcess(run.id);
-    updateScriptRun(run.id, {
+    await terminateScriptRunProcess(run.id);
+    await updateScriptRun(run.id, {
       status: "cancelled",
       pid: null,
       finishedAt: new Date().toISOString(),
@@ -487,7 +489,7 @@ export async function handleScriptRuns(
   if (getInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await getInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const step = getScriptRunJournalStep(parsed.params.runId, parsed.params.stepKey);
+    const step = await getScriptRunJournalStep(parsed.params.runId, parsed.params.stepKey);
     if (!step) {
       jsonError(res, "Script run journal step not found", 404);
       return true;
@@ -508,12 +510,12 @@ export async function handleScriptRuns(
   if (postInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await postInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    upsertScriptRunJournalStep({
+    await upsertScriptRunJournalStep({
       runId: run.id,
       stepKey: parsed.body.stepKey,
       stepType: parsed.body.stepType,
@@ -523,7 +525,7 @@ export async function handleScriptRuns(
       error: parsed.body.error,
       durationMs: parsed.body.durationMs,
     });
-    const limit = assertRunWithinLimits(run.id);
+    const limit = await assertRunWithinLimits(run.id);
     if (!limit.ok) {
       json(res, { error: "script_run_limit", message: limit.error }, 429);
       return true;
@@ -535,11 +537,11 @@ export async function handleScriptRuns(
   if (heartbeatRoute.match(req.method, pathSegments)) {
     const parsed = await heartbeatRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getScriptRun(parsed.params.runId)) {
+    if (!(await getScriptRun(parsed.params.runId))) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    updateScriptRun(parsed.params.runId, { lastHeartbeatAt: new Date().toISOString() });
+    await updateScriptRun(parsed.params.runId, { lastHeartbeatAt: new Date().toISOString() });
     res.writeHead(204);
     res.end();
     return true;
@@ -548,7 +550,7 @@ export async function handleScriptRuns(
   if (statusRoute.match(req.method, pathSegments)) {
     const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
@@ -558,7 +560,7 @@ export async function handleScriptRuns(
       res.end();
       return true;
     }
-    updateScriptRun(parsed.params.runId, {
+    await updateScriptRun(parsed.params.runId, {
       status: parsed.body.status,
       pid: null,
       finishedAt: parsed.body.status === "paused" ? null : new Date().toISOString(),
@@ -585,7 +587,7 @@ export async function handleScriptRuns(
   if (agentTaskRoute.match(req.method, pathSegments)) {
     const parsed = await agentTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;

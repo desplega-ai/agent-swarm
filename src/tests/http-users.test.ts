@@ -196,21 +196,21 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(create.status).toBe(200);
     const { user } = (await create.json()) as { user: { id: string } };
-    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(1.25);
+    expect((await getBudget("user", user.id))?.dailyBudgetUsd).toBe(1.25);
 
     const update = await authedFetch(`/api/users/${user.id}`, {
       method: "PATCH",
       body: JSON.stringify({ dailyBudgetUsd: 2.5 }),
     });
     expect(update.status).toBe(200);
-    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(2.5);
+    expect((await getBudget("user", user.id))?.dailyBudgetUsd).toBe(2.5);
 
     const remove = await authedFetch(`/api/users/${user.id}`, {
       method: "PATCH",
       body: JSON.stringify({ dailyBudgetUsd: null }),
     });
     expect(remove.status).toBe(200);
-    expect(getBudget("user", user.id)).toBeNull();
+    expect(await getBudget("user", user.id)).toBeNull();
   });
 
   test("budget / status / emailAliases diffs each emit the right event types", async () => {
@@ -409,20 +409,20 @@ describe("GET /api/users/unmapped", () => {
   test("groups :meta + :count entries and sorts by count DESC", async () => {
     // Seed two unmapped identities with different counts.
     const ns = "integration:unmapped:slack";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "U_LOW:meta",
       value: { lastSeenAt: "2026-05-01T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "U_LOW:count", value: 1, valueType: "integer" });
-    upsertKv({
+    await upsertKv({ namespace: ns, key: "U_LOW:count", value: 1, valueType: "integer" });
+    await upsertKv({
       namespace: ns,
       key: "U_HIGH:meta",
       value: { lastSeenAt: "2026-05-15T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "U_HIGH:count", value: 5, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "U_HIGH:count", value: 5, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped?kind=slack");
     expect(r.status).toBe(200);
@@ -442,13 +442,13 @@ describe("GET /api/users/unmapped", () => {
 
   test("default unmapped list includes Kapso sender identities", async () => {
     const ns = "integration:unmapped:kapso";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "34679077777:meta",
       value: { lastSeenAt: "2026-05-20T00:00:00Z", sampleEventType: "kapso.message.received" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped");
     expect(r.status).toBe(200);
@@ -465,8 +465,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
   test("link-to-existing branch links + clears kv rows", async () => {
     const existing = createUser({ name: "ExistingTarget" });
     const ns = "integration:unmapped:slack";
-    upsertKv({ namespace: ns, key: "U_QA9:meta", value: { lastSeenAt: "x" }, valueType: "json" });
-    upsertKv({ namespace: ns, key: "U_QA9:count", value: 3, valueType: "integer" });
+    await upsertKv({
+      namespace: ns,
+      key: "U_QA9:meta",
+      value: { lastSeenAt: "x" },
+      valueType: "json",
+    });
+    await upsertKv({ namespace: ns, key: "U_QA9:count", value: 3, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/slack/U_QA9/resolve", {
       method: "POST",
@@ -487,8 +492,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
   test("create-new branch creates the user + links + clears kv rows", async () => {
     const ns = "integration:unmapped:github";
-    upsertKv({ namespace: ns, key: "ghuser:meta", value: { lastSeenAt: "x" }, valueType: "json" });
-    upsertKv({ namespace: ns, key: "ghuser:count", value: 1, valueType: "integer" });
+    await upsertKv({
+      namespace: ns,
+      key: "ghuser:meta",
+      value: { lastSeenAt: "x" },
+      valueType: "json",
+    });
+    await upsertKv({ namespace: ns, key: "ghuser:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/github/ghuser/resolve", {
       method: "POST",
@@ -504,13 +514,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
   test("create-new branch supports phone-only Kapso contacts without email", async () => {
     const ns = "integration:unmapped:kapso";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "34679077777:meta",
       value: { lastSeenAt: "x", sampleEventType: "kapso.message.received" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/kapso/34679077777/resolve", {
       method: "POST",
@@ -542,13 +552,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     // before linking AND before deleting the two kv rows.
     const ns = "integration:unmapped:slack";
     const literal = "@alexdev";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: `${literal}:meta`,
       value: { lastSeenAt: "2026-05-19T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: `${literal}:count`, value: 2, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: `${literal}:count`, value: 2, valueType: "integer" });
 
     const r = await authedFetch(
       `/api/users/unmapped/slack/${encodeURIComponent(literal)}/resolve`,
@@ -581,13 +591,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     const literalKind = "custom;crm";
     const ns = `integration:unmapped:${literalKind}`;
     const externalId = "CRM_42";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: `${externalId}:meta`,
       value: { lastSeenAt: "2026-05-19T00:00:00Z", sampleEventType: "lead" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: `${externalId}:count`, value: 4, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: `${externalId}:count`, value: 4, valueType: "integer" });
 
     const r = await authedFetch(
       `/api/users/unmapped/${encodeURIComponent(literalKind)}/${externalId}/resolve`,

@@ -440,7 +440,7 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
   // (kv-set's identical guard is covered by kv-tool.test.ts:178)
   test("worker cannot kv-delete in another agent's namespace", async () => {
     const namespace = `task:agent:${OTHER_WORKER_ID}`;
-    upsertKv({ namespace, key: "charact-del", value: "keep-me", valueType: "string" });
+    await upsertKv({ namespace, key: "charact-del", value: "keep-me", valueType: "string" });
 
     const result = await callTool("kv-delete", WORKER_ID, { key: "charact-del", namespace });
 
@@ -449,18 +449,18 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
       "writes to another agent's namespace require lead",
     );
     // DB not mutated
-    expect(getKv(namespace, "charact-del")).not.toBeNull();
+    expect(await getKv(namespace, "charact-del")).not.toBeNull();
   });
 
   test("lead can kv-delete in another agent's namespace", async () => {
     const namespace = `task:agent:${OTHER_WORKER_ID}`;
-    upsertKv({ namespace, key: "charact-del-lead", value: "x", valueType: "string" });
+    await upsertKv({ namespace, key: "charact-del-lead", value: "x", valueType: "string" });
 
     const result = await callTool("kv-delete", LEAD_ID, { key: "charact-del-lead", namespace });
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.deleted).toBe(true);
-    expect(getKv(namespace, "charact-del-lead")).toBeNull();
+    expect(await getKv(namespace, "charact-del-lead")).toBeNull();
   });
 
   // kv-incr.ts:17 — cross-agent task:agent:* writes require lead
@@ -474,7 +474,7 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
       "writes to another agent's namespace require lead",
     );
     // DB not mutated (entry was never created)
-    expect(getKv(namespace, "charact-incr")).toBeNull();
+    expect(await getKv(namespace, "charact-incr")).toBeNull();
   });
 
   test("lead can kv-incr in another agent's namespace", async () => {
@@ -483,6 +483,6 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
     const result = await callTool("kv-incr", LEAD_ID, { key: "charact-incr-lead", namespace });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getKv(namespace, "charact-incr-lead")).not.toBeNull();
+    expect(await getKv(namespace, "charact-incr-lead")).not.toBeNull();
   });
 });

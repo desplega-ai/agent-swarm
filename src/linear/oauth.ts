@@ -60,7 +60,7 @@ export async function captureLinearAppUserId(accessToken: string): Promise<void>
   if (!appUserId) {
     throw new Error("Linear viewer query returned no id");
   }
-  upsertKv({
+  await upsertKv({
     namespace: APP_USER_ID_NAMESPACE,
     key: workspaceId && workspaceId !== "" ? workspaceId : "default",
     value: appUserId,

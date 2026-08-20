@@ -13456,9 +13456,9 @@ export async function listRecentSessions(
  * `total` in the `/api/sessions` pager — a session is a root task, so this is
  * a plain count, no recursive chain walk needed.
  */
-export function countSessions(
+export async function countSessions(
   opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId">,
-): number {
+): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
   const requestedByUserId = opts?.requestedByUserId?.trim() || undefined;
@@ -13480,11 +13480,10 @@ export function countSessions(
     params.push(requestedByUserId);
   }
 
-  const row = getDb()
-    .prepare<{ count: number }, string[]>(
-      `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM agent_tasks WHERE ${conditions.join(" AND ")}`,
+    params,
+  );
   return row?.count ?? 0;
 }
 
@@ -13556,7 +13555,21 @@ function rowToBudgetRefusalNotification(
  * Look up a single budget row by (scope, scopeId). Returns `null` when no row
  * exists — callers treat that as "unlimited / no budget configured".
  */
-export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
+export async function getBudget(scope: BudgetScope, scopeId: string): Promise<Budget | null> {
+  const row = await getDbClient().get<BudgetRow>(
+    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
+    [scope, scopeId],
+  );
+  return row ? rowToBudget(row) : null;
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `getBudget`, kept for
+ * `canClaim` (budget-admission.ts), whose call sites all run inside a raw
+ * synchronous `getDb().transaction()` callback (`/api/poll`, `task-action`
+ * `accept`) — stays on the raw sync handle.
+ */
+export function getBudgetSync(scope: BudgetScope, scopeId: string): Budget | null {
   const row = getDb()
     .prepare<BudgetRow, [string, string]>(
       "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets WHERE scope = ? AND scope_id = ?",
@@ -13569,13 +13582,11 @@ export function getBudget(scope: BudgetScope, scopeId: string): Budget | null {
  * Phase 6: list every budget row in the system. Used by `GET /api/budgets`.
  * Order is `(scope, scope_id)` for stable output across calls.
  */
-export function getBudgets(): Budget[] {
-  return getDb()
-    .prepare<BudgetRow, []>(
-      "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
-    )
-    .all()
-    .map(rowToBudget);
+export async function getBudgets(): Promise<Budget[]> {
+  const rows = await getDbClient().query<BudgetRow>(
+    "SELECT scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt FROM budgets ORDER BY scope, scope_id",
+  );
+  return rows.map(rowToBudget);
 }
 
 /**
@@ -13583,19 +13594,22 @@ export function getBudgets(): Budget[] {
  * exist, otherwise updates `daily_budget_usd` and `lastUpdatedAt`. Returns the
  * resulting row in both cases.
  */
-export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd: number): Budget {
+export async function upsertBudget(
+  scope: BudgetScope,
+  scopeId: string,
+  dailyBudgetUsd: number,
+): Promise<Budget> {
   const now = Date.now();
-  getDb()
-    .prepare(
-      `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
+  await getDbClient().run(
+    `INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(scope, scope_id) DO UPDATE SET
          daily_budget_usd = excluded.daily_budget_usd,
          lastUpdatedAt = excluded.lastUpdatedAt`,
-    )
-    .run(scope, scopeId, dailyBudgetUsd, now, now);
+    [scope, scopeId, dailyBudgetUsd, now, now],
+  );
 
-  const updated = getBudget(scope, scopeId);
+  const updated = await getBudget(scope, scopeId);
   if (!updated) {
     throw new Error(
       `upsertBudget: row missing after insert for (scope=${scope}, scopeId=${scopeId})`,
@@ -13608,10 +13622,11 @@ export function upsertBudget(scope: BudgetScope, scopeId: string, dailyBudgetUsd
  * Phase 6: delete a budget row. Returns `true` if a row was deleted, `false`
  * if `(scope, scopeId)` did not exist.
  */
-export function deleteBudget(scope: BudgetScope, scopeId: string): boolean {
-  const result = getDb()
-    .prepare("DELETE FROM budgets WHERE scope = ? AND scope_id = ?")
-    .run(scope, scopeId);
+export async function deleteBudget(scope: BudgetScope, scopeId: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM budgets WHERE scope = ? AND scope_id = ?", [
+    scope,
+    scopeId,
+  ]);
   return result.changes > 0;
 }
 
@@ -13649,30 +13664,27 @@ function rowToPricingRow(row: PricingRowDb): PricingRow {
 }
 
 /** Phase 6: list every pricing row, latest-effective first. */
-export function getAllPricingRows(): PricingRow[] {
-  return getDb()
-    .prepare<PricingRowDb, []>(
-      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
-    )
-    .all()
-    .map(rowToPricingRow);
+export async function getAllPricingRows(): Promise<PricingRow[]> {
+  const rows = await getDbClient().query<PricingRowDb>(
+    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing ORDER BY provider, model, token_class, effective_from DESC",
+  );
+  return rows.map(rowToPricingRow);
 }
 
 /**
  * Phase 6: list every pricing row for a given (provider, model, tokenClass)
  * triple. Order is `effective_from DESC` so newest is first.
  */
-export function getPricingRows(
+export async function getPricingRows(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
-): PricingRow[] {
-  return getDb()
-    .prepare<PricingRowDb, [string, string, string]>(
-      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
-    )
-    .all(provider, model, tokenClass)
-    .map(rowToPricingRow);
+): Promise<PricingRow[]> {
+  const rows = await getDbClient().query<PricingRowDb>(
+    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? ORDER BY effective_from DESC",
+    [provider, model, tokenClass],
+  );
+  return rows.map(rowToPricingRow);
 }
 
 /**
@@ -13681,7 +13693,26 @@ export function getPricingRows(
  * matches (model unseeded for that triple at that time). Backed by the
  * `idx_pricing_lookup` index from migration 044.
  */
-export function getActivePricingRow(
+export async function getActivePricingRow(
+  provider: PricingProvider,
+  model: string,
+  tokenClass: PricingTokenClass,
+  atEpochMs: number,
+): Promise<PricingRow | null> {
+  const row = await getDbClient().get<PricingRowDb>(
+    "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
+    [provider, model, tokenClass, atEpochMs],
+  );
+  return row ? rowToPricingRow(row) : null;
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `getActivePricingRow`,
+ * kept for `insertChangedPricingRows` (pricing-refresh.ts), whose own body
+ * contains a raw synchronous `getDb().transaction()` callback (which cannot
+ * await) — stays on the raw sync handle.
+ */
+export function getActivePricingRowSync(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
@@ -13708,7 +13739,38 @@ export interface InsertPricingRowInput {
  * `(provider, model, token_class, effective_from)` — caller (the HTTP route)
  * translates that into a 409.
  */
-export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
+export async function insertPricingRow(input: InsertPricingRowInput): Promise<PricingRow> {
+  const now = Date.now();
+  await getDbClient().run(
+    `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      input.provider,
+      input.model,
+      input.tokenClass,
+      input.effectiveFrom,
+      input.pricePerMillionUsd,
+      now,
+      now,
+    ],
+  );
+  return {
+    provider: input.provider,
+    model: input.model,
+    tokenClass: input.tokenClass,
+    effectiveFrom: input.effectiveFrom,
+    pricePerMillionUsd: input.pricePerMillionUsd,
+    createdAt: now,
+    lastUpdatedAt: now,
+  };
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `insertPricingRow`, kept
+ * for `insertChangedPricingRows` (pricing-refresh.ts) — see
+ * `getActivePricingRowSync`.
+ */
+export function insertPricingRowSync(input: InsertPricingRowInput): PricingRow {
   const now = Date.now();
   getDb()
     .prepare(
@@ -13740,17 +13802,16 @@ export function insertPricingRow(input: InsertPricingRowInput): PricingRow {
  * the row did not exist. Discouraged operationally — historical session_costs
  * are not retroactively recomputed — but allowed for typo correction.
  */
-export function deletePricingRow(
+export async function deletePricingRow(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
   effectiveFrom: number,
-): boolean {
-  const result = getDb()
-    .prepare(
-      "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
-    )
-    .run(provider, model, tokenClass, effectiveFrom);
+): Promise<boolean> {
+  const result = await getDbClient().run(
+    "DELETE FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = ?",
+    [provider, model, tokenClass, effectiveFrom],
+  );
   return result.changes > 0;
 }
 
@@ -13767,7 +13828,19 @@ export function deletePricingRow(
  * `idx_session_costs_agent_createdAt` index (verified via EXPLAIN QUERY PLAN
  * in the test suite).
  */
-export function getDailySpendForAgent(agentId: string, dateUtc: string): number {
+export async function getDailySpendForAgent(agentId: string, dateUtc: string): Promise<number> {
+  const row = await getDbClient().get<CoalesceSumRow>(
+    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
+    [agentId, dateUtc],
+  );
+  return row?.total ?? 0;
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `getDailySpendForAgent`,
+ * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
+ */
+export function getDailySpendForAgentSync(agentId: string, dateUtc: string): number {
   const row = getDb()
     .prepare<CoalesceSumRow, [string, string]>(
       "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
@@ -13788,7 +13861,19 @@ export function getDailySpendForAgent(agentId: string, dateUtc: string): number 
  * for V1 daily-spend volumes; if it ever becomes a hotspot, a covering
  * functional index on `substr(createdAt, 1, 10)` would be the fix.
  */
-export function getDailySpendGlobal(dateUtc: string): number {
+export async function getDailySpendGlobal(dateUtc: string): Promise<number> {
+  const row = await getDbClient().get<CoalesceSumRow>(
+    "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
+    [dateUtc],
+  );
+  return row?.total ?? 0;
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `getDailySpendGlobal`,
+ * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
+ */
+export function getDailySpendGlobalSync(dateUtc: string): number {
   const row = getDb()
     .prepare<CoalesceSumRow, [string]>(
       "SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE substr(createdAt, 1, 10) = ?",
@@ -13803,7 +13888,22 @@ export function getDailySpendGlobal(dateUtc: string): number {
  * `'YYYY-MM-DD'` (UTC). Costs are joined through `agent_tasks` deliberately;
  * `session_costs` stays task/session-scoped and does not grow a userId column.
  */
-export function getDailySpendForUser(userId: string, dateUtc: string): number {
+export async function getDailySpendForUser(userId: string, dateUtc: string): Promise<number> {
+  const row = await getDbClient().get<CoalesceSumRow>(
+    `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
+       FROM session_costs sc
+       JOIN agent_tasks t ON sc.taskId = t.id
+       WHERE t.requestedByUserId = ? AND substr(sc.createdAt, 1, 10) = ?`,
+    [userId, dateUtc],
+  );
+  return row?.total ?? 0;
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of `getDailySpendForUser`,
+ * kept for `canClaim` (budget-admission.ts) — see `getBudgetSync`.
+ */
+export function getDailySpendForUserSync(userId: string, dateUtc: string): number {
   const row = getDb()
     .prepare<CoalesceSumRow, [string, string]>(
       `SELECT COALESCE(SUM(sc.totalCostUsd), 0) AS total
@@ -13835,7 +13935,60 @@ export interface RecordBudgetRefusalNotificationInput {
  * calls — used by the notification path to dedup "the agent told me about
  * this task already" across retries within the same UTC day.
  */
-export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotificationInput): {
+export async function recordBudgetRefusalNotification(
+  input: RecordBudgetRefusalNotificationInput,
+): Promise<{
+  inserted: boolean;
+  row: BudgetRefusalNotification;
+}> {
+  const client = getDbClient();
+  const now = Date.now();
+  const result = await client.run(
+    `INSERT OR IGNORE INTO budget_refusal_notifications
+       (task_id, date, agent_id, cause, agent_spend_usd, agent_budget_usd, global_spend_usd, global_budget_usd, user_spend_usd, user_budget_usd, follow_up_task_id, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    [
+      input.taskId,
+      input.date,
+      input.agentId,
+      input.cause,
+      input.agentSpendUsd ?? null,
+      input.agentBudgetUsd ?? null,
+      input.globalSpendUsd ?? null,
+      input.globalBudgetUsd ?? null,
+      input.userSpendUsd ?? null,
+      input.userBudgetUsd ?? null,
+      now,
+    ],
+  );
+
+  const existing = await client.get<BudgetRefusalNotificationRow>(
+    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    [input.taskId, input.date],
+  );
+
+  if (!existing) {
+    // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
+    // existing row. If we hit this it's a hard schema/runtime invariant break.
+    throw new Error(
+      `recordBudgetRefusalNotification: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
+    );
+  }
+
+  return {
+    inserted: result.changes > 0,
+    row: rowToBudgetRefusalNotification(existing),
+  };
+}
+
+/**
+ * DEFERRED (transaction rule): sync counterpart of
+ * `recordBudgetRefusalNotification`, kept for the budget-refusal dedup write
+ * at `/api/poll`'s pre-assigned/pool gates and MCP `task-action` `accept` —
+ * all three run inside a raw synchronous `getDb().transaction()` callback,
+ * which cannot await.
+ */
+export function recordBudgetRefusalNotificationSync(input: RecordBudgetRefusalNotificationInput): {
   inserted: boolean;
   row: BudgetRefusalNotification;
 } {
@@ -13868,10 +14021,8 @@ export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotifi
     .get(input.taskId, input.date);
 
   if (!existing) {
-    // Should be unreachable: INSERT OR IGNORE either inserts or leaves an
-    // existing row. If we hit this it's a hard schema/runtime invariant break.
     throw new Error(
-      `recordBudgetRefusalNotification: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
+      `recordBudgetRefusalNotificationSync: row missing after insert for (taskId=${input.taskId}, date=${input.date})`,
     );
   }
 
@@ -13884,15 +14035,14 @@ export function recordBudgetRefusalNotification(input: RecordBudgetRefusalNotifi
 /**
  * Lookup helper used by tests and by the Phase 5 follow-up-task write-back.
  */
-export function getBudgetRefusalNotification(
+export async function getBudgetRefusalNotification(
   taskId: string,
   date: string,
-): BudgetRefusalNotification | null {
-  const row = getDb()
-    .prepare<BudgetRefusalNotificationRow, [string, string]>(
-      "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
-    )
-    .get(taskId, date);
+): Promise<BudgetRefusalNotification | null> {
+  const row = await getDbClient().get<BudgetRefusalNotificationRow>(
+    "SELECT * FROM budget_refusal_notifications WHERE task_id = ? AND date = ?",
+    [taskId, date],
+  );
   return row ? rowToBudgetRefusalNotification(row) : null;
 }
 
@@ -13901,12 +14051,13 @@ export function getBudgetRefusalNotification(
  * first. Used by the operator dashboard to surface refusals as an
  * actionable feed (parent task → follow-up task link).
  */
-export function getRecentBudgetRefusalNotifications(limit = 50): BudgetRefusalNotification[] {
-  const rows = getDb()
-    .prepare<BudgetRefusalNotificationRow, [number]>(
-      "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
-    )
-    .all(limit);
+export async function getRecentBudgetRefusalNotifications(
+  limit = 50,
+): Promise<BudgetRefusalNotification[]> {
+  const rows = await getDbClient().query<BudgetRefusalNotificationRow>(
+    "SELECT * FROM budget_refusal_notifications ORDER BY createdAt DESC LIMIT ?",
+    [limit],
+  );
   return rows.map(rowToBudgetRefusalNotification);
 }
 
@@ -13914,12 +14065,14 @@ export function getRecentBudgetRefusalNotifications(limit = 50): BudgetRefusalNo
  * Boolean observability helper — returns true iff a refusal notification has
  * already been recorded for `(taskId, date)`.
  */
-export function hasBudgetRefusalNotificationToday(taskId: string, date: string): boolean {
-  const row = getDb()
-    .prepare<{ one: number }, [string, string]>(
-      "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
-    )
-    .get(taskId, date);
+export async function hasBudgetRefusalNotificationToday(
+  taskId: string,
+  date: string,
+): Promise<boolean> {
+  const row = await getDbClient().get<{ one: number }>(
+    "SELECT 1 as one FROM budget_refusal_notifications WHERE task_id = ? AND date = ? LIMIT 1",
+    [taskId, date],
+  );
   return row !== null;
 }
 
@@ -13932,16 +14085,15 @@ export function hasBudgetRefusalNotificationToday(taskId: string, date: string):
  * but only the first refusal per day creates a follow-up task in the first
  * place (see `recordBudgetRefusalNotification` for the dedup invariant).
  */
-export function setBudgetRefusalFollowUpTaskId(
+export async function setBudgetRefusalFollowUpTaskId(
   taskId: string,
   date: string,
   followUpTaskId: string,
-): void {
-  getDb()
-    .prepare(
-      "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
-    )
-    .run(followUpTaskId, taskId, date);
+): Promise<void> {
+  await getDbClient().run(
+    "UPDATE budget_refusal_notifications SET follow_up_task_id = ? WHERE task_id = ? AND date = ?",
+    [followUpTaskId, taskId, date],
+  );
 }
 
 // ============================================================================
@@ -13958,21 +14110,20 @@ export function setBudgetRefusalFollowUpTaskId(
  * (`src/providers/swarm-events-shared.ts:48-49`) plus margin for missed
  * heartbeats. Agents with `status = 'offline'` are excluded.
  */
-export function getLiveAgentCounts(minutes: number = 5): {
+export async function getLiveAgentCounts(minutes: number = 5): Promise<{
   leads_alive: number;
   workers_alive: number;
-} {
-  const row = getDb()
-    .prepare<{ leads_alive: number | null; workers_alive: number | null }, [number]>(
-      `SELECT
+}> {
+  const row = await getDbClient().get<{ leads_alive: number | null; workers_alive: number | null }>(
+    `SELECT
          SUM(CASE WHEN isLead = 1 THEN 1 ELSE 0 END) AS leads_alive,
          SUM(CASE WHEN isLead = 0 THEN 1 ELSE 0 END) AS workers_alive
        FROM agents
        WHERE lastActivityAt IS NOT NULL
          AND lastActivityAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || ?1 || ' minutes')
          AND status != 'offline'`,
-    )
-    .get(minutes);
+    [minutes],
+  );
   return {
     leads_alive: row?.leads_alive ?? 0,
     workers_alive: row?.workers_alive ?? 0,
@@ -13987,18 +14138,16 @@ export function getLiveAgentCounts(minutes: number = 5): {
  * `agents_online` reports total alive agents (leads + workers) so the home
  * page can show a single "online" stat without summing on the client.
  */
-export function getInstanceActivity(): {
+export async function getInstanceActivity(): Promise<{
   agents_online: number;
   leads_online: number;
   recent_tasks_count: number;
-} {
-  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
-  const tasksRow = getDb()
-    .prepare<{ count: number }, []>(
-      `SELECT COUNT(*) AS count FROM agent_tasks
+}> {
+  const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
+  const tasksRow = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM agent_tasks
        WHERE createdAt >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-24 hours')`,
-    )
-    .get();
+  );
   return {
     agents_online: leads_alive + workers_alive,
     leads_online: leads_alive,
@@ -14021,15 +14170,15 @@ export interface SwarmMetrics {
  * count. Pure `COUNT(*)` / `GROUP BY` queries; the `agent_tasks` status
  * grouping rides the indexes added in migration 069.
  */
-export function getSwarmMetrics(): SwarmMetrics {
-  const db = getDb();
+export async function getSwarmMetrics(): Promise<SwarmMetrics> {
+  const client = getDbClient();
 
-  const groupCounts = (table: string): { total: number; by_status: Record<string, number> } => {
-    const rows = db
-      .prepare<{ status: string; count: number }, []>(
-        `SELECT status, COUNT(*) AS count FROM ${table} GROUP BY status`,
-      )
-      .all();
+  const groupCounts = async (
+    table: string,
+  ): Promise<{ total: number; by_status: Record<string, number> }> => {
+    const rows = await client.query<{ status: string; count: number }>(
+      `SELECT status, COUNT(*) AS count FROM ${table} GROUP BY status`,
+    );
     const by_status: Record<string, number> = {};
     let total = 0;
     for (const r of rows) {
@@ -14039,20 +14188,18 @@ export function getSwarmMetrics(): SwarmMetrics {
     return { total, by_status };
   };
 
-  const workflowRow = db
-    .prepare<{ total: number; enabled: number }, []>(
-      "SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled FROM workflows",
-    )
-    .get();
-  const pagesRow = db.prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM pages").get();
-  const sessionsRow = db
-    .prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM active_sessions")
-    .get();
-  const skillsRow = db.prepare<{ count: number }, []>("SELECT COUNT(*) AS count FROM skills").get();
+  const workflowRow = await client.get<{ total: number; enabled: number }>(
+    "SELECT COUNT(*) AS total, SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END) AS enabled FROM workflows",
+  );
+  const pagesRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM pages");
+  const sessionsRow = await client.get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM active_sessions",
+  );
+  const skillsRow = await client.get<{ count: number }>("SELECT COUNT(*) AS count FROM skills");
 
   return {
-    tasks: groupCounts("agent_tasks"),
-    agents: groupCounts("agents"),
+    tasks: await groupCounts("agent_tasks"),
+    agents: await groupCounts("agents"),
     workflows: { total: workflowRow?.total ?? 0, enabled: workflowRow?.enabled ?? 0 },
     pages: { total: pagesRow?.count ?? 0 },
     sessions: { active: sessionsRow?.count ?? 0 },
@@ -14064,12 +14211,10 @@ export function getSwarmMetrics(): SwarmMetrics {
  * `first_task` milestone: true once any task has reached `status = 'completed'`.
  * Cheap LIMIT 1 probe; the row's contents don't matter, only existence.
  */
-export function hasFirstCompletedTask(): boolean {
-  const row = getDb()
-    .prepare<{ one: number }, []>(
-      `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
-    )
-    .get();
+export async function hasFirstCompletedTask(): Promise<boolean> {
+  const row = await getDbClient().get<{ one: number }>(
+    `SELECT 1 AS one FROM agent_tasks WHERE status = 'completed' LIMIT 1`,
+  );
   return row !== null;
 }
 
@@ -14155,18 +14300,18 @@ function encodeKvValue(value: unknown, valueType: KvValueType): string {
  * deleted inline (single-row DELETE WHERE) so the row count stays bounded over
  * time without a background sweeper.
  */
-export function getKv(namespace: string, key: string): KvEntry | null {
-  const row = getDb()
-    .prepare<KvRow, [string, string]>(
-      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+export async function getKv(namespace: string, key: string): Promise<KvEntry | null> {
+  const row = await getDbClient().get<KvRow>(
+    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
          FROM kv_entries WHERE namespace = ? AND key = ?`,
-    )
-    .get(namespace, key);
+    [namespace, key],
+  );
   if (!row) return null;
   if (row.expires_at !== null && row.expires_at <= Date.now()) {
-    getDb()
-      .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
-      .run(namespace, key);
+    await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
+      namespace,
+      key,
+    ]);
     return null;
   }
   return decodeKvRow(row);
@@ -14174,31 +14319,29 @@ export function getKv(namespace: string, key: string): KvEntry | null {
 
 /** Delete expired entries in one namespace. Used by internal TTL-backed stores
  * that need proactive cleanup rather than waiting for a point read. */
-export function sweepExpiredKv(namespace: string, now = Date.now()): number {
-  const result = getDb()
-    .prepare<unknown, [string, number]>(
-      `DELETE FROM kv_entries
+export async function sweepExpiredKv(namespace: string, now = Date.now()): Promise<number> {
+  const result = await getDbClient().run(
+    `DELETE FROM kv_entries
         WHERE namespace = ?
           AND expires_at IS NOT NULL
           AND expires_at <= ?`,
-    )
-    .run(namespace, now);
+    [namespace, now],
+  );
   return result.changes;
 }
 
 /** Delete expired entries across a namespace family (`prefix` and
  * `prefix:*`). Used by per-agent internal stores whose inactive owners may
  * never return to trigger a namespace-local sweep. */
-export function sweepExpiredKvPrefix(prefix: string, now = Date.now()): number {
+export async function sweepExpiredKvPrefix(prefix: string, now = Date.now()): Promise<number> {
   const escaped = prefix.replace(/[\\%_]/g, "\\$&");
-  const result = getDb()
-    .prepare<unknown, [string, string, number]>(
-      `DELETE FROM kv_entries
+  const result = await getDbClient().run(
+    `DELETE FROM kv_entries
         WHERE (namespace = ? OR namespace LIKE ? ESCAPE '\\')
           AND expires_at IS NOT NULL
           AND expires_at <= ?`,
-    )
-    .run(prefix, `${escaped}:%`, now);
+    [prefix, `${escaped}:%`, now],
+  );
   return result.changes;
 }
 
@@ -14209,19 +14352,18 @@ export function sweepExpiredKvPrefix(prefix: string, now = Date.now()): number {
  * If the key already exists with a different `valueType` we still overwrite —
  * INCR is the only collision-sensitive op and it does its own check.
  */
-export function upsertKv(input: {
+export async function upsertKv(input: {
   namespace: string;
   key: string;
   value: unknown;
   valueType: KvValueType;
   expiresAt?: number | null;
-}): KvEntry {
+}): Promise<KvEntry> {
   const encoded = encodeKvValue(input.value, input.valueType);
   const expiresAt = input.expiresAt ?? null;
   const now = Date.now();
-  const row = getDb()
-    .prepare<KvRow, [string, string, string, KvValueType, number | null, number, number]>(
-      `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
+  const row = await getDbClient().get<KvRow>(
+    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(namespace, key) DO UPDATE SET
          value = excluded.value,
@@ -14229,8 +14371,8 @@ export function upsertKv(input: {
          expires_at = excluded.expires_at,
          updated_at = excluded.updated_at
        RETURNING namespace, key, value, value_type, expires_at, created_at, updated_at`,
-    )
-    .get(input.namespace, input.key, encoded, input.valueType, expiresAt, now, now);
+    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now],
+  );
   if (!row) throw new Error("Failed to upsert kv entry");
   return decodeKvRow(row);
 }
@@ -14239,10 +14381,11 @@ export function upsertKv(input: {
  * Delete a KV entry. Returns true if a row was removed, false if nothing
  * existed. Does not differentiate expired-but-not-yet-swept from never-existed.
  */
-export function deleteKv(namespace: string, key: string): boolean {
-  const result = getDb()
-    .prepare<unknown, [string, string]>(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`)
-    .run(namespace, key);
+export async function deleteKv(namespace: string, key: string): Promise<boolean> {
+  const result = await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ? AND key = ?`, [
+    namespace,
+    key,
+  ]);
   return result.changes > 0;
 }
 
@@ -14333,37 +14476,35 @@ export function incrKv(namespace: string, key: string, by: number): KvEntry {
  * `limit` is capped by the caller (HTTP enforces ≤1000); helper does no extra
  * bounds-check beyond what SQL accepts.
  */
-export function listKv(
+export async function listKv(
   namespace: string,
   opts: { prefix?: string; limit: number; offset: number },
-): KvEntry[] {
+): Promise<KvEntry[]> {
   const now = Date.now();
   if (opts.prefix !== undefined && opts.prefix.length > 0) {
     // LIKE-escape `\` `%` `_` so a user-supplied prefix can't run wildcards.
     const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const rows = getDb()
-      .prepare<KvRow, [string, number, string, number, number]>(
-        `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+    const rows = await getDbClient().query<KvRow>(
+      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
            FROM kv_entries
           WHERE namespace = ?
             AND (expires_at IS NULL OR expires_at > ?)
             AND key LIKE ? ESCAPE '\\'
           ORDER BY key
           LIMIT ? OFFSET ?`,
-      )
-      .all(namespace, now, `${escaped}%`, opts.limit, opts.offset);
+      [namespace, now, `${escaped}%`, opts.limit, opts.offset],
+    );
     return rows.map(decodeKvRow);
   }
-  const rows = getDb()
-    .prepare<KvRow, [string, number, number, number]>(
-      `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
+  const rows = await getDbClient().query<KvRow>(
+    `SELECT namespace, key, value, value_type, expires_at, created_at, updated_at
          FROM kv_entries
         WHERE namespace = ?
           AND (expires_at IS NULL OR expires_at > ?)
         ORDER BY key
         LIMIT ? OFFSET ?`,
-    )
-    .all(namespace, now, opts.limit, opts.offset);
+    [namespace, now, opts.limit, opts.offset],
+  );
   return rows.map(decodeKvRow);
 }
 
@@ -14371,27 +14512,25 @@ export function listKv(
  * Count entries in a namespace (optionally with a prefix filter). Expired
  * rows are excluded — same predicate as `listKv`.
  */
-export function countKv(namespace: string, opts: { prefix?: string }): number {
+export async function countKv(namespace: string, opts: { prefix?: string }): Promise<number> {
   const now = Date.now();
   if (opts.prefix !== undefined && opts.prefix.length > 0) {
     const escaped = opts.prefix.replace(/[\\%_]/g, "\\$&");
-    const row = getDb()
-      .prepare<{ n: number }, [string, number, string]>(
-        `SELECT COUNT(*) AS n FROM kv_entries
+    const row = await getDbClient().get<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM kv_entries
           WHERE namespace = ?
             AND (expires_at IS NULL OR expires_at > ?)
             AND key LIKE ? ESCAPE '\\'`,
-      )
-      .get(namespace, now, `${escaped}%`);
+      [namespace, now, `${escaped}%`],
+    );
     return row?.n ?? 0;
   }
-  const row = getDb()
-    .prepare<{ n: number }, [string, number]>(
-      `SELECT COUNT(*) AS n FROM kv_entries
+  const row = await getDbClient().get<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM kv_entries
         WHERE namespace = ?
           AND (expires_at IS NULL OR expires_at > ?)`,
-    )
-    .get(namespace, now);
+    [namespace, now],
+  );
   return row?.n ?? 0;
 }
 
@@ -14475,7 +14614,7 @@ function rowToScriptRunListItem(row: ScriptRunListRow): ScriptRunListItem {
   };
 }
 
-export function createScriptRun(data: {
+export async function createScriptRun(data: {
   id: string;
   agentId: string;
   source: string;
@@ -14485,36 +14624,22 @@ export function createScriptRun(data: {
   requestedByUserId?: string;
   createdBy?: string;
   updatedBy?: string;
-}): { run: ScriptRun; existing: boolean } {
-  const db = getDb();
+}): Promise<{ run: ScriptRun; existing: boolean }> {
+  const client = getDbClient();
   if (data.idempotencyKey) {
-    const existing = db
-      .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
-      .get(data.idempotencyKey);
+    const existing = await client.get<ScriptRunRow>(
+      "SELECT * FROM script_runs WHERE idempotencyKey = ?",
+      [data.idempotencyKey],
+    );
     if (existing) return { run: rowToScriptRun(existing), existing: true };
   }
 
-  const row = db
-    .prepare<
-      ScriptRunRow,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO script_runs
+  const row = await client.get<ScriptRunRow>(
+    `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, idempotencyKey, requestedByUserId, created_by, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       data.id,
       data.agentId,
       data.scriptName ?? null,
@@ -14524,7 +14649,8 @@ export function createScriptRun(data: {
       data.requestedByUserId ?? null,
       data.createdBy ?? null,
       data.updatedBy ?? data.createdBy ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create script run");
   return { run: rowToScriptRun(row), existing: false };
 }
@@ -14532,7 +14658,7 @@ export function createScriptRun(data: {
 // Persist a synchronous inline run (POST /api/scripts/run) as an already-terminal
 // row. Unlike createScriptRun these never get a journal and never use the
 // idempotencyKey column (inline idempotency lives in the kv table).
-export function recordInlineScriptRun(data: {
+export async function recordInlineScriptRun(data: {
   id: string;
   agentId: string;
   source: string;
@@ -14547,34 +14673,14 @@ export function recordInlineScriptRun(data: {
   createdBy?: string;
   /** Set when this run originated from an external API endpoint (POST /api/x/script/<id>). */
   apiEndpointId?: string | null;
-}): ScriptRun {
-  const row = getDb()
-    .prepare<
-      ScriptRunRow,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO script_runs
+}): Promise<ScriptRun> {
+  const row = await getDbClient().get<ScriptRunRow>(
+    `INSERT INTO script_runs
         (id, agentId, scriptName, source, args, kind, status, output, error,
          startedAt, finishedAt, requestedByUserId, created_by, updated_by, apiEndpointId)
        VALUES (?, ?, ?, ?, ?, 'inline', ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       data.id,
       data.agentId,
       data.scriptName ?? null,
@@ -14589,32 +14695,34 @@ export function recordInlineScriptRun(data: {
       data.createdBy ?? null,
       data.createdBy ?? null,
       data.apiEndpointId ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to record inline script run");
   return rowToScriptRun(row);
 }
 
-export function getScriptRun(id: string): ScriptRun | null {
-  const row = getDb()
-    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE id = ?")
-    .get(id);
+export async function getScriptRun(id: string): Promise<ScriptRun | null> {
+  const row = await getDbClient().get<ScriptRunRow>("SELECT * FROM script_runs WHERE id = ?", [id]);
   return row ? rowToScriptRun(row) : null;
 }
 
-export function getScriptRunByIdempotencyKey(idempotencyKey: string): ScriptRun | null {
-  const row = getDb()
-    .prepare<ScriptRunRow, [string]>("SELECT * FROM script_runs WHERE idempotencyKey = ?")
-    .get(idempotencyKey);
+export async function getScriptRunByIdempotencyKey(
+  idempotencyKey: string,
+): Promise<ScriptRun | null> {
+  const row = await getDbClient().get<ScriptRunRow>(
+    "SELECT * FROM script_runs WHERE idempotencyKey = ?",
+    [idempotencyKey],
+  );
   return row ? rowToScriptRun(row) : null;
 }
 
-export function listScriptRuns(opts?: {
+export async function listScriptRuns(opts?: {
   status?: ScriptRunStatus;
   agentId?: string;
   scriptName?: string;
   limit?: number;
   offset?: number;
-}): ScriptRunListItem[] {
+}): Promise<ScriptRunListItem[]> {
   const conditions: string[] = [];
   const params: Array<string | number> = [];
   if (opts?.status) {
@@ -14634,9 +14742,8 @@ export function listScriptRuns(opts?: {
   const offset = opts?.offset ?? 0;
   params.push(limit, offset);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const rows = getDb()
-    .prepare<ScriptRunListRow, Array<string | number>>(
-      `SELECT
+  const rows = await getDbClient().query<ScriptRunListRow>(
+    `SELECT
         id,
         agentId,
         scriptName,
@@ -14652,16 +14759,16 @@ export function listScriptRuns(opts?: {
        FROM script_runs ${where}
        ORDER BY startedAt DESC
        LIMIT ? OFFSET ?`,
-    )
-    .all(...params);
+    params,
+  );
   return rows.map(rowToScriptRunListItem);
 }
 
-export function countScriptRuns(opts?: {
+export async function countScriptRuns(opts?: {
   status?: ScriptRunStatus;
   agentId?: string;
   scriptName?: string;
-}): number {
+}): Promise<number> {
   const conditions: string[] = [];
   const params: string[] = [];
   if (opts?.status) {
@@ -14677,22 +14784,21 @@ export function countScriptRuns(opts?: {
     params.push(opts.scriptName);
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const row = getDb()
-    .prepare<{ count: number }, string[]>(`SELECT COUNT(*) AS count FROM script_runs ${where}`)
-    .get(...params);
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM script_runs ${where}`,
+    params,
+  );
   return row?.count ?? 0;
 }
 
-export function countActiveScriptRuns(): number {
-  const row = getDb()
-    .prepare<{ count: number }, []>(
-      "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
-    )
-    .get();
+export async function countActiveScriptRuns(): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM script_runs WHERE status IN ('running', 'paused')",
+  );
   return row?.count ?? 0;
 }
 
-export function updateScriptRun(
+export async function updateScriptRun(
   id: string,
   patch: Partial<{
     status: ScriptRunStatus;
@@ -14703,7 +14809,7 @@ export function updateScriptRun(
     lastHeartbeatAt: string | null;
     updatedBy: string | null;
   }>,
-): void {
+): Promise<void> {
   const sets: string[] = [];
   const vals: Array<string | number | null> = [];
   if (patch.status !== undefined) {
@@ -14736,13 +14842,13 @@ export function updateScriptRun(
   }
   if (sets.length === 0) return;
   vals.push(id);
-  getDb().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+  await getDbClient().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
 }
 
-export function getRunningScriptRuns(): ScriptRun[] {
-  const rows = getDb()
-    .prepare<ScriptRunRow, []>("SELECT * FROM script_runs WHERE status IN ('running', 'paused')")
-    .all();
+export async function getRunningScriptRuns(): Promise<ScriptRun[]> {
+  const rows = await getDbClient().query<ScriptRunRow>(
+    "SELECT * FROM script_runs WHERE status IN ('running', 'paused')",
+  );
   return rows.map(rowToScriptRun);
 }
 
@@ -14780,19 +14886,18 @@ function rowToScriptRunJournalEntry(row: ScriptRunJournalRow): ScriptRunJournalE
   };
 }
 
-export function getScriptRunJournalStep(
+export async function getScriptRunJournalStep(
   runId: string,
   stepKey: string,
-): ScriptRunJournalEntry | null {
-  const row = getDb()
-    .prepare<ScriptRunJournalRow, [string, string]>(
-      "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
-    )
-    .get(runId, stepKey);
+): Promise<ScriptRunJournalEntry | null> {
+  const row = await getDbClient().get<ScriptRunJournalRow>(
+    "SELECT * FROM script_run_journal WHERE runId = ? AND stepKey = ?",
+    [runId, stepKey],
+  );
   return row ? rowToScriptRunJournalEntry(row) : null;
 }
 
-export function upsertScriptRunJournalStep(data: {
+export async function upsertScriptRunJournalStep(data: {
   runId: string;
   stepKey: string;
   stepType: string;
@@ -14801,8 +14906,8 @@ export function upsertScriptRunJournalStep(data: {
   result?: unknown;
   error?: string;
   durationMs?: number;
-}): void {
-  getDb().run(
+}): Promise<void> {
+  await getDbClient().run(
     `INSERT OR IGNORE INTO script_run_journal
       (id, runId, stepKey, stepType, config, status, result, error, durationMs, completedAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
@@ -14820,29 +14925,26 @@ export function upsertScriptRunJournalStep(data: {
   );
 }
 
-export function listScriptRunJournalSteps(runId: string): ScriptRunJournalEntry[] {
-  const rows = getDb()
-    .prepare<ScriptRunJournalRow, [string]>(
-      "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
-    )
-    .all(runId);
+export async function listScriptRunJournalSteps(runId: string): Promise<ScriptRunJournalEntry[]> {
+  const rows = await getDbClient().query<ScriptRunJournalRow>(
+    "SELECT * FROM script_run_journal WHERE runId = ? ORDER BY startedAt ASC",
+    [runId],
+  );
   return rows.map(rowToScriptRunJournalEntry);
 }
 
-export function countScriptRunJournalSteps(runId: string): number {
-  const row = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
-    )
-    .get(runId);
+export async function countScriptRunJournalSteps(runId: string): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ?",
+    [runId],
+  );
   return row?.count ?? 0;
 }
 
-export function countScriptRunJournalAgentTaskSteps(runId: string): number {
-  const row = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
-    )
-    .get(runId);
+export async function countScriptRunJournalAgentTaskSteps(runId: string): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM script_run_journal WHERE runId = ? AND stepType = 'agent-task'",
+    [runId],
+  );
   return row?.count ?? 0;
 }

@@ -22,7 +22,7 @@ type PricingRateLookup = (
   model: string,
   tokenClass: PricingTokenClass,
   atEpochMs: number,
-) => number | null;
+) => Promise<number | null>;
 
 type SessionCostModelUsageInput = Omit<SessionCostModelBreakdown, "costUsd">;
 
@@ -64,19 +64,19 @@ function cacheWriteSplit(input: SessionCostRecomputeInput): CacheWriteSplit | nu
   };
 }
 
-function priceModel(
+async function priceModel(
   provider: PricingProvider,
   usage: SessionCostModelUsageInput,
   split: CacheWriteSplit | null,
   atEpochMs: number,
   lookupRate: PricingRateLookup,
-): number | null {
+): Promise<number | null> {
   const lookupModel = normalizeModelKey(provider, usage.model);
-  const inputRate = lookupRate(provider, lookupModel, "input", atEpochMs);
-  const outputRate = lookupRate(provider, lookupModel, "output", atEpochMs);
+  const inputRate = await lookupRate(provider, lookupModel, "input", atEpochMs);
+  const outputRate = await lookupRate(provider, lookupModel, "output", atEpochMs);
   if (inputRate == null || outputRate == null) return null;
 
-  const cacheReadRate = lookupRate(provider, lookupModel, "cached_input", atEpochMs) ?? 0;
+  const cacheReadRate = (await lookupRate(provider, lookupModel, "cached_input", atEpochMs)) ?? 0;
   const uncachedInputTokens = INCLUSIVE_INPUT_PROVIDERS.has(provider)
     ? Math.max(0, usage.inputTokens - usage.cacheReadTokens)
     : usage.inputTokens;
@@ -90,14 +90,14 @@ function priceModel(
     // aggregate is billed proportionally rather than dropped.
     const fiveMinuteTokens = usage.cacheWriteTokens * split.fiveMinuteRatio;
     const oneHourTokens = usage.cacheWriteTokens * split.oneHourRatio;
-    const fiveMinuteRate = lookupRate(provider, lookupModel, "cache_write", atEpochMs) ?? 0;
-    const oneHourRate = lookupRate(provider, lookupModel, "cache_write_1h", atEpochMs);
+    const fiveMinuteRate = (await lookupRate(provider, lookupModel, "cache_write", atEpochMs)) ?? 0;
+    const oneHourRate = await lookupRate(provider, lookupModel, "cache_write_1h", atEpochMs);
     // A missing 1h rate is not permission to silently make billed writes free.
     if (oneHourTokens > 0 && oneHourRate == null) return null;
     cacheWriteCostUnits = fiveMinuteTokens * fiveMinuteRate + oneHourTokens * (oneHourRate ?? 0);
   } else {
     // Legacy payloads carry only the aggregate and retain the historical 5m class.
-    const cacheWriteRate = lookupRate(provider, lookupModel, "cache_write", atEpochMs) ?? 0;
+    const cacheWriteRate = (await lookupRate(provider, lookupModel, "cache_write", atEpochMs)) ?? 0;
     cacheWriteCostUnits = usage.cacheWriteTokens * cacheWriteRate;
   }
 
@@ -121,10 +121,10 @@ function unpricedResult(
   };
 }
 
-export function recomputeSessionCost(
+export async function recomputeSessionCost(
   input: SessionCostRecomputeInput,
   lookupRate: PricingRateLookup,
-): SessionCostRecomputeResult {
+): Promise<SessionCostRecomputeResult> {
   const modelUsageEntries = input.models?.length ? input.models : undefined;
   const modelBreakdown = modelUsageEntries?.map((model) => ({ ...model }));
   if (!input.provider) {
@@ -169,10 +169,16 @@ export function recomputeSessionCost(
   // otherwise-exact token recompute over them would cost more accuracy than
   // it protects; the drift metric still exposes the residual.
   const webSearchRate = hasWebSearchRequests
-    ? lookupRate(input.provider, "*", "web_search", input.atEpochMs)
+    ? await lookupRate(input.provider, "*", "web_search", input.atEpochMs)
     : null;
   for (const usage of usages) {
-    const tokenCostUsd = priceModel(input.provider, usage, split, input.atEpochMs, lookupRate);
+    const tokenCostUsd = await priceModel(
+      input.provider,
+      usage,
+      split,
+      input.atEpochMs,
+      lookupRate,
+    );
     if (tokenCostUsd == null) return unpricedResult(input, modelBreakdown);
     const webSearchCostUsd = ((usage.webSearchRequests ?? 0) * (webSearchRate ?? 0)) / PER_MILLION;
     const costUsd = tokenCostUsd + webSearchCostUsd;
@@ -183,7 +189,7 @@ export function recomputeSessionCost(
   let sessionFeesUsd = 0;
   const durationMs = input.durationMs ?? 0;
   if (input.provider === "claude-managed" && durationMs > 0) {
-    const runtimeRate = lookupRate(input.provider, "*", "runtime_hour", input.atEpochMs);
+    const runtimeRate = await lookupRate(input.provider, "*", "runtime_hour", input.atEpochMs);
     if (runtimeRate == null) return unpricedResult(input, modelBreakdown);
     sessionFeesUsd += (durationMs / 3_600_000) * (runtimeRate / PER_MILLION);
   }

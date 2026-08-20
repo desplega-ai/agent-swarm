@@ -119,7 +119,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
           ...(name ? { name } : {}),
           createdAt: new Date().toISOString(),
         };
-        putKapsoNumberMapping(mapping);
+        await putKapsoNumberMapping(mapping);
 
         const text = `Registered Kapso number ${phoneNumberId} → ${
           workflowId
@@ -181,8 +181,8 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
           });
         }
 
-        const existing = getKapsoNumberMapping(phoneNumberId);
-        const deleted = deleteKapsoNumberMapping(phoneNumberId);
+        const existing = await getKapsoNumberMapping(phoneNumberId);
+        const deleted = await deleteKapsoNumberMapping(phoneNumberId);
         const text = existing
           ? `Unregistered Kapso number ${phoneNumberId}`
           : `No mapping found for Kapso number ${phoneNumberId}`;

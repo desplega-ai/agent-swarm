@@ -124,7 +124,7 @@ export async function emitBudgetRefusalSideEffects(
         });
 
         try {
-          setBudgetRefusalFollowUpTaskId(ctx.task.id, ctx.date, followUp.id);
+          await setBudgetRefusalFollowUpTaskId(ctx.task.id, ctx.date, followUp.id);
         } catch (err) {
           console.warn(
             `[budget-refusal-notify] Failed to write back follow_up_task_id for task ${ctx.task.id.slice(0, 8)} (${ctx.date}): ${err}`,

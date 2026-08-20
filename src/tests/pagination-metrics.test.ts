@@ -106,13 +106,13 @@ describe("pagination metrics", () => {
     expect(await countPagesByAgent(a2.id)).toBe(2);
   });
 
-  test("countSessions is filter-aware on source", () => {
+  test("countSessions is filter-aware on source", async () => {
     // Sessions are root tasks (parentTaskId IS NULL). Tasks created here have
     // no parent, so each is its own session. Assertions are delta-based so the
     // test is robust against tasks created by earlier tests in this file.
-    const mcpBefore = countSessions({ source: ["mcp"] });
-    const slackBefore = countSessions({ source: ["slack"] });
-    const bothBefore = countSessions({ source: ["mcp", "slack"] });
+    const mcpBefore = await countSessions({ source: ["mcp"] });
+    const slackBefore = await countSessions({ source: ["slack"] });
+    const bothBefore = await countSessions({ source: ["mcp", "slack"] });
 
     for (let i = 0; i < 5; i++) {
       createTaskExtended(`mcp session ${i}`, { source: "mcp" });
@@ -121,12 +121,12 @@ describe("pagination metrics", () => {
       createTaskExtended(`slack session ${i}`, { source: "slack" });
     }
 
-    expect(countSessions({ source: ["mcp"] }) - mcpBefore).toBe(5);
-    expect(countSessions({ source: ["slack"] }) - slackBefore).toBe(2);
-    expect(countSessions({ source: ["mcp", "slack"] }) - bothBefore).toBe(7);
+    expect((await countSessions({ source: ["mcp"] })) - mcpBefore).toBe(5);
+    expect((await countSessions({ source: ["slack"] })) - slackBefore).toBe(2);
+    expect((await countSessions({ source: ["mcp", "slack"] })) - bothBefore).toBe(7);
     // q filter narrows on top of source.
-    expect(countSessions({ source: ["slack"], q: "slack session" }) - slackBefore).toBe(2);
-    expect(countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
+    expect((await countSessions({ source: ["slack"], q: "slack session" })) - slackBefore).toBe(2);
+    expect(await countSessions({ q: "no-such-session-marker-zzz" })).toBe(0);
   });
 
   test("getSwarmMetrics returns coherent aggregate counts", async () => {
@@ -141,7 +141,7 @@ describe("pagination metrics", () => {
     createSkill({ name: "pm-skill", description: "test skill", content: "body" });
     await insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
 
-    const m = getSwarmMetrics();
+    const m = await getSwarmMetrics();
 
     // tasks: by_status counts sum to the total.
     expect(m.tasks.total).toBeGreaterThan(0);

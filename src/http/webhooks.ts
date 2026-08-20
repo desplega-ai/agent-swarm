@@ -586,7 +586,7 @@ export async function handleWebhooks(
     void acknowledgeKapsoInboundMessage(payload, config);
 
     try {
-      const routing = routeKapsoInbound(payload);
+      const routing = await routeKapsoInbound(payload);
       switch (routing.kind) {
         case "workflow":
           // Advanced override — dispatch through the workflow's webhook trigger.

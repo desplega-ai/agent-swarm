@@ -478,7 +478,7 @@ describe("/api/script-runs HTTP", () => {
       body: createBody(),
     });
     const { id } = (await created.json()) as { id: string };
-    updateScriptRun(id, {
+    await updateScriptRun(id, {
       status: "failed",
       pid: null,
       finishedAt: new Date().toISOString(),

@@ -1,10 +1,10 @@
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createLogEntry,
-  getActivePricingRow,
+  getActivePricingRowSync,
   getDb,
   type InsertPricingRowInput,
-  insertPricingRow,
+  insertPricingRowSync,
 } from "./db";
 import { updateLiveModelsCatalog } from "./models-catalog";
 import type { ModelsDevCache } from "./modelsdev-cache";
@@ -39,6 +39,11 @@ function logPricingRefreshError(message: string, err: unknown): void {
   console.warn(scrubSecrets(`[pricing-refresh] ${message}: ${detail}`));
 }
 
+/**
+ * DEFERRED (transaction rule): own body contains `.transaction(` — skipped
+ * entirely, left 100% sync (uses `getActivePricingRowSync` /
+ * `insertPricingRowSync`).
+ */
 function insertChangedPricingRows(
   rows: PricingSeedRow[],
   now: number,
@@ -51,7 +56,7 @@ function insertChangedPricingRows(
 
   const tx = getDb().transaction((seedRows: PricingSeedRow[]) => {
     for (const row of seedRows) {
-      const existing = getActivePricingRow(row.provider, row.model, row.tokenClass, now);
+      const existing = getActivePricingRowSync(row.provider, row.model, row.tokenClass, now);
       if (existing?.pricePerMillionUsd === row.pricePerMillionUsd) {
         unchanged += 1;
         continue;
@@ -61,7 +66,7 @@ function insertChangedPricingRows(
         ...row,
         effectiveFrom: now,
       };
-      insertPricingRow(input);
+      insertPricingRowSync(input);
       inserted += 1;
     }
   });

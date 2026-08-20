@@ -628,19 +628,19 @@ async function handleIncr(
   return true;
 }
 
-function sendGet(
+async function sendGet(
   req: IncomingMessage,
   res: ServerResponse,
   namespace: string,
   key: string,
   respond: GetKvRespond,
-): boolean {
+): Promise<boolean> {
   const authErr = authorizeRead(namespace, buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
   }
-  const entry = getKv(namespace, key);
+  const entry = await getKv(namespace, key);
   if (!entry) {
     jsonError(res, "not found", 404);
     return true;
@@ -649,14 +649,14 @@ function sendGet(
   return true;
 }
 
-function sendPut(
+async function sendPut(
   req: IncomingMessage,
   res: ServerResponse,
   namespace: string,
   key: string,
   body: z.infer<typeof kvSetBodySchema>,
   respond: PutKvRespond,
-): boolean {
+): Promise<boolean> {
   const authErr = authorizeWrite(namespace, buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
@@ -673,7 +673,7 @@ function sendPut(
   }
   const expiresAt = body.expiresInSec !== undefined ? Date.now() + body.expiresInSec * 1000 : null;
   try {
-    const entry = upsertKv({
+    const entry = await upsertKv({
       namespace,
       key,
       value: body.value,
@@ -688,18 +688,18 @@ function sendPut(
   return true;
 }
 
-function sendDelete(
+async function sendDelete(
   req: IncomingMessage,
   res: ServerResponse,
   namespace: string,
   key: string,
-): boolean {
+): Promise<boolean> {
   const authErr = authorizeWrite(namespace, buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
   }
-  const removed = deleteKv(namespace, key);
+  const removed = await deleteKv(namespace, key);
   if (!removed) {
     jsonError(res, "not found", 404);
     return true;
@@ -709,13 +709,13 @@ function sendDelete(
   return true;
 }
 
-function sendList(
+async function sendList(
   req: IncomingMessage,
   res: ServerResponse,
   namespace: string,
   query: z.infer<typeof kvListQuerySchema>,
   respond: ListKvRespond,
-): boolean {
+): Promise<boolean> {
   const authErr = authorizeRead(namespace, buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
@@ -724,8 +724,8 @@ function sendList(
   const limit = Math.min(query.limit ?? 100, MAX_KV_LIST_LIMIT);
   const offset = query.offset ?? 0;
   const prefix = query.prefix && query.prefix.length > 0 ? query.prefix : undefined;
-  const entries = listKv(namespace, { prefix, limit, offset });
-  const total = countKv(namespace, { prefix });
+  const entries = await listKv(namespace, { prefix, limit, offset });
+  const total = await countKv(namespace, { prefix });
   respond(res, 200, { entries, total, namespace });
   return true;
 }

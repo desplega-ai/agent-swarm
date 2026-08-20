@@ -313,7 +313,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(text).toContain(`kv://${overflowNamespace}/`);
 
     const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
-    const stored = getKv(overflowNamespace, key);
+    const stored = await getKv(overflowNamespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: {
         ok: boolean;
@@ -370,7 +370,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     const overflowNamespace = mcpOverflowNamespace(workerId);
     const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
     const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
-    const stored = getKv(overflowNamespace, key);
+    const stored = await getKv(overflowNamespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: {
         data: { data: { result: Array<{ index: number; text: string }> } };

@@ -208,7 +208,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     expect(countUsers()).toBe(0);
     expect(externalIdRows()).toHaveLength(0);
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect(meta).not.toBeNull();
     expect(meta!.valueType).toBe("json");
     const metaValue = meta!.value as {
@@ -221,7 +221,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     expect(metaValue.lastSeenAt).toBeTruthy();
     expect(meta!.expiresAt).not.toBeNull();
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count).not.toBeNull();
     expect(count!.valueType).toBe("integer");
     expect(count!.value).toBe(1);
@@ -242,10 +242,10 @@ describe("resolveSlackUserId — three-step cascade", () => {
       sampleContext: "second",
     });
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect((meta!.value as { sampleContext: string }).sampleContext).toBe("second");
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count!.value).toBe(2);
   });
 
@@ -328,7 +328,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_OK).toBe(1);
 
     // Cached row carries the 24h TTL anchor.
-    const cached = getKv("integration:user-enrichment:slack", "U_OK");
+    const cached = await getKv("integration:user-enrichment:slack", "U_OK");
     expect(cached).not.toBeNull();
     expect(cached!.expiresAt).not.toBeNull();
     expect(cached!.expiresAt! - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
@@ -346,7 +346,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_ERR).toBe(2);
 
     // Nothing persisted.
-    expect(getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
   });
 
   test("no-email profile → no cache, second call still calls the API", async () => {
@@ -361,7 +361,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(second).toBeNull();
     expect(callCounts.U_NOEMAIL).toBe(2);
 
-    expect(getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
   });
 });
 

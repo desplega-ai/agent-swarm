@@ -150,7 +150,7 @@ describe("delete-page MCP tool", () => {
       },
       changedByAgentId: ownerId,
     });
-    upsertKv({
+    await upsertKv({
       namespace: `task:page:${page.id}`,
       key: "state",
       value: { ok: true },
