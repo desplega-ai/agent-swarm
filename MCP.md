@@ -81,6 +81,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [run-schedule-now](#run-schedule-now)
 - [Memory Tools](#memory-tools)
   - [memory-search](#memory-search)
+  - [memory-store](#memory-store)
   - [memory-get](#memory-get)
   - [memory-edit](#memory-edit)
   - [memory-delete](#memory-delete)
@@ -1004,6 +1005,21 @@ Search your accumulated memories using natural language. Returns summaries with 
 | `scope` | `all \| agent \| swarm` | No | "all" | Search scope: 'all' (own + swarm), 'agent' (own only), 'swarm' (shared only). |
 | `limit` | `number` | No | 10 | Max results to return. |
 | `source` | `manual \| file_index \| session_summary \| task_completion` | No | - | Filter by memory source type. |
+
+### memory-store
+
+**Store a memory**
+
+Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact about a repo or a person. Use it when you solve something that will come back. Scope 'agent' is visible only to you. Scope 'swarm' is visible to every agent. Long content is split into chunks and embedded in the background. Search first with memory-search when a similar memory may exist, then edit it with memory-edit instead of storing a duplicate.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `content` | `string` | Yes | - | The memory body. Markdown is fine. State the fact, the context it applies to, and the evidence. |
+| `name` | `string` | Yes | - | Short title, one line, used in search results and the UI. |
+| `scope` | `agent \| swarm` | No | "agent" | 'agent' (default): only you can recall it. 'swarm': every agent can recall it. |
+| `tags` | `array` | No | - | Free-form tags, for example a repo name or a topic. |
+| `taskId` | `uuid` | No | - | The task this learning came from, when there is one. |
+| `intent` | `string` | No | - | Why this is worth remembering. Kept in the audit trail. |
 
 ### memory-get
 

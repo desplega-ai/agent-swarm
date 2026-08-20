@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "slack-interaction",
+  "displayName": "Slack Interaction",
+  "slug": "slack-interaction",
+  "title": "Slack Interaction",
+  "description": "Slack: reply, post, read, upload, and the thread rules. What the engine already posts, the one-message rule, `slack-reply`, `slack-post`, `slack-start-thread`, `slack-read`, `slack-upload-file`, `slack-download-file`, `slack-list-channels`, `slack-update`, `slack-delete`, unknown-user registration with `manage-user`, and Slack standing orders. Use before any Slack message.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["slack", "communication"]
+}

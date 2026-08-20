@@ -65,6 +65,29 @@ templates/skills/<name>/
 - Limits (`SKILL_FILE_LIMITS`): 100 files, 500 KB per file, 10 MB total.
 - `SKILL.md` is rejected as a bundled path — the body lives on the skill row.
 
+## Skills the system prompt points at
+
+The v2 system prompt (`src/prompts/session-templates.ts`, `src/prompts/base-prompt.ts`)
+carries branches and pointers; the reference material lives in skills. These
+seeded skills are named by the prompt, five of them with a MUST pointer:
+
+| Skill | Pointer in the prompt | Holds |
+|---|---|---|
+| `swarm-scripts` | MUST, worker bulk/repeat branch; secrets block | rubric, authoring contract, seed catalog, connections and secrets, `db_query`, script APIs |
+| `memory` | MUST, before store/edit/delete | tools, what makes a good memory, scope, dedup, triage, lead promotion |
+| `slack-interaction` | MUST, before any Slack post | engine-owned posts, the one-message rule, tools, unknown users, standing orders |
+| `code-quality` | MUST, before push/PR/review (repository block) | gh/glab, PR checks, CI loop, merge policy, review rules, review-reply provenance |
+| `heartbeat-runbook` | MUST, lead heartbeat checklist | cap policy, lift triggers, checklist and boot-triage steps |
+| `scheduling` | plain pointer | `create-schedule` target types, timing, verify and repair |
+| `pages`, `apps`, `agent-fs` | plain pointers (outputs block) | publishing, apps, the shared drive |
+| `workflow-iterate` | plain pointer (lead) | building workflows |
+
+Renaming or unseeding one of these breaks a prompt pointer. Change the template
+and the skill in the same PR. Skill descriptions are written as pointers: the
+trigger word first, one trigger per branch, no identity the body carries. Each
+description costs every agent tokens on every turn (claude and pi load all
+descriptions natively), so keep them short.
+
 ## Vendored ai-toolbox skills
 
 The source of truth for these seeded skills is

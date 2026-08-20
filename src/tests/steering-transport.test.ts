@@ -345,7 +345,6 @@ describe("steering worker transport", () => {
     const args = {
       role: "worker",
       agentId: crypto.randomUUID(),
-      swarmUrl: "localhost",
       // steer-task/accept-steer register under `core`, not `task-pool`.
       serverCapabilities: ["core"],
     };
@@ -363,9 +362,9 @@ describe("steering worker transport", () => {
       traits: { hasMcp: true, hasLocalEnvironment: true, steerModes: ["queue"] },
     });
 
-    expect(capable).toContain("Live Task Steering");
+    expect(capable).toContain("Live task steering");
     expect(capable).toContain("accept-steer");
-    expect(absentTrait).not.toContain("Live Task Steering");
-    expect(capabilityDisabled).not.toContain("Live Task Steering");
+    expect(absentTrait).not.toContain("Live task steering");
+    expect(capabilityDisabled).not.toContain("Live task steering");
   });
 });

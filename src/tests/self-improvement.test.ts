@@ -499,46 +499,30 @@ describe("Self-Improvement Mechanisms", () => {
   // P2: Self-awareness in base prompt
   // ==========================================================================
 
-  describe("base prompt self-awareness", () => {
-    test("base prompt includes 'How You Are Built' section", async () => {
-      const prompt = await getBasePrompt({
-        role: "worker",
-        agentId: workerId,
-        swarmUrl: "test.example.com",
-      });
+  describe("base prompt memory guidance", () => {
+    const MEMORY_SKILL_POINTER =
+      "You MUST use the `memory` skill before you store, edit, or delete a memory.";
 
-      expect(prompt).toContain("### How You Are Built");
-      expect(prompt).toContain("desplega-ai/agent-swarm");
-      expect(prompt).toContain("src/commands/runner.ts");
-      expect(prompt).toContain("src/hooks/hook.ts");
+    test("a worker prompt names memory-store and the memory skill", async () => {
+      const prompt = await getBasePrompt({ role: "worker", agentId: workerId });
+
+      expect(prompt).toContain("`memory-store`");
+      expect(prompt).toContain(MEMORY_SKILL_POINTER);
     });
 
-    test("self-awareness section includes change proposal instructions", async () => {
-      const prompt = await getBasePrompt({
-        role: "worker",
-        agentId: workerId,
-        swarmUrl: "test.example.com",
-      });
+    test("a lead prompt names memory-store and the memory skill", async () => {
+      const prompt = await getBasePrompt({ role: "lead", agentId: leadId });
 
-      expect(prompt).toContain("Proposing changes");
-      expect(prompt).toContain("@tarasyarema");
+      expect(prompt).toContain("`memory-store`");
+      expect(prompt).toContain(MEMORY_SKILL_POINTER);
     });
 
-    test("self-awareness is included for both worker and lead roles", async () => {
-      const workerPrompt = await getBasePrompt({
-        role: "worker",
-        agentId: workerId,
-        swarmUrl: "test.example.com",
-      });
+    test("neither role carries the retired self-awareness section", async () => {
+      const workerPrompt = await getBasePrompt({ role: "worker", agentId: workerId });
+      const leadPrompt = await getBasePrompt({ role: "lead", agentId: leadId });
 
-      const leadPrompt = await getBasePrompt({
-        role: "lead",
-        agentId: leadId,
-        swarmUrl: "test.example.com",
-      });
-
-      expect(workerPrompt).toContain("### How You Are Built");
-      expect(leadPrompt).toContain("### How You Are Built");
+      expect(workerPrompt).not.toContain("How You Are Built");
+      expect(leadPrompt).not.toContain("How You Are Built");
     });
   });
 

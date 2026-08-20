@@ -30,7 +30,7 @@ If given a URL, extract owner, repo, and issue number. Fetch issue details (titl
 ### 3. Implement
 
 1. **Understand the codebase** — explore relevant files and existing patterns
-2. **Plan your approach** — consider using plan creation for complex changes
+2. **Plan your approach** — consider using `/planning` for complex changes
 3. **Write the code** — implement the requested functionality
 4. **Test your changes** — run existing tests, add new tests if appropriate
 5. **Verify it works** — manual verification where possible

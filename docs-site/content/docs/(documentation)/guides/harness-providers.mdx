@@ -541,25 +541,27 @@ Even if the in-process MCP connection fails, the **runner** and the adapter's ow
 
 ### How it is built
 
-Composed by `getBasePrompt(args)` at [`src/prompts/base-prompt.ts:55–225`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildSystemPrompt()` at [`runner.ts:2269–2286`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). The pieces, in order:
+Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/base-prompt.ts) and orchestrated by `buildSystemPrompt()` in [`src/commands/runner.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/commands/runner.ts). Static blocks come first, per-task blocks last, so the cached prefix stays stable across tasks. The pieces, in order:
 
-| Source | Section | Resolver |
+| Source | Section | Gate |
 |---|---|---|
-| Template `system.session.{lead\|worker}` | Base role prompt | `resolveTemplateAsync` L61–63 |
-| Template `system.agent.worker.slack` | Slack section (workers only) | L66–72 |
-| `agentSoulMd` + `agentIdentityMd` + name/description | `## Your Identity` | L75–90 |
-| Installed skills list | Skill summary | L93–96 |
-| Installed MCP servers list | MCP summary | L99–101 |
-| Repo `CLAUDE.md` (from cwd) | `## Repository Context` | L111–118 (read via `readClaudeMd` at `runner.ts:77–86`) |
-| Templates `system.agent.agent_fs`, `...services`, `...artifacts` | Conditional suffixes | L157–188 |
-| `agentClaudeMd` | `## Agent Instructions` (truncated) | L197–207 |
-| `agentToolsMd` | `## Your Tools & Capabilities` (truncated) | L210–219 |
-| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | `runner.ts:2321–2323` |
-| `task.additionalSystemPrompt` | Appended per-task | `runner.ts:3093–3097` |
+| Composite `system.session.{lead\|worker\|worker.managed\|worker.remote}` | Role line, persona (description, SOUL.md, IDENTITY.md when edited), operating contract, workspace, memory, communication, secrets | Composite picked by traits: no MCP → `worker.remote`, MCP without a local environment → `worker.managed`, then by role |
+| Template `system.agent.scripts_only_mode` | Code-mode instructions | `scriptsOnly` |
+| Template `system.agent.outputs` or `...outputs.no_agent_fs` | `## Outputs` | MCP + `pages` capability; agent-fs variant when `AGENT_FS_API_URL` is set on a local environment |
+| Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
+| Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
+| Skills + MCP server names | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
+| `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider codex/opencode/pi, content differs from the generated default. Claude loads `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` natively |
+| Repo context | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
+| `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
+| `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
+| `task.additionalSystemPrompt` | Appended per-task | Task field |
 
-Truncation caps: `BOOTSTRAP_MAX_CHARS=20_000` per section, `BOOTSTRAP_TOTAL_MAX_CHARS=150_000` total (`base-prompt.ts` L16–19).
+Inject-when-edited: IDENTITY.md and CLAUDE.md are compared (whitespace-normalized) with the generators in [`src/prompts/defaults.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/defaults.ts), current and legacy. An unedited default is skipped. SOUL.md is always injected. TOOLS.md is never injected; the workspace block points at it.
 
-Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me` at `runner.ts:2427–2449`. If missing, defaults come from the template, then from the generators in [`src/prompts/defaults.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/defaults.ts), then pushed back to the server.
+Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me`. If missing, defaults come from the template, then from the generators in `src/prompts/defaults.ts`, then pushed back to the server.
+
+Reference material (script authoring contract, scheduling, Slack rules, memory triage, code-quality checks, heartbeat runbook) lives in the seeded skills `swarm-scripts`, `scheduling`, `slack-interaction`, `memory`, `code-quality`, and `heartbeat-runbook`. The prompt carries the branch and a pointer. Render every variant with `bun scripts/dump-prompt-variants.ts [outDir]`.
 
 If the runner reuses an existing repo clone that has local changes, `ensureRepoForTask()` now auto-stashes that work before refreshing from origin. The resulting `swarm-autostash` refs are threaded into `repoContext.autoStashes` and appended to the base prompt so the active session can restore them deliberately instead of silently losing or ignoring dirty work.
 

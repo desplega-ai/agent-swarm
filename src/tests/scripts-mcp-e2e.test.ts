@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { join } from "node:path";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
@@ -9,7 +10,6 @@ import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { getTemplateDefinition } from "../prompts/registry";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { registerScriptRunTool } from "../tools/script-run";
 import { registerScriptRunsTools } from "../tools/script-runs";
@@ -220,8 +220,12 @@ beforeEach(() => {
 describe("script_ MCP HTTP proxy tools", () => {
   test("upserts the canonical script authoring contract example verbatim", async () => {
     const tools = buildToolServer();
-    const contract = getTemplateDefinition("system.agent.script_authoring_contract");
-    const source = contract?.defaultBody.match(/```ts\n([\s\S]*?)\n```/)?.[1];
+    // The authoring contract lives in the seeded `swarm-scripts` skill since
+    // prompt v2; its first ```ts fence is the canonical example.
+    const skillBody = await Bun.file(
+      join(import.meta.dir, "../../templates/skills/swarm-scripts/content.md"),
+    ).text();
+    const source = skillBody.match(/```ts\n([\s\S]*?)\n```/)?.[1];
     expect(source).toBeTruthy();
 
     const upsert = (await tools.upsert.handler(

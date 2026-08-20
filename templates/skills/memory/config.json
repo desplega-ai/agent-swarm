@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "memory",
+  "displayName": "Memory",
+  "slug": "memory",
+  "title": "Memory",
+  "description": "Remember, recall, learning, memory: how swarm memory works and how to store, search, edit, rate, and delete memories with `memory-store`, `memory-search`, `memory-get`, `memory-edit`, `memory_rate`, and `memory-delete`, plus lead promotion with `inject-learning`. Use before you store, edit, or delete a memory.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["memory", "recall", "learning"]
+}

@@ -14,13 +14,37 @@ import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-prompt-session.sqlite";
 
-/** Heading of `system.agent.script_authoring_contract` — used for dedupe checks */
-const AUTHORING_CONTRACT_MARKER = "### Script Authoring Contract";
+/** U+2014. Written as an escape so this file stays free of the character. */
+const EM_DASH = "\u2014";
 
-/** How many times the authoring contract appears in a rendered prompt */
-function countAuthoringContract(text: string): number {
-  return text.split(AUTHORING_CONTRACT_MARKER).length - 1;
-}
+/** The prompt v2 block set. Every entry is registered under category "system". */
+const SYSTEM_TEMPLATES = [
+  "system.agent.communication",
+  "system.agent.lead",
+  "system.agent.memory",
+  "system.agent.memory.remote",
+  "system.agent.outputs",
+  "system.agent.outputs.no_agent_fs",
+  "system.agent.role",
+  "system.agent.scripts_only_mode",
+  "system.agent.scripts_only_mode.slack",
+  "system.agent.secrets",
+  "system.agent.slack",
+  "system.agent.steering",
+  "system.agent.steering.delivery",
+  "system.agent.worker",
+  "system.agent.worker.remote",
+  "system.agent.workspace",
+  "system.agent.workspace.remote",
+];
+
+/** The four composites. base-prompt.ts picks one per session by traits, then role. */
+const SESSION_TEMPLATES = [
+  "system.session.lead",
+  "system.session.worker",
+  "system.session.worker.managed",
+  "system.session.worker.remote",
+];
 
 /**
  * Re-register session templates if they've been cleared by other tests.
@@ -29,6 +53,13 @@ async function ensureTemplatesRegistered(): Promise<void> {
   if (getTemplateDefinition("system.agent.role")) return;
   const ts = Date.now();
   await import(`../prompts/session-templates?t=${ts}`);
+}
+
+function sessionSystemEventTypes(category: "system" | "session"): string[] {
+  return getAllTemplateDefinitions()
+    .filter((d) => d.category === category)
+    .map((d) => d.eventType)
+    .sort();
 }
 
 beforeAll(async () => {
@@ -54,443 +85,233 @@ afterAll(async () => {
   }
   // This file clears the process-wide registry; heal it so later test files
   // (whose import graphs already evaluated the template modules) don't
-  // resolve empty templates. CI(Linux)-only breakage otherwise — see
+  // resolve empty templates. CI(Linux)-only breakage otherwise, see
   // template-registry-helpers.ts.
   await restoreAllTemplateDefinitions();
 });
 
 // ============================================================================
-// System template registration
+// Registration
 // ============================================================================
 
-describe("Session templates — registration", () => {
+describe("Session templates: registration", () => {
   beforeEach(async () => {
     await ensureTemplatesRegistered();
   });
 
-  test("all 19 system templates are registered", () => {
-    const systemTemplates = [
-      "system.agent.role",
+  test("registers exactly the prompt v2 system blocks", () => {
+    expect(sessionSystemEventTypes("system")).toEqual([...SYSTEM_TEMPLATES].sort());
+  });
+
+  test("registers exactly the four session composites", () => {
+    expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
+  });
+
+  test("registers 21 system and session templates in total", () => {
+    const all = getAllTemplateDefinitions();
+    const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
+    // 17 system blocks + 4 session composites.
+    expect(sessionSystem.length).toBe(21);
+  });
+
+  test("drops the v1 blocks that prompt v2 deleted", () => {
+    const removed = [
       "system.agent.register",
-      "system.agent.lead",
-      "system.agent.slack",
-      "system.agent.messaging",
-      "system.agent.worker",
-      "system.agent.worker.slack",
+      "system.agent.self_awareness",
       "system.agent.filesystem",
       "system.agent.agent_fs",
-      "system.agent.self_awareness",
+      "system.agent.context_mode",
       "system.agent.script_authoring_contract",
       "system.agent.script_rubric",
-      "system.agent.context_mode",
+      "system.agent.scheduling",
       "system.agent.seed_scripts",
-
       "system.agent.system",
       "system.agent.services",
       "system.agent.artifacts",
+      "system.agent.apps",
       "system.agent.share_urls",
+      "system.agent.code_quality",
       "system.agent.communication_style",
-    ];
-
-    for (const eventType of systemTemplates) {
-      const def = getTemplateDefinition(eventType);
-      expect(def).toBeDefined();
-      expect(def!.category).toBe("system");
-    }
-  });
-
-  test("session composite templates are registered", () => {
-    const sessionTemplates = [
-      "system.session.lead",
-      "system.session.worker",
+      "system.agent.messaging",
+      "system.agent.worker.slack",
       "system.session.worker.pi",
       "system.session.lead.pi",
     ];
 
-    for (const eventType of sessionTemplates) {
-      const def = getTemplateDefinition(eventType);
-      expect(def).toBeDefined();
-      expect(def!.category).toBe("session");
+    for (const eventType of removed) {
+      expect(getTemplateDefinition(eventType)).toBeUndefined();
     }
-  });
-
-  test("total of 32 session/system templates registered", () => {
-    const all = getAllTemplateDefinitions();
-    const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 26 = the original 19 + `system.session.worker.pi` + `system.agent.seed_scripts`
-    // + `system.agent.script_rubric` + `system.agent.scripts_only_mode`
-    // + `system.agent.scripts_only_mode.slack` + `system.agent.messaging`
-    // + `system.agent.steering`.
-    // 29 = 27 + `system.agent.script_authoring_contract` + `system.session.lead.pi`.
-    // 30 = 29 + `system.agent.scheduling` (split out of context_mode so the
-    // pi composites keep the scheduling rules without the ctx_* tool block).
-    // 31 = 30 + `system.agent.apps`.
-    // 32 = 31 + `system.agent.communication_style`.
-    expect(sessionSystem.length).toBe(32);
   });
 });
 
 // ============================================================================
-// Individual system template resolution
+// Individual block resolution
 // ============================================================================
 
-describe("Session templates — individual resolution", () => {
+describe("Session templates: role block", () => {
   beforeEach(async () => {
     await ensureTemplatesRegistered();
   });
 
-  test("system.agent.role interpolates role and agentId", () => {
+  test("interpolates name, role, agentId, and persona", () => {
     const result = resolveTemplate("system.agent.role", {
+      name: "Ada",
       role: "worker",
       agentId: "agent-xyz-789",
+      persona: "\nBackend worker.\n",
     });
     expect(result.skipped).toBe(false);
-    expect(result.text).toContain("your role is: worker");
-    expect(result.text).toContain("agent-xyz-789");
     expect(result.unresolved.length).toBe(0);
+    expect(result.text).toContain("You are Ada, a worker in the swarm.");
+    expect(result.text).toContain("Your agent ID is agent-xyz-789.");
+    expect(result.text).toContain("Backend worker.");
   });
 
-  test("system.agent.filesystem interpolates agentId", () => {
-    const result = resolveTemplate("system.agent.filesystem", {
-      agentId: "agent-fs-test",
+  test("leaves no dangling text when the persona is empty", () => {
+    const result = resolveTemplate("system.agent.role", {
+      name: "Ada",
+      role: "worker",
+      agentId: "agent-xyz-789",
+      persona: "",
     });
-    expect(result.skipped).toBe(false);
-    expect(result.text).toContain("/workspace/shared/thoughts/agent-fs-test/plans/");
-    expect(result.text).toContain("/workspace/shared/memory/agent-fs-test/");
     expect(result.unresolved.length).toBe(0);
-  });
-
-  test("system.agent.agent_fs interpolates agentId and sharedOrgId", () => {
-    const result = resolveTemplate("system.agent.agent_fs", {
-      agentId: "agent-afs-test",
-      sharedOrgId: "org-shared-123",
-    });
-    expect(result.skipped).toBe(false);
-    expect(result.text).toContain("agent-fs --org org-shared-123 write thoughts/agent-afs-test/");
-    expect(result.unresolved.length).toBe(0);
-  });
-
-  test("system.agent.services interpolates agentId and swarmUrl", () => {
-    const result = resolveTemplate("system.agent.services", {
-      agentId: "agent-svc-test",
-      swarmUrl: "swarm.example.com",
-    });
-    expect(result.skipped).toBe(false);
-    expect(result.text).toContain("https://agent-svc-test.swarm.example.com");
-    expect(result.unresolved.length).toBe(0);
-  });
-
-  test("system.agent.lead contains delegation rules", () => {
-    const result = resolveTemplate("system.agent.lead", {});
-    expect(result.text).toContain("CRITICAL: You are a coordinator");
-    expect(result.text).toContain("coordinator");
-    expect(result.text).not.toContain("slack-reply");
-  });
-
-  test("system.agent.slack contains Slack tool guidance", () => {
-    const result = resolveTemplate("system.agent.slack", {});
-    expect(result.text).toContain("Slack Tools");
-    expect(result.text).toContain("slack-reply");
-    expect(result.text).toContain("slack-read");
-    expect(result.text).toContain("slack-list-channels");
-    expect(result.text).toContain("Do not relay worker output");
-    expect(result.text).toContain("prefer one reply per task over several");
-    expect(result.text).toContain("match its length to what the user asked for");
-    expect(result.text).not.toContain("post the result back to the originating thread");
-  });
-
-  test("Slack worker guidance leaves agent messages explicit", () => {
-    const result = resolveTemplate("system.agent.worker.slack", {
-      slackChannelId: "C123",
-      slackThreadTs: "123.456",
-    });
-    expect(result.text).toContain("Do not post progress, start, completion, failure");
-    expect(result.text).toContain("prefer one reply per task over several");
-    expect(result.text).toContain("match its length to what the user asked for");
-    expect(result.text).not.toContain("You MUST keep the originating Slack thread informed");
-  });
-
-  test("scripts-only Slack worker guidance has the same restraint", () => {
-    const result = resolveTemplate("system.agent.scripts_only_mode.slack", {
-      slackChannelId: "C123",
-      slackThreadTs: "123.456",
-    });
-    expect(result.text).toContain("Do not post progress, start, completion, failure");
-    expect(result.text).toContain("prefer one reply per task over several");
-    expect(result.text).toContain("match its length to what the user asked for");
-    expect(result.text).toContain("ctx.swarm.slack_reply");
-  });
-
-  test("system.agent.worker contains worker tools", () => {
-    const result = resolveTemplate("system.agent.worker", {});
-    expect(result.text).toContain("store-progress");
-    expect(result.text).toContain("task-action");
-  });
-
-  test("system.agent.register contains join-swarm", () => {
-    const result = resolveTemplate("system.agent.register", {});
-    expect(result.text).toContain("join-swarm");
-  });
-
-  test("system.agent.self_awareness contains architecture details", () => {
-    const result = resolveTemplate("system.agent.self_awareness", {});
-    expect(result.text).toContain("desplega-ai/agent-swarm");
-    expect(result.text).toContain("Docker container");
-  });
-
-  test("system.agent.context_mode contains context-mode reference", () => {
-    const result = resolveTemplate("system.agent.context_mode", {});
-    expect(result.text).toContain("context-mode");
-    expect(result.text).toContain("batch_execute");
-    expect(result.text).toContain("Agent Scripts");
-  });
-
-  test("system.agent.script_authoring_contract states the call convention and secret rules", () => {
-    const result = resolveTemplate("system.agent.script_authoring_contract", {});
-    expect(result.skipped).toBe(false);
-    expect(result.text).toContain("`args` FIRST, `ctx` SECOND");
-    expect(result.text).toContain('import type { ScriptContext } from "swarm-sdk"');
-    expect(result.text).toContain("export default async function (args");
-    expect(result.text).toContain("ctx: ScriptContext");
-    expect(result.text).toContain("export const argsSchema");
-    expect(result.text).toContain(
-      "inline source passed to `script-run` executes without a compile-time typecheck",
+    expect(result.text.trim()).toBe(
+      "You are Ada, a worker in the swarm. Your agent ID is agent-xyz-789.",
     );
-    expect(result.text).toContain("`script-upsert` typechecks before saving");
-    expect(result.text).toContain("`script-query-types`");
-    expect(result.text).toContain("ctx.swarm.config");
-    expect(result.text).toContain("ctx.api.<slug>");
-    expect(result.text).toContain("ctx.stdlib");
-    expect(result.text).toContain("ctx.logger");
-    expect(result.text).toContain("[REDACTED:<CONFIG_KEY>]");
-    expect(result.text).toContain("includeSecrets: true");
-    expect(result.text).toContain("taskTemplate");
-  });
-
-  test("system.agent.script_rubric leads with the authoring contract", () => {
-    const result = resolveTemplate("system.agent.script_rubric", {});
-    expect(result.unresolved.length).toBe(0);
-    expect(countAuthoringContract(result.text)).toBe(1);
-    // Contract renders before the rubric body
-    expect(result.text.indexOf(AUTHORING_CONTRACT_MARKER)).toBeLessThan(
-      result.text.indexOf("### Agent Scripts"),
-    );
-  });
-
-  test("system.agent.script_rubric contains script decision guardrails", () => {
-    const result = resolveTemplate("system.agent.script_rubric", {});
-    expect(result.text).toContain("Do not script below the ~10-call threshold");
-    expect(result.text).toContain("named script only when the logic will be invoked ≥2 times");
-    expect(result.text).toContain("~26 underlying calls");
-    expect(result.text).toContain("~90-95% context reduction");
-  });
-
-  test("system.agent.seed_scripts points agents at task-start scripts", () => {
-    const result = resolveTemplate("system.agent.seed_scripts", {});
-    expect(result.text).toContain("Pre-built Seed Scripts");
-    expect(result.text).toContain("task-context-gathering");
-    expect(result.text).toContain("smart-recall");
-    expect(result.text).toContain("script-search");
-    expect(result.text).not.toContain("compound-insights");
-  });
-
-  // system.agent.guidelines was removed — its content was redundant with worker/lead templates
-
-  test("system.agent.system contains package info", () => {
-    const result = resolveTemplate("system.agent.system", {});
-    expect(result.text).toContain("Ubuntu");
-    expect(result.text).toContain("gh");
-    expect(result.text).toContain("glab");
-  });
-
-  test("system.agent.artifacts contains artifact info", () => {
-    const result = resolveTemplate("system.agent.artifacts", {});
-    expect(result.text).toContain("localtunnel");
-    expect(result.text).toContain("/workspace/personal/artifacts/");
   });
 });
 
-// ============================================================================
-// Composite session template resolution
-// ============================================================================
-
-describe("Session templates — composite resolution", () => {
+describe("Session templates: MUST pointers", () => {
   beforeEach(async () => {
     await ensureTemplatesRegistered();
   });
 
-  test("system.session.lead resolves all template references", () => {
-    const result = resolveTemplate("system.session.lead", {
-      role: "lead",
-      agentId: "lead-agent-001",
-    });
-    expect(result.skipped).toBe(false);
-    expect(result.unresolved.length).toBe(0);
-
-    // Contains role section
-    expect(result.text).toContain("your role is: lead");
-    expect(result.text).toContain("lead-agent-001");
-
-    // Contains register section
-    expect(result.text).toContain("join-swarm");
-
-    // Lead is hinted to persist learned requester comms preferences
-    expect(result.text).toContain("persist them with its `comms` field");
-
-    // Contains lead-specific section (not worker)
-    expect(result.text).toContain("CRITICAL: You are a coordinator");
-    expect(result.text).toContain("coordinator");
-    expect(result.text).not.toContain("task-action");
-
-    // Contains filesystem section with interpolated agentId
-    expect(result.text).toContain("/workspace/shared/thoughts/lead-agent-001/");
-
-    // Contains self_awareness
-    expect(result.text).toContain("How You Are Built");
-
-    // Contains context_mode
-    expect(result.text).toContain("Context Window Management");
-    expect(result.text).toContain("Pre-built Seed Scripts");
-
-    // Guidelines template was removed (redundant with lead/worker templates)
-
-    // Contains system
-    expect(result.text).toContain("System packages available");
-
-    // Contains communication style
-    expect(result.text).toContain("### Communication Style");
+  test("the worker contract points at the swarm-scripts skill", () => {
+    const result = resolveTemplate("system.agent.worker", {});
+    expect(result.text).toContain("You MUST use the `swarm-scripts` skill for this branch.");
   });
 
-  test("system.session.worker resolves all template references", () => {
-    const result = resolveTemplate("system.session.worker", {
-      role: "worker",
-      agentId: "worker-agent-001",
-    });
-    expect(result.skipped).toBe(false);
-    expect(result.unresolved.length).toBe(0);
-
-    // Contains role section
-    expect(result.text).toContain("your role is: worker");
-    expect(result.text).toContain("worker-agent-001");
-
-    // Contains register section
-    expect(result.text).toContain("join-swarm");
-
-    // Contains worker-specific section (not lead)
-    expect(result.text).toContain("store-progress");
-    expect(result.text).toContain("task-action");
-    expect(result.text).not.toContain("CRITICAL: You are a coordinator");
-
-    // Contains filesystem section with interpolated agentId
-    expect(result.text).toContain("/workspace/shared/thoughts/worker-agent-001/");
-
-    // Contains self_awareness
-    expect(result.text).toContain("How You Are Built");
-
-    // Contains context_mode
-    expect(result.text).toContain("Context Window Management");
-    expect(result.text).toContain("Pre-built Seed Scripts");
-
-    // Guidelines template was removed (redundant with lead/worker templates)
-
-    // Contains system
-    expect(result.text).toContain("System packages available");
-
-    // Contains communication style
-    expect(result.text).toContain("### Communication Style");
+  test("the lead contract points at the heartbeat-runbook skill", () => {
+    const result = resolveTemplate("system.agent.lead", {});
+    expect(result.text).toContain(
+      "You MUST use the `heartbeat-runbook` skill when you handle a heartbeat checklist task.",
+    );
   });
 
-  test("communication style block resolves in every session composite", () => {
-    const composites = [
-      "system.session.lead",
-      "system.session.worker",
-      "system.session.worker.pi",
-      "system.session.lead.pi",
-      "system.session.worker.remote",
-    ];
+  test("the memory block points at the memory skill", () => {
+    const result = resolveTemplate("system.agent.memory", {});
+    expect(result.text).toContain(
+      "You MUST use the `memory` skill before you store, edit, or delete a memory.",
+    );
+  });
 
-    for (const eventType of composites) {
-      const result = resolveTemplate(eventType, { role: "worker", agentId: "agent-001" });
+  test("the slack block points at the slack-interaction skill", () => {
+    const result = resolveTemplate("system.agent.slack", {});
+    expect(result.text).toContain(
+      "You MUST use the `slack-interaction` skill before you post to Slack.",
+    );
+  });
+
+  test("the lead contract names the renamed desplega commands", () => {
+    const result = resolveTemplate("system.agent.lead", {});
+    expect(result.text).toContain("/researching");
+    expect(result.text).toContain("/planning");
+    expect(result.text).toContain("/implementing");
+  });
+});
+
+// ============================================================================
+// Composite resolution
+// ============================================================================
+
+describe("Session templates: composite resolution", () => {
+  beforeEach(async () => {
+    await ensureTemplatesRegistered();
+  });
+
+  const vars = {
+    name: "Ada",
+    role: "worker",
+    agentId: "composite-agent-001",
+    persona: "",
+  };
+
+  for (const eventType of SESSION_TEMPLATES) {
+    test(`${eventType} resolves every template reference`, () => {
+      const result = resolveTemplate(eventType, vars);
       expect(result.skipped).toBe(false);
-      expect(result.text).toContain("### Communication Style");
-      expect(result.text).toContain("Mirror the requester");
-      expect(result.text).toContain("Never use em dashes");
-    }
-  });
-
-  test("composite does NOT include conditional sections (agent_fs, services, artifacts)", () => {
-    const result = resolveTemplate("system.session.lead", {
-      role: "lead",
-      agentId: "test-agent",
-    });
-
-    // agent_fs, services, artifacts are NOT in the composite
-    expect(result.text).not.toContain("Agent Filesystem (agent-fs)");
-    expect(result.text).not.toContain("Service Registry");
-    expect(result.text).not.toContain("localtunnel");
-  });
-
-  test("authoring contract renders exactly once in every script-carrying composite", () => {
-    const composites: [string, string][] = [
-      ["system.session.lead", "lead"],
-      ["system.session.worker", "worker"],
-      ["system.session.worker.pi", "worker"],
-      ["system.session.lead.pi", "lead"],
-    ];
-
-    for (const [eventType, role] of composites) {
-      const result = resolveTemplate(eventType, { role, agentId: "dedupe-test" });
       expect(result.unresolved.length).toBe(0);
-      expect(countAuthoringContract(result.text)).toBe(1);
+      expect(result.text).not.toContain("{{@template[");
+      expect(result.text).toContain("You are Ada,");
+      expect(result.text).toContain("composite-agent-001");
+    });
+  }
+
+  test("lead and worker differ only in the contract block", () => {
+    const lead = resolveTemplate("system.session.lead", { ...vars, role: "lead" }).text;
+    const worker = resolveTemplate("system.session.worker", vars).text;
+
+    // Shared blocks: workspace, memory, communication, secrets.
+    for (const shared of [
+      "`/workspace/personal/` is yours.",
+      "You MUST use the `memory` skill",
+      "## How you write",
+      "## Secrets",
+    ]) {
+      expect(lead).toContain(shared);
+      expect(worker).toContain(shared);
+    }
+
+    expect(lead).toContain("## How you lead");
+    expect(lead).not.toContain("## How you work");
+    expect(worker).toContain("## How you work");
+    expect(worker).not.toContain("## How you lead");
+  });
+
+  test("the managed composite is the worker composite with the remote workspace", () => {
+    const managed = resolveTemplate("system.session.worker.managed", vars).text;
+    const worker = resolveTemplate("system.session.worker", vars).text;
+
+    expect(managed).toContain("## How you work");
+    expect(managed).toContain(
+      "Your profile lives in the database. Edit it with `update-profile`: `soulMd`, `identityMd`, `heartbeatMd`, `toolsMd`.",
+    );
+    expect(managed).not.toContain("`/workspace/personal/` is yours.");
+    expect(worker).toContain("`/workspace/personal/` is yours.");
+
+    // Every other block is shared with the local worker composite.
+    for (const shared of ["You MUST use the `memory` skill", "## How you write", "## Secrets"]) {
+      expect(managed).toContain(shared);
     }
   });
 
-  test("system.session.lead.pi omits the context-mode block but keeps lead + script guidance", () => {
-    const result = resolveTemplate("system.session.lead.pi", {
-      role: "lead",
-      agentId: "pi-lead-001",
-    });
-    expect(result.skipped).toBe(false);
-    expect(result.unresolved.length).toBe(0);
+  test("the remote composite names no swarm tool", () => {
+    const remote = resolveTemplate("system.session.worker.remote", vars).text;
 
-    // No context_mode block — none of its ctx_* tool advertising
-    expect(result.text).not.toContain("Context Window Management");
-    expect(result.text).not.toContain("batch_execute");
-    expect(result.text).not.toContain("execute_file");
-    expect(result.text).not.toContain("context-mode` MCP tools");
+    for (const tool of ["store-progress", "get-swarm", "memory-store", "update-profile"]) {
+      expect(remote).not.toContain(tool);
+    }
+    expect(remote).toContain("Your final message is the task output.");
+    expect(remote).toContain("Your completed output is stored as a memory");
+  });
+});
 
-    // Still a lead, still gets the script guidance
-    expect(result.text).toContain("CRITICAL: You are a coordinator");
-    expect(result.text).toContain("Agent Scripts");
-    expect(result.text).toContain(AUTHORING_CONTRACT_MARKER);
-    expect(result.text).toContain("Pre-built Seed Scripts");
+// ============================================================================
+// Hygiene
+// ============================================================================
+
+describe("Session templates: hygiene", () => {
+  beforeEach(async () => {
+    await ensureTemplatesRegistered();
   });
 
-  test("lead and worker composites differ only in lead vs worker section", () => {
-    const leadResult = resolveTemplate("system.session.lead", {
-      role: "lead",
-      agentId: "test-agent",
-    });
-    const workerResult = resolveTemplate("system.session.worker", {
-      role: "worker",
-      agentId: "test-agent",
-    });
+  test("no system or session template body contains an em dash", () => {
+    const offenders = getAllTemplateDefinitions()
+      .filter((d) => d.category === "system" || d.category === "session")
+      .filter((d) => d.defaultBody.includes(EM_DASH) || d.header.includes(EM_DASH))
+      .map((d) => d.eventType);
 
-    // Both share common sections
-    expect(leadResult.text).toContain("join-swarm");
-    expect(workerResult.text).toContain("join-swarm");
-    expect(leadResult.text).toContain("How You Are Built");
-    expect(workerResult.text).toContain("How You Are Built");
-    expect(leadResult.text).toContain("Pre-built Seed Scripts");
-    expect(workerResult.text).toContain("Pre-built Seed Scripts");
-
-    // Lead has lead content, not worker
-    expect(leadResult.text).toContain("CRITICAL: You are a coordinator");
-    expect(leadResult.text).not.toContain("task-action");
-
-    // Worker has worker content, not lead
-    expect(workerResult.text).toContain("task-action");
-    expect(workerResult.text).not.toContain("CRITICAL: You are a coordinator");
+    expect(offenders).toEqual([]);
   });
 });
 
@@ -498,119 +319,41 @@ describe("Session templates — composite resolution", () => {
 // Integration with getBasePrompt
 // ============================================================================
 
-describe("Session templates — getBasePrompt integration", () => {
+describe("Session templates: getBasePrompt integration", () => {
   beforeEach(async () => {
     await ensureTemplatesRegistered();
   });
 
-  test("getBasePrompt uses session composite for worker", async () => {
+  /** getBasePrompt collapses 3+ consecutive newlines; apply the same rule here. */
+  function collapse(text: string): string {
+    return text.replace(/\n{3,}/g, "\n\n");
+  }
+
+  test("a local worker prompt opens with the worker composite verbatim", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = await getBasePrompt({
+    const agentId = "integration-test-worker";
+    const composite = resolveTemplate("system.session.worker", {
+      name: "an agent",
       role: "worker",
-      agentId: "integration-test-worker",
-      swarmUrl: "swarm.test.com",
-    });
+      agentId,
+      persona: "",
+    }).text;
 
-    // Core sections from composite
-    expect(result).toContain("your role is: worker");
-    expect(result).toContain("integration-test-worker");
-    expect(result).toContain("join-swarm");
-    expect(result).toContain("store-progress");
-    expect(result).toContain("How You Are Built");
-    expect(result).toContain("Pre-built Seed Scripts");
-    expect(result).toContain("System packages available");
-
-    // Conditional sections (services included by default)
-    expect(result).toContain("Service Registry");
-    expect(result).toContain("https://integration-test-worker.swarm.test.com");
-
-    // Artifacts included by default
-    expect(result).toContain("Artifacts");
+    const result = await getBasePrompt({ role: "worker", agentId });
+    expect(result).toStartWith(collapse(composite));
   });
 
-  test("getBasePrompt uses session composite for lead", async () => {
+  test("a local lead prompt opens with the lead composite verbatim", async () => {
     const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = await getBasePrompt({
+    const agentId = "integration-test-lead";
+    const composite = resolveTemplate("system.session.lead", {
+      name: "an agent",
       role: "lead",
-      agentId: "integration-test-lead",
-      swarmUrl: "swarm.test.com",
-    });
+      agentId,
+      persona: "",
+    }).text;
 
-    // Core sections from composite
-    expect(result).toContain("your role is: lead");
-    expect(result).toContain("integration-test-lead");
-    expect(result).toContain("CRITICAL: You are a coordinator");
-    expect(result).toContain("Pre-built Seed Scripts");
-
-    // Should NOT have worker content
-    expect(result).not.toContain("task-action");
-  });
-
-  test("authoring contract renders exactly once in the scripts-only prompt", async () => {
-    const { getBasePrompt } = await import("../prompts/base-prompt");
-    for (const role of ["worker", "lead"] as const) {
-      const result = await getBasePrompt({
-        role,
-        agentId: "scripts-only-dedupe",
-        swarmUrl: "swarm.test.com",
-        scriptsOnly: true,
-      });
-
-      expect(result).toContain("Code-Mode: script tools ONLY");
-      expect(countAuthoringContract(result)).toBe(1);
-    }
-  });
-
-  test("getBasePrompt renders the authoring contract once per provider/role combo", async () => {
-    const { getBasePrompt } = await import("../prompts/base-prompt");
-    const combos = [
-      { role: "worker", provider: undefined },
-      { role: "lead", provider: undefined },
-      { role: "worker", provider: "pi" as const },
-      { role: "lead", provider: "pi" as const },
-    ];
-
-    for (const combo of combos) {
-      const result = await getBasePrompt({
-        role: combo.role,
-        agentId: "contract-once",
-        swarmUrl: "swarm.test.com",
-        provider: combo.provider,
-      });
-      expect(countAuthoringContract(result)).toBe(1);
-    }
-  });
-
-  test("getBasePrompt uses the pi lead composite (no context-mode) for lead + pi", async () => {
-    const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = await getBasePrompt({
-      role: "lead",
-      agentId: "integration-test-pi-lead",
-      swarmUrl: "swarm.test.com",
-      provider: "pi",
-    });
-
-    expect(result).toContain("CRITICAL: You are a coordinator");
-    expect(result).toContain("Agent Scripts");
-    expect(result).toContain("Pre-built Seed Scripts");
-    expect(result).not.toContain("Context Window Management");
-    expect(result).not.toContain("batch_execute");
-    expect(result).not.toContain("execute_file");
-  });
-
-  test("getBasePrompt includes script guidance for pi worker without context-mode tool list", async () => {
-    const { getBasePrompt } = await import("../prompts/base-prompt");
-    const result = await getBasePrompt({
-      role: "worker",
-      agentId: "integration-test-pi",
-      swarmUrl: "swarm.test.com",
-      provider: "pi",
-    });
-
-    expect(result).toContain("Agent Scripts");
-    expect(result).toContain("Pre-built Seed Scripts");
-    expect(result).toContain("task-context-gathering");
-    expect(result).not.toContain("Context Window Management");
-    expect(result).not.toContain("batch_execute");
+    const result = await getBasePrompt({ role: "lead", agentId });
+    expect(result).toStartWith(collapse(composite));
   });
 });

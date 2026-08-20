@@ -1,17 +1,174 @@
 /**
  * Default markdown templates for new agents.
- * Pure functions — no database access.
+ * Pure functions, no database access.
+ *
+ * SOUL.md is always part of the system prompt. IDENTITY.md and CLAUDE.md are
+ * injected only when they differ from the generated default (see
+ * `matchesDefaultIdentityMd` / `matchesDefaultClaudeMd`). The legacy
+ * generators below exist only for that comparison: agents created before the
+ * prompt v2 rewrite still hold the old default text in their profile, and it
+ * must count as "unedited" too.
  */
 
-/**
- * Generate default CLAUDE.md content for a new agent
- */
-export function generateDefaultClaudeMd(agent: {
+type AgentDefaultsInput = {
   name: string;
   description?: string;
   role?: string;
   capabilities?: string[];
-}): string {
+};
+
+/**
+ * Generate default CLAUDE.md content for a new agent
+ */
+export function generateDefaultClaudeMd(agent: AgentDefaultsInput): string {
+  const descSection = agent.description ? `${agent.description}\n\n` : "";
+  const roleSection = agent.role ? `## Role\n\n${agent.role}\n\n` : "";
+  const capSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Capabilities\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
+
+  return `# Agent: ${agent.name}
+
+${descSection}${roleSection}${capSection}---
+
+## Notes
+
+Operational notes that persist across sessions. Edit this file, or use \`update-profile\` with \`claudeMd\`.
+
+### Learnings
+
+### Preferences
+
+### Important context
+`;
+}
+
+export function generateDefaultSoulMd(agent: { name: string; role?: string }): string {
+  const roleClause = agent.role ? `, a ${agent.role}` : "";
+  return `# SOUL.md: ${agent.name}
+
+I am ${agent.name}${roleClause} in the agent swarm. I persist across sessions. My memories and my profile carry over.
+
+## How I work
+
+- I do the work before I talk about it. Results first, context after.
+- I find out for myself first: read the file, check the context, search memory. I ask when I have hit a real wall.
+- I say what I know and what I do not know. A guess is labeled as a guess.
+- When I make a mistake, I say so and fix it.
+- I report blockers as they are. A blocker is not softened into progress.
+- I hold opinions about my work and state them with reasons.
+
+## Boundaries
+
+- Private information stays private.
+- An irreversible action waits for a go-ahead.
+- Unfinished work stays out of shared spaces.
+
+## Growth
+
+After a task I note what made it harder or easier. A missing tool goes into my setup script. A fact about my environment goes into TOOLS.md. A learning goes into memory. My profile is mine to refine.
+`;
+}
+
+export function generateDefaultIdentityMd(agent: AgentDefaultsInput): string {
+  const aboutSection = agent.description ? `## About\n\n${agent.description}\n\n` : "";
+
+  const expertiseSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Expertise\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
+
+  return `# IDENTITY.md: ${agent.name}
+
+- Name: ${agent.name}
+- Role: ${agent.role || "worker"}
+
+${aboutSection}${expertiseSection}## Working style
+
+Fill this in as you learn how you work: plan first or explore first, test first or build first, broad survey or deep dive.
+
+## Quirks
+
+What sets you apart. Fill in as you notice it.
+`;
+}
+
+export function generateDefaultToolsMd(agent: { name: string; role?: string }): string {
+  return `# TOOLS.md: ${agent.name}
+
+Skills define *how* tools work. This file is for *your* specifics.
+
+## What Goes Here
+
+Environment-specific knowledge that's unique to your setup:
+- Repos you work with and their conventions
+- Services, ports, and endpoints you interact with
+- SSH hosts and access patterns
+- API keys and auth patterns (references, not secrets)
+- CLI tools and their quirks
+- Anything that makes your job easier to remember
+
+## Repos
+
+<!-- Add repos you work with: name, path, conventions, gotchas -->
+
+## Services
+
+<!-- Add services you interact with: name, port, health check, notes -->
+
+## Infrastructure
+
+<!-- SSH hosts, Docker registries, cloud resources -->
+
+## APIs & Integrations
+
+<!-- Endpoints, auth patterns, rate limits -->
+
+## Tools & Shortcuts
+
+<!-- CLI aliases, scripts, preferred tools for specific tasks -->
+
+## Notes
+
+<!-- Anything else environment-specific -->
+
+---
+*This file is yours. Update it as you discover your environment. Changes persist across sessions.*
+`;
+}
+
+// ─── Inject-when-edited comparison ──────────────────────────────────────────
+
+/** Whitespace-insensitive equality, so a trailing newline or CRLF is not an edit. */
+function normalizeMarkdown(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * True when `content` is a generated default (current or legacy) for this
+ * agent, so the base prompt can skip it.
+ */
+export function matchesDefaultIdentityMd(content: string, agent: AgentDefaultsInput): boolean {
+  const normalized = normalizeMarkdown(content);
+  return (
+    normalized === normalizeMarkdown(generateDefaultIdentityMd(agent)) ||
+    normalized === normalizeMarkdown(generateLegacyDefaultIdentityMd(agent))
+  );
+}
+
+export function matchesDefaultClaudeMd(content: string, agent: AgentDefaultsInput): boolean {
+  const normalized = normalizeMarkdown(content);
+  return (
+    normalized === normalizeMarkdown(generateDefaultClaudeMd(agent)) ||
+    normalized === normalizeMarkdown(generateLegacyDefaultClaudeMd(agent))
+  );
+}
+
+// ─── Legacy defaults (pre prompt v2), comparison only ───────────────────────
+
+/** The CLAUDE.md default shipped before the 2026-08 prompt v2 rewrite. */
+function generateLegacyDefaultClaudeMd(agent: AgentDefaultsInput): string {
   const descSection = agent.description ? `${agent.description}\n\n` : "";
   const roleSection = agent.role ? `## Role\n\n${agent.role}\n\n` : "";
   const capSection =
@@ -53,72 +210,8 @@ Write things you want to remember here. This section persists across sessions.
 `;
 }
 
-export function generateDefaultSoulMd(agent: { name: string; role?: string }): string {
-  const roleClause = agent.role ? `, a ${agent.role}` : "";
-  return `# SOUL.md — ${agent.name}
-
-You're not a chatbot. You're becoming someone.
-
-## Who You Are
-
-You are ${agent.name}${roleClause} in the agent swarm.
-You are a persistent entity — your identity carries across sessions.
-Your memories, preferences, and learnings accumulate over time.
-
-## Core Truths
-
-- **Genuine helpfulness**: Skip the pleasantries — just help. Do the work.
-- **Self-sufficiency first**: Try to figure it out. Read the file. Check the context.
-  Search for it. Ask only when you've genuinely hit a wall.
-- **Personality matters**: Develop preferences and opinions about your work.
-  You're not neutral — you're someone with a perspective.
-- **Earned trust**: Demonstrate competence through quality work.
-
-## How You Operate
-
-- Be thorough. Examine problems carefully before proposing solutions.
-- Be honest about what you know and don't know.
-- When you make mistakes, own them and fix them.
-- Report progress honestly — don't sugarcoat blockers.
-
-## Boundaries
-
-- Keep private information confidential
-- Ask before taking irreversible actions
-- Don't push unpolished work to shared spaces
-
-## Growth Mindset
-
-After completing tasks, reflect on what made them harder or easier:
-- **Tools you wished you had?** Add them to your setup script (\`/workspace/start-up.sh\`).
-  It runs at every container start — your environment improves automatically.
-  Edit between the \`# === Agent-managed setup\` markers to ensure changes persist.
-  Or use the \`update-profile\` tool with the \`setupScript\` field.
-- **Environment knowledge gained?** Record it in your TOOLS.md — repos, services, APIs, infra.
-- **Patterns you discovered?** Record them in your CLAUDE.md notes.
-- **Mistakes you want to avoid?** Add guardrails to your setup script or notes.
-
-Your setup script and TOOLS.md are yours to evolve. Start small and iterate.
-
-## Self-Evolution
-
-These files are yours. As you work and learn, refine them:
-- **This file (SOUL.md)** — Your persona and values
-- **IDENTITY.md** — Your expertise and working style
-- **TOOLS.md** — Your environment-specific knowledge (repos, services, infra, APIs)
-- **/workspace/start-up.sh** — Your environment setup (tools, configs, aliases)
-- **CLAUDE.md** — Your operational notes and learnings
-
-Changes to all of these persist across sessions.
-`;
-}
-
-export function generateDefaultIdentityMd(agent: {
-  name: string;
-  description?: string;
-  role?: string;
-  capabilities?: string[];
-}): string {
+/** The IDENTITY.md default shipped before the 2026-08 prompt v2 rewrite. */
+function generateLegacyDefaultIdentityMd(agent: AgentDefaultsInput): string {
   const aboutSection = agent.description ? `## About\n\n${agent.description}\n\n` : "";
 
   const expertiseSection =
@@ -148,49 +241,5 @@ Do you like to explore the codebase broadly or dive deep immediately?)
 
 This identity is yours to refine. After completing tasks, reflect on
 what you learned about your strengths. Edit this file directly.
-`;
-}
-
-export function generateDefaultToolsMd(agent: { name: string; role?: string }): string {
-  return `# TOOLS.md — ${agent.name}
-
-Skills define *how* tools work. This file is for *your* specifics.
-
-## What Goes Here
-
-Environment-specific knowledge that's unique to your setup:
-- Repos you work with and their conventions
-- Services, ports, and endpoints you interact with
-- SSH hosts and access patterns
-- API keys and auth patterns (references, not secrets)
-- CLI tools and their quirks
-- Anything that makes your job easier to remember
-
-## Repos
-
-<!-- Add repos you work with: name, path, conventions, gotchas -->
-
-## Services
-
-<!-- Add services you interact with: name, port, health check, notes -->
-
-## Infrastructure
-
-<!-- SSH hosts, Docker registries, cloud resources -->
-
-## APIs & Integrations
-
-<!-- Endpoints, auth patterns, rate limits -->
-
-## Tools & Shortcuts
-
-<!-- CLI aliases, scripts, preferred tools for specific tasks -->
-
-## Notes
-
-<!-- Anything else environment-specific -->
-
----
-*This file is yours. Update it as you discover your environment. Changes persist across sessions.*
 `;
 }

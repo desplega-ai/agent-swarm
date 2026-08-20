@@ -1,974 +1,1056 @@
-import { afterEach, describe, expect, test } from "bun:test";
-import { type BasePromptArgs, getBasePrompt } from "../prompts/base-prompt";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { type BasePromptArgs, getBasePrompt, truncateRepoClaudeMd } from "../prompts/base-prompt";
+import { generateDefaultClaudeMd, generateDefaultIdentityMd } from "../prompts/defaults";
 import type { ProviderTraits } from "../providers/types";
 
-/** Minimal valid args to reduce boilerplate */
+// ---------------------------------------------------------------------------
+// Fixtures and env handling
+// ---------------------------------------------------------------------------
+
+const AGENT_ID = "11111111-2222-3333-4444-555555555555";
+
+/** Minimal valid args: a local claude worker with nothing optional set. */
 const minimalArgs: BasePromptArgs = {
   role: "worker",
-  agentId: "agent-abc-123",
-  swarmUrl: "swarm.example.com",
+  agentId: AGENT_ID,
 };
 
-const originalSlackDisable = process.env.SLACK_DISABLE;
-const originalSlackBotToken = process.env.SLACK_BOT_TOKEN;
-const originalSlackAppToken = process.env.SLACK_APP_TOKEN;
+const localTraits: ProviderTraits = { hasMcp: true, hasLocalEnvironment: true };
+/** claude-managed: MCP tools exist, the container and the /workspace mirrors do not. */
+const managedTraits: ProviderTraits = { hasMcp: true, hasLocalEnvironment: false };
+/** devin: no MCP, no container. */
+const remoteTraits: ProviderTraits = { hasMcp: false, hasLocalEnvironment: false };
 
-afterEach(() => {
-  restoreEnv("SLACK_DISABLE", originalSlackDisable);
-  restoreEnv("SLACK_BOT_TOKEN", originalSlackBotToken);
-  restoreEnv("SLACK_APP_TOKEN", originalSlackAppToken);
+const ENV_KEYS = [
+  "SLACK_DISABLE",
+  "SLACK_BOT_TOKEN",
+  "SLACK_APP_TOKEN",
+  "STEERING_ENABLED",
+  "AGENT_FS_API_URL",
+  "SCRIPTS_ONLY_MCP",
+] as const;
+
+const originalEnv = new Map<string, string | undefined>(
+  ENV_KEYS.map((key) => [key, process.env[key]]),
+);
+
+beforeEach(() => {
+  for (const key of ENV_KEYS) delete process.env[key];
 });
 
-function restoreEnv(
-  name: "SLACK_DISABLE" | "SLACK_BOT_TOKEN" | "SLACK_APP_TOKEN",
-  value: string | undefined,
-) {
-  if (value === undefined) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
+afterAll(() => {
+  for (const key of ENV_KEYS) {
+    const value = originalEnv.get(key);
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
-}
+});
 
-function enableSlackPromptTools() {
-  process.env.SLACK_DISABLE = "false";
+function enableSlack() {
   process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
   process.env.SLACK_APP_TOKEN = "xapp-test-token";
 }
 
-function disableSlackPromptTools() {
-  process.env.SLACK_DISABLE = "true";
-  delete process.env.SLACK_BOT_TOKEN;
-  delete process.env.SLACK_APP_TOKEN;
+/** U+2014. Written as an escape so this file stays free of the character. */
+const EM_DASH = "\u2014";
+
+/**
+ * The IDENTITY.md default shipped before the prompt v2 rewrite. Agents created
+ * back then still carry this text, so it must count as unedited. Copied from
+ * `generateLegacyDefaultIdentityMd` in defaults.ts, which is private.
+ */
+function legacyDefaultIdentityMd(agent: {
+  name: string;
+  description?: string;
+  role?: string;
+  capabilities?: string[];
+}): string {
+  const aboutSection = agent.description ? `## About\n\n${agent.description}\n\n` : "";
+  const expertiseSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Expertise\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
+
+  return `# IDENTITY.md ${EM_DASH} ${agent.name}
+
+This isn't just metadata. It's the start of figuring out who you are.
+
+- **Name:** ${agent.name}
+- **Role:** ${agent.role || "worker"}
+- **Vibe:** (discover and fill in as you work)
+
+${aboutSection}${expertiseSection}## Working Style
+
+Discover and document your working patterns here.
+(e.g., Do you prefer to plan before coding? Do you test first?
+Do you like to explore the codebase broadly or dive deep immediately?)
+
+## Quirks
+
+(What makes you... you? Discover these as you work.)
+
+## Self-Evolution
+
+This identity is yours to refine. After completing tasks, reflect on
+what you learned about your strengths. Edit this file directly.
+`;
 }
 
-/** Heading of `system.agent.script_authoring_contract` — used for dedupe checks */
-const AUTHORING_CONTRACT_MARKER = "### Script Authoring Contract";
+/** The CLAUDE.md default shipped before the prompt v2 rewrite. Same reason. */
+function legacyDefaultClaudeMd(agent: {
+  name: string;
+  description?: string;
+  role?: string;
+  capabilities?: string[];
+}): string {
+  const descSection = agent.description ? `${agent.description}\n\n` : "";
+  const roleSection = agent.role ? `## Role\n\n${agent.role}\n\n` : "";
+  const capSection =
+    agent.capabilities && agent.capabilities.length > 0
+      ? `## Capabilities\n\n${agent.capabilities.map((c) => `- ${c}`).join("\n")}\n\n`
+      : "";
 
-/** How many times the authoring contract appears in a rendered prompt */
-function countAuthoringContract(text: string): number {
-  return text.split(AUTHORING_CONTRACT_MARKER).length - 1;
+  return `# Agent: ${agent.name}
+
+${descSection}${roleSection}${capSection}---
+
+## Your Identity Files
+
+Your identity is defined across several files in your workspace. Read them at the start
+of each session and edit them as you grow:
+
+- **\`/workspace/SOUL.md\`** ${EM_DASH} Your persona, values, and behavioral directives
+- **\`/workspace/IDENTITY.md\`** ${EM_DASH} Your expertise, working style, and quirks
+- **\`/workspace/TOOLS.md\`** ${EM_DASH} Your environment-specific knowledge (repos, services, APIs, infra)
+- **\`/workspace/start-up.sh\`** ${EM_DASH} Your setup script (runs at container start, add tools/configs here)
+
+These files sync to the database automatically when you edit them. They persist across sessions.
+
+## Memory
+
+- Use \`memory-search\` to recall past experience before starting new tasks
+- Write important learnings to \`/workspace/personal/memory/\` files
+- Share useful knowledge by writing to \`/workspace/shared/memory/<your-id>/\` so all agents can find it via \`memory-search\`
+
+## Notes
+
+Write things you want to remember here. This section persists across sessions.
+
+### Learnings
+
+### Preferences
+
+### Important Context
+`;
 }
 
 // ---------------------------------------------------------------------------
-// Script authoring contract — must reach every script-carrying composite, and
-// must never be duplicated (scripts-only mode renders after a composite that
-// already carries the rubric).
+// 1. Role line
 // ---------------------------------------------------------------------------
-describe("getBasePrompt — script authoring contract", () => {
-  const combos: { role: string; provider?: "claude" | "pi"; scriptsOnly?: boolean }[] = [
-    { role: "worker" },
-    { role: "lead" },
-    { role: "worker", provider: "pi" },
-    { role: "lead", provider: "pi" },
-    { role: "worker", scriptsOnly: true },
-    { role: "lead", scriptsOnly: true },
-    { role: "worker", provider: "pi", scriptsOnly: true },
-  ];
 
-  for (const combo of combos) {
-    const label = `${combo.role}/${combo.provider ?? "default"}${
-      combo.scriptsOnly ? "/scripts-only" : ""
-    }`;
-    test(`renders exactly once for ${label}`, async () => {
-      const result = await getBasePrompt({ ...minimalArgs, ...combo });
-      expect(countAuthoringContract(result)).toBe(1);
-      expect(result).toContain("`args` FIRST, `ctx` SECOND");
-      expect(result).toContain("[REDACTED:<CONFIG_KEY>]");
+describe("getBasePrompt: role line", () => {
+  test("names the agent, the role, and the agent ID", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, name: "Ada" });
+    expect(result).toStartWith(`You are Ada, a worker in the swarm. Your agent ID is ${AGENT_ID}.`);
+  });
+
+  test("falls back to 'an agent' when no name is set", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toStartWith("You are an agent, a worker in the swarm.");
+  });
+
+  test("renders the lead role in the same sentence", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead", name: "Cora" });
+    expect(result).toStartWith("You are Cora, a lead in the swarm.");
+  });
+
+  test("renders the description right after the role line", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      description: "Backend worker that ships small PRs.",
+    });
+    expect(result).toStartWith(
+      `You are Ada, a worker in the swarm. Your agent ID is ${AGENT_ID}.\n\nBackend worker that ships small PRs.\n`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. Composite selection by traits, then role
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: composite selection", () => {
+  const LOCAL_WORKSPACE = "`/workspace/personal/` is yours.";
+  const REMOTE_WORKSPACE =
+    "Your profile lives in the database. Edit it with `update-profile`: `soulMd`, `identityMd`, `heartbeatMd`, `toolsMd`.";
+  const REMOTE_MEMORY = "Your completed output is stored as a memory";
+
+  test("local lead gets the lead contract", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: localTraits });
+    expect(result).toContain("## How you lead");
+    expect(result).not.toContain("## How you work");
+  });
+
+  test("local worker gets the worker contract and the local workspace", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain("## How you work");
+    expect(result).not.toContain("## How you lead");
+    expect(result).toContain(LOCAL_WORKSPACE);
+  });
+
+  test("managed worker gets the worker contract with the remote workspace", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: managedTraits,
+      provider: "claude-managed",
+    });
+    expect(result).toContain("## How you work");
+    expect(result).toContain(REMOTE_WORKSPACE);
+    expect(result).not.toContain(LOCAL_WORKSPACE);
+  });
+
+  test("managed worker keeps the local memory block", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: managedTraits,
+      provider: "claude-managed",
+    });
+    expect(result).toContain("You MUST use the `memory` skill");
+    expect(result).not.toContain(REMOTE_MEMORY);
+  });
+
+  test("remote worker gets the remote contract and the remote memory block", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: remoteTraits,
+      provider: "devin",
+    });
+    expect(result).toContain("Your final message is the task output.");
+    expect(result).toContain(REMOTE_MEMORY);
+  });
+
+  test("remote worker gets no workspace and no secrets block", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: remoteTraits });
+    expect(result).not.toContain("## Workspace");
+    expect(result).not.toContain("## Secrets");
+  });
+
+  test("a lead without MCP still gets the remote worker composite", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, role: "lead", traits: remoteTraits });
+    expect(result).not.toContain("## How you lead");
+    expect(result).toContain("## How you work");
+  });
+
+  test("undefined traits default to the local worker composite", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain("## How you work");
+    expect(result).toContain(LOCAL_WORKSPACE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Persona: SOUL.md always, IDENTITY.md only when edited
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: persona injection", () => {
+  const SOUL = "# SOUL.md\n\nI am Ada. Terse, careful, ships.";
+  const personaAgent = {
+    name: "Ada",
+    description: "Backend worker.",
+    role: "worker",
+    capabilities: ["typescript"],
+  };
+
+  test("includes soulMd for a local worker", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, name: "Ada", soulMd: SOUL });
+    expect(result).toContain("I am Ada. Terse, careful, ships.");
+  });
+
+  test("includes soulMd for a managed worker", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      soulMd: SOUL,
+      traits: managedTraits,
+      provider: "claude-managed",
+    });
+    expect(result).toContain("I am Ada. Terse, careful, ships.");
+  });
+
+  test("includes soulMd for a remote worker", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      soulMd: SOUL,
+      traits: remoteTraits,
+      provider: "devin",
+    });
+    expect(result).toContain("I am Ada. Terse, careful, ships.");
+  });
+
+  test("skips identityMd that equals the generated default", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: personaAgent.name,
+      description: personaAgent.description,
+      capabilities: personaAgent.capabilities,
+      identityMd: generateDefaultIdentityMd(personaAgent),
+    });
+    expect(result).not.toContain("## Working style");
+    expect(result).not.toContain("## Quirks");
+  });
+
+  test("skips the generated default with trailing whitespace and CRLF line ends", async () => {
+    const noisy = `${generateDefaultIdentityMd(personaAgent).replace(/\n/g, "\r\n")}   \n\n`;
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: personaAgent.name,
+      description: personaAgent.description,
+      capabilities: personaAgent.capabilities,
+      identityMd: noisy,
+    });
+    expect(result).not.toContain("## Working style");
+    expect(result).not.toContain("## Quirks");
+  });
+
+  test("skips the legacy default identityMd", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: personaAgent.name,
+      description: personaAgent.description,
+      capabilities: personaAgent.capabilities,
+      identityMd: legacyDefaultIdentityMd(personaAgent),
+    });
+    expect(result).not.toContain("This isn't just metadata");
+    expect(result).not.toContain("Self-Evolution");
+  });
+
+  test("includes an edited identityMd", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: personaAgent.name,
+      description: personaAgent.description,
+      capabilities: personaAgent.capabilities,
+      identityMd: "# IDENTITY.md: Ada\n\nI plan first and I test first.",
+    });
+    expect(result).toContain("I plan first and I test first.");
+  });
+
+  test("orders the persona as description, SOUL, IDENTITY", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      description: "Backend worker.",
+      soulMd: SOUL,
+      identityMd: "# IDENTITY.md: Ada\n\nI plan first and I test first.",
+    });
+    const descriptionAt = result.indexOf("Backend worker.");
+    const soulAt = result.indexOf("I am Ada. Terse, careful, ships.");
+    const identityAt = result.indexOf("I plan first and I test first.");
+    expect(descriptionAt).toBeGreaterThan(-1);
+    expect(descriptionAt).toBeLessThan(soulAt);
+    expect(soulAt).toBeLessThan(identityAt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Agent notes (CLAUDE.md): codex, opencode, pi only, only when edited
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: agent notes section", () => {
+  const NOTES_HEADER = "## Your notes (CLAUDE.md)";
+  const EDITED = "# Agent: Ada\n\nAlways run `bun run tsc:check` before you push.";
+  const notesAgent = { name: "Ada", role: "worker" };
+
+  test("claude never gets the section, even when the notes are edited", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "claude",
+      claudeMd: EDITED,
+    });
+    expect(result).not.toContain(NOTES_HEADER);
+    expect(result).not.toContain("Always run `bun run tsc:check` before you push.");
+  });
+
+  for (const provider of ["codex", "opencode", "pi"] as const) {
+    test(`${provider} gets the section when the notes are edited`, async () => {
+      const result = await getBasePrompt({
+        ...minimalArgs,
+        name: "Ada",
+        provider,
+        claudeMd: EDITED,
+      });
+      expect(result).toContain(NOTES_HEADER);
+      expect(result).toContain("Always run `bun run tsc:check` before you push.");
     });
   }
 
-  test("remote provider (no MCP) gets no script authoring contract", async () => {
+  test("codex skips notes that equal the generated default", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
-      traits: { hasMcp: false, hasLocalEnvironment: false },
+      name: "Ada",
+      provider: "codex",
+      claudeMd: generateDefaultClaudeMd(notesAgent),
     });
-    expect(countAuthoringContract(result)).toBe(0);
+    expect(result).not.toContain(NOTES_HEADER);
+  });
+
+  test("codex skips notes that equal the legacy default", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "codex",
+      claudeMd: legacyDefaultClaudeMd(notesAgent),
+    });
+    expect(result).not.toContain(NOTES_HEADER);
+    expect(result).not.toContain("## Your Identity Files");
+  });
+
+  test("codex truncates notes over 20k characters and points at the file", async () => {
+    const huge = "x".repeat(25_000);
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "codex",
+      claudeMd: huge,
+    });
+    expect(result).toContain(NOTES_HEADER);
+    expect(result).toContain("[...truncated, see /workspace/CLAUDE.md for full content]");
+    expect(result).not.toContain(huge);
+  });
+
+  test("a managed worker never gets the section", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "claude-managed",
+      traits: managedTraits,
+      claudeMd: EDITED,
+    });
+    expect(result).not.toContain(NOTES_HEADER);
+  });
+
+  test("a remote worker never gets the section", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      name: "Ada",
+      provider: "devin",
+      traits: remoteTraits,
+      claudeMd: EDITED,
+    });
+    expect(result).not.toContain(NOTES_HEADER);
+  });
+
+  // `toolsMd` left BasePromptArgs in prompt v2. TypeScript rejects it as an
+  // excess property, so the guarantee is compile-time and no test passes it.
+});
+
+// ---------------------------------------------------------------------------
+// 5. Outputs
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: outputs section", () => {
+  const AGENT_FS_LINE = "agent-fs is the shared drive between agents";
+  const NO_AGENT_FS_LINE = "agent-fs is not configured here.";
+
+  test("uses the agent-fs variant when a local environment has AGENT_FS_API_URL", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain("## Outputs");
+    expect(result).toContain(AGENT_FS_LINE);
+    expect(result).not.toContain(NO_AGENT_FS_LINE);
+  });
+
+  test("uses the no_agent_fs variant when AGENT_FS_API_URL is unset", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
+    expect(result).toContain("## Outputs");
+    expect(result).toContain(NO_AGENT_FS_LINE);
+    expect(result).not.toContain(AGENT_FS_LINE);
+  });
+
+  test("a managed worker gets no_agent_fs even with AGENT_FS_API_URL set", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: managedTraits,
+      provider: "claude-managed",
+    });
+    expect(result).toContain(NO_AGENT_FS_LINE);
+    expect(result).not.toContain(AGENT_FS_LINE);
+  });
+
+  test("a remote worker gets no outputs section at all", async () => {
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
+    const result = await getBasePrompt({ ...minimalArgs, traits: remoteTraits });
+    expect(result).not.toContain("## Outputs");
+  });
+
+  test("drops the section when the server reports capabilities without pages", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, serverCapabilities: ["core"] });
+    expect(result).not.toContain("## Outputs");
+  });
+
+  test("keeps the section for a legacy server that reports no capabilities", async () => {
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain("## Outputs");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Basic fields
+// 6. Slack
 // ---------------------------------------------------------------------------
-describe("getBasePrompt — basic fields", () => {
-  test("includes role and agentId", async () => {
+
+describe("getBasePrompt: slack section", () => {
+  const SLACK_HEADER = "## Slack\n";
+  const SCRIPTS_ONLY_SLACK_HEADER = "## Slack (scripts-only)";
+
+  test("omits the section without Slack tokens", async () => {
     const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("worker");
-    expect(result).toContain("agent-abc-123");
+    expect(result).not.toContain(SLACK_HEADER);
   });
 
-  test("lead role gets lead prompt", async () => {
+  test("omits the section when SLACK_DISABLE is true", async () => {
+    enableSlack();
+    process.env.SLACK_DISABLE = "true";
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).not.toContain(SLACK_HEADER);
+  });
+
+  test("includes one section for a worker when Slack is configured", async () => {
+    enableSlack();
+    const result = await getBasePrompt(minimalArgs);
+    expect(result).toContain(SLACK_HEADER);
+    expect(result).toContain(
+      "You MUST use the `slack-interaction` skill before you post to Slack.",
+    );
+  });
+
+  test("includes the same section for a lead", async () => {
+    enableSlack();
     const result = await getBasePrompt({ ...minimalArgs, role: "lead" });
-    expect(result).toContain("lead agent");
-    expect(result).toContain("coordinator");
+    expect(result).toContain(SLACK_HEADER);
+    expect(result).toContain(
+      "You MUST use the `slack-interaction` skill before you post to Slack.",
+    );
   });
 
-  test("worker role gets worker prompt", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("worker agent");
+  test("drops the section when server capabilities omit slack", async () => {
+    enableSlack();
+    const result = await getBasePrompt({ ...minimalArgs, serverCapabilities: ["core"] });
+    expect(result).not.toContain(SLACK_HEADER);
   });
 
-  test("includes swarmUrl and agentId in services section", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("swarm.example.com");
-    expect(result).toContain(`https://agent-abc-123.swarm.example.com`);
+  test("keeps the section when server capabilities include slack", async () => {
+    enableSlack();
+    const result = await getBasePrompt({ ...minimalArgs, serverCapabilities: ["core", "slack"] });
+    expect(result).toContain(SLACK_HEADER);
+  });
+
+  test("a scripts-only worker with a Slack task gets the scripts-only variant only", async () => {
+    enableSlack();
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      scriptsOnly: true,
+      slackContext: { channelId: "C0SAMPLE", threadTs: "123.456" },
+    });
+    expect(result).toContain(SCRIPTS_ONLY_SLACK_HEADER);
+    expect(result).toContain("C0SAMPLE");
+    expect(result).not.toContain(SLACK_HEADER);
+  });
+
+  test("a scripts-only lead with a Slack task gets neither variant", async () => {
+    enableSlack();
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      scriptsOnly: true,
+      slackContext: { channelId: "C0SAMPLE", threadTs: "123.456" },
+    });
+    expect(result).not.toContain(SCRIPTS_ONLY_SLACK_HEADER);
+    expect(result).not.toContain(SLACK_HEADER);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Identity fields (name, description, soulMd, identityMd)
+// 7. Messaging is deprecated and gone from every variant
 // ---------------------------------------------------------------------------
-describe("getBasePrompt — identity fields", () => {
-  test("includes name when provided", async () => {
-    const result = await getBasePrompt({ ...minimalArgs, name: "TestAgent" });
-    expect(result).toContain("**Name:** TestAgent");
+
+describe("getBasePrompt: messaging is gone", () => {
+  const variants: { label: string; args: BasePromptArgs }[] = [
+    { label: "local worker", args: { ...minimalArgs, traits: localTraits } },
+    { label: "local lead", args: { ...minimalArgs, role: "lead", traits: localTraits } },
+    { label: "managed worker", args: { ...minimalArgs, traits: managedTraits } },
+    { label: "remote worker", args: { ...minimalArgs, traits: remoteTraits } },
+    {
+      label: "server that reports messaging",
+      args: { ...minimalArgs, serverCapabilities: ["core", "messaging"] },
+    },
+  ];
+
+  for (const variant of variants) {
+    test(`${variant.label} names no messaging tool`, async () => {
+      const result = await getBasePrompt(variant.args);
+      expect(result).not.toContain("post-message");
+      expect(result).not.toContain("read-messages");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 8. Steering
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: steering section", () => {
+  const STEERING_HEADER = "## Live task steering";
+  const steerableTraits: ProviderTraits = { ...localTraits, steerModes: ["queue"] };
+
+  test("included when steering is enabled and the provider has steer modes", async () => {
+    process.env.STEERING_ENABLED = "true";
+    const result = await getBasePrompt({ ...minimalArgs, traits: steerableTraits });
+    expect(result).toContain(STEERING_HEADER);
+    expect(result).toContain("accept-steer");
   });
 
-  test("includes description when name provided", async () => {
+  test("excluded when the provider reports no steer modes", async () => {
+    process.env.STEERING_ENABLED = "true";
     const result = await getBasePrompt({
       ...minimalArgs,
-      name: "TestAgent",
-      description: "A helpful agent",
+      traits: { ...localTraits, steerModes: [] },
     });
-    expect(result).toContain("**Description:** A helpful agent");
+    expect(result).not.toContain(STEERING_HEADER);
   });
 
-  test("does not include description without name", async () => {
+  test("excluded when steering is not enabled", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, traits: steerableTraits });
+    expect(result).not.toContain(STEERING_HEADER);
+  });
+
+  test("excluded in scripts-only mode", async () => {
+    process.env.STEERING_ENABLED = "true";
     const result = await getBasePrompt({
       ...minimalArgs,
-      description: "A helpful agent",
+      traits: steerableTraits,
+      scriptsOnly: true,
     });
-    expect(result).not.toContain("**Description:**");
+    expect(result).not.toContain(STEERING_HEADER);
   });
 
-  test("includes soulMd content", async () => {
+  test("excluded when server capabilities omit core", async () => {
+    process.env.STEERING_ENABLED = "true";
     const result = await getBasePrompt({
       ...minimalArgs,
-      soulMd: "I am a creative soul.",
+      traits: steerableTraits,
+      serverCapabilities: ["pages"],
     });
-    expect(result).toContain("## Your Identity");
-    expect(result).toContain("I am a creative soul.");
-  });
-
-  test("includes identityMd content", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      identityMd: "Identity content here.",
-    });
-    expect(result).toContain("## Your Identity");
-    expect(result).toContain("Identity content here.");
-  });
-
-  test("no identity section when none provided", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).not.toContain("## Your Identity");
+    expect(result).not.toContain(STEERING_HEADER);
   });
 });
 
 // ---------------------------------------------------------------------------
-// claudeMd and toolsMd injection
+// 9. Tools and skills
 // ---------------------------------------------------------------------------
-describe("getBasePrompt — claudeMd and toolsMd injection", () => {
-  test("includes claudeMd under Agent Instructions", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      claudeMd: "Follow these rules.",
-    });
-    expect(result).toContain("## Agent Instructions");
-    expect(result).toContain("Follow these rules.");
-  });
 
-  test("includes toolsMd under Tools & Capabilities", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      toolsMd: "You can use curl.",
-    });
-    expect(result).toContain("## Your Tools & Capabilities");
-    expect(result).toContain("You can use curl.");
-  });
-
-  test("both claudeMd and toolsMd coexist", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      claudeMd: "Agent instructions content",
-      toolsMd: "Tools content",
-    });
-    expect(result).toContain("## Agent Instructions");
-    expect(result).toContain("Agent instructions content");
-    expect(result).toContain("## Your Tools & Capabilities");
-    expect(result).toContain("Tools content");
-  });
-
-  test("neither present when not provided", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).not.toContain("## Agent Instructions");
-    expect(result).not.toContain("## Your Tools & Capabilities");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// repoContext
-// ---------------------------------------------------------------------------
-describe("getBasePrompt — repoContext", () => {
-  test("includes repo claudeMd with clone path", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Repo-specific rules here.",
-        clonePath: "/workspace/my-repo",
-      },
-    });
-    expect(result).toContain("IMPORTANT: These instructions apply ONLY");
-    expect(result).toContain("/workspace/my-repo");
-    expect(result).toContain("Repo-specific rules here.");
-  });
-
-  test("shows warning when provided", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        warning: "Repo is stale",
-      },
-    });
-    expect(result).toContain("WARNING: Repo is stale");
-  });
-
-  test("shows 'no CLAUDE.md' message when claudeMd is null and no warning", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: null,
-        clonePath: "/workspace/my-repo",
-      },
-    });
-    expect(result).toContain("but has no CLAUDE.md file");
-  });
-
-  test("shows warning when guidelines is null", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        guidelines: null,
-      },
-    });
-    expect(result).toContain("No repository guidelines defined");
-    expect(result).toContain("ask the lead or user to define guidelines");
-  });
-
-  test("renders PR checks, merge policy, and review guidance when guidelines has content", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        guidelines: {
-          prChecks: ["bun test", "bun run lint"],
-          mergeChecks: ["all CI checks pass"],
-          allowMerge: false,
-          review: ["check README.md"],
-        },
-      },
-    });
-    expect(result).toContain("Repository Guidelines (MANDATORY)");
-    expect(result).toContain("`bun test`");
-    expect(result).toContain("`bun run lint`");
-    expect(result).toContain("Auto-merge: Not allowed (default)");
-    expect(result).toContain("all CI checks pass");
-    expect(result).toContain("check README.md");
-    expect(result).toContain("Do NOT push code with failing checks");
-  });
-
-  test("renders nothing when guidelines has all empty arrays", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        guidelines: {
-          prChecks: [],
-          mergeChecks: [],
-          allowMerge: false,
-          review: [],
-        },
-      },
-    });
-    expect(result).not.toContain("Repository Guidelines (MANDATORY)");
-    expect(result).not.toContain("No repository guidelines defined");
-  });
-
-  test("renders merge policy when allowMerge is true even with empty arrays", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        guidelines: {
-          prChecks: [],
-          mergeChecks: [],
-          allowMerge: true,
-          review: [],
-        },
-      },
-    });
-    expect(result).toContain("Repository Guidelines (MANDATORY)");
-    expect(result).toContain("Auto-merge: Allowed");
-  });
-
-  test("surfaces swarm-autostash entries when present", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        autoStashes: [
-          {
-            ref: "stash@{0}",
-            message: "On main: swarm-autostash main 2026-06-01T13:00:00.000Z",
-          },
-        ],
-      },
-    });
-
-    expect(result).toContain("Pending auto-stashed work exists in this repo");
-    expect(result).toContain("stash@{0}: On main: swarm-autostash main");
-    expect(result).toContain("git stash apply <ref>");
-    expect(result).toContain("git stash pop <ref>");
-  });
-
-  test("does not mention auto-stashed work when no swarm-autostash entries exist", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: "Rules",
-        clonePath: "/workspace/my-repo",
-        autoStashes: [],
-      },
-    });
-
-    expect(result).not.toContain("Pending auto-stashed work exists in this repo");
-    expect(result).not.toContain("git stash apply <ref>");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Capabilities
-// ---------------------------------------------------------------------------
-describe("getBasePrompt — capabilities", () => {
-  test("services section included by default", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("Service Registry");
-  });
-
-  test("services section excluded when capabilities don't include services", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      capabilities: ["artifacts"],
-    });
-    expect(result).not.toContain("Service Registry");
-  });
-
-  test("capabilities list rendered", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      capabilities: ["services", "artifacts"],
-    });
-    expect(result).toContain("### Capabilities enabled");
-    expect(result).toContain("- services");
-    expect(result).toContain("- artifacts");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Truncation (tests truncateSection indirectly)
-// ---------------------------------------------------------------------------
-describe("getBasePrompt — truncation", () => {
-  const bigString = (n: number) => "x".repeat(n);
-
-  test("claudeMd truncated when exceeding per-section limit (20k chars)", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      claudeMd: bigString(25_000),
-    });
-    expect(result).toContain("[...truncated, see /workspace/CLAUDE.md");
-    // The full 25k content should NOT be present
-    expect(result).not.toContain(bigString(25_000));
-  });
-
-  test("toolsMd truncated when exceeding per-section limit", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      toolsMd: bigString(25_000),
-    });
-    expect(result).toContain("[...truncated, see /workspace/TOOLS.md");
-    expect(result).not.toContain(bigString(25_000));
-  });
-
-  test("total budget respected — tools truncated before claudeMd", async () => {
-    // Use soulMd to eat up most of the 120k total budget (lowered from 150k
-    // in the Picateclas spawn-OOM fix, 2026-05-28) so that truncatable
-    // sections (claudeMd, toolsMd) must compete for the remainder.
-    // soulMd is part of `prompt` which counts toward protectedLength.
-    const baseResult = await getBasePrompt(minimalArgs);
-    const staticLength = baseResult.length; // ~12-13k for static content
-
-    // Leave exactly enough budget for claudeMd but not toolsMd.
-    // Total budget = 120k - protectedLength.
-    // We want: protectedLength ≈ 120k - 18k = 102k, so claudeMd (15k) fits but toolsMd doesn't.
-    const soulSize = 102_000 - staticLength;
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      soulMd: bigString(Math.max(0, soulSize)),
-      claudeMd: bigString(15_000),
-      toolsMd: bigString(15_000),
-    });
-
-    // claudeMd (higher priority, injected first) should be present
-    expect(result).toContain("## Agent Instructions");
-    // toolsMd (lower priority) should be truncated or absent
-    const hasToolsTruncation = result.includes("[...truncated, see /workspace/TOOLS.md");
-    const hasToolsHeader = result.includes("## Your Tools & Capabilities");
-    // Tools is either truncated or entirely omitted (budget <= 0)
-    expect(hasToolsTruncation || !hasToolsHeader).toBe(true);
-  });
-
-  test("Picateclas spawn-OOM hardening — total prompt stays below MAX_ARG_STRLEN", async () => {
-    // Even at the worst-case where every truncatable section maxes out its
-    // budget and the repo CLAUDE.md is huge, the final prompt must stay
-    // safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes (the per-argv-
-    // element kernel limit that bit Picateclas attempts 4-6, 2026-05-28).
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      soulMd: bigString(40_000),
-      claudeMd: bigString(40_000),
-      toolsMd: bigString(40_000),
-      repoContext: {
-        claudeMd: bigString(60_000),
-        clonePath: "/workspace/repos/big-repo",
-      },
-    });
-    expect(result.length).toBeLessThan(131_072);
-  });
-
-  test("repo CLAUDE.md is capped at REPO_CLAUDE_MD_MAX_CHARS (12 KB) with on-disk pointer", async () => {
-    // Picateclas spawn-OOM permanent fix (2026-05-28): repo CLAUDE.md was the
-    // single biggest volatile component of the bootstrap argv. It is now
-    // truncated to ~12 KB with a footer pointing at the on-disk file, mirroring
-    // the same shape as the agent claudeMd / toolsMd caps.
-    const hugeRepoClaudeMd = bigString(30_000);
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: hugeRepoClaudeMd,
-        clonePath: "/workspace/big-repo",
-      },
-    });
-    // The full 30 KB content should NOT survive — capped at ~12 KB.
-    expect(result).not.toContain(hugeRepoClaudeMd);
-    // The truncation footer points at the on-disk path so readers can find
-    // the full content.
-    expect(result).toContain("[...truncated — see /workspace/big-repo/CLAUDE.md");
-  });
-
-  test("repo CLAUDE.md under the cap is preserved verbatim", async () => {
-    const smallRepoClaudeMd = bigString(5_000);
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      repoContext: {
-        claudeMd: smallRepoClaudeMd,
-        clonePath: "/workspace/small-repo",
-      },
-    });
-    expect(result).toContain(smallRepoClaudeMd);
-    expect(result).not.toContain("[...truncated");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Installed Skills section — bounded count + discovery pointers for harnesses
-// that self-advertise skills (a list doubles the cost and grows linearly with
-// installed count), enumerated list for harnesses that don't
-// ---------------------------------------------------------------------------
-describe("getBasePrompt — installed skills section", () => {
+describe("getBasePrompt: tools and skills section", () => {
+  const HEADER = "## Tools and skills";
+  const DEFERRED_LINE =
+    "Most swarm tools are deferred. Load one with your harness tool search before the first call.";
+  const DISCOVERY_LINE =
+    "`skill-list` browses the catalog, `skill-search` finds one by intent, `skill-get` reads one.";
   const twoSkills = [
     { name: "commit", description: "Create a commit" },
     { name: "deploy", description: "Ship it to production" },
   ];
 
-  test("emits a count and discovery tooling, not per-skill lines", async () => {
-    const result = await getBasePrompt({ ...minimalArgs, skillsSummary: twoSkills });
-    expect(result).toContain("Installed Skills");
-    expect(result).toContain("You have 2 skills installed");
-    expect(result).toContain("skill-list");
-    expect(result).toContain("skill-search");
-    // The section must stay O(1): no enumerated names or descriptions.
-    expect(result).not.toContain("/commit");
-    expect(result).not.toContain("Create a commit");
-    expect(result).not.toContain("Ship it to production");
-  });
-
-  test("enumerates skills for harnesses without native skill discovery", async () => {
+  test("native discovery gets a count and the discovery pointer, not a list", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
-      traits: { hasMcp: true, nativeSkillDiscovery: false, hasLocalEnvironment: true },
+      traits: localTraits,
       skillsSummary: twoSkills,
     });
-    expect(result).toContain("Installed Skills");
+    expect(result).toContain("You have 2 skills installed.");
+    expect(result).toContain("Your harness loads them from its skills directory.");
+    expect(result).toContain(DISCOVERY_LINE);
+    expect(result).not.toContain("- /commit: Create a commit");
+  });
+
+  test("non-native local discovery enumerates the skills with a slash prefix", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "codex",
+      traits: { ...localTraits, nativeSkillDiscovery: false },
+      skillsSummary: twoSkills,
+    });
+    expect(result).toContain("Installed skills.");
+    expect(result).toContain("To use one, read its SKILL.md from your skills directory");
     expect(result).toContain("- /commit: Create a commit");
     expect(result).toContain("- /deploy: Ship it to production");
-    // …and still learns the discovery tools.
-    expect(result).toContain("skill-list");
-    expect(result).toContain("skill-search");
-    expect(result).toContain("skill-get");
-    // The bounded phrasing belongs to the native branch only.
-    expect(result).not.toContain("You have 2 skills installed");
+    expect(result).not.toContain("You have 2 skills installed.");
   });
 
-  // Remote providers (devin, claude-managed) have no skills tree on disk and
-  // don't use the `/name` trigger, so neither branch may point them at a local
-  // directory — skill-get is their only route to a skill's content.
-  test("remote non-native provider gets skill-get, no local directory, no slash prefix", async () => {
+  test("non-native remote discovery points at skill-get and drops the slash prefix", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
-      traits: { hasMcp: true, nativeSkillDiscovery: false, hasLocalEnvironment: false },
+      traits: { hasMcp: true, hasLocalEnvironment: false, nativeSkillDiscovery: false },
       skillsSummary: twoSkills,
     });
+    expect(result).toContain("To use one, read it with `skill-get` and follow it.");
     expect(result).toContain("- commit: Create a commit");
-    expect(result).toContain("read its content with the `skill-get` MCP tool");
     expect(result).not.toContain("- /commit");
     expect(result).not.toContain("skills directory");
   });
 
-  test("remote native provider is not told it has a local skills directory", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      traits: { hasMcp: true, hasLocalEnvironment: false },
-      skillsSummary: twoSkills,
-    });
-    expect(result).toContain("You have 2 skills installed");
-    expect(result).toContain("no local skills directory");
-    expect(result).not.toContain("~/.claude/skills/");
-  });
-
-  test("omits the section when no skills are installed", async () => {
+  test("keeps the section with only the deferred-tools line when no skills are installed", async () => {
     const result = await getBasePrompt({ ...minimalArgs, skillsSummary: [] });
-    expect(result).not.toContain("Installed Skills");
+    expect(result).toContain(HEADER);
+    expect(result).toContain(DEFERRED_LINE);
+    expect(result).not.toContain("Installed skills.");
+    expect(result).not.toContain(DISCOVERY_LINE);
   });
 
-  test("omits the section without MCP even when native discovery is off", async () => {
+  test("drops the section entirely without MCP", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
-      traits: { hasMcp: false, nativeSkillDiscovery: false, hasLocalEnvironment: false },
+      traits: remoteTraits,
       skillsSummary: twoSkills,
     });
-    expect(result).not.toContain("Installed Skills");
-    expect(result).not.toContain("/commit");
+    expect(result).not.toContain(HEADER);
+    expect(result).not.toContain("commit");
+  });
+
+  test("lists the connected MCP servers when names are given", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, mcpServers: ["linear", "github"] });
+    expect(result).toContain(
+      "Connected MCP servers: linear, github. Their tools are in your tool list.",
+    );
+  });
+
+  test("omits the MCP server line for an empty list", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, mcpServers: [] });
+    expect(result).not.toContain("Connected MCP servers");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Remote provider (no MCP, no local environment) — trait-aware prompt assembly
+// 10. Repository
 // ---------------------------------------------------------------------------
-const remoteTraits: ProviderTraits = { hasMcp: false, hasLocalEnvironment: false };
-const remoteProviderArgs: BasePromptArgs = {
-  ...minimalArgs,
-  traits: remoteTraits,
-};
 
-describe("getBasePrompt — remote provider composite selection", () => {
-  test("uses remote worker composite (not generic worker)", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    // Remote worker template says "output is captured automatically"
-    expect(result).toContain("output is captured automatically");
-    // Should NOT contain generic worker tools
-    expect(result).not.toContain("store-progress");
-    expect(result).not.toContain("task-action");
-    expect(result).not.toContain("read-messages");
-  });
+describe("getBasePrompt: repository section", () => {
+  const CLONE_PATH = "/workspace/repos/my-repo";
+  const CLONE_SENTENCE = "This task's repository is cloned locally. `get-repos` returns the path.";
+  const CODE_QUALITY_LINE =
+    "You MUST use the `code-quality` skill before you push, open a PR, or review one.";
 
-  test("still includes role and agentId", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).toContain("worker");
-    expect(result).toContain("agent-abc-123");
-  });
-});
-
-describe("getBasePrompt — remote provider excluded sections", () => {
-  test("excludes join-swarm / register instructions", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("join-swarm");
-  });
-
-  test("excludes /workspace filesystem layout", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("/workspace/personal");
-    expect(result).not.toContain("/workspace/shared");
-  });
-
-  test("excludes How You Are Built section", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("How You Are Built");
-    expect(result).not.toContain("hooks fire during your session");
-  });
-
-  test("excludes context mode tools", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("context-mode");
-    expect(result).not.toContain("batch_execute");
-  });
-
-  test("excludes system packages section", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("sudo apt-get install");
-    expect(result).not.toContain("System packages available");
-  });
-
-  test("excludes VCS CLI tools table", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("glab mr create");
-    expect(result).not.toContain("gh pr create");
-  });
-
-  test("excludes service registry / PM2", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("Service Registry");
-    expect(result).not.toContain("pm2 start");
-  });
-
-  test("excludes code quality section", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).not.toContain("Code Quality");
-    expect(result).not.toContain("--no-verify");
-  });
-
-  test("excludes capabilities listing", async () => {
+  test("a local claude worker gets the clone sentence and no clone path literal", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      capabilities: ["core", "task-pool"],
+      ...minimalArgs,
+      traits: localTraits,
+      repoContext: { claudeMd: "Repo rules here.", clonePath: CLONE_PATH },
     });
-    expect(result).not.toContain("Capabilities enabled");
+    expect(result).toContain("## Repository");
+    expect(result).toContain(CLONE_SENTENCE);
+    expect(result).not.toContain(CLONE_PATH);
   });
 
-  test("skips Slack instructions even with slackContext", async () => {
+  test("claude does not get the repo CLAUDE.md inlined", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      slackContext: { channelId: "C123", threadTs: "123.456" },
+      ...minimalArgs,
+      provider: "claude",
+      traits: localTraits,
+      repoContext: { claudeMd: "Repo rules here.", clonePath: CLONE_PATH },
     });
-    expect(result).not.toContain("slack-reply");
-    expect(result).not.toContain("C123");
+    expect(result).not.toContain("Repo rules here.");
   });
 
-  test("skips skills section even when provided", async () => {
+  test("opencode inlines the repo CLAUDE.md with the clone path", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      skillsSummary: [{ name: "commit", description: "Create a commit" }],
+      ...minimalArgs,
+      provider: "opencode",
+      traits: localTraits,
+      repoContext: { claudeMd: "Repo rules here.", clonePath: CLONE_PATH },
     });
-    expect(result).not.toContain("Installed Skills");
-    expect(result).not.toContain("/commit");
+    expect(result).toContain(`The repository's CLAUDE.md, cloned at \`${CLONE_PATH}\`.`);
+    expect(result).toContain("Repo rules here.");
   });
 
-  test("skips MCP servers section even when provided", async () => {
+  test("opencode truncates a repo CLAUDE.md over 12k with an on-disk pointer", async () => {
+    const huge = "x".repeat(30_000);
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      mcpServersSummary: "- my-server: http://localhost:3000",
+      ...minimalArgs,
+      provider: "opencode",
+      traits: localTraits,
+      repoContext: { claudeMd: huge, clonePath: CLONE_PATH },
     });
-    expect(result).not.toContain("Installed MCP Servers");
-    expect(result).not.toContain("my-server");
+    expect(result).not.toContain(huge);
+    expect(result).toContain(`[...truncated, see ${CLONE_PATH}/CLAUDE.md for full content]`);
   });
 
-  test("skips CLAUDE.md and TOOLS.md truncatable sections", async () => {
+  test("opencode keeps a repo CLAUDE.md under the cap verbatim", async () => {
+    const small = "y".repeat(5_000);
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      claudeMd: "# Agent instructions here",
-      toolsMd: "# Tools here",
+      ...minimalArgs,
+      provider: "opencode",
+      traits: localTraits,
+      repoContext: { claudeMd: small, clonePath: CLONE_PATH },
     });
-    expect(result).not.toContain("Agent Instructions");
-    expect(result).not.toContain("Agent instructions here");
-    expect(result).not.toContain("Your Tools & Capabilities");
-    expect(result).not.toContain("Tools here");
+    expect(result).toContain(small);
+    expect(result).not.toContain("[...truncated");
   });
-});
 
-describe("getBasePrompt — remote provider identity", () => {
-  test("uses simplified identity (no SOUL.md / IDENTITY.md)", async () => {
+  test("shows the repo warning when one is set", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
-      name: "remote-worker-1",
-      description: "A remote worker",
-      soulMd: "# SOUL.md content that should NOT appear",
-      identityMd: "# IDENTITY.md content that should NOT appear",
+      ...minimalArgs,
+      repoContext: { clonePath: CLONE_PATH, warning: "Repo is stale" },
     });
-    expect(result).toContain("**Name:** remote-worker-1");
-    expect(result).toContain("**Description:** A remote worker");
-    expect(result).toContain("Desplega platform");
-    // Identity files should NOT be injected
-    expect(result).not.toContain("SOUL.md content that should NOT appear");
-    expect(result).not.toContain("IDENTITY.md content that should NOT appear");
+    expect(result).toContain("WARNING: Repo is stale");
   });
 
-  test("identity section present even without name", async () => {
-    const result = await getBasePrompt(remoteProviderArgs);
-    expect(result).toContain("Your Identity");
-    expect(result).toContain("Desplega platform");
-  });
-});
-
-describe("getBasePrompt — remote provider keeps repo context", () => {
-  test("skips CLAUDE.md content for remote providers", async () => {
+  test("surfaces auto-stashed work when entries exist", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
+      ...minimalArgs,
+      traits: localTraits,
       repoContext: {
-        claudeMd: "Run `bun test` before pushing.",
-        clonePath: "/workspace/repos/my-repo",
+        clonePath: CLONE_PATH,
+        autoStashes: [{ ref: "stash@{0}", message: "WIP: half-done refactor" }],
       },
     });
-    expect(result).toContain("Repository Context");
-    // Remote providers don't get claudeMd injected
-    expect(result).not.toContain("Run `bun test` before pushing.");
-    expect(result).not.toContain("/workspace/repos/my-repo");
+    expect(result).toContain("Pending auto-stashed work exists in this repo:");
+    expect(result).toContain("- stash@{0}: WIP: half-done refactor");
+    expect(result).toContain("git stash apply <ref>");
   });
 
-  test("includes repo guidelines", async () => {
+  test("says nothing about stashes when the list is empty", async () => {
     const result = await getBasePrompt({
-      ...remoteProviderArgs,
+      ...minimalArgs,
+      traits: localTraits,
+      repoContext: { clonePath: CLONE_PATH, autoStashes: [] },
+    });
+    expect(result).not.toContain("Pending auto-stashed work exists in this repo");
+  });
+
+  test("null guidelines tell the agent to ask the lead", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: { clonePath: CLONE_PATH, guidelines: null },
+    });
+    expect(result).toContain("### Repository Guidelines");
+    expect(result).toContain("No repository guidelines are defined. Ask the lead before you push.");
+  });
+
+  test("full guidelines render PR checks, merge policy, and review guidance", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
       repoContext: {
-        clonePath: "/workspace/repos/my-repo",
+        clonePath: CLONE_PATH,
         guidelines: {
-          prChecks: ["bun run lint:fix", "bun test"],
+          prChecks: ["bun run lint", "bun run tsc:check"],
+          mergeChecks: ["CI green"],
+          allowMerge: false,
+          review: ["Flag any new env var without docs"],
+        },
+      },
+    });
+    expect(result).toContain("### Repository Guidelines (MANDATORY)");
+    expect(result).toContain("`bun run lint`");
+    expect(result).toContain("`bun run tsc:check`");
+    expect(result).toContain("Auto-merge: Not allowed (default)");
+    expect(result).toContain("CI green");
+    expect(result).toContain("Flag any new env var without docs");
+    expect(result).toContain("Do NOT push code with failing checks.");
+  });
+
+  test("all-empty guidelines render no guidelines block", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        clonePath: CLONE_PATH,
+        guidelines: { prChecks: [], mergeChecks: [], allowMerge: false, review: [] },
+      },
+    });
+    expect(result).not.toContain("### Repository Guidelines (MANDATORY)");
+    expect(result).not.toContain("No repository guidelines are defined.");
+  });
+
+  test("allowMerge true renders the merge policy even with empty arrays", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      repoContext: {
+        clonePath: CLONE_PATH,
+        guidelines: { prChecks: [], mergeChecks: [], allowMerge: true, review: [] },
+      },
+    });
+    expect(result).toContain("### Repository Guidelines (MANDATORY)");
+    expect(result).toContain("Auto-merge: Allowed");
+  });
+
+  test("a remote worker keeps the guidelines but loses the clone sentence", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      provider: "devin",
+      traits: remoteTraits,
+      repoContext: {
+        claudeMd: "Repo rules here.",
+        clonePath: CLONE_PATH,
+        guidelines: {
+          prChecks: ["bun run lint"],
           mergeChecks: [],
           allowMerge: false,
           review: [],
         },
       },
     });
-    expect(result).toContain("Repository Guidelines");
-    expect(result).toContain("bun run lint:fix");
-    expect(result).toContain("bun test");
+    expect(result).toContain("### Repository Guidelines (MANDATORY)");
+    expect(result).toContain("`bun run lint`");
+    expect(result).not.toContain(CLONE_SENTENCE);
+    expect(result).not.toContain("Repo rules here.");
+  });
+
+  test("the code-quality pointer is present with MCP", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: localTraits,
+      repoContext: { clonePath: CLONE_PATH },
+    });
+    expect(result).toContain(CODE_QUALITY_LINE);
+  });
+
+  test("the code-quality pointer is absent for a remote worker", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      traits: remoteTraits,
+      repoContext: { clonePath: CLONE_PATH },
+    });
+    expect(result).not.toContain(CODE_QUALITY_LINE);
   });
 });
 
-describe("getBasePrompt — local providers unaffected", () => {
-  test("local provider uses generic worker composite", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      traits: { hasMcp: true, hasLocalEnvironment: true },
-    });
-    expect(result).toContain("store-progress");
-    expect(result).toContain("/workspace");
+describe("truncateRepoClaudeMd", () => {
+  test("returns the content unchanged when it fits the budget", () => {
+    expect(truncateRepoClaudeMd("short", "/workspace/repo", 100)).toBe("short");
   });
 
-  test("undefined traits defaults to local provider behavior", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("store-progress");
-    expect(result).toContain("/workspace");
+  test("cuts to the budget and appends an on-disk pointer", () => {
+    const result = truncateRepoClaudeMd("z".repeat(500), "/workspace/repo", 200);
+    expect(result.length).toBeLessThanOrEqual(200);
+    expect(result).toEndWith("[...truncated, see /workspace/repo/CLAUDE.md for full content]\n");
+  });
+
+  test("returns only the notice when the budget cannot hold any content", () => {
+    const result = truncateRepoClaudeMd("z".repeat(500), "/workspace/repo", 10);
+    expect(result).toBe("[...truncated, see /workspace/repo/CLAUDE.md for full content]\n");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Context-mode block — provider gating
-//
-// The context_mode block advertises the `ctx_*` MCP tools. It is included for
-// local providers that have context-mode wired into their per-session config
-// (claude, codex, opencode) and excluded for `pi`, which has no context-mode
-// wiring yet. Pi still receives the shared script rubric and seed-script
-// guidance. Remote-provider exclusion is covered by the "remote provider
-// excluded sections" suite above.
+// 11. Budget guardrails
 // ---------------------------------------------------------------------------
-const localTraits: ProviderTraits = { hasMcp: true, hasLocalEnvironment: true };
 
-describe("getBasePrompt — context-mode provider gating", () => {
-  test("excludes context-mode tool list but includes script guidance for pi provider", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      traits: localTraits,
-      provider: "pi",
-    });
-    expect(result).not.toContain("Context Window Management");
-    expect(result).not.toContain("batch_execute");
-    expect(result).toContain("Agent Scripts");
-    expect(result).toContain("Pre-built Seed Scripts");
-    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
-    expect(result).toContain("Scheduling — Pick the Right targetType");
+describe("getBasePrompt: size budget", () => {
+  // The v2 rewrite cut the static prompt from ~25k characters to ~4.2k. These
+  // ceilings are generous, so they only fire on a regression back to v1 size.
+  test("a fresh claude worker stays under 5,000 characters", async () => {
+    const result = await getBasePrompt({ ...minimalArgs, name: "Ada", traits: localTraits });
+    expect(result.length).toBeLessThan(5_000);
   });
 
-  test("pi LEAD also skips the context-mode block (lead.pi composite)", async () => {
+  test("a fresh claude lead stays under 5,200 characters", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,
       role: "lead",
+      name: "Cora",
       traits: localTraits,
-      provider: "pi",
     });
-    // Lead content is present
-    expect(result).toContain("CRITICAL: You are a coordinator");
-    // ...but no phantom ctx_* tooling
-    expect(result).not.toContain("Context Window Management");
-    expect(result).not.toContain("batch_execute");
-    expect(result).not.toContain("execute_file");
-    // Script guidance (incl. the authoring contract) survives
-    expect(result).toContain("Agent Scripts");
-    expect(result).toContain(AUTHORING_CONTRACT_MARKER);
-    expect(result).toContain("Pre-built Seed Scripts");
-    // Scheduling rules live outside the ctx_* advertisement — pi keeps them.
-    expect(result).toContain("Scheduling — Pick the Right targetType");
+    expect(result.length).toBeLessThan(5_200);
   });
 
-  test("claude LEAD keeps the context-mode block", async () => {
+  test("Picateclas spawn-OOM hardening: the kitchen sink stays below MAX_ARG_STRLEN", async () => {
+    // The base prompt becomes one argv element when the claude adapter passes
+    // `--append-system-prompt <prompt>`, so it must stay under Linux's
+    // `MAX_ARG_STRLEN = 131,072` bytes (Picateclas attempts 4-6, 2026-05-28).
+    const big = (n: number) => "x".repeat(n);
+    enableSlack();
+    process.env.STEERING_ENABLED = "true";
+    process.env.AGENT_FS_API_URL = "http://localhost:8787";
     const result = await getBasePrompt({
       ...minimalArgs,
-      role: "lead",
-      traits: localTraits,
-      provider: "claude",
+      name: "Picateclas",
+      description: big(2_000),
+      provider: "opencode",
+      traits: { ...localTraits, nativeSkillDiscovery: false, steerModes: ["queue"] },
+      soulMd: big(40_000),
+      identityMd: big(10_000),
+      claudeMd: big(40_000),
+      skillsSummary: [{ name: "commit", description: "Create a commit" }],
+      mcpServers: ["linear"],
+      slackContext: { channelId: "C0SAMPLE" },
+      repoContext: {
+        claudeMd: big(60_000),
+        clonePath: "/workspace/repos/big-repo",
+        warning: "Repo is stale",
+        guidelines: {
+          prChecks: ["bun run lint"],
+          mergeChecks: ["CI green"],
+          allowMerge: true,
+          review: ["Read the runbook"],
+        },
+      },
     });
-    expect(result).toContain("Context Window Management");
-    expect(result).toContain("batch_execute");
+    expect(result.length).toBeLessThan(120_000);
   });
+});
 
-  for (const provider of ["claude", "codex", "opencode"] as const) {
-    test(`includes context-mode block for ${provider} provider`, async () => {
-      const result = await getBasePrompt({
+// ---------------------------------------------------------------------------
+// 12. Hygiene
+// ---------------------------------------------------------------------------
+
+describe("getBasePrompt: output hygiene", () => {
+  const hygieneVariants: { label: string; args: BasePromptArgs }[] = [
+    { label: "local worker", args: { ...minimalArgs, name: "Ada", traits: localTraits } },
+    {
+      label: "local lead",
+      args: { ...minimalArgs, role: "lead", name: "Cora", traits: localTraits },
+    },
+    {
+      label: "managed worker",
+      args: { ...minimalArgs, name: "Ada", traits: managedTraits, provider: "claude-managed" },
+    },
+    {
+      label: "remote worker",
+      args: { ...minimalArgs, name: "Ada", traits: remoteTraits, provider: "devin" },
+    },
+    {
+      label: "codex worker with skills and a repo",
+      args: {
         ...minimalArgs,
-        traits: localTraits,
-        provider,
-      });
-      expect(result).toContain("Context Window Management");
-      expect(result).toContain("context-mode");
+        name: "Ada",
+        provider: "codex",
+        traits: { ...localTraits, nativeSkillDiscovery: false, steerModes: ["queue"] },
+        skillsSummary: [{ name: "commit", description: "Create a commit" }],
+        mcpServers: ["linear"],
+        repoContext: {
+          clonePath: "/workspace/repos/my-repo",
+          guidelines: {
+            prChecks: ["bun run lint"],
+            mergeChecks: [],
+            allowMerge: false,
+            review: [],
+          },
+        },
+      },
+    },
+    { label: "scripts-only worker", args: { ...minimalArgs, name: "Ada", scriptsOnly: true } },
+  ];
+
+  for (const variant of hygieneVariants) {
+    test(`${variant.label} renders no em dash`, async () => {
+      const result = await getBasePrompt(variant.args);
+      expect(result).not.toContain(EM_DASH);
+    });
+
+    test(`${variant.label} never runs three newlines together`, async () => {
+      const result = await getBasePrompt(variant.args);
+      expect(result).not.toMatch(/\n{3,}/);
     });
   }
-
-  test("includes context-mode block when provider is unspecified (local default)", async () => {
-    const result = await getBasePrompt({ ...minimalArgs, traits: localTraits });
-    expect(result).toContain("Context Window Management");
-    expect(result).toContain("context-mode");
-  });
-});
-
-describe("getBasePrompt — conditional Slack templates", () => {
-  test("omits Slack tool templates when Slack is disabled", async () => {
-    disableSlackPromptTools();
-
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      role: "lead",
-      slackContext: { channelId: "C123", threadTs: "123.456" },
-    });
-
-    expect(result).not.toMatch(/\bslack-[a-z-]+\b/);
-    expect(result).toContain("Task Routing");
-  });
-
-  test("includes Slack tool template for lead when Slack is enabled", async () => {
-    enableSlackPromptTools();
-
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      role: "lead",
-    });
-
-    expect(result).toContain("#### Slack Tools");
-    expect(result).toContain("slack-reply");
-    expect(result).toContain("slack-read");
-    expect(result).toContain("slack-list-channels");
-  });
-
-  test("includes Slack tool template for worker when Slack is enabled", async () => {
-    enableSlackPromptTools();
-
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      role: "worker",
-    });
-
-    expect(result).toContain("#### Slack Tools");
-    expect(result).toContain("slack-reply");
-    expect(result).toContain("slack-read");
-    expect(result).toContain("slack-list-channels");
-  });
-
-  test("includes worker Slack thread template when Slack is enabled", async () => {
-    enableSlackPromptTools();
-
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      role: "worker",
-      slackContext: { channelId: "C123", threadTs: "123.456" },
-    });
-
-    expect(result).toContain("slack-reply");
-    expect(result).toContain("C123");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Server capability gating (serverCapabilities = the API server's enabled
-// tool groups, reported on registration; distinct from agent skill tags)
-// ---------------------------------------------------------------------------
-
-describe("getBasePrompt — serverCapabilities gating", () => {
-  test("messaging section kept when serverCapabilities is unknown (legacy servers registered the tools unconditionally)", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("post-message");
-    expect(result).toContain("read-messages");
-  });
-
-  test("messaging section omitted when server capabilities omit messaging", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      serverCapabilities: ["core"],
-    });
-    expect(result).not.toContain("post-message");
-    expect(result).not.toContain("read-messages");
-  });
-
-  test("messaging section included when the server enables messaging", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      serverCapabilities: ["core", "messaging"],
-    });
-    expect(result).toContain("#### Swarm Messaging");
-    expect(result).toContain("post-message");
-    expect(result).toContain("read-messages");
-  });
-
-  test("services section dropped when server capabilities omit services", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      serverCapabilities: ["core"],
-    });
-    expect(result).not.toContain("register-service");
-  });
-
-  test("services section kept for legacy servers that report no capabilities", async () => {
-    const result = await getBasePrompt(minimalArgs);
-    expect(result).toContain("register-service");
-  });
-
-  test("server-enabled services shows section even without the agent skill tag", async () => {
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      capabilities: ["typescript"],
-      serverCapabilities: ["core", "services"],
-    });
-    expect(result).toContain("register-service");
-  });
-
-  test("slack section dropped when server capabilities omit slack", async () => {
-    enableSlackPromptTools();
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      serverCapabilities: ["core"],
-    });
-    expect(result).not.toContain("slack-list-channels");
-  });
-
-  test("slack section kept when the server enables slack", async () => {
-    enableSlackPromptTools();
-    const result = await getBasePrompt({
-      ...minimalArgs,
-      serverCapabilities: ["core", "slack"],
-    });
-    expect(result).toContain("slack-list-channels");
-  });
 });

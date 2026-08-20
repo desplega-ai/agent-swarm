@@ -328,16 +328,35 @@ describe("scripts-only MCP gating", () => {
 });
 
 describe("scripts-only prompt gating", () => {
-  test("injects scripts-only guidance and suppresses named Slack-tool guidance", async () => {
+  // The Slack blocks are gated on the bot + app tokens, so pin them here
+  // instead of inheriting whatever the ambient environment carries.
+  const slackEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    for (const key of ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "SLACK_DISABLE"]) {
+      slackEnv[key] = process.env[key];
+    }
+    process.env.SLACK_BOT_TOKEN = "xoxb-test-token";
+    process.env.SLACK_APP_TOKEN = "xapp-test-token";
+    delete process.env.SLACK_DISABLE;
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(slackEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  test("injects scripts-only guidance and suppresses the named Slack block", async () => {
     const prompt = await getBasePrompt({
       role: "worker",
       agentId: "scripts-only-prompt-agent",
-      swarmUrl: "swarm.test",
       scriptsOnly: true,
     });
 
     expect(prompt).toContain("## Code-Mode: script tools ONLY");
-    expect(prompt).not.toContain("#### Slack Tools");
+    expect(prompt).not.toContain("## Slack\n");
   });
 
   test("respects an explicit false argument over a true process environment value", async () => {
@@ -345,12 +364,10 @@ describe("scripts-only prompt gating", () => {
       const prompt = await getBasePrompt({
         role: "worker",
         agentId: "full-surface-prompt-agent",
-        swarmUrl: "swarm.test",
         scriptsOnly: false,
       });
 
-      expect(prompt).not.toContain("## Code-Mode: script tools ONLY");
-      expect(prompt).toContain("#### Slack Tools");
+      expect(prompt).not.toContain("## Code-Mode");
     });
   });
 
@@ -358,12 +375,11 @@ describe("scripts-only prompt gating", () => {
     const prompt = await getBasePrompt({
       role: "worker",
       agentId: "scripts-only-slack-agent",
-      swarmUrl: "swarm.test",
       scriptsOnly: true,
       slackContext: { channelId: "C123", threadTs: "123.456" },
     });
 
-    expect(prompt).toContain("#### Slack Thread Updates (scripts-only)");
-    expect(prompt).not.toContain("#### Slack Thread Updates\n");
+    expect(prompt).toContain("## Slack (scripts-only)");
+    expect(prompt).not.toContain("## Slack\n");
   });
 });

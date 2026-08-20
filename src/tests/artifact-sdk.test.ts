@@ -747,71 +747,32 @@ describe("artifact CLI command", () => {
 
 // ─── Base prompt tests ──────────────────────────────────────────────────
 
+// Prompt v2: the artifacts block left the system prompt. Outputs go through
+// pages, apps, and agent-fs; the `artifacts` skill is opt-in (systemDefault
+// false). The prompt must not point at artifacts any more.
 describe("base prompt artifacts mention", () => {
-  test("includes artifacts mention when capability is set", async () => {
+  test("does not mention the artifacts path, localtunnel, or the SDK", async () => {
     const prompt = await getBasePrompt({
       role: "worker",
       agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
       capabilities: ["core", "artifacts", "services"],
     });
 
-    expect(prompt).toContain("/artifacts");
-    expect(prompt).toContain("/workspace/personal/artifacts/");
-  });
-
-  test("excludes artifacts mention without capability", async () => {
-    const prompt = await getBasePrompt({
-      role: "worker",
-      agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
-      capabilities: ["core", "services"],
-    });
-
-    expect(prompt).not.toContain("/artifacts");
-  });
-
-  test("includes artifacts mention when no capabilities specified (default)", async () => {
-    const prompt = await getBasePrompt({
-      role: "worker",
-      agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
-    });
-
-    expect(prompt).toContain("/artifacts");
-  });
-
-  test("does NOT inline full artifact docs (those go in the skill)", async () => {
-    const prompt = await getBasePrompt({
-      role: "worker",
-      agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
-      capabilities: ["core", "artifacts"],
-    });
-
+    expect(prompt).not.toContain("/workspace/personal/artifacts/");
+    expect(prompt).not.toContain("localtunnel");
     expect(prompt).not.toContain("createArtifactServer");
     expect(prompt).not.toContain("SwarmSDK");
   });
 
-  test("mentions localtunnel concept", async () => {
+  test("points at pages and apps for human-facing outputs instead", async () => {
     const prompt = await getBasePrompt({
       role: "worker",
       agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
       capabilities: ["core", "artifacts"],
     });
 
-    expect(prompt).toContain("localtunnel");
-  });
-
-  test("mentions artifact storage path", async () => {
-    const prompt = await getBasePrompt({
-      role: "worker",
-      agentId: "test-agent-id",
-      swarmUrl: "https://test.swarm.example.com",
-      capabilities: ["core", "artifacts"],
-    });
-
-    expect(prompt).toContain("/workspace/personal/artifacts/");
+    expect(prompt).toContain("## Outputs");
+    expect(prompt).toContain("`pages` skill");
+    expect(prompt).toContain("`apps` skill");
   });
 });

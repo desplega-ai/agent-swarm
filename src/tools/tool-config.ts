@@ -23,13 +23,10 @@ export const CORE_TOOLS = new Set([
   "send-task", // delegate subtasks
   "get-tasks", // list/filter tasks
 
-  // Communication (used every session)
-  "read-messages", // internal swarm chat
-  "post-message", // internal swarm chat
-
   // Memory (used at session start)
   "memory-search", // recall relevant context
   "memory-get", // retrieve full memory content
+  "memory-store", // store a learning (used every session)
   "memory-delete", // delete own memories
   "memory_rate", // rate a memory used in this task (worker→server)
 
@@ -86,6 +83,10 @@ export const DEFERRED_TOOLS = new Set([
   "update-profile",
   "context-history",
   "context-diff",
+
+  // Swarm messaging (2). Deprecated: the prompt no longer names these tools.
+  "read-messages",
+  "post-message",
 
   // Slack (9)
   "slack-reply",

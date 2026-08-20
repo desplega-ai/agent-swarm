@@ -168,6 +168,7 @@ export interface SwarmSdk {
 
   // --- write: memory ---
   memory_delete(args: { id: string }): Promise<unknown>;
+  memory_store(args: { content: string; name: string; scope?: "agent" | "swarm"; tags?: string[]; taskId?: string; intent?: string }): Promise<unknown>;
   memory_edit(args: {
     memoryId?: string;
     key?: string;

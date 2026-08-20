@@ -185,8 +185,8 @@ describe("Tool Annotations & Classification", () => {
     expect(overlap).toEqual([]);
   });
 
-  test("CORE_TOOLS contains exactly 15 tools", () => {
-    expect(CORE_TOOLS.size).toBe(15);
+  test("CORE_TOOLS contains exactly 14 tools", () => {
+    expect(CORE_TOOLS.size).toBe(14);
   });
 
   test("ALL_TOOLS equals CORE_TOOLS union DEFERRED_TOOLS", () => {
@@ -243,15 +243,16 @@ describe("Tool Annotations & Classification", () => {
     }
   });
 
-  test("core tools include essential communication tools", () => {
+  test("deprecated swarm messaging tools are deferred, not core", () => {
     const commTools = ["read-messages", "post-message"];
     for (const tool of commTools) {
-      expect(CORE_TOOLS.has(tool)).toBe(true);
+      expect(CORE_TOOLS.has(tool)).toBe(false);
+      expect(DEFERRED_TOOLS.has(tool)).toBe(true);
     }
   });
 
   test("core tools include memory tools", () => {
-    const memTools = ["memory-search", "memory-get"];
+    const memTools = ["memory-search", "memory-get", "memory-store"];
     for (const tool of memTools) {
       expect(CORE_TOOLS.has(tool)).toBe(true);
     }

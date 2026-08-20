@@ -1,122 +1,131 @@
 ---
 name: swarm-scripts
-description: Use swarm scripts for bulk SDK calls, repetitive fan-out, and context-efficient data processing.
+description: "Bulk, repeat, fan-out, or data-heavy work: write and run swarm scripts (inline `script-run`, named `script-upsert`, durable `launch-script-run`). Covers the script-vs-tool rubric, the authoring contract (`args` first, `ctx` second), the seed catalog, connections and secrets, `db_query`, and exposing a script as an API."
 ---
 
 # Swarm Scripts
 
-Use swarm scripts when direct tool calls would create repetitive work, flood the context window, or require deterministic data processing across many records. Scripts run out-of-process with a typed Swarm SDK and return only the final result to your context.
+A swarm script is TypeScript that runs out of process with a typed Swarm SDK. Only its return value enters your context. Use one when direct tool calls would repeat, flood your context, or need deterministic processing over many records.
 
-## Decision Rubric
+## When to script
 
-The canonical decision rubric lives in the prompt-template registry as `system.agent.script_rubric` and is injected into agent session prompts. Do not maintain a second script-vs-tool table in this skill; keeping one source of truth prevents drift between the session prompt and this reference.
+| Situation | Approach |
+|---|---|
+| 1 to 9 SDK calls, result fits in context | Direct tool calls. |
+| 10 or more similar calls, bulk or fan-out | Script. Inline `script-run` for a one-off, a named script for reuse. |
+| Fetch, parse, and transform heavy data | Script, or `ctx_*` (context-mode) when your harness has it. |
+| One large web fetch | `ctx_fetch_and_index` (context-mode). |
+| Multi-agent fan-out, parallel work, deterministic pipeline | Workflow. See `workflow-iterate`. |
+| Work that repeats on a clock | Schedule. See `scheduling`. |
 
-Operationally, follow the prompt rubric: direct tool call below the ~10-call threshold; inline `script-run` for genuine one-offs; named script only when the logic will be invoked ≥2 times by you, another agent, or a workflow.
+Named script only when the logic will run two or more times, by you, another agent, a schedule, or a workflow. A one-off goes inline, so the catalog does not fill with scratch saves.
 
-## Loading Script Tools
+Reference point: a workflow triage that took about 26 tool calls returns as one result of about 4k tokens in about 13 seconds.
 
-The script tools are deferred. Before authoring or running a script, load the relevant tools with ToolSearch:
+## Loading the tools
 
-```text
-script-query-types
-script-upsert
-script-run
-script-search
-script-delete
+The script tools are deferred. Load them with your harness tool search before the first call: `script-search`, `script-run`, `script-upsert`, `script-query-types`, `script-delete`, and for durable runs `launch-script-run`, `get-script-run`, `list-script-runs`.
+
+Run `script-query-types` before non-trivial work. It returns the live `swarm-sdk.d.ts` and stdlib declarations, including generated per-app types.
+
+## Seed catalog
+
+The swarm ships named scripts at global scope. Each one replaces a multi-step tool chain. `script-search` with a plain-language description finds them. Call one with `script-run` and `name` plus `args`.
+
+| Script | Args | Use |
+|---|---|---|
+| `task-context-gathering` | `{ taskId, queries: [...] }` | the task plus a deduplicated multi-query memory recall |
+| `smart-recall` | `{ queries: [...] }` | multi-query memory recall without the task |
+| `memory-dedup-check` | `{ text, threshold? }` | near-duplicates before you store a memory |
+| `delegate` | `{ agentName, task, parentTaskId? }` | a subtask for an agent by name, returns `{ taskId }` |
+| `wait-for-task` | `{ taskId }` | waits up to about 25 s for a terminal state, returns `{ done, status, output }`; call again while `done` is false |
+| `get-child-outputs` | `{ parentTaskId }` | every child with status and output |
+| `complete-task` | `{ taskId, output }` | finish a task from inside a script |
+| `report-progress` | `{ taskId, note }` | a progress note from inside a script |
+| `swarm-overview` | `{}` | agents and task counts |
+| `Heartbeat Audit`, `boot-triage` | see `heartbeat-runbook` | the lead's heartbeat data gathering |
+
+## Authoring contract
+
+The entry point takes `args` first and `ctx` second. A one-parameter `function (ctx)` receives `args` at runtime, so every `ctx.*` access throws. This is the most common cause of a failed run.
+
+```ts
+import type { ScriptContext } from "swarm-sdk";
+import * as z from "zod";
+
+export const argsSchema = z.object({ taskId: z.string(), limit: z.number().optional() });
+
+export default async function (args: z.infer<typeof argsSchema>, ctx: ScriptContext) {
+  const res = await ctx.swarm.task_get({ taskId: args.taskId });
+  const task = ((res as { data?: unknown }).data ?? res) as { title?: string };
+  return { title: task?.title };
+}
 ```
 
-Use `script-query-types` before non-trivial work so the script matches the live `swarm-sdk.d.ts` and stdlib signatures.
+- `args` can be `undefined` when a caller passes none. Guard with `argsSchema.safeParse(args ?? {})` or optional chaining.
+- Export a Zod `argsSchema` from every named script. `script-upsert` converts it to JSON Schema, so callers, schedules, and workflows see the input contract.
+- Inline source through `script-run` runs without a typecheck. `script-upsert` typechecks before it saves. Import `ScriptContext` from `"swarm-sdk"` in inline code too, so promotion to a named script works.
+- SDK methods return `Promise<unknown>`. Responses are usually wrapped: read `res?.data ?? res`. Exception: `app_query` with a literal `appId` and `query` returns rows typed from the app's columns.
+- `agentId` is propagated through the `X-Agent-ID` header, so SDK calls run as you. `taskId` is not ambient: pass it in `args` when the script calls `task_storeProgress`.
+- A script invoked from a workflow node may run under a workflow identity.
+- Return compact structured data. Raw logs, full HTML, big JSON arrays, and file contents stay inside the script.
+- Limits: about 30 s wall clock (up to 5 minutes where the tool exposes it), 1 MB stdout. Never sleep or loop past about 25 s. Chain `wait-for-task` calls instead.
 
-## Inline Script Pattern
+### What `ctx` holds
 
-Use `script-run` with inline source for one-off work:
+- `ctx.swarm.*`: the swarm SDK. `task_get`, `task_send`, `task_storeProgress`, `task_action`, `task_list`, `slack_reply`, `memory_search`, `memory_store`, `kv_get`, `kv_getOrNull`, `kv_set`, `kv_delete`, `kv_incr`, `kv_list`, `swarm_get`, `agent_info`, `db_query`, and more. `kv_getOrNull` returns the entry, `null` on a missing key, and throws on other errors.
+- `ctx.swarm.config`: `apiKey`, `agentId`, `mcpBaseUrl`, and `ctx.swarm.config.get("KEY")` for user config values. All are `Redacted` wrappers that stringify to `<redacted>`. Never unwrap one into a return value, a log line, or a request body you build by hand.
+- `ctx.api.<slug>` and `ctx.mcp.<slug>`: typed clients for registered connections. They exist only for registered connections. Introspect with `Object.keys(ctx.api ?? {})` and `Object.keys(ctx.mcp ?? {})`.
+- `ctx.stdlib`: `fetch`, `fetchJson` (retries, 30 s timeout), `grep`, `glob`, `table`, `Redacted`.
+- `ctx.logger`: `log`, `warn`, `error`. Keep logs short.
+
+### Durable workflow scripts
+
+`launch-script-run` runs a script as a durable, journaled run with a different `ctx`: `ctx.run` (`id`, `agentId`, `args`) and `ctx.step.rawLlm(label, config)`, `ctx.step.agentTask(label, config)`, `ctx.step.swarmScript(label, config)`, plus `ctx.swarm.*`, `ctx.stdlib`, `ctx.logger`. Durable runs have no `ctx.api`, no `ctx.mcp`, and no `ctx.swarm.config`. Call a connection from an inner script through `ctx.step.swarmScript`. See the `script-workflows` skill.
+
+## Inline script pattern
 
 ```typescript
-export default async function main(args: any, ctx: any) {
-  const { swarm, logger } = ctx;
-  // All SDK methods return Promise<unknown> — unwrap defensively.
-  const res: any = await swarm.task_list({ status: args?.status, limit: args?.limit ?? 50 });
+import type { ScriptContext } from "swarm-sdk";
+
+export default async function main(args: { status?: string; limit?: number } | undefined, ctx: ScriptContext) {
+  const res: any = await ctx.swarm.task_list({ status: args?.status, limit: args?.limit ?? 50 });
   const tasks: any[] = res?.data?.tasks ?? res?.tasks ?? [];
-  logger.info(`Fetched ${tasks.length} tasks`);
+  ctx.logger.log(`Fetched ${tasks.length} tasks`);
   return {
     total: tasks.length,
-    tasks: tasks.map((task: any) => ({
-      id: task.id,
-      status: task.status,
-      title: task.task?.slice(0, 120),
-    })),
+    tasks: tasks.map((task: any) => ({ id: task.id, status: task.status, title: task.task?.slice(0, 120) })),
   };
 }
 ```
 
-Keep logs useful but compact. The value returned from `main` is what comes back to your context.
+## Named script pattern
 
-## Named Script Pattern
+`script-upsert` with a searchable name, a concrete description, and an intent that says when to choose it. Good named scripts: aggregate failures by agent, schedule, or error family; fetch and normalize a third-party API response; fan out over tasks, memories, repos, or schedules; turn noisy JSON or HTML into a compact summary.
 
-Use `script-upsert` when the same logic is likely to be reused at least twice by another task, agent, or workflow. Give the script a searchable name, a concrete description, and an intent that explains when to choose it.
+## Secrets
 
-Good named scripts:
+Order of preference:
 
-- Aggregate failures by agent, schedule, or error family.
-- Fetch and normalize a third-party API response.
-- Fan out over many swarm tasks, memories, repos, or schedules.
-- Convert noisy JSON or HTML into a compact summary.
+1. A registered connection: `ctx.api.<slug>.<operationId>({ path, query, header, body })` (OpenAPI), `ctx.api.<slug>.graphql(query, variables)` (GraphQL), `ctx.mcp.<slug>.<toolName>(args)` (MCP, proxied server-side, returns the raw MCP envelope: read `res.structuredContent ?? res.content?.[0]?.text`). Credentials attach at egress. The script never sees them. OAuth tokens refresh on their own.
+2. A credential binding placeholder in a hand-written request: `Authorization: Bearer [REDACTED:GITHUB_TOKEN]`. The runtime substitutes the value at egress, only for the binding's allowed hosts.
+3. `ctx.swarm.config.get("KEY")` for a config value you pass to `ctx.stdlib.fetch` as a header value. Still `Redacted`; never log it.
 
-## Connected APIs and MCPs (`ctx.api` / `ctx.mcp`)
+A raw secret, or the output of `get-config` with `includeSecrets: true`, must not appear in script source, script `args`, a schedule's `taskTemplate` or `scriptArgs`, or a task description. Those are stored as plain text and replayed on every run.
 
-Registered script connections give every script typed clients for external
-services — check what exists before hand-rolling `fetch` calls:
+Registration is lead-only: `script-connections` and `credential-bindings`. A worker that needs a missing connection puts the request in its task output: `slug`, `baseUrl` or spec URL, `allowedHosts`, and the auth (config key or OAuth provider). Leads: `upsert-openapi` with a spec URL keeps operations refreshable; `credential-bindings` `oauth-app-upsert` then `oauth-authorize-url` sets up an OAuth provider (`tokenAuthStyle` and `tokenBodyFormat` cover Notion-style token endpoints).
 
-```typescript
-export default async function main(args: any, ctx: any) {
-  return { api: Object.keys(ctx.api ?? {}), mcp: Object.keys(ctx.mcp ?? {}) };
-}
-```
+Full reference: the "Script connections" guide on the docs site.
 
-Three kinds, all credential-injected at egress (script code never sees the
-secret, only `[REDACTED:<KEY>]` placeholders):
+## `db_query` for aggregation
 
-- **OpenAPI** — `ctx.api.<slug>.<operationId>({ path, query, header, body })`.
-  Registered from a spec URL; every operation becomes a typed method.
-- **GraphQL** — `ctx.api.<slug>.graphql(query, variables)` (positional args).
-- **MCP** — `ctx.mcp.<slug>.<toolName>(args)`. Proxied server-side; returns the
-  raw MCP envelope, so unwrap `res.structuredContent ?? res.content?.[0]?.text`.
-
-When to reach for a connection instead of raw `fetch`:
-
-- The task talks to a third-party API (GitHub, Notion, an internal service) —
-  a connection means typed methods, managed auth, and no secret handling.
-- The credential is OAuth-based — bindings resolve tokens from the swarm's
-  OAuth store and auto-refresh them; a script cannot do that itself.
-- Multiple scripts or agents will hit the same API — register once, reuse.
-
-Registration is **lead-only** (`script-connections` + `credential-bindings`
-tools). Workers who need a connection that does not exist yet should not
-work around it with raw fetch + pasted secrets — ask the lead (or suggest in
-the task result) to register one, handing over: `slug`, `baseUrl` or spec URL,
-`allowedHosts`, and how it authenticates (config key vs OAuth provider). Leads:
-prefer `upsert-openapi` with a spec URL so operations stay refreshable, and use
-`credential-bindings` `oauth-app-upsert` → `oauth-authorize-url` for OAuth
-providers (Notion-style Basic/JSON token endpoints are supported via
-`tokenAuthStyle` / `tokenBodyFormat`).
-
-Full reference: the "Script connections" guide on the docs site
-(`docs-site/content/docs/(documentation)/guides/script-connections.mdx`).
-
-## Using `db_query` For Aggregation
-
-For scripts that aggregate over tasks, sessions, or memory, `ctx.swarm.db_query` with direct SQL is far more efficient than fetching lists client-side.
-
-**The parameter is `sql`:**
+Direct SQL beats fetching lists into the script. The parameter is `sql`:
 
 ```typescript
-// CORRECT
-const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) as cnt FROM agent_tasks GROUP BY status" });
-
-// Legacy scripts may still run with `query`, but new code should not use it.
+const res = await ctx.swarm.db_query({ sql: "SELECT status, count(*) AS cnt FROM agent_tasks GROUP BY status" });
 ```
 
-**`db_query` returns positional rows, not objects.** The response shape is `{ rows: unknown[][], columns: string[] }`. Zip them into objects:
+`db_query` returns positional rows: `{ rows: unknown[][], columns: string[] }`. Zip them:
 
 ```typescript
 function rowsToObjects(res: any): any[] {
@@ -126,44 +135,19 @@ function rowsToObjects(res: any): any[] {
     Array.isArray(r) ? Object.fromEntries(cols.map((c, i) => [c, r[i]])) : r,
   );
 }
-
-const rows = rowsToObjects(await ctx.swarm.db_query({
-  sql: `SELECT status, count(*) as cnt FROM agent_tasks WHERE createdAt > datetime('now','-3 days') GROUP BY status`,
-}));
-// rows = [{ status: "completed", cnt: 42 }, ...]
 ```
 
-**Common tables:** `agent_tasks` (tasks), `session_logs` (tool call logs), `agent_memory` (memories), `scheduled_tasks` (schedules), `agents` (agent registry).
+Common tables: `agent_tasks`, `session_logs`, `agent_memory`, `scheduled_tasks`, `agents`. `session_logs` has no `tool_name` column. Tool names sit inside the `content` JSON column. Extract them with `instr` and `substr` in SQL, or parse the JSON in the script.
 
-**`session_logs` has no `tool_name` column.** Tool names are embedded in the `content` JSON column. Extract them SQL-side with `instr`/`substr` or parse JSON in JS after fetching.
-
-## SDK And Context Gotchas
-
-- **`args` can be undefined.** When a script is called without arguments, `args` is `undefined`. Always guard: `argsSchema.safeParse(args || {})` or use optional chaining (`args?.field`).
-- **SDK methods return `Promise<unknown>`** — except `app_query` called with a literal `appId` + `query` naming a known app, which returns `{ success, status, data: { rows?, count?, ... } }` with rows typed from the app's declared columns. For everything else, never assume a specific return shape without defensive unwrapping (`res?.data?.tasks ?? res?.tasks ?? []`). Run `script-query-types` to see live type signatures — including the generated per-app types.
-- `agentId` is propagated to scripts via the `X-Agent-ID` header, so SDK calls run as the invoking agent.
-- `taskId` is not ambient. If a script needs to call `ctx.swarm.task_storeProgress`, pass `taskId` explicitly in `args`.
-- Scripts invoked from a workflow script node may run with a workflow identity rather than a human or worker agent identity.
-- Return compact structured data. Do not return raw logs, full HTML, huge JSON arrays, or large file contents.
-- For a single large web fetch, prefer context-mode `ctx_fetch_and_index`; for repeated fetch/parse/aggregate work, prefer a script.
-
-## Progress Updates From Scripts
-
-Thread task identity explicitly:
+## Progress from a script
 
 ```typescript
-export default async function main(args: { taskId: string; items: string[] }, ctx: any) {
-  const { swarm } = ctx;
-  await swarm.task_storeProgress({
-    taskId: args.taskId,
-    progress: `Processing ${args.items.length} items with a script`,
-  });
+export default async function main(args: { taskId: string; items: string[] }, ctx: ScriptContext) {
+  await ctx.swarm.task_storeProgress({ taskId: args.taskId, progress: `Processing ${args.items.length} items` });
   return { processed: args.items.length };
 }
 ```
 
-Do not assume the runtime can infer the current task.
+## Exposing a script as an API
 
-## Exposing Scripts as External APIs
-
-Named scripts can be exposed as public HTTP endpoints — `POST /api/x/script/<id>` — for callers outside the swarm. Manage endpoints from the script's **API** tab in the dashboard, or programmatically with the `script-apis` tool (`list`/`create`/`update`/`rotate`/`delete`). `list` masks bearer tokens by default; pass `includeSecrets: true` to reveal them. `create`/`rotate` always return the fresh plaintext token once.
+A named script can serve `POST /api/x/script/<id>` for callers outside the swarm. Manage endpoints from the script's API tab in the dashboard, or with the `script-apis` tool (`list`, `create`, `update`, `rotate`, `delete`). `list` masks bearer tokens; `includeSecrets: true` reveals them. `create` and `rotate` return the plaintext token once.

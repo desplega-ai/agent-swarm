@@ -76,6 +76,8 @@ const UNGATED_TOOL_FILES: Record<string, string> = {
   "src/tools/memory-get.ts": PIN_REASON,
   "src/tools/memory-rate.ts": PIN_REASON,
   "src/tools/memory-search.ts": PIN_REASON,
+  "src/tools/memory-store.ts":
+    "writes only rows owned by the calling agent (same posture as the POST /api/memory/index route it wraps)",
   "src/tools/my-agent-info.ts": PIN_REASON,
   "src/tools/oauth-access-token.ts": PIN_REASON,
   "src/tools/poll-task.ts": PIN_REASON,

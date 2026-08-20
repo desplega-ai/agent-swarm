@@ -152,6 +152,11 @@ bun run test:root -- src/tests/memory-rater-e2e.test.ts               # step-7: 
 - `src/be/memory/reranker.ts` — scoring + `usefulness(α, β)` factor.
 - `src/be/memory/constants.ts` — env-overridable tuning.
 - `src/be/memory/index.ts` — singletons.
+- `src/be/memory/index-content.ts` — `indexMemoryContent()`: chunk, re-index by
+  `sourcePath`, batch store, link resolution, background embed. Shared by
+  `POST /api/memory/index` and the `memory-store` tool.
+- `src/tools/memory-store.ts` — the agent-facing write path (`memory_store` in
+  the scripts SDK goes through the MCP bridge to the same tool).
 - `src/be/memory/raters/` — rater framework (registry, store, retrieval bridge,
   three rater implementations, edges store).
 - `src/prompts/memories.ts` — prompt addendum gated on `MEMORY_RATERS`

@@ -1131,6 +1131,26 @@ Retrieve full details of a specific memory.
 
 Like `memory-search`, `memory-get` may include a `rateHint` in task context for memories that are worth rating.
 
+### memory-store
+
+Store a learning as a searchable memory: a fix, a pattern, a gotcha, a fact
+about a repo or a person. This is the write path the system prompt names and
+it works on every harness. Long content is chunked on headings and embedded in
+the background. The caller always owns the row, for both scopes.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `content` | string | Yes | The memory body. State the fact, the context it applies to, and the evidence |
+| `name` | string | Yes | Short one-line title, used in search results and the UI |
+| `scope` | string | No | `agent` (default, only you) or `swarm` (every agent) |
+| `tags` | string[] | No | Free-form tags, for example a repo name or a topic |
+| `taskId` | uuid | No | The task this learning came from |
+| `intent` | string | No | Why this is worth remembering. Kept in the audit trail |
+
+Returns `memoryIds`, `chunks`, and `queued`. Search first with `memory-search`
+when a similar memory may exist, then `memory-edit` it instead of storing a
+duplicate. The seeded `memory` skill holds the full guidance.
+
 ### memory-edit
 
 Edit an existing memory in place while preserving its ID, rating history, and

@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "scheduling",
+  "displayName": "Scheduling",
+  "slug": "scheduling",
+  "title": "Scheduling",
+  "description": "Recurring, cron, periodic, one-time delayed, or scheduled work: create and manage swarm schedules with `create-schedule`. Covers the target type (workflow, script, agent-task), cron vs interval vs one-time timing, timezone, model tier, secrets in task templates, and how to verify and repair a schedule.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["schedules", "automation", "cron"]
+}

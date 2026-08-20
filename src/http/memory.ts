@@ -1,13 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { chunkContent } from "../be/chunking";
 import { getDb, getTaskById } from "../be/db";
 import { getEmbeddingProvider, getMemoryStore } from "../be/memory";
 import { canReadMemory } from "../be/memory/access";
 import { CANDIDATE_SET_MULTIPLIER } from "../be/memory/constants";
 import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
-import { refreshLinks, storeLinks } from "../be/memory/link-resolver";
+import { indexMemoryContent } from "../be/memory/index-content";
+import { refreshLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
@@ -618,62 +618,6 @@ export async function handleMemory(
       }
     }
 
-    // Chunk content and create memories
-    const contentChunks = chunkContent(content);
-    if (contentChunks.length === 0) {
-      contentChunks.push({
-        content: content.trim(),
-        chunkIndex: 0,
-        totalChunks: 1,
-        headings: [],
-      });
-    }
-
-    const store = getMemoryStore();
-    const provider = getEmbeddingProvider();
-
-    if (sourcePath && memoryAgentId && contentChunks.length === 1) {
-      const existing = store
-        .list(memoryAgentId, {
-          scope,
-          limit: 2,
-          ownerAgentId: memoryAgentId,
-          sourcePath,
-        })
-        .filter((memory) => memory.sourcePath === sourcePath);
-      if (existing.length === 1 && existing[0]?.totalChunks === 1) {
-        const result = store.edit({
-          id: existing[0].id,
-          mode: "replace",
-          content: contentChunks[0]!.content,
-          intent: "re-index memory source path",
-          changedByAgentId: agentId,
-        });
-        const embedding = await provider.embed(contentChunks[0]!.content);
-        if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
-        try {
-          // Re-index of an existing memory: prune stale content-derived links.
-          refreshLinks(result.memory.id, memoryAgentId, result.memory.content);
-        } catch (err) {
-          console.error(
-            `[memory] Link resolution failed for ${result.memory.id}:`,
-            (err as Error).message,
-          );
-        }
-        indexMemory.respond(res, 202, {
-          queued: false,
-          memoryIds: [result.memory.id],
-          edited: result.changed,
-        });
-        return true;
-      }
-    }
-
-    // Dedup multi-chunk or ambiguous source paths via the existing lossy path.
-    if (sourcePath && memoryAgentId) {
-      store.deleteBySourcePath(sourcePath, memoryAgentId);
-    }
-
     // Derive contextKey from body or X-Context-Key header
     const headerContextKey = req.headers["x-context-key"];
     const resolvedContextKey =
@@ -681,59 +625,23 @@ export async function handleMemory(
       (Array.isArray(headerContextKey) ? headerContextKey[0] : headerContextKey) ??
       undefined;
 
-    // Atomic batch insert — all chunks or none
-    const memories = store.storeBatch(
-      contentChunks.map((chunk) => ({
-        agentId: memoryAgentId || null,
-        content: chunk.content,
-        name,
-        scope,
-        source,
-        sourcePath: sourcePath || null,
-        sourceTaskId: sourceTaskId || null,
-        chunkIndex: chunk.chunkIndex,
-        totalChunks: chunk.totalChunks,
-        tags: tags || [],
-        contextKey: resolvedContextKey ?? null,
-        intent: "index memory content",
-        key: sourcePath || null,
-      })),
-    );
+    const { queued, memoryIds, edited } = await indexMemoryContent({
+      agentId: memoryAgentId,
+      content,
+      name,
+      scope,
+      source,
+      sourceTaskId,
+      sourcePath,
+      tags,
+      contextKey: resolvedContextKey,
+    });
 
-    // Resolve and store deterministic links (wikilinks, PR refs, agent-fs paths)
-    if (memoryAgentId) {
-      for (const memory of memories) {
-        try {
-          storeLinks(memory.id, memoryAgentId, memory.content);
-        } catch (err) {
-          console.error(
-            `[memory] Link resolution failed for ${memory.id}:`,
-            (err as Error).message,
-          );
-        }
-      }
-    }
-
-    // Async batch embed (fire and forget)
-    (async () => {
-      try {
-        const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
-        for (let i = 0; i < embeddings.length; i++) {
-          if (embeddings[i]) {
-            store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
-          }
-        }
-      } catch (err) {
-        console.error("[memory] Batch embedding failed:", (err as Error).message);
-      }
-    })().catch((err) =>
-      console.error(
-        "[memory] batch embed failed:",
-        scrubSecrets(err instanceof Error ? err.message : String(err)),
-      ),
-    );
-
-    indexMemory.respond(res, 202, { queued: true, memoryIds: memories.map((m) => m.id) });
+    indexMemory.respond(res, 202, {
+      queued,
+      memoryIds,
+      ...(edited !== undefined ? { edited } : {}),
+    });
     return true;
   }
 

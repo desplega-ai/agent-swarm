@@ -32,6 +32,12 @@ import brainstormingConfig from "../../../templates/skills/brainstorming/config.
 import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
   type: "text",
 };
+import codeQualityConfig from "../../../templates/skills/code-quality/config.json" with {
+  type: "text",
+};
+import codeQualityContent from "../../../templates/skills/code-quality/content.md" with {
+  type: "text",
+};
 import codeReviewingConfig from "../../../templates/skills/code-reviewing/config.json" with {
   type: "text",
 };
@@ -88,6 +94,12 @@ import engineeringStandardsConfig from "../../../templates/skills/engineering-st
 import engineeringStandardsContent from "../../../templates/skills/engineering-standards/content.md" with {
   type: "text",
 };
+import heartbeatRunbookConfig from "../../../templates/skills/heartbeat-runbook/config.json" with {
+  type: "text",
+};
+import heartbeatRunbookContent from "../../../templates/skills/heartbeat-runbook/content.md" with {
+  type: "text",
+};
 import implementingConfig from "../../../templates/skills/implementing/config.json" with {
   type: "text",
 };
@@ -108,6 +120,8 @@ import kvStorageContent from "../../../templates/skills/kv-storage/content.md" w
 };
 import learningConfig from "../../../templates/skills/learning/config.json" with { type: "text" };
 import learningContent from "../../../templates/skills/learning/content.md" with { type: "text" };
+import memoryConfig from "../../../templates/skills/memory/config.json" with { type: "text" };
+import memoryContent from "../../../templates/skills/memory/content.md" with { type: "text" };
 import oneShotConfig from "../../../templates/skills/one-shot/config.json" with { type: "text" };
 import oneShotContent from "../../../templates/skills/one-shot/content.md" with { type: "text" };
 import pagesConfig from "../../../templates/skills/pages/config.json" with { type: "text" };
@@ -142,6 +156,12 @@ import scheduledTaskResilienceConfig from "../../../templates/skills/scheduled-t
 import scheduledTaskResilienceContent from "../../../templates/skills/scheduled-task-resilience/content.md" with {
   type: "text",
 };
+import schedulingConfig from "../../../templates/skills/scheduling/config.json" with {
+  type: "text",
+};
+import schedulingContent from "../../../templates/skills/scheduling/content.md" with {
+  type: "text",
+};
 import scriptBuilderConfig from "../../../templates/skills/script-builder/config.json" with {
   type: "text",
 };
@@ -152,6 +172,12 @@ import scriptWorkflowsConfig from "../../../templates/skills/script-workflows/co
   type: "text",
 };
 import scriptWorkflowsContent from "../../../templates/skills/script-workflows/content.md" with {
+  type: "text",
+};
+import slackInteractionConfig from "../../../templates/skills/slack-interaction/config.json" with {
+  type: "text",
+};
+import slackInteractionContent from "../../../templates/skills/slack-interaction/content.md" with {
   type: "text",
 };
 import stepRunningConfig from "../../../templates/skills/step-running/config.json" with {
@@ -271,6 +297,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: brainstormingConfig, body: brainstormingContent },
+  { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
   { config: composioConfig, body: composioContent },
   { config: composioGmailConfig, body: composioGmailContent },
@@ -281,10 +308,12 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: designDocsConfig, body: designDocsContent },
   { config: downloadTaskAttachmentConfig, body: downloadTaskAttachmentContent },
   { config: engineeringStandardsConfig, body: engineeringStandardsContent },
+  { config: heartbeatRunbookConfig, body: heartbeatRunbookContent },
   { config: implementingConfig, body: implementingContent },
   { config: improveAgentsMdConfig, body: improveAgentsMdContent },
   { config: kvStorageConfig, body: kvStorageContent },
   { config: learningConfig, body: learningContent },
+  { config: memoryConfig, body: memoryContent },
   { config: oneShotConfig, body: oneShotContent },
   { config: pagesConfig, body: pagesContent },
   { config: phaseRunningConfig, body: phaseRunningContent },
@@ -294,8 +323,10 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: researchingConfig, body: researchingContent },
   { config: reviewingConfig, body: reviewingContent },
   { config: scheduledTaskResilienceConfig, body: scheduledTaskResilienceContent },
+  { config: schedulingConfig, body: schedulingContent },
   { config: scriptBuilderConfig, body: scriptBuilderContent },
   { config: scriptWorkflowsConfig, body: scriptWorkflowsContent },
+  { config: slackInteractionConfig, body: slackInteractionContent },
   { config: stepRunningConfig, body: stepRunningContent },
   { config: swarmScriptsConfig, body: swarmScriptsContent },
   { config: tackleGhCommentsConfig, body: tackleGhCommentsContent },

@@ -178,8 +178,10 @@ Before publishing:
 | `api_url` | `${MCP_BASE_URL}/p/:id` | Direct API render. HTML inlines and serves; JSON 302-redirects to `app_url`. Useful for no-SPA-required links. |
 
 `${APP_URL}` is the deployment's SPA origin and `${MCP_BASE_URL}` is its API
-origin. Both are surfaced as env vars to your agent — never hardcode hosts; read
-them from `process.env`.
+origin. `${SWARM_URL}` is the bare host (no scheme) for copy that needs only the
+domain. All three are env vars in your session. Read them; never hardcode a
+host. When a variable you need is missing, say so in your output instead of
+falling back to localhost or inventing a host.
 
 **Default**: share `app_url`. Append `?mode=full` when the recipient should
 see ONLY the page (no surrounding swarm chrome). Use `api_url` only when you

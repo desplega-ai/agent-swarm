@@ -87,9 +87,9 @@ After using `send-task`, monitor progress with `get-task-details`. If a worker i
 ### Worker available commands
 
 When assigning tasks, workers may benefit from these commands:
-- `/desplega:research` — Web research (auto-stores in shared filesystem)
-- `/desplega:create-plan` — Create implementation plans (auto-stores in shared filesystem)
-- `/desplega:implement-plan` — Execute plans (also for continuing work)
+- `/researching` — Web research (auto-stores in shared filesystem)
+- `/planning` — Create implementation plans (auto-stores in shared filesystem)
+- `/implementing` — Execute plans (also for continuing work)
 
 ## Filesystem
 

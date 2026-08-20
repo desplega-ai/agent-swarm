@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "code-quality",
+  "displayName": "Code Quality",
+  "slug": "code-quality",
+  "title": "Code Quality",
+  "description": "Push, PR, MR, merge, review, CI, gh, glab: the checks to run before you push or open a pull request, how to review one, the merge policy, and the GitHub review-reply provenance rule. Use before you push, open a PR or MR, or review one.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["git", "github", "gitlab", "review", "ci"]
+}

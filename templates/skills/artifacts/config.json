@@ -9,6 +9,6 @@
   "category": "skills",
   "placeholders": [],
   "runAllSeedersCandidate": true,
-  "systemDefault": true,
+  "systemDefault": false,
   "tags": ["artifacts", "evidence", "qa", "agent-fs", "serving", "tunnel"]
 }

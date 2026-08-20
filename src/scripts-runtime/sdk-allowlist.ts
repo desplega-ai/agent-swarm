@@ -3,6 +3,7 @@ export const SDK_TOOL_NAME_MAP = {
   memory_search: "memory-search",
   memory_get: "memory-get",
   memory_edit: "memory-edit",
+  memory_store: "memory-store",
   memory_rate: "memory_rate",
   memory_delete: "memory-delete", // destructive
   inject_learning: "inject-learning",

@@ -1,27 +1,36 @@
 /**
- * System prompt assembly for agent sessions.
+ * System prompt assembly for agent sessions (prompt v2).
  *
- * Uses the template registry (session-templates.ts) for the core prompt
- * building blocks. Dynamic sections (identity, repo context, CLAUDE.md,
- * TOOLS.md) and conditional sections (agent_fs, services, artifacts) are
- * still assembled here based on runtime state.
+ * Order, static before volatile:
+ *
+ *   A-D, F, G  composite session template (role + persona, contract, workspace,
+ *              memory, communication, secrets) from session-templates.ts
+ *   E          outputs (gated on AGENT_FS_API_URL and the pages capability)
+ *   H          deployment-gated notes: slack, steering
+ *   I          tools and skills (deferred-tools line, skills, MCP server names)
+ *   J          agent notes: CLAUDE.md for codex, opencode, pi, only when edited
+ *   K          repository (per task)
+ *
+ * The runner appends the requester profile, the operator SYSTEM_PROMPT, and a
+ * cwd warning after this.
  */
 
 import type { ProviderTraits } from "../providers/types";
 import type { ProviderName } from "../types";
 import { isSteeringEnabled } from "../utils/steering-enabled";
+import { matchesDefaultClaudeMd, matchesDefaultIdentityMd } from "./defaults";
 import { resolveTemplateAsync } from "./resolver";
 
 // Side-effect import: register all system + session templates
 import "./session-templates";
 
-/** Max characters per individual injected section before truncation */
+/** Max characters for the injected agent CLAUDE.md section before truncation */
 export const BOOTSTRAP_MAX_CHARS = 20_000;
 
 /**
- * Max total characters across all injected sections combined.
+ * Max total characters for the whole base prompt.
  *
- * Sized to stay safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes — the
+ * Sized to stay safely below Linux's `MAX_ARG_STRLEN = 131,072` bytes, the
  * per-argv-element kernel limit that bit Picateclas attempts 4-6
  * (2026-05-28). The base-prompt becomes one argv element when the claude
  * adapter passes `--append-system-prompt <prompt>`, so the prompt MUST stay
@@ -33,16 +42,17 @@ export const BOOTSTRAP_MAX_CHARS = 20_000;
 const BOOTSTRAP_TOTAL_MAX_CHARS = 120_000;
 
 /**
- * Per-section cap applied to the *repo* CLAUDE.md (the agent-swarm OSS
- * one is ~18 KB and the biggest volatile component of the system prompt).
- * 12 KB leaves room for the static prompt scaffold + identity + tools +
- * agent CLAUDE.md without ever crossing MAX_ARG_STRLEN.
+ * Per-section cap applied to the *repo* CLAUDE.md when it is inlined (opencode
+ * only). The agent-swarm OSS one is ~18 KB and the biggest volatile component
+ * of the system prompt.
  */
 const REPO_CLAUDE_MD_MAX_CHARS = 12_000;
 
-/** Truncation notice appended when a section is cut */
-const truncationNotice = (file: string) =>
-  `\n\n[...truncated, see /workspace/${file} for full content]\n`;
+/** Providers that do not load the agent's CLAUDE.md natively. Claude does. */
+const CLAUDE_MD_INJECT_PROVIDERS: ReadonlySet<string> = new Set(["codex", "opencode", "pi"]);
+
+/** Providers that get the repo CLAUDE.md inlined until native loading is verified. */
+const REPO_CLAUDE_MD_INLINE_PROVIDERS: ReadonlySet<string> = new Set(["opencode"]);
 
 export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const slackDisable = env.SLACK_DISABLE;
@@ -54,24 +64,18 @@ export function areSlackPromptToolsEnabled(env: NodeJS.ProcessEnv = process.env)
 export type BasePromptArgs = {
   role: string;
   agentId: string;
-  swarmUrl: string;
+  /** The agent's own declared skill tags (task routing). Also an input to the generated defaults. */
   capabilities?: string[];
   /**
    * The API server's enabled capability flags (which MCP tool groups it
-   * registers), from the register response. Distinct from `capabilities`
-   * above, which is the agent's own declared skill tags used for task
-   * routing. Gates prompt sections that instruct capability-gated tools so
-   * agents aren't told about tools the server doesn't expose. Undefined when
-   * the server is older and doesn't report it — sections then fall back to
-   * their legacy inclusion rules.
+   * registers), from the register response. Gates prompt sections that
+   * instruct capability-gated tools so agents aren't told about tools the
+   * server doesn't expose. Undefined when the server is older and doesn't
+   * report it; sections then fall back to their legacy inclusion rules.
    */
   serverCapabilities?: string[];
   traits?: ProviderTraits;
-  /**
-   * Harness provider for this session. Gates provider-specific prompt blocks
-   * (e.g. the context-mode MCP tool list is excluded for `pi`, which has no
-   * context-mode MCP wiring yet).
-   */
+  /** Harness provider for this session. Gates the CLAUDE.md injection. */
   provider?: ProviderName;
   /**
    * Resolved by the runner from the worker environment and raw config row.
@@ -82,7 +86,6 @@ export type BasePromptArgs = {
   description?: string;
   soulMd?: string;
   identityMd?: string;
-  toolsMd?: string;
   claudeMd?: string;
   repoContext?: {
     claudeMd?: string | null;
@@ -98,36 +101,53 @@ export type BasePromptArgs = {
   };
   /** Slack context from the current task, if present */
   slackContext?: { channelId: string; threadTs?: string };
-  /** Pre-fetched skill summaries for the installed skills section */
+  /** Pre-fetched skill summaries for the tools and skills section */
   skillsSummary?: { name: string; description: string }[];
-  /** Pre-fetched MCP server summaries for the installed MCP servers section */
-  mcpServersSummary?: string;
+  /** Names of the MCP servers connected for this agent */
+  mcpServers?: string[];
 };
 
 export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
-  const { role, agentId, swarmUrl, traits } = args;
+  const { role, agentId, traits } = args;
   const {
     hasMcp = true,
     hasLocalEnvironment: hasLocalEnv = true,
     nativeSkillDiscovery = true,
   } = traits ?? {};
   const steerModes = traits?.steerModes ?? [];
+  const provider = args.provider ?? "claude";
 
-  const vars: Record<string, string> = { role, agentId, swarmUrl };
+  const defaultsInput = {
+    name: args.name ?? agentId,
+    description: args.description,
+    role,
+    capabilities: args.capabilities,
+  };
 
-  // Resolve the composite session template (trait-aware for remote providers)
+  // A. Persona: description, SOUL.md always, IDENTITY.md only when edited.
+  const personaParts: string[] = [];
+  if (args.description) personaParts.push(args.description);
+  if (args.soulMd) personaParts.push(args.soulMd.trim());
+  if (args.identityMd && !matchesDefaultIdentityMd(args.identityMd, defaultsInput)) {
+    personaParts.push(args.identityMd.trim());
+  }
+  const persona = personaParts.length > 0 ? `\n${personaParts.join("\n\n")}\n` : "";
+
+  const vars: Record<string, string> = {
+    name: args.name ?? "an agent",
+    role,
+    agentId,
+    persona,
+  };
+
+  // Composite choice by traits, then role.
   let compositeEventType: string;
   if (!hasMcp) {
-    // If no MCP, role cannot be lead
+    // No MCP means no tools to name and no lead role (devin).
     compositeEventType = "system.session.worker.remote";
-  } else if (args.provider === "pi") {
-    // Pi has no context-mode MCP wiring yet, so it uses composites that omit
-    // the context-mode tool list while still including the shared script
-    // rubric (and its authoring contract) plus seed-script guidance. Checked
-    // before the role branch so pi *leads* aren't told about `ctx_*` tools that
-    // don't exist for them either. All other local providers (claude, codex,
-    // opencode) keep the full context block via the standard composites.
-    compositeEventType = role === "lead" ? "system.session.lead.pi" : "system.session.worker.pi";
+  } else if (!hasLocalEnv) {
+    // MCP tools but no container or /workspace mirrors (claude-managed).
+    compositeEventType = "system.session.worker.managed";
   } else if (role === "lead") {
     compositeEventType = "system.session.lead";
   } else {
@@ -136,11 +156,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
   const compositeResult = await resolveTemplateAsync(compositeEventType, vars);
   let prompt = compositeResult.text;
 
-  // Experimental scripts-only MCP surface (code-mode): the composite templates
-  // reference named swarm tools that are not registered when the server runs
-  // with SCRIPTS_ONLY_MCP=true, so tell the agent everything goes through
-  // script-run. The runner owns config/env precedence; the environment fallback
-  // remains only for direct callers during the migration.
+  // Experimental scripts-only MCP surface (code-mode): named swarm tools are
+  // not registered, so tell the agent everything goes through script-run.
   const scriptsOnly = args.scriptsOnly ?? process.env.SCRIPTS_ONLY_MCP === "true";
   const scriptsOnlyMode = hasMcp && scriptsOnly;
   if (scriptsOnlyMode) {
@@ -148,50 +165,36 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += `\n${scriptsOnlyResult.text}`;
   }
 
-  const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
-
   // Server-side capability flags gate which MCP tool groups the API server
-  // registers — don't instruct tools the server doesn't expose. When the
-  // server is older and didn't report its capabilities, `whenUnknown` picks
-  // the legacy behavior per section.
+  // registers. When the server is older and didn't report its capabilities,
+  // `whenUnknown` picks the legacy behavior per section.
   const serverHasCapability = (cap: string, whenUnknown: boolean): boolean =>
     args.serverCapabilities ? args.serverCapabilities.includes(cap) : whenUnknown;
 
-  // The named-Slack-tool templates would instruct tools that don't exist in
-  // scripts-only mode; the scripts_only_mode(.slack) templates cover Slack via
-  // ctx.swarm.slack_* instead.
+  // E. Outputs. Pages and apps register under the `pages` capability; the
+  // agent-fs CLI needs a local environment with AGENT_FS_API_URL set.
+  if (hasMcp && serverHasCapability("pages", true)) {
+    const agentFsConfigured = hasLocalEnv && Boolean(process.env.AGENT_FS_API_URL);
+    const outputsResult = await resolveTemplateAsync(
+      agentFsConfigured ? "system.agent.outputs" : "system.agent.outputs.no_agent_fs",
+      {},
+    );
+    prompt += outputsResult.text;
+  }
+
+  // H. Slack. One block for both roles; the scripts-only variant covers Slack
+  // via ctx.swarm.slack_* for Slack-originated tasks.
+  const slackPromptToolsEnabled = areSlackPromptToolsEnabled();
   if (hasMcp && slackPromptToolsEnabled && !scriptsOnlyMode && serverHasCapability("slack", true)) {
     const slackResult = await resolveTemplateAsync("system.agent.slack", {});
     prompt += slackResult.text;
   }
-
-  // Conditionally inject Slack instructions for workers with Slack-originated
-  // tasks. The scripts-only branch reaches Slack via the scripts SDK (always
-  // full surface), so only the named-tool branch needs the capability gate.
-  if (
-    role !== "lead" &&
-    args.slackContext &&
-    hasMcp &&
-    slackPromptToolsEnabled &&
-    (scriptsOnlyMode || serverHasCapability("slack", true))
-  ) {
-    const slackResult = await resolveTemplateAsync(
-      scriptsOnlyMode ? "system.agent.scripts_only_mode.slack" : "system.agent.worker.slack",
-      {
-        slackChannelId: args.slackContext.channelId,
-        slackThreadTs: args.slackContext.threadTs ?? "",
-      },
-    );
+  if (role !== "lead" && args.slackContext && scriptsOnlyMode && slackPromptToolsEnabled) {
+    const slackResult = await resolveTemplateAsync("system.agent.scripts_only_mode.slack", {
+      slackChannelId: args.slackContext.channelId,
+      slackThreadTs: args.slackContext.threadTs ?? "",
+    });
     prompt += slackResult.text;
-  }
-
-  // Swarm messaging (post-message / read-messages) is a default-disabled
-  // capability — only describe the tools when the server registers them.
-  // Unknown server => include: servers that predate capability reporting
-  // registered these tools unconditionally, so the guidance stays accurate.
-  if (hasMcp && !scriptsOnlyMode && serverHasCapability("messaging", true)) {
-    const messagingResult = await resolveTemplateAsync("system.agent.messaging", {});
-    prompt += messagingResult.text;
   }
 
   if (
@@ -207,245 +210,158 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     prompt += steeringResult.text;
   }
 
-  // Inject agent identity
-  if (!hasLocalEnv) {
-    // Simplified identity for remote providers — no self-evolution, no /workspace files
-    prompt += "\n\n## Your Identity\n\n";
-    if (args.name) {
-      prompt += `**Name:** ${args.name}\n`;
-      if (args.description) {
-        prompt += `**Description:** ${args.description}\n`;
-      }
-      prompt += "\n";
-    }
-    prompt += `You are part of an agent swarm managed by the Desplega platform. `;
-    prompt += `You receive tasks from the swarm's lead agent and execute them independently. `;
-    prompt += `Focus on quality work and clear communication of results.\n`;
-  } else if (args.soulMd || args.identityMd || args.name) {
-    prompt += "\n\n## Your Identity\n\n";
-    if (args.name) {
-      prompt += `**Name:** ${args.name}\n`;
-      if (args.description) {
-        prompt += `**Description:** ${args.description}\n`;
-      }
-      prompt += "\n";
-    }
-    if (args.soulMd) {
-      prompt += `${args.soulMd}\n`;
-    }
-    if (args.identityMd) {
-      prompt += `${args.identityMd}\n`;
-    }
+  // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
+  if (hasMcp) {
+    prompt += renderToolsAndSkills({
+      skillsSummary: args.skillsSummary,
+      mcpServers: args.mcpServers,
+      nativeSkillDiscovery,
+      hasLocalEnv,
+    });
   }
 
-  // Installed skills section — shape depends on whether the harness discovers
-  // skills on its own. Skip entirely for providers without MCP: the discovery
-  // tools are MCP tools.
-  if (hasMcp && args.skillsSummary && args.skillsSummary.length > 0) {
+  // J. Agent notes (CLAUDE.md). Claude loads ~/.claude/CLAUDE.md and
+  // /workspace/CLAUDE.md natively; the others get it here, and only when it
+  // differs from the generated default.
+  if (
+    hasLocalEnv &&
+    args.claudeMd &&
+    CLAUDE_MD_INJECT_PROVIDERS.has(provider) &&
+    !matchesDefaultClaudeMd(args.claudeMd, defaultsInput)
+  ) {
+    const budget = Math.min(
+      BOOTSTRAP_MAX_CHARS,
+      Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - prompt.length),
+    );
+    prompt += truncateSection(args.claudeMd, "## Your notes (CLAUDE.md)", "CLAUDE.md", budget);
+  }
+
+  // K. Repository (per task). Never truncated except the inlined repo CLAUDE.md.
+  if (args.repoContext) {
+    prompt += renderRepository(args.repoContext, { hasMcp, hasLocalEnv, provider });
+  }
+
+  // Blocks start and end with a newline; collapse the seams to one blank line.
+  return prompt.replace(/\n{3,}/g, "\n\n");
+};
+
+function renderToolsAndSkills(input: {
+  skillsSummary?: { name: string; description: string }[];
+  mcpServers?: string[];
+  nativeSkillDiscovery: boolean;
+  hasLocalEnv: boolean;
+}): string {
+  let section =
+    "\n\n## Tools and skills\n\nMost swarm tools are deferred. Load one with your harness tool search before the first call.\n";
+
+  const skills = input.skillsSummary ?? [];
+  if (skills.length > 0) {
     const discovery =
-      "To browse the full catalog use the `skill-list` MCP tool, find one by intent with `skill-search`, and read a skill's content with `skill-get`.";
-    if (nativeSkillDiscovery) {
+      "`skill-list` browses the catalog, `skill-search` finds one by intent, `skill-get` reads one.";
+    if (input.nativeSkillDiscovery) {
       // Claude and pi read their local skills tree and inject name+description
       // natively, so enumerating here is pure duplication that grows linearly
-      // with the installed count — emit a bounded count + discovery pointers.
-      const count = args.skillsSummary.length;
-      const where = hasLocalEnv
-        ? "Your harness loads them from its skills directory (each skill is a folder with a SKILL.md — e.g. ~/.claude/skills/, ~/.codex/skills/, ~/.pi/agent/skills/, ~/.opencode/skills/) and most harnesses surface them natively."
+      // with the installed count.
+      const count = skills.length;
+      const where = input.hasLocalEnv
+        ? "Your harness loads them from its skills directory."
         : "This session has no local skills directory, so reach them through the MCP tools.";
-      prompt += `\n\n## Installed Skills\n\nYou have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery}\n`;
+      section += `You have ${count} skill${count === 1 ? "" : "s"} installed. ${where} ${discovery}\n`;
     } else {
-      // Codex and opencode have no native skill system — we only inline a
-      // SKILL.md when a turn prompt opens with `/name`. Without this list they
+      // Codex and opencode have no native skill system; without this list they
       // have zero ambient awareness that any skill exists.
-      //
-      // Remote providers (devin) take this branch too, but have no skills tree
-      // to read and don't use the `/name` trigger, so neither the slash prefix
-      // nor the directory instruction applies to them — `skill-get` is their
-      // only route to a skill's content.
-      const summaries = args.skillsSummary
-        .map((s) => `- ${hasLocalEnv ? "/" : ""}${s.name}: ${s.description}`)
+      const howTo = input.hasLocalEnv
+        ? "To use one, read its SKILL.md from your skills directory and follow it."
+        : "To use one, read it with `skill-get` and follow it.";
+      const lines = skills
+        .map((s) => `- ${input.hasLocalEnv ? "/" : ""}${s.name}: ${s.description}`)
         .join("\n");
-      const howTo = hasLocalEnv
-        ? "To use one, read its SKILL.md from your skills directory and follow its instructions."
-        : "To use one, read its content with the `skill-get` MCP tool and follow its instructions.";
-      prompt += `\n\n## Installed Skills\n\nThe following skills are available. ${howTo}\n\n${summaries}\n\n${discovery}\n`;
+      section += `Installed skills. ${howTo}\n\n${lines}\n\n${discovery}\n`;
     }
   }
 
-  // Installed MCP servers section — skip for providers without MCP
-  if (hasMcp && args.mcpServersSummary) {
-    prompt += `\n\n## Installed MCP Servers\n\nThe following MCP servers are configured for your use:\n${args.mcpServersSummary}\n`;
+  const servers = (input.mcpServers ?? []).filter((name) => name.trim().length > 0);
+  if (servers.length > 0) {
+    section += `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`;
   }
 
-  // Repo context (protected, never truncated)
-  if (args.repoContext) {
-    prompt += "\n\n## Repository Context\n\n";
+  return section;
+}
 
-    if (args.repoContext.warning) {
-      prompt += `WARNING: ${args.repoContext.warning}\n\n`;
-    }
+function renderRepository(
+  repo: NonNullable<BasePromptArgs["repoContext"]>,
+  ctx: { hasMcp: boolean; hasLocalEnv: boolean; provider: string },
+): string {
+  let section = "\n\n## Repository\n\n";
 
-    if (hasLocalEnv) {
-      if (args.repoContext.claudeMd) {
-        prompt += `The following CLAUDE.md is from the repository cloned at \`${args.repoContext.clonePath}\`. `;
-        prompt += `**IMPORTANT: These instructions apply ONLY when working within the \`${args.repoContext.clonePath}\` directory.** `;
-        prompt += `Do NOT apply these rules to files outside that directory.\n\n`;
-        // Cap the repo CLAUDE.md so it can't blow the bootstrap budget on its
-        // own. Pre-cap, the agent-swarm OSS CLAUDE.md was 17,856 B — the
-        // single biggest volatile component of the system prompt and the
-        // direct driver of the Picateclas argv-E2BIG saga (2026-05-28).
-        // Truncation footer points readers at the on-disk copy in the cwd.
-        prompt += `${truncateRepoClaudeMd(
-          args.repoContext.claudeMd,
-          args.repoContext.clonePath,
-          REPO_CLAUDE_MD_MAX_CHARS,
-        )}\n`;
-      } else if (!args.repoContext.warning) {
-        prompt += `Repository is cloned at \`${args.repoContext.clonePath}\` but has no CLAUDE.md file.\n`;
+  if (ctx.hasLocalEnv) {
+    section +=
+      "This task's repository is cloned locally. `get-repos` returns the path. Its `CLAUDE.md` applies inside that directory.\n";
+  }
+
+  if (repo.warning) {
+    section += `\nWARNING: ${repo.warning}\n`;
+  }
+
+  if (ctx.hasLocalEnv && repo.claudeMd && REPO_CLAUDE_MD_INLINE_PROVIDERS.has(ctx.provider)) {
+    // opencode does not load the repo CLAUDE.md natively (unverified), so it
+    // is inlined there, capped so it cannot blow the bootstrap budget on its
+    // own (Picateclas argv-E2BIG saga, 2026-05-28).
+    section += `\nThe repository's CLAUDE.md, cloned at \`${repo.clonePath}\`. It applies only inside that directory.\n\n`;
+    section += `${truncateRepoClaudeMd(repo.claudeMd, repo.clonePath, REPO_CLAUDE_MD_MAX_CHARS)}\n`;
+  }
+
+  if (ctx.hasLocalEnv && repo.autoStashes && repo.autoStashes.length > 0) {
+    const stashes = repo.autoStashes.map((stash) => `- ${stash.ref}: ${stash.message}`).join("\n");
+    section += `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+  }
+
+  const g = repo.guidelines;
+  if (g === null || g === undefined) {
+    section += `\n### Repository Guidelines\n\nNo repository guidelines are defined. Ask the lead before you push.\n`;
+  } else {
+    const hasAnyContent =
+      g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0 || g.allowMerge;
+    if (hasAnyContent) {
+      section += `\n### Repository Guidelines (MANDATORY)\n\n`;
+      if (g.prChecks.length > 0) {
+        section += `**PR Checks. Run ALL before pushing code or creating a PR:**\n`;
+        g.prChecks.forEach((check, i) => {
+          section += `${i + 1}. \`${check}\`\n`;
+        });
+        section += `If ANY check fails, fix the issue before pushing. Do NOT push code with failing checks.\nDo NOT use \`--no-verify\` or any flag that bypasses git hooks.\n\n`;
       }
-
-      if (args.repoContext.autoStashes && args.repoContext.autoStashes.length > 0) {
-        const stashes = args.repoContext.autoStashes
-          .map((stash) => `- ${stash.ref}: ${stash.message}`)
-          .join("\n");
-        prompt += `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+      section += `**Merge Policy:**\n`;
+      section += `- Auto-merge: ${g.allowMerge ? "Allowed" : "Not allowed (default)"}\n`;
+      if (g.mergeChecks.length > 0) {
+        section += `- Before merging, verify:\n`;
+        g.mergeChecks.forEach((check) => {
+          section += `  - ${check}\n`;
+        });
       }
-    }
-
-    // Inject repo guidelines
-    const g = args.repoContext.guidelines;
-    if (g === null || g === undefined) {
-      prompt += `\n### Repository Guidelines\n\nNo repository guidelines defined. If you need to push code, ask the lead or user to define guidelines first.\n`;
-    } else {
-      const hasAnyContent =
-        g.prChecks.length > 0 || g.mergeChecks.length > 0 || g.review.length > 0 || g.allowMerge;
-      if (hasAnyContent) {
-        prompt += `\n### Repository Guidelines (MANDATORY)\n\n`;
-        if (g.prChecks.length > 0) {
-          prompt += `**PR Checks — Run ALL before pushing code or creating a PR:**\n`;
-          g.prChecks.forEach((check, i) => {
-            prompt += `${i + 1}. \`${check}\`\n`;
-          });
-          prompt += `If ANY check fails, fix the issue before pushing. Do NOT push code with failing checks.\nDo NOT use \`--no-verify\` or any flag that bypasses git hooks.\n\n`;
-        }
-        prompt += `**Merge Policy:**\n`;
-        prompt += `- Auto-merge: ${g.allowMerge ? "Allowed" : "Not allowed (default)"}\n`;
-        if (g.mergeChecks.length > 0) {
-          prompt += `- Before merging, verify:\n`;
-          g.mergeChecks.forEach((check) => {
-            prompt += `  - ${check}\n`;
-          });
-        }
-        prompt += `\n`;
-        if (g.review.length > 0) {
-          prompt += `**Review Guidance:**\n`;
-          g.review.forEach((item) => {
-            prompt += `- ${item}\n`;
-          });
-          prompt += `\n`;
-        }
+      section += `\n`;
+      if (g.review.length > 0) {
+        section += `**Review Guidance:**\n`;
+        g.review.forEach((item) => {
+          section += `- ${item}\n`;
+        });
+        section += `\n`;
       }
     }
   }
 
-  // Skip conditional suffix and truncatable sections for remote providers — these
-  // reference local Docker environment features (agent-fs, services, artifacts, /workspace files)
-  if (hasLocalEnv) {
-    // Build conditional suffix (sections that depend on runtime env/capabilities)
-    let conditionalSuffix = "";
-
-    // Conditionally include agent-fs instructions when available
-    if (process.env.AGENT_FS_API_URL) {
-      const sharedOrgId = process.env.AGENT_FS_SHARED_ORG_ID || "YOUR_SHARED_ORG_ID";
-      const agentFsResult = await resolveTemplateAsync("system.agent.agent_fs", {
-        agentId,
-        sharedOrgId,
-      });
-      conditionalSuffix += agentFsResult.text;
-    }
-
-    // Services tools exist only when the server enables the (default-disabled)
-    // `services` capability. When the server reports its capabilities, that is
-    // authoritative — agent skill tags default from the same list the server
-    // no longer includes `services` in, so requiring both would suppress the
-    // section for default workers even on servers that enable it. The legacy
-    // agent-tag opt-out only applies against older servers that don't report.
-    if (
-      args.serverCapabilities
-        ? args.serverCapabilities.includes("services")
-        : !args.capabilities || args.capabilities.includes("services")
-    ) {
-      const servicesResult = await resolveTemplateAsync("system.agent.services", {
-        agentId,
-        swarmUrl,
-      });
-      conditionalSuffix += servicesResult.text;
-    }
-
-    if (!args.capabilities || args.capabilities.includes("artifacts")) {
-      const artifactsResult = await resolveTemplateAsync("system.agent.artifacts", {});
-      conditionalSuffix += artifactsResult.text;
-    }
-
-    // App tools register under the server's `pages` capability. Prefer the
-    // authoritative server report; retain the legacy agent-tag fallback only
-    // for servers that predate capability reporting.
-    if (serverHasCapability("pages", !args.capabilities || args.capabilities.includes("pages"))) {
-      const appsResult = await resolveTemplateAsync("system.agent.apps", {});
-      conditionalSuffix += appsResult.text;
-    }
-
-    if (args.capabilities) {
-      conditionalSuffix += `
-### Capabilities enabled for this agent:
-
-- ${args.capabilities.join("\n- ")}
-`;
-    }
-
-    // Inject truncatable sections with per-section and total character caps
-    // Priority: agent CLAUDE.md > tools (tools cut first when over total budget)
-    const protectedLength = prompt.length + conditionalSuffix.length;
-    const totalBudget = Math.max(0, BOOTSTRAP_TOTAL_MAX_CHARS - protectedLength);
-    let totalUsed = 0;
-
-    // Agent CLAUDE.md (higher priority — injected first)
-    if (args.claudeMd) {
-      const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
-      const section = truncateSection(
-        args.claudeMd,
-        "## Agent Instructions",
-        "CLAUDE.md",
-        perSectionBudget,
-      );
-      prompt += section;
-      totalUsed += section.length;
-    }
-
-    // Tools (lower priority — gets whatever budget remains)
-    if (args.toolsMd) {
-      const perSectionBudget = Math.min(BOOTSTRAP_MAX_CHARS, totalBudget - totalUsed);
-      const section = truncateSection(
-        args.toolsMd,
-        "## Your Tools & Capabilities",
-        "TOOLS.md",
-        perSectionBudget,
-      );
-      prompt += section;
-      totalUsed += section.length;
-    }
-
-    prompt += conditionalSuffix;
+  if (ctx.hasMcp) {
+    section += `\nYou MUST use the \`code-quality\` skill before you push, open a PR, or review one.\n`;
   }
 
-  return prompt;
-};
+  return section;
+}
 
 /**
  * Truncate the repo CLAUDE.md to a hard byte budget so it can't blow the
  * bootstrap argv ceiling on its own (Picateclas spawn-OOM, 2026-05-28).
  *
- * The footer is structured as a `[truncated — see <path>/CLAUDE.md for full
+ * The footer is structured as a `[truncated, see <path>/CLAUDE.md for full
  * content]` notice so anyone reading the system prompt knows exactly where
  * the dropped content lives on disk.
  *
@@ -453,7 +369,7 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
  */
 export function truncateRepoClaudeMd(content: string, clonePath: string, budget: number): string {
   if (content.length <= budget) return content;
-  const notice = `\n\n[...truncated — see ${clonePath}/CLAUDE.md for full content]\n`;
+  const notice = `\n\n[...truncated, see ${clonePath}/CLAUDE.md for full content]\n`;
   const contentBudget = budget - notice.length;
   if (contentBudget <= 0) return notice.trimStart();
   return content.slice(0, contentBudget) + notice;
@@ -472,7 +388,7 @@ function truncateSection(
   if (fullSection.length <= budget) return fullSection;
 
   const headerStr = `\n\n${header}\n\n`;
-  const notice = truncationNotice(fileName);
+  const notice = `\n\n[...truncated, see /workspace/${fileName} for full content]\n`;
   const contentBudget = budget - headerStr.length - notice.length;
 
   if (contentBudget > 0) {

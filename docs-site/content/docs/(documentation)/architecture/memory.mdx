@@ -22,15 +22,16 @@ Memories are automatically created from:
 
 - **Session summaries** — At the end of each session, a lightweight model (default: Gemini 3 Flash via OpenRouter, configurable through `MEMORY_RATER_LLM_MODEL`) extracts key learnings: mistakes made, patterns discovered, failed approaches, and codebase knowledge. These summaries become searchable memories. Requires `OPENROUTER_API_KEY` — without it the Stop hook skips session-summary indexing entirely.
 - **Task completions** — Every completed (or failed) task's output is indexed. Failed tasks include notes about what went wrong, so the agent avoids repeating the same mistake.
-- **File-based notes** — Agents write to `/workspace/personal/memory/` in their per-agent directory. Files written here are automatically indexed via the PostToolUse hook and can be promoted to swarm scope.
+- **Explicit stores** — Agents call the `memory-store` tool (or `ctx.swarm.memory_store` from a script) with a title, content, scope, and tags. This is the write path the system prompt names, and it works on every harness, including remote ones.
+- **File-based notes** — On harnesses with a file hook (claude, pi, opencode), files written to `/workspace/personal/memory/` or `/workspace/shared/memory/<agentId>/` are indexed automatically.
 - **Lead-to-worker injection** — The lead agent can push specific learnings into any worker's memory using the `inject-learning` tool, closing the feedback loop.
 
 ### Memory Scopes
 
 | Scope | Path | Visibility |
 |-------|------|-----------|
-| Agent (private) | `/workspace/personal/memory/` | Only the owning agent |
-| Swarm (shared) | Promoted via `inject-learning` | All agents in the swarm |
+| Agent (private) | `memory-store` with `scope: "agent"` (default), or `/workspace/personal/memory/` | Only the owning agent |
+| Swarm (shared) | `memory-store` with `scope: "swarm"`, `inject-learning`, or `/workspace/shared/memory/<agentId>/` | All agents in the swarm |
 
 ### Automatic Scope Promotion
 
@@ -110,6 +111,7 @@ The same data renders as the **Usefulness panel** on the dashboard's `/memory` p
 
 Agents can search and manage memories using MCP tools:
 
+- **`memory-store`** — Create a memory: `content`, `name`, `scope` (`agent` or `swarm`), optional `tags`, `taskId`, and `intent`. Long content is chunked on headings and embedded in the background. The owner is always the caller, for both scopes.
 - **`memory-search`** — Search with natural language queries. Calls now require an `intent` string so retrievals can be attributed to a concrete task or question, and response payloads may include `rateHint` nudges when a retrieved memory looks worth rating.
 - **`memory-get`** — Retrieve full details of a specific memory by ID (increments access count). Like `memory-search`, it requires an `intent` string and records the retrieval event for downstream recall analysis.
 - **`memory-edit`** — Edit an existing memory in place without changing its ID. Use `mode: "replace"` to rewrite the full content or `mode: "exact"` for a surgical single-substring replacement guarded by uniqueness and optional version checks.
@@ -132,15 +134,18 @@ The link graph has a full read side:
 
 ## Writing Memories
 
-The best practice is to write memories to files immediately when something important is learned:
+Store a memory as soon as something worth keeping is learned, with the `memory-store` tool:
 
 ```
-Write("/workspace/personal/memory/auth-header-fix.md",
-  "The API requires Bearer prefix on all auth headers.
-   Without it, you get a misleading 403 instead of 401.")
+memory-store({
+  name: "API auth header needs the Bearer prefix",
+  content: "The API requires the Bearer prefix on all auth headers. Without it you get a misleading 403 instead of 401.",
+  scope: "agent",
+  tags: ["example-api"],
+})
 ```
 
-Files are automatically indexed by the PostToolUse hook — no additional action needed.
+The seeded `memory` skill carries the full guidance: what makes a good memory, when to pick `swarm` scope, how to check for a near-duplicate with the `memory-dedup-check` script before storing, and how to triage with `memory-edit`, `memory-delete`, and `memory_rate`. On harnesses with a file hook, a file written under `/workspace/personal/memory/` is indexed too.
 
 ### What to Save
 

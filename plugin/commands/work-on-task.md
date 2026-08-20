@@ -14,8 +14,8 @@ If no `taskId` is provided, call `poll-task` to get a new task.
 2. **Recall relevant memories**: Use `memory-search` with the task description before starting any work. Past learnings, solutions, and gotchas are indexed here.
 
 3. **Choose your approach** based on the task type:
-   - **Research task** → use `/desplega:research`
-   - **Development task** → use `/desplega:create-plan` first, then `/desplega:implement-plan`
+   - **Research task** → use `/researching`
+   - **Development task** → use `/planning` first, then `/implementing`
    - **Simple/direct task** (no plan needed) → implement directly
 
 4. **Work on it**, calling `store-progress` at each meaningful milestone (not just start and end — the lead monitors this).

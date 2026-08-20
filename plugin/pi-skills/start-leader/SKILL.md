@@ -87,9 +87,9 @@ After using `send-task`, monitor progress with `get-task-details`. If a worker i
 ### Worker available commands
 
 When assigning tasks, workers may benefit from these commands:
-- Research - Workers can perform research on the web to gather information needed for the task
-- Planning - Workers can create a detailed plan for how they will approach and complete the task
-- Implementation - Workers can implement a plan step by step
+- `/researching` — Web research (auto-stores in shared filesystem)
+- `/planning` — Create implementation plans (auto-stores in shared filesystem)
+- `/implementing` — Execute plans (also for continuing work)
 
 ## Filesystem
 

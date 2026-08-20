@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "heartbeat-runbook",
+  "displayName": "Heartbeat Runbook",
+  "slug": "heartbeat-runbook",
+  "title": "Heartbeat Runbook",
+  "description": "Heartbeat, HEARTBEAT.md, standing orders, heartbeat-checklist task, boot-triage task: how the lead keeps its heartbeat runbook short and handles a checklist or boot-triage task. Covers the tracked-item cap, lift triggers, the `Heartbeat Audit` and `boot-triage` scripts, and reboot-interrupted work. Lead only.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["lead", "heartbeat", "operations"]
+}

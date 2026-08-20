@@ -62,6 +62,7 @@ import { registerMemoryEditTool } from "./tools/memory-edit";
 import { registerMemoryGetTool } from "./tools/memory-get";
 import { registerMemoryRateTool } from "./tools/memory-rate";
 import { registerMemorySearchTool } from "./tools/memory-search";
+import { registerMemoryStoreTool } from "./tools/memory-store";
 import { registerMyAgentInfoTool } from "./tools/my-agent-info";
 import { registerGetOauthAccessTokenTool } from "./tools/oauth-access-token";
 import { registerPollTaskTool } from "./tools/poll-task";
@@ -420,6 +421,7 @@ export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolea
   // Memory capability - persistent memory with vector search
   if (hasCapability("memory")) {
     registerMemorySearchTool(server);
+    registerMemoryStoreTool(server);
     registerMemoryGetTool(server);
     registerMemoryEditTool(server);
     registerMemoryDeleteTool(server);

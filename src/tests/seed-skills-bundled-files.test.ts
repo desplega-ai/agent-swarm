@@ -203,8 +203,11 @@ describe("seeded skills with bundled files", () => {
       deleteSkillFile(artifacts.id, file.path);
     }
 
-    // Old-format hash: base only, no file section.
-    const legacyHash = computeContentHash(`${legacyContent}\n\n# seed:systemDefault=1\n`);
+    // Old-format hash: base only, no file section. The flag mirrors the seeded
+    // config so the test does not pin artifacts' systemDefault value.
+    const legacyHash = computeContentHash(
+      `${legacyContent}\n\n# seed:systemDefault=${artifacts.systemDefault ? 1 : 0}\n`,
+    );
     recordSeedState("skill", "artifacts", legacyHash);
 
     const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "artifacts");

@@ -67,16 +67,17 @@ afterAll(async () => {
 // ============================================================================
 
 describe("template registration — all sources", () => {
-  test("agent prompt requires bot-token provenance for GitHub review replies", () => {
-    const result = resolveTemplate("system.agent.system", {});
+  // Prompt v2 deleted `system.agent.system`. The bot-token provenance rule now
+  // lives in the `code-quality` skill, which the repository section points at.
+  test("the code-quality skill requires bot-token provenance for GitHub review replies", async () => {
+    const skillPath = `${import.meta.dir}/../../templates/skills/code-quality/content.md`;
+    const content = await Bun.file(skillPath).text();
 
-    expect(result.skipped).toBe(false);
-    expect(result.text).toContain("gh api user --jq .login");
-    expect(result.text).toContain("$" + "{GITHUB_BOT_NAME:-agent-swarm-bot}");
-    expect(result.text).toContain("GITHUB_TOKEN");
-    expect(result.text).toContain("<!-- agent-swarm:review-ack -->");
-    expect(result.text).toContain("Never use a user-OAuth GitHub connector");
-    expect(result.text).toContain("If the identity does not match, do not post");
+    expect(content).toContain("gh api user --jq .login");
+    expect(content).toContain("$" + "{GITHUB_BOT_NAME:-agent-swarm-bot}");
+    expect(content).toContain("GITHUB_TOKEN");
+    expect(content).toContain("<!-- agent-swarm:review-ack -->");
+    expect(content).toContain("must not author swarm review replies");
   });
 
   test("GitLab templates are registered (3 common + 4 event)", () => {
