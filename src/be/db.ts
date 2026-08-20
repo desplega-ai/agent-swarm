@@ -5497,6 +5497,41 @@ export function releaseStaleReviewingTasks(timeoutMinutes: number = 30): number 
   return result.changes;
 }
 
+/**
+ * Release 'offered' tasks whose offeree can no longer possibly poll for them
+ * — the agent was deleted, or is `offline` (multi-runtime expiry once its
+ * last runtime instance ages out, or an explicit graceful close). Returns
+ * them to `unassigned` rather than back to `offered`: a stuck offer is
+ * invisible to `autoAssignPoolTasks` (which only scans `unassigned`) and to
+ * the poll-based accept/reject path (which only the original offeree can
+ * reach), so `offered` is a dead end once the offeree is gone (#1190).
+ *
+ * Deliberately gated on liveness, not elapsed time: a fixed timeout would
+ * either yank a live offer out from under an offeree that is simply slow to
+ * poll, or (set generously) leave a genuinely dead offeree's task stranded
+ * for the full window regardless of how obviously offline it already is.
+ * `agents.status = 'offline'` already encodes the staleness threshold that
+ * matters — `runtimeStaleThresholdMinutes()` / `RUNTIME_STALE_THRESHOLD_MIN`
+ * for multi-runtime expiry, or immediate for an explicit close — so no
+ * separate timeout knob is introduced here.
+ */
+export function releaseStaleOfferedTasksForOfflineAgents(): number {
+  const now = new Date().toISOString();
+
+  const result = getDb().run(
+    `UPDATE agent_tasks
+     SET status = 'unassigned', offeredTo = NULL, offeredAt = NULL, lastUpdatedAt = ?
+     WHERE status = 'offered'
+       AND offeredTo IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM agents WHERE agents.id = agent_tasks.offeredTo AND agents.status != 'offline'
+       )`,
+    [now],
+  );
+
+  return result.changes;
+}
+
 export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
   return getDb()
     .prepare<AgentTaskRow, [string]>(

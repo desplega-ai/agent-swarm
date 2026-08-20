@@ -19,7 +19,9 @@ import {
   getTaskById,
   hasCapacity,
   initDb,
+  releaseStaleOfferedTasksForOfflineAgents,
   startTask,
+  updateAgentStatus,
   upsertSwarmConfig,
 } from "../be/db";
 import {
@@ -1608,6 +1610,113 @@ describe("heartbeat ordering vs auto-assignment", () => {
     expect(getAgentById(id)?.status).toBe("offline");
     expect(getTaskById(task.id)?.status).toBe("unassigned");
     expect(getTaskById(task.id)?.agentId ?? null).toBeNull();
+  });
+});
+
+describe("offered task strand recovery (#1190)", () => {
+  test("an offer pinned to an agent whose only runtime expires is released back to the pool", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    makeRuntimeStale(rt);
+
+    const task = createTaskExtended("offer-work", { offeredTo: id });
+    expect(getTaskById(task.id)?.status).toBe("offered");
+
+    await runHeartbeatSweep();
+
+    // Runtime expiry (step 0) offlines the agent before the release step
+    // reasons about it, same as autoAssignPoolTasks's ordering guarantee.
+    expect(getAgentById(id)?.status).toBe("offline");
+    const after = getTaskById(task.id);
+    expect(after?.status).toBe("unassigned");
+    expect(after?.offeredTo ?? null).toBeNull();
+    expect(after?.agentId ?? null).toBeNull();
+  });
+
+  test("the released offer is reassigned to an idle worker in the very same sweep", async () => {
+    const deadOfferee = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const deadRt = crypto.randomUUID();
+    await register(deadOfferee, { maxTasks: 1, runtimeInstanceId: deadRt });
+    makeRuntimeStale(deadRt);
+
+    const rescuer = makeAgent(3);
+    const rescuerRt = crypto.randomUUID();
+    await register(rescuer, { maxTasks: 1, runtimeInstanceId: rescuerRt });
+
+    const task = createTaskExtended("rescued-offer", { offeredTo: deadOfferee });
+
+    await runHeartbeatSweep();
+
+    expect(getAgentById(deadOfferee)?.status).toBe("offline");
+    // Released to unassigned and picked back up by the live idle worker in
+    // the same sweep — the reason the release runs before autoAssignPoolTasks
+    // instead of alongside releaseStaleReviewingTasks in the trailing cleanup.
+    const after = getTaskById(task.id);
+    expect(after?.status).toBe("pending");
+    expect(after?.agentId).toBe(rescuer);
+  });
+
+  test("an offer to a healthy offeree that simply has not polled yet is left untouched", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    // No makeRuntimeStale(): the runtime is live, the agent just hasn't
+    // polled for this offer yet — elapsed time alone must not release it.
+
+    const task = createTaskExtended("slow-poll-offer", { offeredTo: id });
+
+    await runHeartbeatSweep();
+
+    expect(getAgentById(id)?.status).not.toBe("offline");
+    const after = getTaskById(task.id);
+    expect(after?.status).toBe("offered");
+    expect(after?.offeredTo).toBe(id);
+  });
+
+  test("releaseStaleOfferedTasksForOfflineAgents releases an offer to a deleted agent", () => {
+    const id = makeAgent(1);
+    const task = createTaskExtended("deleted-offeree-offer", { offeredTo: id });
+    getDb().prepare("DELETE FROM agents WHERE id = ?").run(id);
+
+    const released = releaseStaleOfferedTasksForOfflineAgents();
+
+    expect(released).toBe(1);
+    const after = getTaskById(task.id);
+    expect(after?.status).toBe("unassigned");
+    expect(after?.offeredTo ?? null).toBeNull();
+  });
+
+  test("releaseStaleOfferedTasksForOfflineAgents releases an offer to an explicitly closed (legacy) agent", () => {
+    const id = makeAgent(1);
+    updateAgentStatus(id, "offline"); // e.g. legacy /close, no multi-runtime involved
+    const task = createTaskExtended("closed-offeree-offer", { offeredTo: id });
+
+    const released = releaseStaleOfferedTasksForOfflineAgents();
+
+    expect(released).toBe(1);
+    expect(getTaskById(task.id)?.status).toBe("unassigned");
+  });
+
+  test("releaseStaleOfferedTasksForOfflineAgents ignores reviewing tasks and other agents' offers", () => {
+    const offlineId = makeAgent(1);
+    updateAgentStatus(offlineId, "offline");
+    const onlineId = makeAgent(1);
+
+    const reviewing = createTaskExtended("reviewing-not-offered", { offeredTo: offlineId });
+    getDb()
+      .prepare("UPDATE agent_tasks SET status = 'reviewing' WHERE id = ?")
+      .run(reviewing.id);
+    const healthyOffer = createTaskExtended("healthy-offer", { offeredTo: onlineId });
+
+    const released = releaseStaleOfferedTasksForOfflineAgents();
+
+    expect(released).toBe(0);
+    expect(getTaskById(reviewing.id)?.status).toBe("reviewing");
+    expect(getTaskById(healthyOffer.id)?.status).toBe("offered");
   });
 });
 

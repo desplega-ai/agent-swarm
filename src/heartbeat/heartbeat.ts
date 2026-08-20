@@ -30,6 +30,7 @@ import {
   isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
   releaseStaleMentionProcessing,
+  releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
   releaseStaleReviewingTasks,
   supersedeTask,
@@ -219,6 +220,7 @@ export interface HeartbeatFindings {
     inboxProcessing: number;
     workflowRuns: number;
     staleRuntimes: number;
+    staleOfferedTasks: number;
   };
 }
 
@@ -293,6 +295,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       inboxProcessing: 0,
       workflowRuns: 0,
       staleRuntimes: 0,
+      staleOfferedTasks: 0,
     },
   };
 
@@ -300,6 +303,13 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // which workers are alive — otherwise auto-assignment below can hand a task
   // to an agent this same sweep is about to mark offline, stranding it.
   findings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
+
+  // 0.5. Release offers pinned to an agent that just went offline (or was
+  // already deleted) back to the pool, before auto-assignment runs — an
+  // offer stuck on a dead offeree is otherwise invisible to
+  // autoAssignPoolTasks (unassigned-only) and to the offeree's own
+  // accept/reject path (nobody left to reach it). See #1190.
+  findings.staleCleanup.staleOfferedTasks = releaseStaleOfferedTasksForOfflineAgents();
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
   detectAndRemediateStalledTasks(findings);
@@ -1204,8 +1214,13 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
       const tasks = getTasksByStatus(status);
 
       for (const task of tasks) {
-        if (!task.agentId) continue;
-        const agent = agents.find((a) => a.id === task.agentId);
+        // 'pending' tasks carry their holder in agentId; 'offered' tasks have
+        // not been accepted yet, so agentId is still NULL and the offeree
+        // lives in offeredTo instead (#1190) — `!task.agentId` alone used to
+        // skip every offered row here, hiding this whole class of orphan.
+        const holderId = status === "offered" ? task.offeredTo : task.agentId;
+        if (!holderId) continue;
+        const agent = agents.find((a) => a.id === holderId);
         if (!agent || agent.status === "offline") {
           orphanedTasks.push(task);
         }
@@ -1217,7 +1232,8 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
       sections.push("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
       sections.push("These tasks are pending/offered but assigned to workers that are offline:");
       for (const task of orphanedTasks) {
-        const agentName = agents.find((a) => a.id === task.agentId)?.name ?? task.agentId ?? "?";
+        const holderId = task.status === "offered" ? task.offeredTo : task.agentId;
+        const agentName = agents.find((a) => a.id === holderId)?.name ?? holderId ?? "?";
         sections.push(
           `- [${task.id}] "${task.task.slice(0, 100)}" — status: ${task.status}, assigned to: ${agentName}`,
         );
@@ -1307,12 +1323,20 @@ export async function runHeartbeatSweep(): Promise<void> {
           inboxProcessing: 0,
           workflowRuns: 0,
           staleRuntimes: 0,
+          staleOfferedTasks: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
       // stopped pinging is exactly the case the preflight gate sees as
       // "nothing actionable", and it would otherwise stay available forever.
       cleanupOnlyFindings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
+      // preflightGate() already sends any tick with `stats.offered > 0` down
+      // the full codeLevelTriage() path, so this cleanup-only branch only
+      // runs with zero offered tasks in play — call it anyway so a task
+      // offered and its offeree deleted/closed in the same idle window isn't
+      // left waiting for the next actionable tick.
+      cleanupOnlyFindings.staleCleanup.staleOfferedTasks =
+        releaseStaleOfferedTasksForOfflineAgents();
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early
@@ -1356,12 +1380,21 @@ function logFindings(findings: HeartbeatFindings): void {
     parts.push(`auto_assigned=${findings.autoAssigned.length}`);
   }
 
-  const { sessions, reviewingTasks, mentionProcessing, inboxProcessing, workflowRuns } =
-    findings.staleCleanup;
+  const {
+    sessions,
+    reviewingTasks,
+    mentionProcessing,
+    inboxProcessing,
+    workflowRuns,
+    staleOfferedTasks,
+  } = findings.staleCleanup;
   const totalCleanup =
     sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
   if (totalCleanup > 0) {
     parts.push(`stale_cleanup=${totalCleanup}`);
+  }
+  if (staleOfferedTasks > 0) {
+    parts.push(`stale_offers_released=${staleOfferedTasks}`);
   }
 
   if (parts.length > 0) {

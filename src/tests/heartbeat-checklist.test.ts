@@ -534,6 +534,34 @@ describe("Heartbeat Checklist", () => {
       expect(status).toContain("offline-worker");
     });
 
+    test("isBootTriage includes Orphaned Tasks for offered tasks on offline offerees (#1190)", () => {
+      // 'offered' tasks carry their target in offeredTo, not agentId (agentId
+      // is only populated once accepted) — this used to be skipped entirely.
+      const offlineAgent = createAgent({
+        name: "offline-offeree",
+        isLead: false,
+        status: "offline",
+      });
+      createTaskExtended("Orphaned offered task", { offeredTo: offlineAgent.id });
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).toContain("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
+      expect(status).toContain("Orphaned offered task");
+      expect(status).toContain("offline-offeree");
+    });
+
+    test("isBootTriage does not flag an offered task whose offeree is online", () => {
+      const onlineAgent = createAgent({
+        name: "online-offeree",
+        isLead: false,
+        status: "idle",
+      });
+      createTaskExtended("Healthy offered task", { offeredTo: onlineAgent.id });
+
+      const status = gatherSystemStatus({ isBootTriage: true });
+      expect(status).not.toContain("Healthy offered task");
+    });
+
     test("non-boot mode does NOT include reboot or orphan sections", async () => {
       const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = createTaskExtended("Some task", { agentId: agent.id });
