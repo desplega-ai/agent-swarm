@@ -96,7 +96,7 @@ describe("memory graph expansion", () => {
     }
   });
 
-  test("linked memory surfaces in results it would not reach by similarity alone", () => {
+  test("linked memory surfaces in results it would not reach by similarity alone", async () => {
     // B first so A's wikilink resolves to B's id at storeLinks time.
     const memoryB = store.store({
       agentId,
@@ -115,7 +115,7 @@ describe("memory graph expansion", () => {
     // A is semantically near the query vector; B is orthogonal (cosine 0 → below MIN_SIMILARITY).
     store.updateEmbedding(memoryA.id, vector(0), "test");
     store.updateEmbedding(memoryB.id, vector(1), "test");
-    storeLinks(memoryA.id, agentId, memoryA.content);
+    await storeLinks(memoryA.id, agentId, memoryA.content);
 
     const candidates = store.search(vector(0), agentId, { scope: "all", limit: 10 });
     expect(candidates.some((c) => c.id === memoryA.id)).toBe(true);
@@ -134,7 +134,7 @@ describe("memory graph expansion", () => {
     expect(ranked.some((r) => r.id === memoryB.id && r.retrievalSource === "graph")).toBe(true);
   });
 
-  test("unresolved wikilink targets are skipped", () => {
+  test("unresolved wikilink targets are skipped", async () => {
     const memory = store.store({
       agentId,
       scope: "agent",
@@ -142,7 +142,7 @@ describe("memory graph expansion", () => {
       content: "References a memory that does not exist: [[Ghost Memory Nobody Wrote]].",
       source: "manual",
     });
-    storeLinks(memory.id, agentId, memory.content);
+    await storeLinks(memory.id, agentId, memory.content);
 
     // The link row exists, but its targetId is still the raw name text.
     const linkRows = getDb()
@@ -266,7 +266,7 @@ describe("memory graph expansion", () => {
     expect(kept.similarity).toBeCloseTo(0.9, 6);
   });
 
-  test("memory_retrieval rows carry retrievalSource='graph'", () => {
+  test("memory_retrieval rows carry retrievalSource='graph'", async () => {
     const parent = store.store({
       agentId,
       scope: "agent",
@@ -288,7 +288,7 @@ describe("memory graph expansion", () => {
     const ranked = rerank(expandCandidatesWithGraph(candidates, agentId, { scope: "all" }), {
       limit: 10,
     });
-    recordRetrievals(
+    await recordRetrievals(
       taskId,
       agentId,
       ranked.map((r) => ({

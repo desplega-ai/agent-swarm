@@ -95,7 +95,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
 
       try {
         const store = getMemoryStore();
-        const result = store.edit({
+        const result = await store.edit({
           id: memoryId,
           key,
           scope,
@@ -115,7 +115,7 @@ export const registerMemoryEditTool = (server: McpServer) => {
           if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
           try {
             // Edit path: prune links derived from removed content (sequel links survive).
-            refreshLinks(result.memory.id, requestInfo.agentId, result.memory.content);
+            await refreshLinks(result.memory.id, requestInfo.agentId, result.memory.content);
           } catch (err) {
             console.error(
               `[memory-edit] Link resolution failed for ${result.memory.id}:`,

@@ -210,9 +210,9 @@ describe("applyRating", () => {
     expect(result).toEqual({ applied: 0, rejected: [] });
   });
 
-  test("audit row carries source, signal, weight, reasoning, taskId", () => {
+  test("audit row carries source, signal, weight, reasoning, taskId", async () => {
     const m = makeMemory("audit");
-    applyRating(
+    await applyRating(
       [
         {
           memoryId: m.id,

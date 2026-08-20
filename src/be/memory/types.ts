@@ -16,8 +16,8 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface MemoryStore {
-  store(input: MemoryInput): AgentMemory;
-  storeBatch(inputs: MemoryInput[]): AgentMemory[];
+  store(input: MemoryInput): Promise<AgentMemory>;
+  storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]>;
   get(id: string): Promise<AgentMemory | null>;
   peek(id: string): Promise<AgentMemory | null>;
   search(
@@ -25,7 +25,7 @@ export interface MemoryStore {
     agentId: string,
     options: MemorySearchOptions,
   ): Promise<MemoryCandidate[]>;
-  edit(input: MemoryEditInput): MemoryEditResult;
+  edit(input: MemoryEditInput): Promise<MemoryEditResult>;
   list(agentId: string, options: MemoryListOptions): Promise<AgentMemory[]>;
   count(agentId: string, options: MemoryListOptions): Promise<number>;
   isSourceProtected(source: AgentMemorySource): boolean;

@@ -176,10 +176,10 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       .all(taskId);
   }
 
-  test("recordRetrievals writes one row per result for the task", () => {
+  test("recordRetrievals writes one row per result for the task", async () => {
     const m1 = makeMemory("retrieval-target-1");
     const m2 = makeMemory("retrieval-target-2");
-    recordRetrievals(taskId, agentId, [
+    await recordRetrievals(taskId, agentId, [
       { memoryId: m1.id, similarity: 0.9 },
       { memoryId: m2.id, similarity: 0.7 },
     ]);
@@ -188,16 +188,16 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     expect(rows.map((r) => r.memoryId).sort()).toEqual([m1.id, m2.id].sort());
   });
 
-  test("recordRetrievals groups rows from one call and stamps result rank", () => {
+  test("recordRetrievals groups rows from one call and stamps result rank", async () => {
     const first = makeMemory("retrieval-group-first");
     const second = makeMemory("retrieval-group-second");
     const third = makeMemory("retrieval-group-third");
 
-    recordRetrievals(taskId, agentId, [
+    await recordRetrievals(taskId, agentId, [
       { memoryId: first.id, similarity: 0.9 },
       { memoryId: second.id, similarity: 0.8 },
     ]);
-    recordRetrievals(taskId, agentId, [{ memoryId: third.id, similarity: 0.7 }]);
+    await recordRetrievals(taskId, agentId, [{ memoryId: third.id, similarity: 0.7 }]);
 
     const rows = getDb()
       .prepare<{ memoryId: string; retrievalId: string | null; rank: number | null }, [string]>(
@@ -219,17 +219,17 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     expect(thirdRow.rank).toBe(0);
   });
 
-  test("recordRetrievals is a no-op when taskId is undefined", () => {
+  test("recordRetrievals is a no-op when taskId is undefined", async () => {
     const m = makeMemory("no-task");
-    recordRetrievals(undefined, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
+    await recordRetrievals(undefined, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
     const rows = getDb().prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
       n: number;
     };
     expect(rows.n).toBe(0);
   });
 
-  test("recordRetrievals is a no-op when results is empty", () => {
-    recordRetrievals(taskId, agentId, []);
+  test("recordRetrievals is a no-op when results is empty", async () => {
+    await recordRetrievals(taskId, agentId, []);
     const rows = getDb().prepare("SELECT COUNT(*) as n FROM memory_retrieval").get() as {
       n: number;
     };
@@ -241,7 +241,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
     const uncited = makeMemory("uncited");
 
     // 1. Search-time: log the retrievals.
-    recordRetrievals(taskId, agentId, [
+    await recordRetrievals(taskId, agentId, [
       { memoryId: cited.id, similarity: 0.9 },
       { memoryId: uncited.id, similarity: 0.85 },
     ]);
@@ -295,7 +295,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
 
   test("negative path: no citation in session_logs → only beta moves", async () => {
     const m = makeMemory("never-cited");
-    recordRetrievals(taskIdMiss, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
+    await recordRetrievals(taskIdMiss, agentId, [{ memoryId: m.id, similarity: 0.9 }]);
     await createSessionLogs({
       taskId: taskIdMiss,
       sessionId: "session-2",
@@ -312,7 +312,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       evidence: "completely unrelated content",
     });
     const stamped: RatingEvent[] = events.map((e) => ({ ...e, source: rater.name }));
-    applyRating(stamped, { taskId: taskIdMiss });
+    await applyRating(stamped, { taskId: taskIdMiss });
 
     expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.25 });
   });

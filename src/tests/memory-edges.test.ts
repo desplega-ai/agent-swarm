@@ -232,9 +232,9 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     });
   });
 
-  test("repeated event with the same referencesSource updates the existing row in place", () => {
+  test("repeated event with the same referencesSource updates the existing row in place", async () => {
     const m = makeMemory("ref-rep");
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -243,7 +243,7 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -258,9 +258,9 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     expect(edges[0]!.beta).toBe(1);
   });
 
-  test("different referencesSource for the same memory creates two distinct edge rows", () => {
+  test("different referencesSource for the same memory creates two distinct edge rows", async () => {
     const m = makeMemory("ref-distinct");
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -269,7 +269,7 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
         referencesSource: "github:foo/bar#1",
       },
     ]);
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -284,11 +284,11 @@ describe("applyRating + agent_memory_edge UPSERT", () => {
     expect(ids).toEqual(["github:foo/bar#1", "linear:DES-187"]);
   });
 
-  test("Q2 free-form: linear, customer, and arbitrary prefixes all accepted", () => {
+  test("Q2 free-form: linear, customer, and arbitrary prefixes all accepted", async () => {
     const m = makeMemory("ref-freeform");
     const sources = ["linear:DES-187", "customer:crabi", "anything:goes-12345"];
     for (const referencesSource of sources) {
-      applyRating([
+      await applyRating([
         {
           memoryId: m.id,
           signal: 1,
@@ -518,7 +518,7 @@ describe("POST /api/memory/rate with referencesSource (step-6 §4)", () => {
 describe("GET /api/memory/edges (step-6 §7)", () => {
   test("returns edges with computed usefulness", async () => {
     const m = makeMemory("get-edges-1");
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -563,7 +563,7 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
 
   test("agent-scope memory owned by another agent → empty (defence-in-depth)", async () => {
     const m = makeMemory("get-edges-other-owner", agentB);
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -579,7 +579,7 @@ describe("GET /api/memory/edges (step-6 §7)", () => {
 
   test("swarm-scope memory is visible to any agent", async () => {
     const m = makeMemory("get-edges-swarm", agentB, "swarm");
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,
@@ -600,9 +600,9 @@ describe("listEdgesForAgent (in-process)", () => {
     expect(listEdgesForAgent(agentA, randomUUID())).toEqual([]);
   });
 
-  test("clamps usefulness to [1.0, 2.0]", () => {
+  test("clamps usefulness to [1.0, 2.0]", async () => {
     const m = makeMemory("usefulness-clamp");
-    applyRating([
+    await applyRating([
       {
         memoryId: m.id,
         signal: 1,

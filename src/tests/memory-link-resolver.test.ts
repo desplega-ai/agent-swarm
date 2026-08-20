@@ -162,11 +162,11 @@ describe("memory_link DB surface", () => {
     });
   }
 
-  test("storeLinks persists rows and resolves wikilinks to memory ids", () => {
+  test("storeLinks persists rows and resolves wikilinks to memory ids", async () => {
     const b = seed("b-target", "target memory B");
     const a = seed("a-source", "See [[b-target]] and PR #123 for details.");
 
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
 
     const rows = linkRowsFor(a.id);
     const wikilink = rows.find((r) => r.linkType === "wikilink");
@@ -181,14 +181,14 @@ describe("memory_link DB surface", () => {
     const c = seed("c-target", "target memory C");
     const a = seed("a-source", "See [[b-target]] and [[c-target]], fixed in #77.");
 
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
     await storeSequelLink(a.id, b.id);
     expect(linkRowsFor(a.id)).toHaveLength(4);
     const survivorId = linkRowsFor(a.id).find(
       (r) => r.linkType === "wikilink" && r.targetId === b.id,
     )?.id;
 
-    refreshLinks(a.id, agentX, "See [[b-target]] only now.");
+    await refreshLinks(a.id, agentX, "See [[b-target]] only now.");
 
     const rows = linkRowsFor(a.id);
     expect(rows).toHaveLength(2);
@@ -204,20 +204,20 @@ describe("memory_link DB surface", () => {
   test("refreshLinks with linkless content clears all content-derived links", async () => {
     const b = seed("b-target", "target memory B");
     const a = seed("a-source", "See [[b-target]] and #42.");
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
     await storeSequelLink(a.id, b.id);
 
-    refreshLinks(a.id, agentX, "Plain text without any references.");
+    await refreshLinks(a.id, agentX, "Plain text without any references.");
 
     const rows = linkRowsFor(a.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.linkType).toBe("sequel");
   });
 
-  test("getLinksForMemory returns outgoing links and backlinks", () => {
+  test("getLinksForMemory returns outgoing links and backlinks", async () => {
     const b = seed("b-target", "target memory B", { scope: "swarm" });
     const a = seed("a-source", "See [[b-target]].");
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
 
     const forA = getLinksForMemory(a.id, { viewerAgentId: agentX });
     expect(forA.links).toHaveLength(1);
@@ -235,9 +235,9 @@ describe("memory_link DB surface", () => {
     expect(forB.backlinks[0]?.from).toEqual({ id: a.id, name: "a-source", scope: "agent" });
   });
 
-  test("unresolved wikilinks come back with resolved: false and no target", () => {
+  test("unresolved wikilinks come back with resolved: false and no target", async () => {
     const a = seed("a-source", "See [[never-created-memory]].");
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
 
     const { links } = getLinksForMemory(a.id, { viewerAgentId: agentX });
     expect(links).toHaveLength(1);
@@ -246,9 +246,9 @@ describe("memory_link DB surface", () => {
     expect(links[0]?.targetId).toBe("never-created-memory");
   });
 
-  test("non-memory link kinds are always resolved", () => {
+  test("non-memory link kinds are always resolved", async () => {
     const a = seed("a-source", "Fixed in #123.");
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
 
     const { links } = getLinksForMemory(a.id, { viewerAgentId: agentX });
     expect(links).toHaveLength(1);
@@ -257,10 +257,10 @@ describe("memory_link DB surface", () => {
     expect(links[0]?.target).toBeUndefined();
   });
 
-  test("cross-agent agent-scoped backlink is not leaked to other agents", () => {
+  test("cross-agent agent-scoped backlink is not leaked to other agents", async () => {
     const b = seed("b-target", "shared memory B", { scope: "swarm" });
     const yMem = seed("y-source", "Private note about [[b-target]].", { agentId: agentY });
-    storeLinks(yMem.id, agentY, yMem.content);
+    await storeLinks(yMem.id, agentY, yMem.content);
 
     // agentX must not learn about agentY's private memory.
     expect(getLinksForMemory(b.id, { viewerAgentId: agentX }).backlinks).toHaveLength(0);
@@ -274,10 +274,10 @@ describe("memory_link DB surface", () => {
     );
   });
 
-  test("agent-scoped link target metadata is hidden from other agents", () => {
+  test("agent-scoped link target metadata is hidden from other agents", async () => {
     const priv = seed("x-private", "agent X private target");
     const a = seed("a-shared", "See [[x-private]].", { scope: "swarm" });
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
 
     const forOwner = getLinksForMemory(a.id, { viewerAgentId: agentX }).links;
     expect(forOwner[0]?.resolved).toBe(true);
@@ -299,10 +299,10 @@ describe("memory_link DB surface", () => {
     expect(forLead[0]?.target?.id).toBe(priv.id);
   });
 
-  test("dangling links pointing at deleted memories are tolerated", () => {
+  test("dangling links pointing at deleted memories are tolerated", async () => {
     const b = seed("b-target", "target memory B");
     const a = seed("a-source", "See [[b-target]].");
-    storeLinks(a.id, agentX, a.content);
+    await storeLinks(a.id, agentX, a.content);
     store.delete(b.id);
 
     const { links, backlinks } = getLinksForMemory(a.id, { viewerAgentId: agentX });

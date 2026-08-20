@@ -120,7 +120,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
 
       if (requestInfo.sourceTaskId && requestInfo.agentId) {
         try {
-          recordRetrievals(
+          await recordRetrievals(
             requestInfo.sourceTaskId,
             requestInfo.agentId,
             [{ memoryId: memory.id, similarity: 1.0 }],

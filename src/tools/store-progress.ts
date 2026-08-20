@@ -357,7 +357,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             const store = getMemoryStore();
             const provider = getEmbeddingProvider();
 
-            const memory = store.store({
+            const memory = await store.store({
               agentId: requestInfo.agentId ?? null,
               content: taskContent,
               name: `Task: ${result.task!.task.slice(0, 80)}`,
@@ -379,7 +379,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (shouldShareWithSwarm) {
               try {
-                const swarmMemory = store.store({
+                const swarmMemory = await store.store({
                   agentId: requestInfo.agentId ?? null,
                   scope: "swarm",
                   name: `Shared: ${result.task!.task.slice(0, 80)}`,

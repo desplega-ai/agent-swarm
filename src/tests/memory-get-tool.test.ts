@@ -142,7 +142,7 @@ describe("memory-get MCP authorization", () => {
 
   // ─── Link traversal blocks (DES-639b) ──────────────────────────────────────
 
-  function seedLinkedPair() {
+  async function seedLinkedPair() {
     const b = getMemoryStore().store({
       agentId: agentA,
       scope: "swarm",
@@ -157,12 +157,12 @@ describe("memory-get MCP authorization", () => {
       content: "See [[get-b-target]].",
       source: "manual",
     });
-    storeLinks(a.id, agentA, a.content);
+    await storeLinks(a.id, agentA, a.content);
     return { a, b };
   }
 
   test("returns links and backlinks blocks", async () => {
-    const { a, b } = seedLinkedPair();
+    const { a, b } = await seedLinkedPair();
 
     const forA = (await buildTool().handler(
       { memoryId: a.id, intent: "test links block" },
@@ -201,7 +201,7 @@ describe("memory-get MCP authorization", () => {
       content: "Private note about [[get-b-target]].",
       source: "manual",
     });
-    storeLinks(priv.id, agentA, priv.content);
+    await storeLinks(priv.id, agentA, priv.content);
 
     // Non-lead agentC must not see agentA's private backlink.
     const forC = (await buildTool().handler(
@@ -228,7 +228,7 @@ describe("memory-get MCP authorization", () => {
   });
 
   test("HTTP GET /api/memory/{id} includes links and backlinks", async () => {
-    const { a, b } = seedLinkedPair();
+    const { a, b } = await seedLinkedPair();
 
     async function httpGet(id: string) {
       const req = {

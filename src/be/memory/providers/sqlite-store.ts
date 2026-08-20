@@ -385,23 +385,19 @@ export class SqliteMemoryStore implements MemoryStore {
     return embedding;
   }
 
-  store(input: MemoryInput): AgentMemory {
+  async store(input: MemoryInput): Promise<AgentMemory> {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     const expiresAt = computeExpiresAt(input.source);
     const key = input.key ?? `${input.scope}/${input.source}/${id}`;
     const contentHash = contentSha256(input.content);
     const version = 1;
-    const db = getDb();
 
-    let row: AgentMemoryRow | null | undefined;
-    const tx = db.transaction(() => {
-      row = db
-        .prepare<AgentMemoryRow, (string | number | null)[]>(
-          `INSERT INTO agent_memory (id, agentId, scope, key, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, updatedAt, accessedAt, expiresAt, accessCount, embeddingModel, contextKey, contentHash, version)
+    const row = await getDbClient().transaction(async (tx) => {
+      const inserted = await tx.get<AgentMemoryRow>(
+        `INSERT INTO agent_memory (id, agentId, scope, key, name, content, summary, source, sourceTaskId, sourcePath, chunkIndex, totalChunks, tags, createdAt, updatedAt, accessedAt, expiresAt, accessCount, embeddingModel, contextKey, contentHash, version)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-        )
-        .get(
+        [
           id,
           input.agentId ?? null,
           input.scope,
@@ -424,42 +420,41 @@ export class SqliteMemoryStore implements MemoryStore {
           input.contextKey ?? null,
           contentHash,
           version,
-        );
+        ],
+      );
 
-      if (!row) throw new Error("Failed to create memory");
-      db.prepare(
+      if (!inserted) throw new Error("Failed to create memory");
+      await tx.run(
         `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
          VALUES (?, ?, ?, ?, ?, ?, 'create', ?, ?, ?, ?, ?)`,
-      ).run(
-        crypto.randomUUID(),
-        row.id,
-        version,
-        input.content,
-        contentHash,
-        input.intent ?? "create memory",
-        input.agentId ?? null,
-        now,
-        now,
-        input.agentId ?? null,
-        input.agentId ?? null,
+        [
+          crypto.randomUUID(),
+          inserted.id,
+          version,
+          input.content,
+          contentHash,
+          input.intent ?? "create memory",
+          input.agentId ?? null,
+          now,
+          now,
+          input.agentId ?? null,
+          input.agentId ?? null,
+        ],
       );
+      return inserted;
     });
-    tx();
 
-    if (!row) throw new Error("Failed to create memory");
     this.syncFtsRow(row.id, row.name, row.content);
     return rowToAgentMemory(row);
   }
 
-  storeBatch(inputs: MemoryInput[]): AgentMemory[] {
-    const db = getDb();
+  async storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]> {
     const results: AgentMemory[] = [];
-    const tx = db.transaction(() => {
+    await getDbClient().transaction(async () => {
       for (const input of inputs) {
-        results.push(this.store(input));
+        results.push(await this.store(input));
       }
     });
-    tx();
     return results;
   }
 
@@ -867,90 +862,103 @@ export class SqliteMemoryStore implements MemoryStore {
     return PROTECTED_SOURCES.has(source);
   }
 
-  edit(input: MemoryEditInput): MemoryEditResult {
+  async edit(input: MemoryEditInput): Promise<MemoryEditResult> {
     if (!input.id && !(input.key && input.scope)) {
       throw new Error("memory edit requires either id or key+scope");
     }
 
-    const db = getDb();
-    const row = input.id
-      ? db
-          .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
-          .get(input.id)
-      : db
-          .prepare<AgentMemoryRow, [string, string, string | null]>(
+    // The row read, the single-chunk assertion and the `expectedVersion`
+    // optimistic-lock check all run INSIDE the transaction: once every read is
+    // awaited, a concurrent edit could otherwise commit between the version
+    // read and the UPDATE and silently win.
+    const { result, ftsContent } = await getDbClient().transaction(async (tx) => {
+      const row = input.id
+        ? await tx.get<AgentMemoryRow>("SELECT * FROM agent_memory WHERE id = ?", [input.id])
+        : await tx.get<AgentMemoryRow>(
             `SELECT * FROM agent_memory
              WHERE key = ? AND scope = ? AND coalesce(agentId, '') = coalesce(?, '')
              ORDER BY chunkIndex ASC
              LIMIT 1`,
-          )
-          .get(input.key!, input.scope!, input.agentId ?? null);
+            [input.key!, input.scope!, input.agentId ?? null],
+          );
 
-    if (!row) throw new Error("memory not found");
-    if ((row.totalChunks ?? 1) !== 1)
-      throw new Error("memory edit only supports single-chunk rows");
-    if (input.expectedVersion && input.expectedVersion !== (row.version ?? 1)) {
-      throw new Error("memory version conflict");
-    }
+      if (!row) throw new Error("memory not found");
+      if ((row.totalChunks ?? 1) !== 1)
+        throw new Error("memory edit only supports single-chunk rows");
+      if (input.expectedVersion && input.expectedVersion !== (row.version ?? 1)) {
+        throw new Error("memory version conflict");
+      }
 
-    const previousVersion = row.version ?? 1;
-    const nextContent = applyEditMode(input.mode, row.content, {
-      content: input.content,
-      oldString: input.oldString,
-      newString: input.newString,
-    });
+      const previousVersion = row.version ?? 1;
+      const nextContent = applyEditMode(input.mode, row.content, {
+        content: input.content,
+        oldString: input.oldString,
+        newString: input.newString,
+      });
 
-    const nextHash = contentSha256(nextContent);
-    if (nextHash === row.contentHash) {
-      return {
-        memory: rowToAgentMemory(row),
-        changed: false,
-        previousVersion,
-        version: previousVersion,
-        contentHash: nextHash,
-      };
-    }
+      const nextHash = contentSha256(nextContent);
+      if (nextHash === row.contentHash) {
+        return {
+          result: {
+            memory: rowToAgentMemory(row),
+            changed: false,
+            previousVersion,
+            version: previousVersion,
+            contentHash: nextHash,
+          },
+          ftsContent: null,
+        };
+      }
 
-    const nextVersion = previousVersion + 1;
-    const now = new Date().toISOString();
-    const tx = db.transaction(() => {
-      db.prepare(
+      const nextVersion = previousVersion + 1;
+      const now = new Date().toISOString();
+      await tx.run(
         `INSERT INTO agent_memory_version (id, memory_id, version, content, contentHash, intent, operation, changedByAgentId, createdAt, updatedAt, created_by, updated_by)
          VALUES (?, ?, ?, ?, ?, ?, 'edit', ?, ?, ?, ?, ?)`,
-      ).run(
-        crypto.randomUUID(),
-        row.id,
-        nextVersion,
-        nextContent,
-        nextHash,
-        input.intent,
-        input.changedByAgentId ?? null,
-        now,
-        now,
-        input.changedByAgentId ?? null,
-        input.changedByAgentId ?? null,
+        [
+          crypto.randomUUID(),
+          row.id,
+          nextVersion,
+          nextContent,
+          nextHash,
+          input.intent,
+          input.changedByAgentId ?? null,
+          now,
+          now,
+          input.changedByAgentId ?? null,
+          input.changedByAgentId ?? null,
+        ],
       );
-      db.prepare(
+      await tx.run(
         `UPDATE agent_memory
          SET content = ?, contentHash = ?, version = ?, updatedAt = ?
          WHERE id = ?`,
-      ).run(nextContent, nextHash, nextVersion, now, row.id);
+        [nextContent, nextHash, nextVersion, now, row.id],
+      );
+
+      return {
+        result: {
+          memory: rowToAgentMemory({
+            ...row,
+            content: nextContent,
+            contentHash: nextHash,
+            version: nextVersion,
+            updatedAt: now,
+          }),
+          changed: true,
+          previousVersion,
+          version: nextVersion,
+          contentHash: nextHash,
+        },
+        ftsContent: nextContent,
+      };
     });
-    tx();
 
-    this.syncFtsRow(row.id, row.name, nextContent);
-    const updated = db
-      .prepare<AgentMemoryRow, [string]>("SELECT * FROM agent_memory WHERE id = ?")
-      .get(row.id);
-    if (!updated) throw new Error("memory disappeared after edit");
+    if (ftsContent !== null) {
+      this.syncFtsRow(result.memory.id, result.memory.name, ftsContent);
+    }
 
-    return {
-      memory: rowToAgentMemory(updated),
-      changed: true,
-      previousVersion,
-      version: nextVersion,
-      contentHash: nextHash,
-    };
+    return result;
   }
 
   async listForCuration(

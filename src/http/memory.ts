@@ -642,7 +642,7 @@ export async function handleMemory(
         })
       ).filter((memory) => memory.sourcePath === sourcePath);
       if (existing.length === 1 && existing[0]?.totalChunks === 1) {
-        const result = store.edit({
+        const result = await store.edit({
           id: existing[0].id,
           mode: "replace",
           content: contentChunks[0]!.content,
@@ -653,7 +653,7 @@ export async function handleMemory(
         if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Re-index of an existing memory: prune stale content-derived links.
-          refreshLinks(result.memory.id, memoryAgentId, result.memory.content);
+          await refreshLinks(result.memory.id, memoryAgentId, result.memory.content);
         } catch (err) {
           console.error(
             `[memory] Link resolution failed for ${result.memory.id}:`,
@@ -682,7 +682,7 @@ export async function handleMemory(
       undefined;
 
     // Atomic batch insert — all chunks or none
-    const memories = store.storeBatch(
+    const memories = await store.storeBatch(
       contentChunks.map((chunk) => ({
         agentId: memoryAgentId || null,
         content: chunk.content,
@@ -704,7 +704,7 @@ export async function handleMemory(
     if (memoryAgentId) {
       for (const memory of memories) {
         try {
-          storeLinks(memory.id, memoryAgentId, memory.content);
+          await storeLinks(memory.id, memoryAgentId, memory.content);
         } catch (err) {
           console.error(
             `[memory] Link resolution failed for ${memory.id}:`,
@@ -783,7 +783,7 @@ export async function handleMemory(
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
       if (sourceTaskId && intent) {
         try {
-          recordRetrievals(
+          await recordRetrievals(
             sourceTaskId,
             myAgentId,
             ranked.map((r) => ({
@@ -948,7 +948,7 @@ export async function handleMemory(
 
     try {
       const store = getMemoryStore();
-      const result = store.edit({
+      const result = await store.edit({
         id: memoryId,
         key,
         scope,
@@ -967,7 +967,7 @@ export async function handleMemory(
         if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
         try {
           // Edit path: prune links derived from removed content (sequel links survive).
-          refreshLinks(result.memory.id, myAgentId, result.memory.content);
+          await refreshLinks(result.memory.id, myAgentId, result.memory.content);
         } catch (err) {
           console.error(
             `[memory-edit] Link resolution failed for ${result.memory.id}:`,
@@ -1111,7 +1111,7 @@ export async function handleMemory(
         const rateContextKey = Array.isArray(rateContextKeyHeader)
           ? rateContextKeyHeader[0]
           : rateContextKeyHeader;
-        const result = applyRating(ratingEvents, { taskId, contextKey: rateContextKey });
+        const result = await applyRating(ratingEvents, { taskId, contextKey: rateContextKey });
         applied += result.applied;
         for (const r of result.rejected) {
           rejected.push({ memoryId: r.event.memoryId, reason: r.reason });
@@ -1189,7 +1189,7 @@ export async function handleMemory(
     const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
     if (sourceTaskId && myAgentId && intent) {
       try {
-        recordRetrievals(
+        await recordRetrievals(
           sourceTaskId,
           myAgentId,
           [{ memoryId: memory.id, similarity: 1.0 }],

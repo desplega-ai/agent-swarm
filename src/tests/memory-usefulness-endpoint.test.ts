@@ -137,7 +137,7 @@ describe("GET /api/memory/usefulness", () => {
     let m2: string; // task_completion, uncited, posterior 1/2
     let m3: string; // manual, only legacy (out-of-window) activity, prior 1/1
 
-    beforeAll(() => {
+    beforeAll(async () => {
       m1 = store.store({
         agentId: AGENT_ID,
         scope: "agent",
@@ -161,11 +161,11 @@ describe("GET /api/memory/usefulness", () => {
       }).id;
 
       // In-window retrievals: one grouped call with two arms, one single-arm call.
-      recordRetrievals(TASK_A, AGENT_ID, [
+      await recordRetrievals(TASK_A, AGENT_ID, [
         { memoryId: m1, similarity: 0.9, retrievalSource: "vec" },
         { memoryId: m2, similarity: 0.7, retrievalSource: "hybrid" },
       ]);
-      recordRetrievals(TASK_B, AGENT_ID, [
+      await recordRetrievals(TASK_B, AGENT_ID, [
         { memoryId: m1, similarity: 0.8, retrievalSource: "hybrid" },
       ]);
 

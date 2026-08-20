@@ -61,7 +61,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       // Create swarm-scoped memory — lead learnings are organizational knowledge visible to all workers
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
       const store = getMemoryStore();
-      const memory = store.store({
+      const memory = await store.store({
         agentId: targetAgentId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,

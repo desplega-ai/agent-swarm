@@ -132,7 +132,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §3
         if (requestInfo.sourceTaskId) {
           try {
-            recordRetrievals(
+            await recordRetrievals(
               requestInfo.sourceTaskId,
               requestInfo.agentId,
               ranked.map((r) => ({

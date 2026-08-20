@@ -223,11 +223,11 @@ function makeMemory(name: string, scope: "agent" | "swarm"): { id: string } {
 }
 
 describe("memory-rater v1.5 — cross-cutting e2e", () => {
-  test("Step A: retrieval bridge writes memory_retrieval rows", () => {
+  test("Step A: retrieval bridge writes memory_retrieval rows", async () => {
     const memA = makeMemory("mem-A-step-a", "agent");
     const memB = makeMemory("mem-B-step-a", "swarm");
 
-    recordRetrievals(taskId, agentId, [
+    await recordRetrievals(taskId, agentId, [
       { memoryId: memA.id, similarity: 0.9 },
       { memoryId: memB.id, similarity: 0.7 },
     ]);
@@ -285,7 +285,7 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     // (mirrors the actual flow in step B).
     insertRetrieval(taskId, agentId, memA.id);
     insertRetrieval(taskId, agentId, memB.id);
-    applyRating(
+    await applyRating(
       [
         {
           memoryId: memA.id,
@@ -413,7 +413,7 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     insertRetrieval(taskId, agentId, memB.id);
 
     // Two edges on mem-A, one from explicit-self (github), one from llm (linear).
-    applyRating(
+    await applyRating(
       [
         {
           memoryId: memA.id,
@@ -425,7 +425,7 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
       ],
       { taskId },
     );
-    applyRating(
+    await applyRating(
       [
         {
           memoryId: memA.id,

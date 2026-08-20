@@ -242,7 +242,7 @@ describe("memory editing", () => {
         content: "See [[edit-b-target]] and [[edit-c-target]].",
         source: "manual",
       });
-      storeLinks(a.id, agentId, a.content);
+      await storeLinks(a.id, agentId, a.content);
       await storeSequelLink(a.id, b.id);
       expect(linkRowsFor(a.id)).toHaveLength(3);
 
