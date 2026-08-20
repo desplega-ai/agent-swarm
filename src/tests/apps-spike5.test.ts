@@ -1166,7 +1166,7 @@ describe("apps spike 5 lifecycle", () => {
         )
         .get(namespace)!.count,
     ).toBe(0);
-  });
+  }, 60_000); // inserts + scans 200k kv rows; >10 s on a loaded 4-core CI runner under --parallel=4
 
   test("hard-deletes only empty columns unless purge is explicit and preserves timestamps", async () => {
     const appId = await createApp({
