@@ -550,6 +550,7 @@ describe("script connections", () => {
       markMigrationApplied(database, "135_backfill_task_pull_request_attachments.sql");
       // 136 alters agent_tasks, which this migration-112-only fixture only creates partially.
       markMigrationApplied(database, "136_task_requester_provenance.sql");
+      markMigrationApplied(database, "137_memory_retrieval_composite_index.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
