@@ -32,6 +32,7 @@
     "agentmail-integration",
     "sentry-integration",
     "jira-integration",
-    "x402-payments"
+    "x402-payments",
+    "multi-runtime-agents"
   ]
 }
