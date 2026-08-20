@@ -3,6 +3,7 @@ import { getConfig } from "@/lib/config";
 import type {
   AgentAvatar,
   AgentMcpServersResponse,
+  AgentRuntimeInstancesResponse,
   AgentSkillsResponse,
   AgentsResponse,
   AgentTask,
@@ -254,6 +255,13 @@ class ApiClient {
     const url = `${this.getBaseUrl()}/api/agents/${id}${includeTasks ? "?include=tasks" : ""}`;
     const res = await fetch(url, { headers: this.getHeaders() });
     if (!res.ok) throw new Error(`Failed to fetch agent: ${res.status}`);
+    return res.json();
+  }
+
+  async fetchAgentRuntimeInstances(id: string): Promise<AgentRuntimeInstancesResponse> {
+    const url = `${this.getBaseUrl()}/api/agents/${id}/runtime-instances`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (!res.ok) throw new Error(`Failed to fetch runtime instances: ${res.status}`);
     return res.json();
   }
 

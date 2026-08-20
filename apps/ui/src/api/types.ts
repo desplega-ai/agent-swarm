@@ -82,6 +82,25 @@ export interface Agent {
   lastUpdatedAt: string;
 }
 
+export type RuntimeInstanceStatus = "active" | "offline";
+
+export interface RuntimeInstance {
+  id: string;
+  agentId: string;
+  status: RuntimeInstanceStatus;
+  reportedSlots: number;
+  credentialReady?: boolean | null;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+  isLive: boolean;
+}
+
+export interface AgentRuntimeInstancesResponse {
+  runtimeInstances: RuntimeInstance[];
+  staleThresholdMinutes: number;
+}
+
 export interface AgentCredStatusLiveTest {
   ok: boolean;
   error?: string | null;
