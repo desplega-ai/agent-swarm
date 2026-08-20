@@ -3515,7 +3515,7 @@ export async function insertTaskAttachment(
   input: InsertTaskAttachmentInput,
 ): Promise<TaskAttachment> {
   return await getDbClient().transaction(async () => {
-    const attachment = insertTaskAttachmentRow(input);
+    const attachment = await insertTaskAttachmentRow(input);
     if (attachment.kind === "agent-fs" && attachment.providerId && attachment.providerKey) {
       const task = await getTaskById(input.taskId);
       if (!task) throw new Error(`Task not found while mapping attachment: ${input.taskId}`);
@@ -3535,21 +3535,17 @@ export async function insertTaskAttachment(
   });
 }
 
-function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachment {
-  const db = getDb();
-
+async function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): Promise<TaskAttachment> {
   if (input.sha256) {
-    const existing = db
-      .prepare<TaskAttachmentRow, [string, string]>(
-        "SELECT * FROM task_attachments WHERE task_id = ? AND sha256 = ? LIMIT 1",
-      )
-      .get(input.taskId, input.sha256);
+    const existing = await getDbClient().get<TaskAttachmentRow>(
+      "SELECT * FROM task_attachments WHERE task_id = ? AND sha256 = ? LIMIT 1",
+      [input.taskId, input.sha256],
+    );
     if (existing) return rowToTaskAttachment(existing);
   }
 
-  const tupleExisting = db
-    .prepare<TaskAttachmentRow, [string, string, string, string, string, string]>(
-      `SELECT * FROM task_attachments
+  const tupleExisting = await getDbClient().get<TaskAttachmentRow>(
+    `SELECT * FROM task_attachments
        WHERE task_id = ?
          AND kind = ?
          AND IFNULL(path, '')    = ?
@@ -3558,46 +3554,13 @@ function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachme
          AND name = ?
        ORDER BY created_at ASC
        LIMIT 1`,
-    )
-    .get(
-      input.taskId,
-      input.kind,
-      input.path ?? "",
-      input.url ?? "",
-      input.pageId ?? "",
-      input.name,
-    );
+    [input.taskId, input.kind, input.path ?? "", input.url ?? "", input.pageId ?? "", input.name],
+  );
   if (tupleExisting) return rowToTaskAttachment(tupleExisting);
 
   const id = crypto.randomUUID();
-  const row = db
-    .prepare<
-      TaskAttachmentRow,
-      [
-        string,
-        string,
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        string | null,
-        number | null,
-        string | null,
-        string | null,
-        string | null,
-        number,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO task_attachments
+  const row = await getDbClient().get<TaskAttachmentRow>(
+    `INSERT INTO task_attachments
          (id, task_id, agent_id, name, kind, url, path, page_id,
           provider_id, provider_key, capabilities,
           agent_fs_org_id, agent_fs_drive_id,
@@ -3605,8 +3568,7 @@ function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachme
           created_by, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    )
-    .get(
+    [
       id,
       input.taskId,
       input.agentId ?? null,
@@ -3628,7 +3590,8 @@ function insertTaskAttachmentRow(input: InsertTaskAttachmentInput): TaskAttachme
       input.isPrimary ? 1 : 0,
       input.createdBy ?? null,
       input.updatedBy ?? input.createdBy ?? null,
-    );
+    ],
+  );
 
   if (!row) {
     throw new Error("Failed to insert task attachment");
@@ -3699,14 +3662,14 @@ export interface UpsertAssetKeyMappingInput {
   updatedBy?: string;
 }
 
-function insertAssetKeyHistory(input: {
+async function insertAssetKeyHistory(input: {
   entityType: AssetEntityType;
   entityId: string;
   previousKey?: string | null;
   newKey: string;
   changedBy?: string;
-}): void {
-  getDb().run(
+}): Promise<void> {
+  await getDbClient().run(
     `INSERT INTO asset_key_history
        (id, entity_type, entity_id, previous_key, new_key, changed_by)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -3767,7 +3730,7 @@ export async function upsertAssetKeyMapping(
       );
       if (!row) throw new Error("Failed to update asset key mapping");
       if (existing.key !== key) {
-        insertAssetKeyHistory({
+        await insertAssetKeyHistory({
           entityType: "file",
           entityId: existing.id,
           previousKey: existing.key,
@@ -3804,7 +3767,7 @@ export async function upsertAssetKeyMapping(
       ],
     );
     if (!row) throw new Error("Failed to create asset key mapping");
-    insertAssetKeyHistory({
+    await insertAssetKeyHistory({
       entityType: "file",
       entityId: id,
       newKey: key,
@@ -4050,7 +4013,7 @@ export async function moveAssetKey(input: {
         );
         for (const mapping of mappedFiles) {
           if (mapping.key === key) continue;
-          insertAssetKeyHistory({
+          await insertAssetKeyHistory({
             entityType: "file",
             entityId: mapping.id,
             previousKey: mapping.key,
@@ -4102,7 +4065,7 @@ export async function moveAssetKey(input: {
         );
         break;
     }
-    insertAssetKeyHistory({
+    await insertAssetKeyHistory({
       entityType: input.entityType,
       entityId: input.id,
       previousKey,
@@ -6331,39 +6294,6 @@ function rowToSessionLog(row: SessionLogRow): SessionLog {
     createdAt: row.createdAt,
   };
 }
-
-export const sessionLogQueries = {
-  insert: () =>
-    getDb().prepare<SessionLogRow, [string, string | null, string, number, string, string, number]>(
-      `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    ),
-
-  insertBatch: () =>
-    getDb().prepare<null, [string, string | null, string, number, string, string, number]>(
-      `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-    ),
-
-  getByTaskId: () =>
-    getDb().prepare<SessionLogRow, [string]>(
-      "SELECT * FROM session_logs WHERE taskId = ? ORDER BY iteration ASC, lineNumber ASC",
-    ),
-
-  getRecentByTaskId: () =>
-    getDb().prepare<SessionLogRow, [string, number]>(
-      `SELECT * FROM (
-         SELECT * FROM session_logs WHERE taskId = ?
-         ORDER BY iteration DESC, lineNumber DESC
-         LIMIT ?
-       ) ORDER BY iteration ASC, lineNumber ASC`,
-    ),
-
-  getBySessionId: () =>
-    getDb().prepare<SessionLogRow, [string, number]>(
-      "SELECT * FROM session_logs WHERE sessionId = ? AND iteration = ? ORDER BY lineNumber ASC",
-    ),
-};
 
 export async function createSessionLogs(logs: {
   taskId?: string;
@@ -9061,10 +8991,10 @@ export type WorkflowRunPage = {
   };
 };
 
-export function listWorkflowRuns(
+export async function listWorkflowRuns(
   workflowId: string,
   options: WorkflowRunListOptions = {},
-): WorkflowRun[] {
+): Promise<WorkflowRun[]> {
   const conditions = ["workflowId = ?"];
   const params: Array<string | number> = [workflowId];
   if (options.status) {
@@ -9081,41 +9011,39 @@ export function listWorkflowRuns(
     params.push(options.offset);
   }
 
-  return getDb()
-    .prepare<WorkflowRunRow, Array<string | number>>(
-      `SELECT * FROM workflow_runs
+  const rows = await getDbClient().query<WorkflowRunRow>(
+    `SELECT * FROM workflow_runs
        WHERE ${conditions.join(" AND ")}
        ORDER BY startedAt DESC, id DESC${pagination}`,
-    )
-    .all(...params)
-    .map(rowToWorkflowRun);
+    params,
+  );
+  return rows.map(rowToWorkflowRun);
 }
 
-export function countWorkflowRuns(
+export async function countWorkflowRuns(
   workflowId: string,
   options: Pick<WorkflowRunListOptions, "status"> = {},
-): number {
+): Promise<number> {
   const conditions = ["workflowId = ?"];
   const params: string[] = [workflowId];
   if (options.status) {
     conditions.push("status = ?");
     params.push(options.status);
   }
-  const row = getDb()
-    .prepare<{ count: number }, string[]>(
-      `SELECT COUNT(*) AS count FROM workflow_runs WHERE ${conditions.join(" AND ")}`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM workflow_runs WHERE ${conditions.join(" AND ")}`,
+    params,
+  );
   return row?.count ?? 0;
 }
 
-export function listWorkflowRunsPage(
+export async function listWorkflowRunsPage(
   workflowId: string,
   options: Required<Pick<WorkflowRunListOptions, "limit" | "offset">> &
     Pick<WorkflowRunListOptions, "status">,
-): WorkflowRunPage {
-  const runs = listWorkflowRuns(workflowId, options);
-  const total = countWorkflowRuns(workflowId, { status: options.status });
+): Promise<WorkflowRunPage> {
+  const runs = await listWorkflowRuns(workflowId, options);
+  const total = await countWorkflowRuns(workflowId, { status: options.status });
   const nextOffset = options.offset + runs.length;
   const hasMore = nextOffset < total;
   return {
@@ -11547,10 +11475,11 @@ export async function updateSkill(
   return row ? rowToSkill(row) : null;
 }
 
-function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
-  getDb()
-    .prepare("UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?")
-    .run(now, skillId);
+async function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
+  await getDbClient().run(
+    "UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?",
+    [now, skillId],
+  );
 }
 
 export async function listSkillFileManifest(skillId: string): Promise<SkillFileManifestEntry[]> {
@@ -11631,16 +11560,15 @@ export async function upsertSkillFile(skillId: string, input: SkillFileInput): P
   return rowToSkillFile(row);
 }
 
-function upsertSkillFileUnchecked(
+async function upsertSkillFileUnchecked(
   skillId: string,
   payload: NormalizedSkillFileInput,
   id: string,
   now: string,
   bumpVersion: boolean,
-): SkillFile {
-  const row = getDb()
-    .prepare<SkillFileRow, (string | number | null)[]>(
-      `INSERT INTO skill_files (
+): Promise<SkillFile> {
+  const row = await getDbClient().get<SkillFileRow>(
+    `INSERT INTO skill_files (
         id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(skillId, path) DO UPDATE SET
@@ -11650,8 +11578,7 @@ function upsertSkillFileUnchecked(
         size = excluded.size,
         lastUpdatedAt = excluded.lastUpdatedAt
       RETURNING *`,
-    )
-    .get(
+    [
       id,
       skillId,
       payload.path,
@@ -11661,10 +11588,11 @@ function upsertSkillFileUnchecked(
       payload.size,
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to upsert skill file");
-  if (bumpVersion) bumpSkillVersion(skillId, now);
+  if (bumpVersion) await bumpSkillVersion(skillId, now);
   return rowToSkillFile(row);
 }
 
@@ -11678,10 +11606,11 @@ export async function upsertSkillFiles(
 
   const now = new Date().toISOString();
   return await getDbClient().transaction(async () => {
-    const rows = normalized.map((file) =>
-      upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false),
-    );
-    bumpSkillVersion(skillId, now);
+    const rows: SkillFile[] = [];
+    for (const file of normalized) {
+      rows.push(await upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false));
+    }
+    await bumpSkillVersion(skillId, now);
     return rows;
   });
 }
@@ -11693,7 +11622,7 @@ export async function deleteSkillFile(skillId: string, path: string): Promise<bo
     normalizedPath,
   ]);
   if (result.changes > 0) {
-    bumpSkillVersion(skillId);
+    await bumpSkillVersion(skillId);
     return true;
   }
   return false;
@@ -13597,26 +13526,6 @@ export async function getActivePricingRow(
   return row ? rowToPricingRow(row) : null;
 }
 
-/**
- * DEFERRED (transaction rule): sync counterpart of `getActivePricingRow`,
- * kept for `insertChangedPricingRows` (pricing-refresh.ts), whose own body
- * contains a raw synchronous `getDb().transaction()` callback (which cannot
- * await) — stays on the raw sync handle.
- */
-export function getActivePricingRowSync(
-  provider: PricingProvider,
-  model: string,
-  tokenClass: PricingTokenClass,
-  atEpochMs: number,
-): PricingRow | null {
-  const row = getDb()
-    .prepare<PricingRowDb, [string, string, string, number]>(
-      "SELECT provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt FROM pricing WHERE provider = ? AND model = ? AND token_class = ? AND effective_from <= ? ORDER BY effective_from DESC LIMIT 1",
-    )
-    .get(provider, model, tokenClass, atEpochMs);
-  return row ? rowToPricingRow(row) : null;
-}
-
 export interface InsertPricingRowInput {
   provider: PricingProvider;
   model: string;
@@ -13645,38 +13554,6 @@ export async function insertPricingRow(input: InsertPricingRowInput): Promise<Pr
       now,
     ],
   );
-  return {
-    provider: input.provider,
-    model: input.model,
-    tokenClass: input.tokenClass,
-    effectiveFrom: input.effectiveFrom,
-    pricePerMillionUsd: input.pricePerMillionUsd,
-    createdAt: now,
-    lastUpdatedAt: now,
-  };
-}
-
-/**
- * DEFERRED (transaction rule): sync counterpart of `insertPricingRow`, kept
- * for `insertChangedPricingRows` (pricing-refresh.ts) — see
- * `getActivePricingRowSync`.
- */
-export function insertPricingRowSync(input: InsertPricingRowInput): PricingRow {
-  const now = Date.now();
-  getDb()
-    .prepare(
-      `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.provider,
-      input.model,
-      input.tokenClass,
-      input.effectiveFrom,
-      input.pricePerMillionUsd,
-      now,
-      now,
-    );
   return {
     provider: input.provider,
     model: input.model,

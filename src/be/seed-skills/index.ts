@@ -214,7 +214,6 @@ import {
   computeContentHash,
   createSkill,
   deleteSkillFile,
-  getDb,
   getDbClient,
   getSkillByName,
   getSkillFiles,
@@ -508,14 +507,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     const { skill } = item;
 
     await getDbClient().transaction(async () => {
-      // NOTE: inline sync lookup (not the async `getSkillByName`) — sync helpers
-      // are safe inside an open async client transaction. Only `existing.id` is
-      // needed here.
-      const existing = getDb()
-        .prepare<{ id: string }, [string, string, string]>(
-          "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-        )
-        .get(skill.name, "swarm", "");
+      // NOTE: inline lookup (not the fuller `getSkillByName`) — only
+      // `existing.id` is needed here.
+      const existing = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+        [skill.name, "swarm", ""],
+      );
 
       if (existing) {
         await updateSkill(existing.id, {

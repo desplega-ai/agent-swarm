@@ -1,10 +1,10 @@
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createLogEntry,
-  getActivePricingRowSync,
+  getActivePricingRow,
   getDbClient,
   type InsertPricingRowInput,
-  insertPricingRowSync,
+  insertPricingRow,
 } from "./db";
 import { updateLiveModelsCatalog } from "./models-catalog";
 import type { ModelsDevCache } from "./modelsdev-cache";
@@ -40,9 +40,8 @@ function logPricingRefreshError(message: string, err: unknown): void {
 }
 
 /**
- * The per-row reads and writes stay on the synchronous helpers
- * (`getActivePricingRowSync` / `insertPricingRowSync`): they run on the shared
- * connection inside the client transaction's open BEGIN.
+ * The per-row reads and writes go through the async client helpers; inside the
+ * transaction callback they are routed into the same open BEGIN.
  */
 async function insertChangedPricingRows(
   rows: PricingSeedRow[],
@@ -56,7 +55,7 @@ async function insertChangedPricingRows(
     let unchanged = 0;
 
     for (const row of rows) {
-      const existing = getActivePricingRowSync(row.provider, row.model, row.tokenClass, now);
+      const existing = await getActivePricingRow(row.provider, row.model, row.tokenClass, now);
       if (existing?.pricePerMillionUsd === row.pricePerMillionUsd) {
         unchanged += 1;
         continue;
@@ -66,7 +65,7 @@ async function insertChangedPricingRows(
         ...row,
         effectiveFrom: now,
       };
-      insertPricingRowSync(input);
+      await insertPricingRow(input);
       inserted += 1;
     }
 

@@ -15,7 +15,7 @@
  */
 
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { getDb, getDbClient } from "./db";
+import { getDbClient } from "./db";
 
 const SCRUB_KEY = "boot-scrub-logs-v2";
 const CURSOR_KEY = "boot-scrub-logs-v2-cursor";
@@ -25,8 +25,6 @@ const BATCH_SIZE = 200;
 const yieldTick = () => new Promise<void>((r) => setTimeout(r, 5));
 
 export async function runBootScrubLogs(): Promise<void> {
-  const db = getDb();
-
   const done = await getDbClient().get<{ key: string }>(
     "SELECT key FROM seed_state WHERE kind = ? AND key = ?",
     ["maintenance", SCRUB_KEY],
@@ -69,12 +67,9 @@ export async function runBootScrubLogs(): Promise<void> {
       (lastProcessedId ? ` (resuming from cursor ${lastProcessedId.slice(0, 8)}…)` : ""),
   );
 
-  const update = db.prepare("UPDATE session_logs SET content = ? WHERE id = ?");
-  const saveCursor = db.prepare(
-    `INSERT INTO seed_state (kind, key, seededHash, seededAt)
+  const saveCursorSql = `INSERT INTO seed_state (kind, key, seededHash, seededAt)
      VALUES ('maintenance', '${CURSOR_KEY}', ?, datetime('now'))
-     ON CONFLICT (kind, key) DO UPDATE SET seededHash = ?, seededAt = datetime('now')`,
-  );
+     ON CONFLICT (kind, key) DO UPDATE SET seededHash = ?, seededAt = datetime('now')`;
 
   let scrubbed = 0;
   let scanned = 0;
@@ -99,18 +94,17 @@ export async function runBootScrubLogs(): Promise<void> {
 
     const batchLastId = rows[rows.length - 1]!.id;
 
-    const tx = db.transaction(() => {
+    await getDbClient().transaction(async (tx) => {
       for (const row of rows) {
         const cleaned = scrubSecrets(row.content);
         if (cleaned !== row.content) {
-          update.run(cleaned, row.id);
+          await tx.run("UPDATE session_logs SET content = ? WHERE id = ?", [cleaned, row.id]);
           scrubbed++;
         }
       }
       // Persist cursor inside the same transaction so it's atomic with the scrub
-      saveCursor.run(batchLastId, batchLastId);
+      await tx.run(saveCursorSql, [batchLastId, batchLastId]);
     });
-    tx();
 
     scanned += rows.length;
     cursor = batchLastId;

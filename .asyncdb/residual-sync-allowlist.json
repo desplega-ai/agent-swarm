@@ -1,0 +1,42 @@
+[
+  {
+    "file": "src/be/db.ts",
+    "reason": "Boot path + the two documented sync seams. Raw access is confined to: (a) initDb and everything it calls synchronously — the agent_tasks CHECK-constraint rebuild (l.284-366), ensureAgentProfileColumns (l.480), seedContextVersions (l.617-651), autoEncryptLegacyPlaintextSecrets (l.7640-7678); (b) getDb/closeDb/getDbClient themselves (l.431-452); (c) the prompt-template chain getPromptTemplates / upsertPromptTemplate / resetPromptTemplateToDefault (l.10173-10370) called synchronously by seedDefaultTemplates from initDb, and resolvePromptTemplate (l.10427-10449) which is DI-injected into src/prompts/resolver.ts and invoked by the still-sync resolveTemplate() public API; (d) moveAssetKey's auditAssetKeys(getDb()) call (l.3964) into the shared sync audit module."
+  },
+  {
+    "file": "src/be/asset-key-audit.ts",
+    "reason": "Every function takes a `database: Database` handle. enforceAssetKeyStartupAudit is called synchronously from initDb (src/be/db.ts:246 and :353), so auditAssetKeys cannot become async without breaking boot; its two non-boot consumers (db.ts moveAssetKey, http/assets.ts key-audit route) share the same sync signature."
+  },
+  {
+    "file": "src/be/oauth-encryption-backfill.ts",
+    "reason": "autoEncryptLegacyOAuthSecrets(database: Database) is a one-time boot backfill invoked synchronously from initDb; keeps the raw handle and a raw database.transaction()."
+  },
+  {
+    "file": "src/be/connection-bindings-blob-migration.ts",
+    "reason": "migrateLegacyCredentialBindingBlob(database: Database) is a one-time boot migration invoked synchronously from initDb (src/be/db.ts:420); keeps the raw handle and a raw database.transaction()."
+  },
+  {
+    "file": "src/be/seed-pricing.ts",
+    "reason": "seedPricingFromModelsDev() is a boot seeder called synchronously from createServer (src/server.ts:285) and src/http/index.ts:547; keeps its prepared insert and raw db.transaction(rows => ...)."
+  },
+  {
+    "file": "src/be/rbac-roles.ts",
+    "reason": "ensureRbacSeedsSynced() is a boot seeder (src/server.ts:289, src/http/index.ts:556, `rbac bootstrap` CLI). Two extra blockers beyond the boot exemption: eight prepared-statement objects cannot cross the DbExecutor seam, and CREATE_USER_DEFAULT_ROLE_TRIGGER_SQL is a multi-statement CREATE TRIGGER body that the client's single-statement run() cannot execute."
+  },
+  {
+    "file": "src/be/memory/providers/sqlite-store.ts",
+    "reason": "memory_vec / memory_fts bootstrap is reached from the SqliteMemoryStore constructor (ensureVecTable, ensureFtsTable -> populateVecTable, populateFtsTable, getVecTableSchema, getVecCount, getHealthCounts). A constructor cannot await, and those helpers are shared with async read paths, so they stay on the raw handle. Removing this needs a lazy async-init redesign of the store, not a mechanical conversion."
+  },
+  {
+    "file": "src/be/script-connections.ts",
+    "reason": "listScriptConnections() must stay synchronous: getScriptApiTypes()/getScriptMcpTypes() feed it into DEFAULT PARAMETER VALUES of scriptSdkTypesWithGeneratedApis / scriptStdlibTypesWithGeneratedApis in src/be/scripts/typecheck.ts, and a default-parameter expression cannot contain an await. Documented inline at the call site."
+  },
+  {
+    "file": "src/http/db-query.ts",
+    "reason": "executeReadOnlyQuery() enforces its read-only guard via bun:sqlite's Statement.columnNames (empty for writes) before executing. The DbExecutor seam deliberately never lets prepared-statement objects cross the boundary, so it exposes no equivalent introspection."
+  },
+  {
+    "file": "src/http/assets.ts",
+    "reason": "The asset-key audit route passes getDb() into the shared synchronous auditAssetKeys(db) helper (see src/be/asset-key-audit.ts). No raw SQL of its own."
+  }
+]
