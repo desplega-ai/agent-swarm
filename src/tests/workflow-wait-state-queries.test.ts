@@ -330,7 +330,7 @@ describe("getStuckWaitRuns", () => {
       id: crypto.randomUUID(),
       workflowId: wf.id,
     });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
     const step = createWorkflowRunStep({
       id: crypto.randomUUID(),
@@ -338,7 +338,7 @@ describe("getStuckWaitRuns", () => {
       nodeId: "w1",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
     const overdueId = crypto.randomUUID();
     await createWaitState({
@@ -365,7 +365,7 @@ describe("getStuckWaitRuns", () => {
       id: crypto.randomUUID(),
       workflowId: wf.id,
     });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
     const step = createWorkflowRunStep({
       id: crypto.randomUUID(),
@@ -373,7 +373,7 @@ describe("getStuckWaitRuns", () => {
       nodeId: "w2",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
     const firedId = crypto.randomUUID();
     await createWaitState({
@@ -402,7 +402,7 @@ describe("getStuckWaitRuns", () => {
       nodeId: "w3",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
     const id = crypto.randomUUID();
     await createWaitState({

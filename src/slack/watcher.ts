@@ -156,8 +156,8 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
         // completed task per tree render. Skipping non-completed avoids
         // hot-path queries for every in-progress poll tick.
         const childAttachments =
-          child.status === "completed" ? getTaskAttachments(child.id) : undefined;
-        const childSteered = getSteeringMessagesForTask(child.id).length > 0;
+          child.status === "completed" ? await getTaskAttachments(child.id) : undefined;
+        const childSteered = (await getSteeringMessagesForTask(child.id)).length > 0;
 
         childNodes.push({
           taskId: child.id,
@@ -178,8 +178,9 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
       }
     }
 
-    const rootAttachments = task.status === "completed" ? getTaskAttachments(task.id) : undefined;
-    const rootSteered = getSteeringMessagesForTask(task.id).length > 0;
+    const rootAttachments =
+      task.status === "completed" ? await getTaskAttachments(task.id) : undefined;
+    const rootSteered = (await getSteeringMessagesForTask(task.id)).length > 0;
 
     nodes.push({
       taskId: task.id,

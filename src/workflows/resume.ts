@@ -157,7 +157,7 @@ async function resumeFromTaskCompletion(
       secretKeys,
     );
   } else {
-    finalizeOrWait(run.id);
+    await finalizeOrWait(run.id);
   }
 }
 
@@ -165,14 +165,14 @@ async function resumeFromTaskCompletion(
  * If no nodes are ready and no steps are still waiting, finalize the run.
  * Otherwise set it back to waiting for the next task completion.
  */
-export function finalizeOrWait(runId: string): void {
-  const steps = getWorkflowRunStepsByRunId(runId);
+export async function finalizeOrWait(runId: string): Promise<void> {
+  const steps = await getWorkflowRunStepsByRunId(runId);
   const hasWaiting = steps.some((s) => s.status === "waiting");
   if (hasWaiting) {
-    updateWorkflowRun(runId, { status: "waiting" });
+    await updateWorkflowRun(runId, { status: "waiting" });
   } else {
     // All steps done (completed or failed) — finalize the run
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "completed",
       finishedAt: new Date().toISOString(),
     });
@@ -202,7 +202,7 @@ async function handleTaskFailure(
   const onFailure = workflow.definition.onNodeFailure ?? "fail";
 
   if (onFailure === "fail") {
-    markRunFailed(event, reason);
+    await markRunFailed(event, reason);
     return;
   }
 
@@ -236,7 +236,7 @@ async function handleTaskFailure(
       secretKeys,
     );
   } else {
-    finalizeOrWait(run.id);
+    await finalizeOrWait(run.id);
   }
 }
 
@@ -256,14 +256,14 @@ async function isStaleTaskEvent(stepId: string, event: TaskEvent): Promise<boole
 /**
  * Mark a workflow run as failed when its linked task fails or is cancelled.
  */
-function markRunFailed(event: TaskEvent, reason: string): void {
+async function markRunFailed(event: TaskEvent, reason: string): Promise<void> {
   const now = new Date().toISOString();
-  updateWorkflowRunStep(event.workflowRunStepId!, {
+  await updateWorkflowRunStep(event.workflowRunStepId!, {
     status: "failed",
     error: reason,
     finishedAt: now,
   });
-  updateWorkflowRun(event.workflowRunId!, {
+  await updateWorkflowRun(event.workflowRunId!, {
     status: "failed",
     error: reason,
     finishedAt: now,
@@ -281,14 +281,14 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   if (!workflow) throw new Error("Workflow not found");
 
   // Find the failed step
-  const steps = getWorkflowRunStepsByRunId(runId);
+  const steps = await getWorkflowRunStepsByRunId(runId);
   const failedStep = steps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
   // Reset step and run
-  updateWorkflowRunStep(failedStep.id, { status: "pending", error: null });
+  await updateWorkflowRunStep(failedStep.id, { status: "pending", error: null });
   const ctx = (run.context ?? {}) as Record<string, unknown>;
-  updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
+  await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
 
   // Resume from the failed node — use findReadyNodes for convergence safety
   const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
@@ -323,7 +323,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   const cancelReason = reason ?? "Cancelled by user";
 
   // Cancel non-terminal steps and their associated tasks
-  const steps = getWorkflowRunStepsByRunId(runId);
+  const steps = await getWorkflowRunStepsByRunId(runId);
   for (const step of steps) {
     if (terminalStatuses.includes(step.status)) continue;
 
@@ -333,7 +333,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       await cancelTask(task.id, cancelReason);
     }
 
-    updateWorkflowRunStep(step.id, {
+    await updateWorkflowRunStep(step.id, {
       status: "cancelled",
       error: cancelReason,
       finishedAt: now,
@@ -341,7 +341,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   }
 
   // Mark the run itself as cancelled
-  updateWorkflowRun(runId, {
+  await updateWorkflowRun(runId, {
     status: "cancelled",
     error: cancelReason,
     finishedAt: now,
@@ -382,7 +382,7 @@ async function resumeFromApprovalResolution(
   };
 
   await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
-  updateWorkflowRun(run.id, { status: "running" });
+  await updateWorkflowRun(run.id, { status: "running" });
 
   // Use port-based routing to determine the correct successors.
   // findReadyNodes without activeEdges would return ALL structural successors
@@ -403,7 +403,7 @@ async function resumeFromApprovalResolution(
       secretKeys,
     );
   } else {
-    finalizeOrWait(run.id);
+    await finalizeOrWait(run.id);
   }
 }
 
@@ -470,7 +470,7 @@ export async function resumeWaitState(
   };
 
   await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
-  updateWorkflowRun(run.id, { status: "running" });
+  await updateWorkflowRun(run.id, { status: "running" });
 
   // 5. Bus listener bookkeeping: this wait is no longer pending, so drop it
   // from the per-event subscription set. If the set empties out, unwire the
@@ -492,7 +492,7 @@ export async function resumeWaitState(
       secretKeys,
     );
   } else {
-    finalizeOrWait(run.id);
+    await finalizeOrWait(run.id);
   }
 }
 

@@ -29,17 +29,17 @@ describe("syncSkillsToFilesystem", () => {
     agentId = agent.id;
 
     // Create and install a simple skill
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "test-skill",
       description: "A test skill",
       content: "---\nname: test-skill\ndescription: A test skill\n---\n\nTest body.",
       type: "personal",
       scope: "agent",
     });
-    installSkill(agentId, skill.id);
+    await installSkill(agentId, skill.id);
 
     // Create a legacy complex skill with no stored files (should be skipped)
-    const complexSkill = createSkill({
+    const complexSkill = await createSkill({
       name: "complex-skill",
       description: "A complex skill",
       content: "---\nname: complex-skill\ndescription: A complex skill\n---\n\nBody.",
@@ -47,9 +47,9 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, complexSkill.id);
+    await installSkill(agentId, complexSkill.id);
 
-    const dbBackedComplexSkill = createSkill({
+    const dbBackedComplexSkill = await createSkill({
       name: "complex-db-skill",
       description: "A DB-backed complex skill",
       content: "---\nname: complex-db-skill\ndescription: A DB-backed complex skill\n---\n\nBody.",
@@ -57,7 +57,7 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, dbBackedComplexSkill.id);
+    await installSkill(agentId, dbBackedComplexSkill.id);
     await upsertSkillFile(dbBackedComplexSkill.id, {
       path: "references/guide.md",
       content: "# Guide\n\nBundled reference.",
@@ -207,7 +207,7 @@ describe("syncSkillsToFilesystem", () => {
   });
 
   test("continues syncing bundled files after one file write fails", async () => {
-    const failSkill = createSkill({
+    const failSkill = await createSkill({
       name: "complex-fail-safe",
       description: "Complex skill with one blocked file",
       content:
@@ -216,7 +216,7 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, failSkill.id);
+    await installSkill(agentId, failSkill.id);
     await upsertSkillFile(failSkill.id, {
       path: "references/blocked.md",
       content: "blocked",
@@ -344,7 +344,7 @@ describe("syncSkillsToFilesystem", () => {
   });
 
   test("sanitizes skill names with special characters", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "my/dangerous/../skill",
       description: "Path traversal attempt",
       content:
@@ -352,7 +352,7 @@ describe("syncSkillsToFilesystem", () => {
       type: "personal",
       scope: "agent",
     });
-    installSkill(agentId, skill.id);
+    await installSkill(agentId, skill.id);
 
     // Clean up first
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });

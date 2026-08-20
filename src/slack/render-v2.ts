@@ -741,7 +741,7 @@ export async function streamOutcomeCard(
 
   const tasks = await getSlackTasksInThread(task.slackChannelId, task.slackThreadTs);
   const duration = formatV2Duration(new Date(task.createdAt), terminalEnd(task, new Date()));
-  const attachment = attachmentLine(getTaskAttachments(task.id));
+  const attachment = attachmentLine(await getTaskAttachments(task.id));
   // Re-read slackReplySent rather than trusting the caller's snapshot: it can flip
   // (via the slack-reply tool) between processSlackRenderV2's task fetch and the
   // Slack round trips in the outer render loop that run before this function is

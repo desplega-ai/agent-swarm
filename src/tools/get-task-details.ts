@@ -186,7 +186,7 @@ export async function getTaskDetailsHandler(
   if (ownershipError) return ownershipError;
 
   const logs = getLogsByTaskIdChronological(taskId);
-  const attachments = getTaskAttachments(taskId);
+  const attachments = await getTaskAttachments(taskId);
 
   // Resolve requesting user details if available
   const requestedByUser = task.requestedByUserId

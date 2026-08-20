@@ -56,7 +56,7 @@ export const registerAppDiffTool = (server: McpServer) => {
 
       const app = getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
-      const selectedFrom = from ?? getAppVersions(appId)[0]?.version;
+      const selectedFrom = from ?? (await getAppVersions(appId))[0]?.version;
       if (selectedFrom === undefined)
         return toolErr("No snapshots exist yet; create a definition write before diffing.");
       const fromDefinition = await definitionForVersion(appId, selectedFrom);

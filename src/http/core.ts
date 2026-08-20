@@ -408,7 +408,7 @@ export async function handleCore(
     };
 
     if (includeInbox) {
-      const inbox = getInboxSummary(myAgentId);
+      const inbox = await getInboxSummary(myAgentId);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ...agentResponse, inbox }));
       return true;

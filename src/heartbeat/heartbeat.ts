@@ -325,7 +325,7 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
       ? Date.now() - new Date(session.lastHeartbeatAt).getTime()
       : null;
     const pendingSteering = (await hasPendingSteering(task.id))
-      ? getPendingSteeringForTask(task.id)
+      ? await getPendingSteeringForTask(task.id)
       : [];
     const newestPendingSteeringAt = pendingSteering.reduce<number>(
       (latest, message) => Math.max(latest, new Date(message.createdAt).getTime()),
@@ -786,7 +786,7 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
     let offset = 0;
 
     while (assignedCount < maxAutoAssignPerSweep() && offset < POOL_SCAN_CAP) {
-      const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
+      const batch = await getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
       if (batch.length === 0) break;
 
       for (const task of batch) {
@@ -848,7 +848,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
     // flapping task could loop forever). Terminalize and stop. Atomic, so we
     // never kill a resume the agent just reclaimed in the gap.
     if (getResumeGeneration(resume) >= maxResumeGenerations()) {
-      const failed = failPendingResumeIfUnclaimed(
+      const failed = await failPendingResumeIfUnclaimed(
         resume.id,
         "failed",
         RESUME_BUDGET_EXHAUSTED_REASON,
@@ -880,7 +880,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
     let escalation: { decisionTaskId: string } | null = null;
     try {
       escalation = await getDbClient().transaction(async () => {
-        const terminalized = failPendingResumeIfUnclaimed(
+        const terminalized = await failPendingResumeIfUnclaimed(
           resume.id,
           "cancelled",
           "pin_unreclaimed_escalated",
@@ -1045,7 +1045,7 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
   const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
   const agents = await getAllAgents();
   const idleWorkers = await getIdleWorkersWithCapacity();
-  const poolTasks = getUnassignedPoolTasks(10);
+  const poolTasks = await getUnassignedPoolTasks(10);
   const recentCompleted = await getRecentCompletedCount(24);
   const recentFailedCount = await getRecentFailedCount(24);
 

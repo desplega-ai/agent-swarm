@@ -266,7 +266,7 @@ export async function handleFs(
   if (downloadTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await downloadTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
     if (!attachment) return true;
     return sendDownload(res, attachment);
   }
@@ -274,7 +274,7 @@ export async function handleFs(
   if (signedUrlTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await signedUrlTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
     if (!attachment) return true;
     return sendSignedUrl(res, attachment, parsed.query.expiresIn);
   }
@@ -282,7 +282,7 @@ export async function handleFs(
   if (getTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await getTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const attachment = findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
+    const attachment = await findAttachment(parsed.params.taskId, parsed.params.attachmentId, res);
     if (!attachment) return true;
     getTaskFileRoute.respond(res, 200, attachment);
     return true;
@@ -294,7 +294,7 @@ export async function handleFs(
     const task = await getTaskById(parsed.params.taskId);
     if (!task) return notFound(res, "Task not found");
     if (!(await canMutateTask(task, myAgentId, req))) return forbidden(res);
-    const attachment = getTaskAttachments(task.id).find(
+    const attachment = (await getTaskAttachments(task.id)).find(
       (item) => item.id === parsed.params.attachmentId,
     );
     if (!attachment) return notFound(res, "Attachment not found");
@@ -315,7 +315,9 @@ export async function handleFs(
     const parsed = await listTaskFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!(await getTaskById(parsed.params.taskId))) return notFound(res, "Task not found");
-    listTaskFilesRoute.respond(res, 200, { attachments: getTaskAttachments(parsed.params.taskId) });
+    listTaskFilesRoute.respond(res, 200, {
+      attachments: await getTaskAttachments(parsed.params.taskId),
+    });
     return true;
   }
 
@@ -499,16 +501,16 @@ function backingProviderId(attachment: TaskAttachment): string | null {
   return null;
 }
 
-function findAttachment(
+async function findAttachment(
   taskId: string,
   attachmentId: string,
   res: ServerResponse,
-): TaskAttachment | null {
-  if (!getTaskById(taskId)) {
+): Promise<TaskAttachment | null> {
+  if (!(await getTaskById(taskId))) {
     notFound(res, "Task not found");
     return null;
   }
-  const attachment = getTaskAttachments(taskId).find((item) => item.id === attachmentId);
+  const attachment = (await getTaskAttachments(taskId)).find((item) => item.id === attachmentId);
   if (!attachment) {
     notFound(res, "Attachment not found");
     return null;

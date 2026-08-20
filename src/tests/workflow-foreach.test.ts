@@ -296,12 +296,12 @@ describe("workflow foreach", () => {
       db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
     }
     const parent = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parent.id, {
+    await db.updateWorkflowRunStep(parent.id, {
       status: "failed",
       error: "transient dispatch failure",
       nextRetryAt: new Date(Date.now() - 1000).toISOString(),
     });
-    db.updateWorkflowRun(runId, { status: "failed" });
+    await db.updateWorkflowRun(runId, { status: "failed" });
 
     try {
       startRetryPoller(registry, 10);
@@ -327,7 +327,7 @@ describe("workflow foreach", () => {
     await completeChild(runId, children[0]!.id, "done", bus);
     const completedBefore = stepById(runId, children[0]!.id)!;
     const parentBefore = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parentBefore.id, { status: "running" });
+    await db.updateWorkflowRunStep(parentBefore.id, { status: "running" });
     const ctx = getContext(runId);
     await walkGraph(definition, runId, ctx, [definition.nodes[0]!], registry, workflow.id);
 
@@ -655,12 +655,12 @@ describe("workflow foreach", () => {
       db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
     }
     const parent = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parent.id, {
+    await db.updateWorkflowRunStep(parent.id, {
       status: "failed",
       error: "transient dispatch failure",
       nextRetryAt: new Date(Date.now() - 1000).toISOString(),
     });
-    db.updateWorkflowRun(runId, {
+    await db.updateWorkflowRun(runId, {
       status: "failed",
       context: { trigger: { items: agentItems.slice(0, 2) } },
     });

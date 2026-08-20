@@ -114,7 +114,7 @@ export const registerSkillUpdateTool = (server: McpServer) => {
           updates.scope = args.scope;
         }
 
-        const skill = updateSkill(args.skillId, updates);
+        const skill = await updateSkill(args.skillId, updates);
         if (!skill) {
           return toolErr("Update failed.", {
             details: "Failed to update skill.",

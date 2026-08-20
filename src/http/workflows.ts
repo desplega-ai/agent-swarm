@@ -889,7 +889,7 @@ export async function handleWorkflows(
       res.end();
       return true;
     }
-    const steps = getWorkflowRunStepsByRunId(parsed.params.id);
+    const steps = await getWorkflowRunStepsByRunId(parsed.params.id);
     getWorkflowRunRoute.respond(res, 200, { run, steps });
     return true;
   }

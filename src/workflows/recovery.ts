@@ -76,7 +76,7 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
       const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
       if (readyNodes.length === 0) {
         // All nodes completed or nothing is ready — mark as completed
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           context: ctx,
           finishedAt: new Date().toISOString(),
@@ -122,12 +122,12 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
         const now = new Date().toISOString();
-        updateWorkflowRunStep(stuck.stepId, {
+        await updateWorkflowRunStep(stuck.stepId, {
           status: "failed",
           error: reason,
           finishedAt: now,
         });
-        updateWorkflowRun(stuck.runId, {
+        await updateWorkflowRun(stuck.runId, {
           status: "failed",
           error: reason,
           finishedAt: now,
@@ -157,7 +157,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       );
       if (routing.foreachChild && !routing.joined) {
         // The parent remains waiting until another child closes the join.
-        finalizeOrWait(stuck.runId);
+        await finalizeOrWait(stuck.runId);
       } else {
         // Always walk normal-task successors, even when empty, so walkGraph's
         // finalization tail persists context and partial/retry failure state.
@@ -239,7 +239,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
         { output: stepOutput, nextPort },
         ctx,
       );
-      updateWorkflowRun(stuck.runId, { status: "running" });
+      await updateWorkflowRun(stuck.runId, { status: "running" });
 
       // Use port-based routing to determine correct successors
       const successors = getSuccessors(workflow.definition, stuck.nodeId, nextPort);
@@ -256,7 +256,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
           secretKeys,
         );
       } else {
-        finalizeOrWait(stuck.runId);
+        await finalizeOrWait(stuck.runId);
       }
       recovered++;
     } catch (err) {

@@ -148,7 +148,7 @@ describe("pagination metrics", () => {
       name: "PM Workflow B",
       definition: { nodes: [{ id: "n1", type: "raw-llm", config: {} }], onNodeFailure: "fail" },
     });
-    createSkill({ name: "pm-skill", description: "test skill", content: "body" });
+    await createSkill({ name: "pm-skill", description: "test skill", content: "body" });
     await insertActiveSession({ agentId: "pm-agent-1", triggerType: "task" });
 
     const m = await getSwarmMetrics();

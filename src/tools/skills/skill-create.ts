@@ -58,7 +58,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
           }
         }
 
-        const skill = createSkill({
+        const skill = await createSkill({
           name: parsed.name,
           description: parsed.description,
           content: args.content,
@@ -75,7 +75,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
         });
 
         // Auto-install for the creating agent
-        installSkill(requestInfo.agentId, skill.id);
+        await installSkill(requestInfo.agentId, skill.id);
 
         return toolOk(`Created and installed skill "${skill.name}".`, {
           data: { yourAgentId: requestInfo.agentId, skill },

@@ -347,12 +347,15 @@ describe("Workflow HTTP API v2", () => {
       });
 
       const failedRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: failedLatest.id });
-      updateWorkflowRun(failedRun.id, { status: "failed", finishedAt: new Date().toISOString() });
+      await updateWorkflowRun(failedRun.id, {
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+      });
       const completedRun = createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: completedLatest.id,
       });
-      updateWorkflowRun(completedRun.id, {
+      await updateWorkflowRun(completedRun.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
@@ -381,7 +384,7 @@ describe("Workflow HTTP API v2", () => {
           id: crypto.randomUUID(),
           workflowId: workflow.id,
         });
-        updateWorkflowRun(oldFailedRun.id, {
+        await updateWorkflowRun(oldFailedRun.id, {
           status: "failed",
           finishedAt: new Date().toISOString(),
         });
@@ -389,7 +392,7 @@ describe("Workflow HTTP API v2", () => {
 
       await Bun.sleep(2);
       const recoveredRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: recovered.id });
-      updateWorkflowRun(recoveredRun.id, {
+      await updateWorkflowRun(recoveredRun.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
@@ -399,7 +402,7 @@ describe("Workflow HTTP API v2", () => {
         id: crypto.randomUUID(),
         workflowId: twoFailures.id,
       });
-      updateWorkflowRun(latestFailedRun.id, {
+      await updateWorkflowRun(latestFailedRun.id, {
         status: "failed",
         finishedAt: new Date().toISOString(),
       });
@@ -752,7 +755,7 @@ describe("Workflow HTTP API v2", () => {
         workflowId: workflow.id,
         triggerData: { largeValue },
       });
-      updateWorkflowRun(run.id, { context: { nodeOutput: largeValue } });
+      await updateWorkflowRun(run.id, { context: { nodeOutput: largeValue } });
       const parsed = listWorkflowRunsInputSchema.parse({ workflowId: workflow.id });
       expect(parsed.limit).toBe(20);
       expect(parsed.offset).toBe(0);

@@ -60,7 +60,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
       }
 
       try {
-        const agentSkill = installSkill(targetAgentId, args.skillId);
+        const agentSkill = await installSkill(targetAgentId, args.skillId);
         return toolOk(`Installed skill "${skill.name}".`, {
           details: `Installed skill "${skill.name}" for agent ${targetAgentId}.`,
           data: { yourAgentId: requestInfo.agentId, agentSkill },

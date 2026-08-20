@@ -107,9 +107,9 @@ export const registerAppUpsertTool = (server: McpServer) => {
               nextDefinition: parsed.definition,
               migration: input.migration,
               forceElementBreak: input.forceElementBreak,
-              snapshot: () => {
+              snapshot: async () => {
                 try {
-                  snapshotApp(appId, requestInfo.agentId);
+                  await snapshotApp(appId, requestInfo.agentId);
                 } catch {
                   throw new AppSnapshotFailure();
                 }

@@ -138,7 +138,7 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
     if (task.status === "completed") {
       const output = task.output || "Task completed.";
       const slackOutput = markdownToSlack(output);
-      const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+      const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
       const body = slackOutput + attachmentsBlock;
       const duration =
         task.finishedAt && task.createdAt
@@ -286,7 +286,7 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
   if (task.status === "completed") {
     const output = task.output || "Task completed.";
     const slackOutput = markdownToSlack(output);
-    const attachmentsBlock = formatAttachmentsBlockForSlack(getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlockForSlack(await getTaskAttachments(task.id));
     const body = slackOutput + attachmentsBlock;
     const duration =
       task.finishedAt && task.createdAt

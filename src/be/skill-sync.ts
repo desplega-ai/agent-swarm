@@ -38,21 +38,23 @@ export async function syncSkillsToFilesystem(
   const skills = await getAgentSkills(agentId);
   const home = homeOverride ?? homedir();
 
-  const entries: SkillFsEntry[] = skills.map((skill) => ({
-    id: skill.id,
-    name: skill.name,
-    content: skill.content ?? null,
-    isComplex: skill.isComplex,
-    isEnabled: skill.isEnabled,
-    isActive: skill.isActive,
-    files: skill.isComplex
-      ? getSkillFiles(skill.id).map((f) => ({
-          path: f.path,
-          content: f.content,
-          isBinary: f.isBinary,
-        }))
-      : [],
-  }));
+  const entries: SkillFsEntry[] = await Promise.all(
+    skills.map(async (skill) => ({
+      id: skill.id,
+      name: skill.name,
+      content: skill.content ?? null,
+      isComplex: skill.isComplex,
+      isEnabled: skill.isEnabled,
+      isActive: skill.isActive,
+      files: skill.isComplex
+        ? (await getSkillFiles(skill.id)).map((f) => ({
+            path: f.path,
+            content: f.content,
+            isBinary: f.isBinary,
+          }))
+        : [],
+    })),
+  );
 
   return writeSkillsToFilesystem(entries, harnessType, home);
 }

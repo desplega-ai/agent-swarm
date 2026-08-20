@@ -78,7 +78,7 @@ export class ForeachExecutor extends BaseExecutor<
     }
 
     const agentTaskExecutor = new AgentTaskExecutor(this.deps);
-    const runSteps = this.deps.db.getWorkflowRunStepsByRunId(meta.runId);
+    const runSteps = await this.deps.db.getWorkflowRunStepsByRunId(meta.runId);
     const childStepsByNodeId = new Map(
       runSteps
         .filter((step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId)
@@ -122,7 +122,7 @@ export class ForeachExecutor extends BaseExecutor<
         nodeType: "agent-task",
         input: { itemKey, index },
       });
-      this.deps.db.updateWorkflowRunStep(childStepId, {
+      await this.deps.db.updateWorkflowRunStep(childStepId, {
         idempotencyKey: `${meta.runId}:${childNodeId}:0`,
       });
       childStepsByNodeId.set(childNodeId, childStep);
@@ -146,7 +146,7 @@ export class ForeachExecutor extends BaseExecutor<
         console.warn(
           `[workflow] Step ${childNodeId}: unresolved interpolation tokens: ${childInterpolation.unresolved.join(", ")}`,
         );
-        this.deps.db.updateWorkflowRunStep(childStep.id, {
+        await this.deps.db.updateWorkflowRunStep(childStep.id, {
           diagnostics: JSON.stringify({ unresolvedTokens: childInterpolation.unresolved }),
         });
       }
@@ -171,9 +171,9 @@ export class ForeachExecutor extends BaseExecutor<
         throw new Error(childResult.error ?? `foreach child "${itemKey}" failed to start`);
       }
       if ("async" in childResult) {
-        this.deps.db.updateWorkflowRunStep(childStep.id, { status: "waiting" });
+        await this.deps.db.updateWorkflowRunStep(childStep.id, { status: "waiting" });
       } else {
-        this.deps.db.updateWorkflowRunStep(childStep.id, {
+        await this.deps.db.updateWorkflowRunStep(childStep.id, {
           status: "completed",
           output: normalizeExistingTaskOutput(childResult.output),
           finishedAt: new Date().toISOString(),
@@ -181,9 +181,9 @@ export class ForeachExecutor extends BaseExecutor<
       }
     }
 
-    const childSteps = this.deps.db
-      .getWorkflowRunStepsByRunId(meta.runId)
-      .filter((step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId);
+    const childSteps = (await this.deps.db.getWorkflowRunStepsByRunId(meta.runId)).filter(
+      (step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId,
+    );
     if (childSteps.every((step) => FOREACH_TERMINAL_STEP_STATUSES.has(step.status))) {
       return { status: "success", output: buildForeachAggregate(childSteps) };
     }

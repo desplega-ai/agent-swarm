@@ -104,7 +104,7 @@ export async function promotePendingSteeringForTask(
   }
 
   const results: MarkSteeringUndeliverableResult[] = [];
-  for (const message of getPendingSteeringForTask(taskId)) {
+  for (const message of await getPendingSteeringForTask(taskId)) {
     try {
       results.push(await markSteeringUndeliverable(message.id, reason));
     } catch (error) {

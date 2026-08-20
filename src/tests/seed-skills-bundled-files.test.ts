@@ -177,14 +177,14 @@ describe("seeded skills with bundled files", () => {
     expect(skill.userInvocable).toBe(true);
 
     // Simulate a user turning off slash-invocation through the skills API.
-    updateSkill(skill.id, { userInvocable: false });
+    await updateSkill(skill.id, { userInvocable: false });
 
     // The flip must move the upstream hash — otherwise the next source update
     // would classify the row as pristine and silently restore userInvocable.
     expect(await skillsSeeder.upstreamHash(item)).not.toBe(item.contentHash);
 
     // Restore so later tests see a pristine skill.
-    updateSkill(skill.id, { userInvocable: true });
+    await updateSkill(skill.id, { userInvocable: true });
     expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
   });
 
@@ -198,9 +198,9 @@ describe("seeded skills with bundled files", () => {
     if (!artifacts) throw new Error("artifacts skill missing");
 
     const legacyContent = "---\nname: artifacts\ndescription: old\n---\n\nold body\n";
-    updateSkill(artifacts.id, { content: legacyContent, isComplex: false });
-    for (const file of getSkillFiles(artifacts.id)) {
-      deleteSkillFile(artifacts.id, file.path);
+    await updateSkill(artifacts.id, { content: legacyContent, isComplex: false });
+    for (const file of await getSkillFiles(artifacts.id)) {
+      await deleteSkillFile(artifacts.id, file.path);
     }
 
     // Old-format hash: base only, no file section.

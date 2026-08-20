@@ -81,7 +81,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
       try {
         // If no channel specified, get unread messages from all channels
         if (!channel) {
-          const allChannels = getAllChannels();
+          const allChannels = await getAllChannels();
           let allMessages: Awaited<ReturnType<typeof getUnreadMessages>> = [];
           let totalUnreadCount = 0;
 
@@ -121,7 +121,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
         // Find channel by name or ID
         let targetChannel = await getChannelByName(channel);
         if (!targetChannel) {
-          targetChannel = getChannelById(channel);
+          targetChannel = await getChannelById(channel);
         }
 
         if (!targetChannel) {
@@ -134,7 +134,7 @@ export const registerReadMessagesTool = (server: McpServer) => {
 
         if (mentionsOnly) {
           // Get messages that mention this agent
-          messages = getMentionsForAgent(requestInfo.agentId, {
+          messages = await getMentionsForAgent(requestInfo.agentId, {
             unreadOnly,
             channelId: targetChannel.id,
           });

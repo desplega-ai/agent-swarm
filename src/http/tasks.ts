@@ -975,7 +975,7 @@ export async function handleTasks(
       return true;
     }
     getTaskSteeringMessagesRoute.respond(res, 200, {
-      messages: getSteeringMessagesForTask(parsed.params.id),
+      messages: await getSteeringMessagesForTask(parsed.params.id),
     });
     return true;
   }
@@ -996,7 +996,7 @@ export async function handleTasks(
     if (parsed.query.taskId) {
       const task = await getTaskById(parsed.query.taskId);
       const messages =
-        task?.agentId === myAgentId ? getPendingSteeringForTask(parsed.query.taskId) : [];
+        task?.agentId === myAgentId ? await getPendingSteeringForTask(parsed.query.taskId) : [];
       getPendingSteeringMessagesRoute.respond(res, 200, { messages });
       return true;
     }
@@ -1154,7 +1154,7 @@ export async function handleTasks(
     }
 
     const logs = await getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
-    const attachments = getTaskAttachments(parsed.params.id);
+    const attachments = await getTaskAttachments(parsed.params.id);
     getTask.respond(res, 200, {
       ...task,
       ...(await getTaskSteeringFields(task)),

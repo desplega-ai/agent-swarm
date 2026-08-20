@@ -1030,7 +1030,7 @@ export async function migrateAppSchema<T>(input: {
   nextDefinition: AppDefinition;
   migration?: AppMigration;
   forceElementBreak?: string[];
-  snapshot: () => void;
+  snapshot: () => void | Promise<void>;
   writeDefinition: () => T;
 }): Promise<{ result: T; migration: AppMigrationReport }> {
   const migration = input.migration ?? {};
@@ -1047,7 +1047,7 @@ export async function migrateAppSchema<T>(input: {
     if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
 
     const result = await getDbClient().transaction(async () => {
-      input.snapshot();
+      await input.snapshot();
       for (const modelPlan of plan.models) {
         for (const row of modelPlan.changedRows) {
           writeAppRowForMigrationUnlocked(input.appId, modelPlan.modelName, row);

@@ -178,10 +178,10 @@ function getRequesterNotes(notes: string | undefined): string | undefined {
  * `/api/fs/tasks/{taskId}/files/{id}/raw` fetch recipe into the dispatch
  * prompt, without shipping the full capabilities/provider blob over poll.
  */
-function attachmentsForTrigger(
+async function attachmentsForTrigger(
   taskId: string,
-): Array<{ id: string; name: string; mimeType?: string; sizeBytes?: number }> {
-  return getTaskAttachments(taskId).map((a) => ({
+): Promise<Array<{ id: string; name: string; mimeType?: string; sizeBytes?: number }>> {
+  return (await getTaskAttachments(taskId)).map((a) => ({
     id: a.id,
     name: a.name,
     mimeType: a.mimeType,
@@ -388,7 +388,7 @@ export async function handlePoll(
                 task: {
                   ...pendingTask,
                   status: "in_progress",
-                  attachments: attachmentsForTrigger(pendingTask.id),
+                  attachments: await attachmentsForTrigger(pendingTask.id),
                 },
                 ...(requestedByUser && {
                   requestedBy: {
@@ -412,10 +412,10 @@ export async function handlePoll(
         // Gated on the messaging capability: without it the read-messages /
         // post-message tools aren't registered, so an unread_mentions trigger
         // would instruct a missing tool and strand the claimed mentions.
-        const claimedChannels = hasCapability("messaging") ? claimMentions(myAgentId) : [];
+        const claimedChannels = hasCapability("messaging") ? await claimMentions(myAgentId) : [];
         if (claimedChannels.length > 0) {
           // Recalculate inbox summary now that we've claimed
-          const inbox = getInboxSummary(myAgentId);
+          const inbox = await getInboxSummary(myAgentId);
           return {
             trigger: {
               type: "unread_mentions",
@@ -520,7 +520,7 @@ export async function handlePoll(
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
-                    task: { ...claimed, attachments: attachmentsForTrigger(claimed.id) },
+                    task: { ...claimed, attachments: await attachmentsForTrigger(claimed.id) },
                   },
                 };
               }

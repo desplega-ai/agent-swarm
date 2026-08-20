@@ -45,7 +45,7 @@ describe("computeAgentSkillsSignature", () => {
     });
     otherAgentId = otherAgent.id;
 
-    const skill1 = createSkill({
+    const skill1 = await createSkill({
       name: "sig-skill-1",
       description: "First skill",
       content: "---\nname: sig-skill-1\ndescription: First skill\n---\nBody 1.",
@@ -54,7 +54,7 @@ describe("computeAgentSkillsSignature", () => {
     });
     skill1Id = skill1.id;
 
-    const skill2 = createSkill({
+    const skill2 = await createSkill({
       name: "sig-skill-2",
       description: "Second skill",
       content: "---\nname: sig-skill-2\ndescription: Second skill\n---\nBody 2.",
@@ -63,7 +63,7 @@ describe("computeAgentSkillsSignature", () => {
     });
     skill2Id = skill2.id;
 
-    installSkill(agentId, skill1Id);
+    await installSkill(agentId, skill1Id);
   });
 
   afterAll(async () => {
@@ -83,7 +83,7 @@ describe("computeAgentSkillsSignature", () => {
 
   test("hash changes when a new skill is installed", async () => {
     const before = await computeAgentSkillsSignature(agentId);
-    installSkill(agentId, skill2Id);
+    await installSkill(agentId, skill2Id);
     const after = await computeAgentSkillsSignature(agentId);
     expect(after.hash).not.toBe(before.hash);
     expect(after.count).toBe(before.count + 1);
@@ -98,7 +98,7 @@ describe("computeAgentSkillsSignature", () => {
   });
 
   test("hash changes when a skill is toggled inactive", async () => {
-    installSkill(agentId, skill2Id);
+    await installSkill(agentId, skill2Id);
     const before = await computeAgentSkillsSignature(agentId);
     await toggleAgentSkill(agentId, skill2Id, false);
     const after = await computeAgentSkillsSignature(agentId);
@@ -115,19 +115,19 @@ describe("computeAgentSkillsSignature", () => {
     // updateSkill always bumps lastUpdatedAt — even an isEnabled no-op flip back is enough.
     // Wait 5ms to guarantee a different ISO timestamp.
     await new Promise((r) => setTimeout(r, 5));
-    updateSkill(skill1Id, { description: "First skill (updated)" });
+    await updateSkill(skill1Id, { description: "First skill (updated)" });
     const after = await computeAgentSkillsSignature(agentId);
     expect(after.hash).not.toBe(before.hash);
     expect(after.count).toBe(before.count);
   });
 
   test("agent A's signature is independent of mutations to agent B's skills", async () => {
-    installSkill(otherAgentId, skill1Id);
+    await installSkill(otherAgentId, skill1Id);
     const aBefore = await computeAgentSkillsSignature(agentId);
     const bBefore = await computeAgentSkillsSignature(otherAgentId);
 
     // Mutate agent B: install another skill, toggle, uninstall
-    installSkill(otherAgentId, skill2Id);
+    await installSkill(otherAgentId, skill2Id);
     await toggleAgentSkill(otherAgentId, skill1Id, false);
     await uninstallSkill(otherAgentId, skill2Id);
 

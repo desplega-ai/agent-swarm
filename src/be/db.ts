@@ -795,7 +795,7 @@ export async function createAgent(
   );
   if (!row) throw new Error("Failed to create agent");
   try {
-    installSystemDefaultSkillsForAgent(id);
+    await installSystemDefaultSkillsForAgent(id);
   } catch (err) {
     console.warn(
       "[db] Failed to install system-default skills for new agent:",
@@ -4170,13 +4170,12 @@ export async function replaceTaskAttachment(
   return row ? rowToTaskAttachment(row) : null;
 }
 
-export function getTaskAttachments(taskId: string): TaskAttachment[] {
-  return getDb()
-    .prepare<TaskAttachmentRow, [string]>(
-      "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
-    )
-    .all(taskId)
-    .map(rowToTaskAttachment);
+export async function getTaskAttachments(taskId: string): Promise<TaskAttachment[]> {
+  const rows = await getDbClient().query<TaskAttachmentRow>(
+    "SELECT * FROM task_attachments WHERE task_id = ? ORDER BY created_at ASC, rowid ASC",
+    [taskId],
+  );
+  return rows.map(rowToTaskAttachment);
 }
 
 // ============================================================================
@@ -4271,25 +4270,23 @@ export async function createSteeringMessage(
   return rowToSteeringMessage(row);
 }
 
-export function getSteeringMessagesForTask(
+export async function getSteeringMessagesForTask(
   taskId: string,
   opts?: { status?: SteeringStatus },
-): SteeringMessage[] {
+): Promise<SteeringMessage[]> {
   const rows = opts?.status
-    ? getDb()
-        .prepare<TaskSteeringMessageRow, [string, SteeringStatus]>(
-          `SELECT * FROM task_steering_messages
+    ? await getDbClient().query<TaskSteeringMessageRow>(
+        `SELECT * FROM task_steering_messages
            WHERE task_id = ? AND status = ?
            ORDER BY created_at ASC, rowid ASC`,
-        )
-        .all(taskId, opts.status)
-    : getDb()
-        .prepare<TaskSteeringMessageRow, [string]>(
-          `SELECT * FROM task_steering_messages
+        [taskId, opts.status],
+      )
+    : await getDbClient().query<TaskSteeringMessageRow>(
+        `SELECT * FROM task_steering_messages
            WHERE task_id = ?
            ORDER BY created_at ASC, rowid ASC`,
-        )
-        .all(taskId);
+        [taskId],
+      );
   return rows.map(rowToSteeringMessage);
 }
 
@@ -4302,8 +4299,8 @@ export async function getSteeringMessageById(id: string): Promise<SteeringMessag
   return row ? rowToSteeringMessage(row) : null;
 }
 
-export function getPendingSteeringForTask(taskId: string): SteeringMessage[] {
-  return getSteeringMessagesForTask(taskId, { status: "pending" });
+export async function getPendingSteeringForTask(taskId: string): Promise<SteeringMessage[]> {
+  return await getSteeringMessagesForTask(taskId, { status: "pending" });
 }
 
 export async function getPendingSteeringForAgent(agentId: string): Promise<SteeringMessage[]> {
@@ -5305,18 +5302,16 @@ export async function checkDependencies(taskId: string): Promise<{
  * Returns only non-terminal tasks by default (the callers want to cascade-fail
  * live dependents, not re-process already-finished ones).
  */
-export function getDependentTasks(
+export async function getDependentTasks(
   parentId: string,
   opts?: { includeTerminal?: boolean },
-): AgentTask[] {
-  const database = getDb();
-  const rows = database
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT t.*
+): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT t.*
        FROM agent_tasks t, json_each(t.dependsOn) AS dep
        WHERE dep.value = ?`,
-    )
-    .all(parentId);
+    [parentId],
+  );
 
   const tasks = rows.map(rowToAgentTask);
   if (opts?.includeTerminal) return tasks;
@@ -5346,7 +5341,7 @@ export async function cascadeFailDependents(
   if (seen.has(parentId)) return [];
   seen.add(parentId);
 
-  const dependents = getDependentTasks(parentId);
+  const dependents = await getDependentTasks(parentId);
   const results: CascadeFailResult[] = [];
 
   for (const dep of dependents) {
@@ -5599,8 +5594,8 @@ export async function getMessageById(id: string): Promise<ChannelMessage | null>
   return rowToChannelMessage(row, agent?.name);
 }
 
-export function getChannelById(id: string): Channel | null {
-  const row = getDb().prepare<ChannelRow, [string]>("SELECT * FROM channels WHERE id = ?").get(id);
+export async function getChannelById(id: string): Promise<Channel | null> {
+  const row = await getDbClient().get<ChannelRow>("SELECT * FROM channels WHERE id = ?", [id]);
   return row ? rowToChannel(row) : null;
 }
 
@@ -5609,11 +5604,9 @@ export async function getChannelByName(name: string): Promise<Channel | null> {
   return row ? rowToChannel(row) : null;
 }
 
-export function getAllChannels(): Channel[] {
-  return getDb()
-    .prepare<ChannelRow, []>("SELECT * FROM channels ORDER BY name")
-    .all()
-    .map(rowToChannel);
+export async function getAllChannels(): Promise<Channel[]> {
+  const rows = await getDbClient().query<ChannelRow>("SELECT * FROM channels ORDER BY name");
+  return rows.map(rowToChannel);
 }
 
 export async function deleteChannel(id: string): Promise<boolean> {
@@ -5676,7 +5669,7 @@ export async function postMessage(
   // Only create tasks when /task prefix is used
   if (isTaskMessage && targetMentions.length > 0) {
     const sender = agentId ? await getAgentById(agentId) : null;
-    const channel = getChannelById(channelId);
+    const channel = await getChannelById(channelId);
     const senderName = sender?.name ?? "Human";
     const channelName = channel?.name ?? "unknown";
     const truncated =
@@ -5773,17 +5766,11 @@ export async function updateReadState(agentId: string, channelId: string): Promi
   );
 }
 
-/**
- * DEFERRED (transaction rule): called from `getInboxSummary` /
- * `getMentionsForAgent`, both of which run inside `poll.ts`'s synchronous
- * `getDb().transaction()` callback — stays on the raw sync handle.
- */
-export function getLastReadAt(agentId: string, channelId: string): string | null {
-  const result = getDb()
-    .prepare<{ lastReadAt: string }, [string, string]>(
-      "SELECT lastReadAt FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-    )
-    .get(agentId, channelId);
+export async function getLastReadAt(agentId: string, channelId: string): Promise<string | null> {
+  const result = await getDbClient().get<{ lastReadAt: string }>(
+    "SELECT lastReadAt FROM channel_read_state WHERE agentId = ? AND channelId = ?",
+    [agentId, channelId],
+  );
   return result?.lastReadAt ?? null;
 }
 
@@ -5791,7 +5778,7 @@ export async function getUnreadMessages(
   agentId: string,
   channelId: string,
 ): Promise<ChannelMessage[]> {
-  const lastReadAt = getLastReadAt(agentId, channelId);
+  const lastReadAt = await getLastReadAt(agentId, channelId);
 
   let query = `SELECT m.*, a.name as agentName FROM channel_messages m
                LEFT JOIN agents a ON m.agentId = a.id
@@ -5811,15 +5798,10 @@ export async function getUnreadMessages(
   return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
-/**
- * DEFERRED (transaction rule): called from `getInboxSummary`, which runs
- * inside `poll.ts`'s synchronous `getDb().transaction()` callback — stays on
- * the raw sync handle.
- */
-export function getMentionsForAgent(
+export async function getMentionsForAgent(
   agentId: string,
   options?: { unreadOnly?: boolean; channelId?: string },
-): ChannelMessage[] {
+): Promise<ChannelMessage[]> {
   let query = `SELECT m.*, a.name as agentName FROM channel_messages m
                LEFT JOIN agents a ON m.agentId = a.id
                WHERE m.mentions LIKE ?`;
@@ -5830,7 +5812,7 @@ export function getMentionsForAgent(
     params.push(options.channelId);
 
     if (options?.unreadOnly) {
-      const lastReadAt = getLastReadAt(agentId, options.channelId);
+      const lastReadAt = await getLastReadAt(agentId, options.channelId);
       if (lastReadAt) {
         query += " AND m.createdAt > ?";
         params.push(lastReadAt);
@@ -5842,10 +5824,8 @@ export function getMentionsForAgent(
 
   type MessageWithAgentRow = ChannelMessageRow & { agentName: string | null };
 
-  return getDb()
-    .prepare<MessageWithAgentRow, string[]>(query)
-    .all(...params)
-    .map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
+  const rows = await getDbClient().query<MessageWithAgentRow>(query, params);
+  return rows.map((row) => rowToChannelMessage(row, row.agentName ?? undefined));
 }
 
 // ============================================================================
@@ -5868,23 +5848,18 @@ export interface InboxSummary {
   recentMentions: MentionPreview[]; // Up to 3 recent @mentions
 }
 
-/**
- * DEFERRED (transaction rule): called directly from `poll.ts`'s synchronous
- * `getDb().transaction()` callback — must stay on the raw sync handle.
- */
-export function getInboxSummary(agentId: string): InboxSummary {
-  const db = getDb();
-  const channels = getAllChannels();
+export async function getInboxSummary(agentId: string): Promise<InboxSummary> {
+  const client = getDbClient();
+  const channels = await getAllChannels();
   let unreadCount = 0;
   let mentionsCount = 0;
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = db
-      .prepare<{ lastReadAt: string; processing_since: string | null }, [string, string]>(
-        "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      )
-      .get(agentId, channel.id);
+    const readState = await client.get<{ lastReadAt: string; processing_since: string | null }>(
+      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
+      [agentId, channel.id],
+    );
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -5896,61 +5871,55 @@ export function getInboxSummary(agentId: string): InboxSummary {
     const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
 
     // Count unread (excluding own messages)
-    const channelUnread = db
-      .prepare<{ count: number }, [string]>(
-        `SELECT COUNT(*) as count FROM channel_messages m
+    const channelUnread = await client.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM channel_messages m
          WHERE m.channelId = ? AND (m.agentId != '${agentId}' OR m.agentId IS NULL) ${baseCondition}`,
-      )
-      .get(channel.id);
+      [channel.id],
+    );
     unreadCount += channelUnread?.count ?? 0;
 
     // Count mentions in unread
-    const channelMentions = db
-      .prepare<{ count: number }, [string, string]>(
-        `SELECT COUNT(*) as count FROM channel_messages m
+    const channelMentions = await client.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM channel_messages m
          WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      )
-      .get(channel.id, `%"${agentId}"%`);
+      [channel.id, `%"${agentId}"%`],
+    );
     mentionsCount += channelMentions?.count ?? 0;
   }
 
   // Count offered tasks for this agent
-  const offeredResult = db
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE offeredTo = ? AND status = 'offered'",
-    )
-    .get(agentId);
+  const offeredResult = await client.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM agent_tasks WHERE offeredTo = ? AND status = 'offered'",
+    [agentId],
+  );
 
   // Count unassigned tasks in pool
-  const poolResult = db
-    .prepare<{ count: number }, []>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
-    )
-    .get();
+  const poolResult = await client.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
+  );
 
   // Count my in-progress tasks
-  const inProgressResult = db
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
-    )
-    .get(agentId);
+  const inProgressResult = await client.get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
+    [agentId],
+  );
 
   // Get recent unread @mentions (up to 3)
   const recentMentions: MentionPreview[] = [];
-  const mentionMessages = getMentionsForAgent(agentId, { unreadOnly: false });
+  const mentionMessages = await getMentionsForAgent(agentId, { unreadOnly: false });
 
   // Filter to only unread mentions and limit to 3
   for (const msg of mentionMessages) {
     if (recentMentions.length >= 3) break;
 
     // Check if message is unread (by checking against read state per channel)
-    const lastReadAt = getLastReadAt(agentId, msg.channelId);
+    const lastReadAt = await getLastReadAt(agentId, msg.channelId);
     if (lastReadAt && new Date(msg.createdAt) <= new Date(lastReadAt)) {
       continue; // Already read
     }
 
     // Get channel name
-    const channel = getChannelById(msg.channelId);
+    const channel = await getChannelById(msg.channelId);
 
     recentMentions.push({
       channelName: channel?.name ?? "unknown",
@@ -5975,22 +5944,23 @@ export function getInboxSummary(agentId: string): InboxSummary {
  * Sets processing_since to prevent duplicate polling.
  * Returns channels with unread mentions, or empty array if none/already claimed.
  */
-/**
- * DEFERRED (transaction rule): called directly from `poll.ts`'s synchronous
- * `getDb().transaction()` callback — must stay on the raw sync handle.
- */
-export function claimMentions(agentId: string): { channelId: string; lastReadAt: string | null }[] {
+export async function claimMentions(
+  agentId: string,
+): Promise<{ channelId: string; lastReadAt: string | null }[]> {
   const now = new Date().toISOString();
-  const channels = getAllChannels();
+  const client = getDbClient();
+  const channels = await getAllChannels();
   const claimedChannels: { channelId: string; lastReadAt: string | null }[] = [];
 
   for (const channel of channels) {
     // Check if this channel is already being processed
-    const readState = getDb()
-      .prepare<{ lastReadAt: string | null; processing_since: string | null }, [string, string]>(
-        "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
-      )
-      .get(agentId, channel.id);
+    const readState = await client.get<{
+      lastReadAt: string | null;
+      processing_since: string | null;
+    }>(
+      "SELECT lastReadAt, processing_since FROM channel_read_state WHERE agentId = ? AND channelId = ?",
+      [agentId, channel.id],
+    );
 
     const lastReadAt = readState?.lastReadAt ?? null;
     const isProcessing =
@@ -6002,16 +5972,15 @@ export function claimMentions(agentId: string): { channelId: string; lastReadAt:
     const baseCondition = lastReadAt ? `AND m.createdAt > '${lastReadAt}'` : "";
 
     // Check if there are unread mentions
-    const mentionCountRow = getDb()
-      .prepare<{ count: number }, [string, string]>(
-        `SELECT COUNT(*) as count FROM channel_messages m
+    const mentionCountRow = await client.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM channel_messages m
          WHERE m.channelId = ? AND m.mentions LIKE ? ${baseCondition}`,
-      )
-      .get(channel.id, `%"${agentId}"%`);
+      [channel.id, `%"${agentId}"%`],
+    );
 
     if (mentionCountRow && mentionCountRow.count > 0) {
       // Atomically claim mentions for this channel
-      const result = getDb().run(
+      const result = await client.run(
         `INSERT INTO channel_read_state (agentId, channelId, lastReadAt, processing_since)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(agentId, channelId) DO UPDATE SET
@@ -8528,32 +8497,30 @@ export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask
  * status precondition, so it would terminalize an `in_progress` resume the
  * worker just started. The `AND status = 'pending'` here is the guard.
  */
-export function failPendingResumeIfUnclaimed(
+export async function failPendingResumeIfUnclaimed(
   taskId: string,
   status: "cancelled" | "failed",
   failureReason: string,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const now = new Date().toISOString();
   const scrubbedReason = scrubSecrets(failureReason);
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string, string, string]>(
-      `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
        WHERE id = ? AND status = 'pending' RETURNING *`,
-    )
-    .get(status, scrubbedReason, now, now, taskId);
+    [status, scrubbedReason, now, now, taskId],
+  );
 
   if (row) {
-    // failPendingResumeIfUnclaimed stays synchronous (reached from a still-sync
-    // getDb().transaction() callback in heartbeat.ts) — fire-and-forget with an
-    // explicit .catch() instead of awaiting inside a try/catch.
-    createLogEntry({
-      eventType: "task_status_change",
-      taskId,
-      agentId: row.agentId ?? undefined,
-      oldValue: "pending",
-      newValue: status,
-      metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
-    }).catch(() => {});
+    try {
+      await createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "pending",
+        newValue: status,
+        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
+      });
+    } catch {}
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -8587,16 +8554,18 @@ export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
  * be skipped or repeated across pages. Used by the heartbeat for
  * auto-assignment and status reporting.
  */
-export function getUnassignedPoolTasks(limit: number = 10, offset: number = 0): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [number, number]>(
-      `SELECT * FROM agent_tasks
+export async function getUnassignedPoolTasks(
+  limit: number = 10,
+  offset: number = 0,
+): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE status = 'unassigned'
        ORDER BY priority DESC, createdAt ASC, rowid ASC
        LIMIT ? OFFSET ?`,
-    )
-    .all(limit, offset)
-    .map(rowToAgentTask);
+    [limit, offset],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -9015,7 +8984,7 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
     void (async () => {
       const latest = await getWorkflowRun(run.id);
       if (!latest || latest.status !== run.status) return;
-      const steps = getWorkflowRunStepsByRunId(run.id);
+      const steps = await getWorkflowRunStepsByRunId(run.id);
       telemetry.workflow(run.status, {
         workflowId: run.workflowId,
         durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
@@ -9026,7 +8995,7 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
   });
 }
 
-export function updateWorkflowRun(
+export async function updateWorkflowRun(
   id: string,
   data: {
     status?: WorkflowRunStatus;
@@ -9034,7 +9003,7 @@ export function updateWorkflowRun(
     error?: string | null;
     finishedAt?: string;
   },
-): WorkflowRun | null {
+): Promise<WorkflowRun | null> {
   const updates: string[] = [];
   const params: (string | null)[] = [];
   if (data.status !== undefined) {
@@ -9054,22 +9023,19 @@ export function updateWorkflowRun(
     params.push(data.finishedAt);
   }
   if (updates.length === 0) {
-    // Stays on the raw sync handle (not the async getWorkflowRun) —
-    // updateWorkflowRun must remain fully synchronous for its
-    // getDb().transaction() callers (checkpoint.ts, task-step-routing.ts).
-    const row = getDb()
-      .prepare<WorkflowRunRow, [string]>("SELECT * FROM workflow_runs WHERE id = ?")
-      .get(id);
+    const row = await getDbClient().get<WorkflowRunRow>(
+      "SELECT * FROM workflow_runs WHERE id = ?",
+      [id],
+    );
     return row ? rowToWorkflowRun(row) : null;
   }
   updates.push("lastUpdatedAt = ?");
   params.push(new Date().toISOString());
   params.push(id);
-  const row = getDb()
-    .prepare<WorkflowRunRow, (string | null)[]>(
-      `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<WorkflowRunRow>(
+    `UPDATE workflow_runs SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   if (!row) return null;
   const run = rowToWorkflowRun(row);
   if (data.status === "completed" || data.status === "failed") {
@@ -9240,7 +9206,7 @@ export async function getWorkflowRunStep(id: string): Promise<WorkflowRunStep | 
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function updateWorkflowRunStep(
+export async function updateWorkflowRunStep(
   id: string,
   data: {
     status?: WorkflowRunStepStatus;
@@ -9254,7 +9220,7 @@ export function updateWorkflowRunStep(
     diagnostics?: string;
     nextPort?: string;
   },
-): WorkflowRunStep | null {
+): Promise<WorkflowRunStep | null> {
   const updates: string[] = [];
   const params: (string | number | null)[] = [];
   if (data.status !== undefined) {
@@ -9298,30 +9264,26 @@ export function updateWorkflowRunStep(
     params.push(data.nextPort);
   }
   if (updates.length === 0) {
-    // Stays on the raw sync handle (not the async getWorkflowRunStep) —
-    // updateWorkflowRunStep must remain fully synchronous for its
-    // getDb().transaction() callers (checkpoint.ts).
-    const row = getDb()
-      .prepare<WorkflowRunStepRow, [string]>("SELECT * FROM workflow_run_steps WHERE id = ?")
-      .get(id);
+    const row = await getDbClient().get<WorkflowRunStepRow>(
+      "SELECT * FROM workflow_run_steps WHERE id = ?",
+      [id],
+    );
     return row ? rowToWorkflowRunStep(row) : null;
   }
   params.push(id);
-  const row = getDb()
-    .prepare<WorkflowRunStepRow, (string | number | null)[]>(
-      `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    `UPDATE workflow_run_steps SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
-export function getWorkflowRunStepsByRunId(runId: string): WorkflowRunStep[] {
-  return getDb()
-    .prepare<WorkflowRunStepRow, [string]>(
-      "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
-    )
-    .all(runId)
-    .map(rowToWorkflowRunStep);
+export async function getWorkflowRunStepsByRunId(runId: string): Promise<WorkflowRunStep[]> {
+  const rows = await getDbClient().query<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE runId = ? ORDER BY startedAt ASC",
+    [runId],
+  );
+  return rows.map(rowToWorkflowRunStep);
 }
 
 // --- Stuck Workflow Run Recovery ---
@@ -9427,12 +9389,14 @@ export async function getStepCountForNode(runId: string, nodeId: string): Promis
   return row?.cnt ?? 0;
 }
 
-export function getLatestStepForNode(runId: string, nodeId: string): WorkflowRunStep | null {
-  const row = getDb()
-    .prepare<WorkflowRunStepRow, [string, string]>(
-      "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
-    )
-    .get(runId, nodeId);
+export async function getLatestStepForNode(
+  runId: string,
+  nodeId: string,
+): Promise<WorkflowRunStep | null> {
+  const row = await getDbClient().get<WorkflowRunStepRow>(
+    "SELECT * FROM workflow_run_steps WHERE runId = ? AND nodeId = ? ORDER BY startedAt DESC LIMIT 1",
+    [runId, nodeId],
+  );
   return row ? rowToWorkflowRunStep(row) : null;
 }
 
@@ -9530,37 +9494,35 @@ function rowToAppVersion(row: AppVersionRow): AppVersion {
   };
 }
 
-export function createAppVersion(data: {
+export async function createAppVersion(data: {
   appId: string;
   version: number;
   snapshot: unknown;
   changedByAgentId?: string;
-}): AppVersion {
+}): Promise<AppVersion> {
   const id = crypto.randomUUID();
-  const row = getDb()
-    .prepare<AppVersionRow, [string, string, number, string, string | null, string]>(
-      `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
+  const row = await getDbClient().get<AppVersionRow>(
+    `INSERT INTO app_versions (id, appId, version, snapshot, changedByAgentId, createdAt)
        VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       data.appId,
       data.version,
       JSON.stringify(data.snapshot),
       data.changedByAgentId ?? null,
       new Date().toISOString(),
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create app version");
   return rowToAppVersion(row);
 }
 
-export function getAppVersions(appId: string): AppVersion[] {
-  return getDb()
-    .prepare<AppVersionRow, [string]>(
-      "SELECT * FROM app_versions WHERE appId = ? ORDER BY version DESC",
-    )
-    .all(appId)
-    .map(rowToAppVersion);
+export async function getAppVersions(appId: string): Promise<AppVersion[]> {
+  const rows = await getDbClient().query<AppVersionRow>(
+    "SELECT * FROM app_versions WHERE appId = ? ORDER BY version DESC",
+    [appId],
+  );
+  return rows.map(rowToAppVersion);
 }
 
 export async function getAppVersion(appId: string, version: number): Promise<AppVersion | null> {
@@ -11386,8 +11348,12 @@ function normalizeSkillFileInput(input: SkillFileInput): NormalizedSkillFileInpu
   };
 }
 
-function assertSkillFileLimits(skillId: string, incoming: SkillFileInput[], replaceAll: boolean) {
-  const existing = replaceAll ? [] : listSkillFileManifest(skillId);
+async function assertSkillFileLimits(
+  skillId: string,
+  incoming: SkillFileInput[],
+  replaceAll: boolean,
+): Promise<void> {
+  const existing = replaceAll ? [] : await listSkillFileManifest(skillId);
   const byPath = new Map(existing.map((file) => [file.path, file.size ?? 0]));
 
   for (const input of incoming) {
@@ -11433,20 +11399,18 @@ export interface SkillInsert {
  * (src/be/seed-skills/index.ts), inside its synchronous
  * `getDb().transaction()` callback — stays on the raw sync handle.
  */
-export function createSkill(data: SkillInsert): Skill {
+export async function createSkill(data: SkillInsert): Promise<Skill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<SkillRow, (string | number | null)[]>(
-      `INSERT INTO skills (
+  const row = await getDbClient().get<SkillRow>(
+    `INSERT INTO skills (
         id, name, description, content, type, scope, ownerAgentId,
         sourceUrl, sourceRepo, sourcePath, sourceBranch, sourceHash, isComplex,
         allowedTools, model, effort, context, agent, disableModelInvocation, userInvocable,
         version, isEnabled, systemDefault, createdAt, lastUpdatedAt
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       data.name,
       data.description,
@@ -11470,22 +11434,18 @@ export function createSkill(data: SkillInsert): Skill {
       data.systemDefault ? 1 : 0,
       now,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create skill");
   return rowToSkill(row);
 }
 
-/**
- * DEFERRED (transaction rule): called from `skillsSeeder.apply()`
- * (src/be/seed-skills/index.ts), inside its synchronous
- * `getDb().transaction()` callback — stays on the raw sync handle.
- */
-export function updateSkill(
+export async function updateSkill(
   id: string,
   updates: Partial<SkillInsert> & { isEnabled?: boolean; lastFetchedAt?: string },
-): Skill | null {
-  const existing = getSkillById(id);
+): Promise<Skill | null> {
+  const existing = await getSkillById(id);
   if (!existing) return null;
 
   const now = new Date().toISOString();
@@ -11579,11 +11539,10 @@ export function updateSkill(
   }
 
   params.push(id);
-  const row = getDb()
-    .prepare<SkillRow, (string | number | null)[]>(
-      `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<SkillRow>(
+    `UPDATE skills SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
 
   return row ? rowToSkill(row) : null;
 }
@@ -11594,42 +11553,29 @@ function bumpSkillVersion(skillId: string, now = new Date().toISOString()) {
     .run(now, skillId);
 }
 
-/**
- * DEFERRED (transaction rule): feeds `assertSkillFileLimits`, called from
- * `upsertSkillFiles` before its synchronous `getDb().transaction()` callback.
- * Kept on the raw sync handle so that (still-sync) call site doesn't need an
- * await — stays on the raw sync handle.
- */
-export function listSkillFileManifest(skillId: string): SkillFileManifestEntry[] {
-  return getDb()
-    .prepare<SkillFileRow, [string]>(
-      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+export async function listSkillFileManifest(skillId: string): Promise<SkillFileManifestEntry[]> {
+  const rows = await getDbClient().query<SkillFileRow>(
+    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
        FROM skill_files
        WHERE skillId = ?
        ORDER BY path ASC`,
-    )
-    .all(skillId)
-    .map((row) => {
-      const { content: _content, ...manifest } = rowToSkillFile(row);
-      return manifest;
-    });
+    [skillId],
+  );
+  return rows.map((row) => {
+    const { content: _content, ...manifest } = rowToSkillFile(row);
+    return manifest;
+  });
 }
 
-/**
- * DEFERRED (transaction rule): called from `syncSeededSkillFiles`
- * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
- * synchronous `getDb().transaction()` callback — stays on the raw sync handle.
- */
-export function getSkillFiles(skillId: string): SkillFile[] {
-  return getDb()
-    .prepare<SkillFileRow, [string]>(
-      `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
+export async function getSkillFiles(skillId: string): Promise<SkillFile[]> {
+  const rows = await getDbClient().query<SkillFileRow>(
+    `SELECT id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
        FROM skill_files
        WHERE skillId = ?
        ORDER BY path ASC`,
-    )
-    .all(skillId)
-    .map(rowToSkillFile);
+    [skillId],
+  );
+  return rows.map(rowToSkillFile);
 }
 
 export async function getSkillFile(skillId: string, path: string): Promise<SkillFile | null> {
@@ -11645,13 +11591,12 @@ export async function getSkillFile(skillId: string, path: string): Promise<Skill
 
 /**
  * Single-file upsert. Duplicates the write `upsertSkillFileUnchecked` does
- * rather than calling it, because that helper is shared with the deferred
- * `upsertSkillFiles` (its synchronous `getDb().transaction()` callback can't
- * absorb an await).
+ * rather than calling it, because that helper is shared with `upsertSkillFiles`'
+ * bulk transaction.
  */
 export async function upsertSkillFile(skillId: string, input: SkillFileInput): Promise<SkillFile> {
   const payload = normalizeSkillFileInput(input);
-  assertSkillFileLimits(skillId, [payload], false);
+  await assertSkillFileLimits(skillId, [payload], false);
 
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -11723,37 +11668,30 @@ function upsertSkillFileUnchecked(
   return rowToSkillFile(row);
 }
 
-/**
- * DEFERRED (boot path): called from `syncSeededSkillFiles`
- * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
- * synchronous `getDb().transaction()` callback, which cannot await — stays on
- * the raw sync handle.
- */
-export function upsertSkillFiles(skillId: string, files: SkillFileInput[]): SkillFile[] {
+export async function upsertSkillFiles(
+  skillId: string,
+  files: SkillFileInput[],
+): Promise<SkillFile[]> {
   if (files.length === 0) return [];
   const normalized = files.map(normalizeSkillFileInput);
-  assertSkillFileLimits(skillId, normalized, false);
+  await assertSkillFileLimits(skillId, normalized, false);
 
   const now = new Date().toISOString();
-  return getDb().transaction(() => {
+  return await getDbClient().transaction(async () => {
     const rows = normalized.map((file) =>
       upsertSkillFileUnchecked(skillId, file, crypto.randomUUID(), now, false),
     );
     bumpSkillVersion(skillId, now);
     return rows;
-  })();
+  });
 }
 
-/**
- * DEFERRED (transaction rule): called from `syncSeededSkillFiles`
- * (src/be/seed-skills/index.ts), itself invoked from `skillsSeeder.apply()`'s
- * synchronous `getDb().transaction()` callback — stays on the raw sync handle.
- */
-export function deleteSkillFile(skillId: string, path: string): boolean {
+export async function deleteSkillFile(skillId: string, path: string): Promise<boolean> {
   const normalizedPath = normalizeSkillFilePath(path);
-  const result = getDb()
-    .prepare("DELETE FROM skill_files WHERE skillId = ? AND path = ?")
-    .run(skillId, normalizedPath);
+  const result = await getDbClient().run("DELETE FROM skill_files WHERE skillId = ? AND path = ?", [
+    skillId,
+    normalizedPath,
+  ]);
   if (result.changes > 0) {
     bumpSkillVersion(skillId);
     return true;
@@ -11853,42 +11791,36 @@ export async function searchSkills(
   return rows.map(rowToSkill);
 }
 
-// DEFERRED (transaction rule): installSystemDefaultSkillsForAgent is called
-// from `createAgent`, which is itself invoked inside raw synchronous
-// `getDb().transaction()` callbacks in src/tools/join-swarm.ts and
-// src/http/agents.ts (handleAgentRegister). Making these async would force an
-// `await` inside those sync transaction callbacks, silently breaking
-// atomicity. Kept fully synchronous — installSkill and getSystemDefaultSkills
-// stay sync too, since installSystemDefaultSkillsForAgent needs to call them
-// without awaiting.
-export function installSkill(agentId: string, skillId: string): AgentSkill {
+export async function installSkill(agentId: string, skillId: string): Promise<AgentSkill> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<AgentSkillRow, [string, string, string, string]>(
-      `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
+  const row = await getDbClient().get<AgentSkillRow>(
+    `INSERT INTO agent_skills (id, agentId, skillId, isActive, installedAt)
        VALUES (?, ?, ?, 1, ?)
        ON CONFLICT(agentId, skillId) DO UPDATE SET isActive = 1
        RETURNING *`,
-    )
-    .get(id, agentId, skillId, now);
+    [id, agentId, skillId, now],
+  );
 
   if (!row) throw new Error("Failed to install skill");
   return rowToAgentSkill(row);
 }
 
-export function getSystemDefaultSkills(): Skill[] {
-  return getDb()
-    .prepare<SkillRow, []>(
-      "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
-    )
-    .all()
-    .map(rowToSkill);
+export async function getSystemDefaultSkills(): Promise<Skill[]> {
+  const rows = await getDbClient().query<SkillRow>(
+    "SELECT * FROM skills WHERE systemDefault = 1 AND isEnabled = 1 ORDER BY name ASC",
+  );
+  return rows.map(rowToSkill);
 }
 
-export function installSystemDefaultSkillsForAgent(agentId: string): AgentSkill[] {
-  return getSystemDefaultSkills().map((skill) => installSkill(agentId, skill.id));
+export async function installSystemDefaultSkillsForAgent(agentId: string): Promise<AgentSkill[]> {
+  const skills = await getSystemDefaultSkills();
+  const installed: AgentSkill[] = [];
+  for (const skill of skills) {
+    installed.push(await installSkill(agentId, skill.id));
+  }
+  return installed;
 }
 
 export async function uninstallSkill(agentId: string, skillId: string): Promise<boolean> {

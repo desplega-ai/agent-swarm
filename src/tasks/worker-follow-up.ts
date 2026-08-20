@@ -155,7 +155,7 @@ export async function createWorkerTaskFollowUp(args: {
 
   let followUpDescription: string;
   if (status === "completed") {
-    const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(task.id));
     const outputSummary = output
       ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
       : `(no output)${attachmentsBlock}`;
@@ -181,7 +181,7 @@ export async function createWorkerTaskFollowUp(args: {
     followUpDescription = failedResult.text;
 
     // Enrich with cascade info: list dependents that were cascade-failed.
-    const cascadedDeps = getDependentTasks(task.id, { includeTerminal: true }).filter(
+    const cascadedDeps = (await getDependentTasks(task.id, { includeTerminal: true })).filter(
       (t) => t.status === "failed" && t.failureReason?.includes("Blocked dependency"),
     );
     if (cascadedDeps.length > 0) {
@@ -450,7 +450,7 @@ export async function createRerouteDecisionTask(args: {
   const identitySlice = crashedAgent?.identityMd
     ? `${crashedAgent.identityMd.slice(0, 500)}${crashedAgent.identityMd.length > 500 ? "..." : ""}`
     : "(no identity recorded)";
-  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+  const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
   const decision = resolveTemplate("task.reroute.decision", {
     original_agent_name: agentName,
@@ -526,7 +526,7 @@ export async function createPoolStarvationDecisionTask(args: {
     affinity?.capabilities && affinity.capabilities.length > 0
       ? affinity.capabilities.join(", ")
       : "(none declared)";
-  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+  const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
   const decision = resolveTemplate("task.pool.starved.decision", {
     original_task_id: original.id,

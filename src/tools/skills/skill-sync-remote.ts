@@ -67,7 +67,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
 
             if (args.force || newHash !== skill.sourceHash) {
               const parsed = parseSkillContent(newContent);
-              updateSkill(skill.id, {
+              await updateSkill(skill.id, {
                 content: newContent,
                 name: parsed.name,
                 description: parsed.description,
@@ -84,7 +84,7 @@ export const registerSkillSyncRemoteTool = (server: McpServer) => {
               updated++;
             } else {
               // Content unchanged — still update lastFetchedAt
-              updateSkill(skill.id, { lastFetchedAt: now });
+              await updateSkill(skill.id, { lastFetchedAt: now });
             }
           } catch (err) {
             errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown error"}`);

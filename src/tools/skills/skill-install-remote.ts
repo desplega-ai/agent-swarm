@@ -93,7 +93,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
           description = `Complex skill from ${args.sourceRepo}`;
         }
 
-        const skill = createSkill({
+        const skill = await createSkill({
           name,
           description,
           content,

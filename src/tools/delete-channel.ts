@@ -54,7 +54,7 @@ export const registerDeleteChannelTool = (server: McpServer) => {
 
       try {
         // Find channel by ID or name
-        let channel = args.channelId ? getChannelById(args.channelId) : null;
+        let channel = args.channelId ? await getChannelById(args.channelId) : null;
         if (!channel && args.name) {
           channel = await getChannelByName(args.name);
         }
@@ -74,7 +74,7 @@ export const registerDeleteChannelTool = (server: McpServer) => {
         }
 
         const channelName = channel.name;
-        const deleted = deleteChannel(channel.id);
+        const deleted = await deleteChannel(channel.id);
 
         if (!deleted) {
           return toolErr("Failed to delete channel.", {

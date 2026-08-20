@@ -43,7 +43,7 @@ export const registerPostMessageTool = (server: McpServer) => {
       // Find channel by name or ID
       let targetChannel = await getChannelByName(channel);
       if (!targetChannel) {
-        targetChannel = getChannelById(channel);
+        targetChannel = await getChannelById(channel);
       }
 
       if (!targetChannel) {

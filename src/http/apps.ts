@@ -1038,7 +1038,7 @@ export async function handleApps(
       return true;
     }
     listAppVersionsRoute.respond(res, 200, {
-      versions: getAppVersions(parsed.params.id).map(decodeAppVersion),
+      versions: (await getAppVersions(parsed.params.id)).map(decodeAppVersion),
     });
     return true;
   }
@@ -1497,9 +1497,9 @@ export async function handleApps(
           nextDefinition: definition.definition,
           migration: parsed.body.migration,
           forceElementBreak: parsed.body.forceElementBreak,
-          snapshot: () => {
+          snapshot: async () => {
             try {
-              snapshotApp(parsed.params.id, myAgentId);
+              await snapshotApp(parsed.params.id, myAgentId);
             } catch {
               throw new AppSnapshotFailure();
             }
@@ -1581,9 +1581,9 @@ export async function handleApps(
           nextDefinition,
           migration: parsed.body.migration,
           forceElementBreak: parsed.body.forceElementBreak,
-          snapshot: () => {
+          snapshot: async () => {
             try {
-              snapshotApp(parsed.params.id, myAgentId);
+              await snapshotApp(parsed.params.id, myAgentId);
             } catch {
               throw new AppSnapshotFailure();
             }

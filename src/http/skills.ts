@@ -463,7 +463,7 @@ export async function handleSkills(
         description = `Complex skill from ${parsed.body.sourceRepo}`;
       }
 
-      const skill = createSkill({
+      const skill = await createSkill({
         name,
         description,
         content,
@@ -514,7 +514,7 @@ export async function handleSkills(
 
         if (parsed.body.force || newHash !== skill.sourceHash) {
           const pm = parseSkillContent(newContent);
-          updateSkill(skill.id, {
+          await updateSkill(skill.id, {
             content: newContent,
             name: pm.name,
             description: pm.description,
@@ -531,7 +531,7 @@ export async function handleSkills(
           updated++;
         } else {
           // Content unchanged — still update lastFetchedAt
-          updateSkill(skill.id, { lastFetchedAt: now });
+          await updateSkill(skill.id, { lastFetchedAt: now });
         }
       } catch (err) {
         errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown"}`);
@@ -573,7 +573,7 @@ export async function handleSkills(
     }
 
     try {
-      const agentSkill = installSkill(parsed.body.agentId, parsed.params.id);
+      const agentSkill = await installSkill(parsed.body.agentId, parsed.params.id);
       installSkillRoute.respond(res, 200, { agentSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Install failed", 400);
@@ -624,7 +624,7 @@ export async function handleSkills(
       return true;
     }
 
-    const files = listSkillFileManifest(parsed.params.id);
+    const files = await listSkillFileManifest(parsed.params.id);
     listSkillFilesRoute.respond(res, 200, { files, total: files.length });
     return true;
   }
@@ -645,7 +645,7 @@ export async function handleSkills(
     }
 
     try {
-      const files = upsertSkillFiles(parsed.params.id, parsed.body.files);
+      const files = await upsertSkillFiles(parsed.params.id, parsed.body.files);
       const updatedSkill = await getSkillById(parsed.params.id);
       bulkUpsertSkillFilesRoute.respond(res, 200, {
         files,
@@ -726,7 +726,7 @@ export async function handleSkills(
     }
 
     try {
-      const deleted = deleteSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      const deleted = await deleteSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
       if (!deleted) {
         jsonError(res, "Skill file not found", 404);
         return true;
@@ -760,7 +760,7 @@ export async function handleSkills(
 
     try {
       const pm = parseSkillContent(parsed.body.content);
-      const skill = createSkill({
+      const skill = await createSkill({
         name: pm.name,
         description: pm.description,
         content: parsed.body.content,
@@ -843,7 +843,7 @@ export async function handleSkills(
       updates.userInvocable = pm.userInvocable;
     }
 
-    const skill = updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
+    const skill = await updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;

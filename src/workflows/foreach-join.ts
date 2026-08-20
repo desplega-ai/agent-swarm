@@ -53,7 +53,7 @@ export async function joinForeach(
     throw new Error(`Step "${childStep.nodeId}" is not a foreach child`);
   }
 
-  const children = getWorkflowRunStepsByRunId(runId)
+  const children = (await getWorkflowRunStepsByRunId(runId))
     .filter((step) => resolveForeachParent(def, step.nodeId)?.id === parent.id)
     .sort((a, b) => childIndex(a) - childIndex(b));
 
@@ -61,7 +61,7 @@ export async function joinForeach(
     return { joined: false, parentNodeId: parent.id, successors: [] };
   }
 
-  const parentStep = getLatestStepForNode(runId, parent.id);
+  const parentStep = await getLatestStepForNode(runId, parent.id);
   if (!parentStep) {
     throw new Error(`Waiting foreach parent step "${parent.id}" was not found`);
   }

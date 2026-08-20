@@ -28,7 +28,7 @@ export async function completeTaskStepAndResolveSuccessors(
   return await getDbClient().transaction(async (): Promise<TaskStepRoutingResult> => {
     const foreachParent = resolveForeachParent(def, step.nodeId);
     if (foreachParent) {
-      updateWorkflowRunStep(step.id, {
+      await updateWorkflowRunStep(step.id, {
         status: "completed",
         output,
         // onNodeFailure:"continue" completions persist the failure reason as
@@ -38,7 +38,7 @@ export async function completeTaskStepAndResolveSuccessors(
         finishedAt: new Date().toISOString(),
       });
       const join = await joinForeach(def, runId, step, ctx);
-      updateWorkflowRun(runId, { status: "running" });
+      await updateWorkflowRun(runId, { status: "running" });
       return {
         foreachChild: true,
         joined: join.joined,
@@ -47,7 +47,7 @@ export async function completeTaskStepAndResolveSuccessors(
     }
 
     await checkpointStep(runId, step.id, step.nodeId, { output }, ctx);
-    updateWorkflowRun(runId, { status: "running" });
+    await updateWorkflowRun(runId, { status: "running" });
     return {
       foreachChild: false,
       joined: true,

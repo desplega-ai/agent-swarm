@@ -77,7 +77,7 @@ export async function startWorkflowExecution(
   if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
     const runId = crypto.randomUUID();
     await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData });
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "skipped",
       error: "cooldown",
       finishedAt: new Date().toISOString(),
@@ -109,7 +109,7 @@ export async function startWorkflowExecution(
       const resolved = await resolveInputs(workflow.input);
       Object.assign(ctx, { input: resolved });
     } catch (err) {
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         status: "failed",
         error: `Input resolution failed: ${err}`,
         finishedAt: new Date().toISOString(),
@@ -184,7 +184,7 @@ export async function walkGraph(
       // but only the parent aggregate belongs in workflow context or routing.
       if (resolveForeachParent(def, nodeId)) continue;
 
-      const step = getLatestStepForNode(runId, nodeId);
+      const step = await getLatestStepForNode(runId, nodeId);
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
         const node = def.nodes.find((n) => n.id === nodeId);
@@ -216,9 +216,9 @@ export async function walkGraph(
   // This prevents runaway workflows (e.g. infinite loop-backs) from consuming
   // unbounded resources. Checked here so it covers initial walks AND async
   // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
-  const allSteps = getWorkflowRunStepsByRunId(runId);
+  const allSteps = await getWorkflowRunStepsByRunId(runId);
   if (allSteps.length >= getMaxWorkflowStepsPerRun()) {
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "failed",
       error: `Circuit breaker: run exceeded ${getMaxWorkflowStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
       finishedAt: new Date().toISOString(),
@@ -266,7 +266,7 @@ export async function walkGraph(
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
     if (nodeExecutionCount > maxIterations()) {
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         status: "failed",
         error: `Max node executions (${maxIterations()}) exceeded — possible infinite loop`,
         finishedAt: new Date().toISOString(),
@@ -344,7 +344,7 @@ export async function walkGraph(
   // pending) or have pending retries.
   const run = await getWorkflowRun(runId);
   if (run && run.status === "running") {
-    const finalSteps = getWorkflowRunStepsByRunId(runId);
+    const finalSteps = await getWorkflowRunStepsByRunId(runId);
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
@@ -361,12 +361,12 @@ export async function walkGraph(
 
     if (hasWaitingSteps) {
       // Async tasks still in progress — set back to waiting for next event
-      updateWorkflowRun(runId, { status: "waiting" });
+      await updateWorkflowRun(runId, { status: "waiting" });
     } else if (!hasPendingRetries) {
       if (failedSteps.length > 0 && !hasCompletedSteps) {
         // All branches failed — mark run as failed
         const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "failed",
           error: `All branches failed. Failed nodes: ${failedNodeIds}`,
           context: ctx,
@@ -376,14 +376,14 @@ export async function walkGraph(
         // Partial failure — some branches succeeded, some failed.
         // Mark as completed with error noting partial failure.
         const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           error: `Partial failure: nodes [${failedNodeIds}] failed (mustPass validation), but other branches completed successfully`,
           context: ctx,
           finishedAt: new Date().toISOString(),
         });
       } else {
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           context: ctx,
           finishedAt: new Date().toISOString(),
@@ -460,7 +460,7 @@ async function executeStep(
   // the `workflow_run_steps` table. The live `ctx` is untouched — executors
   // still see real values.
   const latestForeachStep =
-    node.type === "foreach" ? getLatestStepForNode(runId, node.id) : undefined;
+    node.type === "foreach" ? await getLatestStepForNode(runId, node.id) : undefined;
   const reusableForeachStep =
     latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
       ? latestForeachStep
@@ -476,7 +476,7 @@ async function executeStep(
     });
 
     // Set idempotency key
-    updateWorkflowRunStep(stepId, { idempotencyKey });
+    await updateWorkflowRunStep(stepId, { idempotencyKey });
   }
 
   // 3. Get executor
@@ -493,7 +493,7 @@ async function executeStep(
     );
     if (inputErrors.length > 0) {
       const errorMsg = `Input schema validation failed: ${inputErrors.join("; ")}`;
-      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      await checkpointStepFailure(runId, stepId, errorMsg, 0);
       throw new Error(errorMsg);
     }
   }
@@ -509,7 +509,7 @@ async function executeStep(
 
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
     const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
-    checkpointStepFailure(runId, stepId, errorMsg, 0);
+    await checkpointStepFailure(runId, stepId, errorMsg, 0);
     return { outcome: "failed", successors: [] };
   }
 
@@ -517,7 +517,7 @@ async function executeStep(
     console.warn(
       `[workflow] Step ${node.id}: unresolved interpolation tokens: ${unresolved.join(", ")}`,
     );
-    updateWorkflowRunStep(stepId, {
+    await updateWorkflowRunStep(stepId, {
       diagnostics: JSON.stringify({ unresolvedTokens: unresolved }),
     });
   }
@@ -562,7 +562,7 @@ async function executeStep(
     // Apply retry policy if configured
     const retryPolicy = node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = checkpointStepFailure(
+    const { shouldRetry } = await checkpointStepFailure(
       runId,
       stepId,
       errorMsg,
@@ -581,7 +581,7 @@ async function executeStep(
   if (result.status === "failed") {
     const retryPolicy = node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = checkpointStepFailure(
+    const { shouldRetry } = await checkpointStepFailure(
       runId,
       stepId,
       result.error || "Executor returned failed status",
@@ -591,7 +591,7 @@ async function executeStep(
 
     // Persist output for observability even on failure (e.g. script nodes keep {exitCode, stdout, stderr})
     if (result.output !== undefined) {
-      updateWorkflowRunStep(stepId, { output: result.output });
+      await updateWorkflowRunStep(stepId, { output: result.output });
     }
 
     if (!shouldRetry) {
@@ -614,7 +614,7 @@ async function executeStep(
     );
     if (outputErrors.length > 0) {
       const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
-      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      await checkpointStepFailure(runId, stepId, errorMsg, 0);
       throw new Error(errorMsg);
     }
   }
@@ -626,7 +626,7 @@ async function executeStep(
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";
-      checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
+      await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
       return { outcome: "failed", successors: [] };
     }
 
@@ -639,7 +639,7 @@ async function executeStep(
       }
       const retryPolicy = node.validation.retry || node.retry;
       const currentRetryCount = existingStep?.retryCount || 0;
-      checkpointStepFailure(
+      await checkpointStepFailure(
         runId,
         stepId,
         "Validation failed, retrying",

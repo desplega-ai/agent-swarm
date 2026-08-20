@@ -66,20 +66,20 @@ function snapshotDefinition(rawDefinition: string): unknown {
  * Snapshot an app's pre-write state. This intentionally reads the definition
  * column directly: recovery snapshots must not depend on it being decodable.
  */
-export function snapshotApp(appId: string, changedByAgentId?: string): AppVersion {
+export async function snapshotApp(appId: string, changedByAgentId?: string): Promise<AppVersion> {
   const app = getDb()
     .prepare<StoredAppRow, [string]>("SELECT name, description, definition FROM apps WHERE id = ?")
     .get(appId);
   if (!app) throw new Error(`App ${appId} not found — cannot create snapshot`);
 
-  const versions = getAppVersions(appId);
+  const versions = await getAppVersions(appId);
   const version = (versions[0]?.version ?? 0) + 1;
   const snapshot: AppSnapshot = {
     name: app.name,
     description: app.description,
     definition: snapshotDefinition(app.definition),
   };
-  return createAppVersion({ appId, version, snapshot, changedByAgentId });
+  return await createAppVersion({ appId, version, snapshot, changedByAgentId });
 }
 
 export function decodeAppVersion(appVersion: AppVersion): AppVersion {
@@ -174,7 +174,7 @@ export async function rollbackApp(input: {
     const existing = getApp(input.appId);
     if (!existing) throw new AppRollbackAppNotFoundError(input.appId);
 
-    const version = getAppVersions(input.appId).find(
+    const version = (await getAppVersions(input.appId)).find(
       (candidate) => candidate.version === input.version,
     );
     if (!version) throw new AppRollbackVersionNotFoundError(input.version);
@@ -187,9 +187,9 @@ export async function rollbackApp(input: {
       nextDefinition: snapshot.definition,
       migration: input.migration,
       forceElementBreak: input.forceElementBreak,
-      snapshot: () => {
+      snapshot: async () => {
         try {
-          snapshotApp(input.appId, input.changedByAgentId);
+          await snapshotApp(input.appId, input.changedByAgentId);
         } catch {
           throw new AppSnapshotFailure();
         }

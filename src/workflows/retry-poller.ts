@@ -51,14 +51,14 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
 
           // If the run was failed (due to this step), set it back to running
           if (run.status === "failed") {
-            updateWorkflowRun(run.id, {
+            await updateWorkflowRun(run.id, {
               status: "running",
               error: undefined,
             });
           }
 
           // Clear the retry marker so this step isn't picked up again
-          updateWorkflowRunStep(step.id, {
+          await updateWorkflowRunStep(step.id, {
             status: "running",
             error: undefined,
             nextRetryAt: undefined,
@@ -81,7 +81,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             inputCtx,
           );
           if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
-            checkpointStepFailure(
+            await checkpointStepFailure(
               run.id,
               step.id,
               scriptBodyInterpolationError(node.id, scriptBodyUnresolved),
@@ -114,7 +114,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               // checkpointStepFailure handles marking run as failed if no retries left,
               // or setting nextRetryAt for the next poll cycle.
               const retryPolicy = node.retry || executor.retryPolicy;
-              checkpointStepFailure(
+              await checkpointStepFailure(
                 run.id,
                 step.id,
                 result.error || "Retry failed",
@@ -141,7 +141,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 );
 
                 if (validationResult.outcome === "halt") {
-                  checkpointStepFailure(
+                  await checkpointStepFailure(
                     run.id,
                     step.id,
                     "Validation failed (mustPass)",
@@ -158,7 +158,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                     ctx[historyKey] = [...existing, validationResult.retryContext];
                   }
                   const retryPolicy = node.validation.retry || node.retry;
-                  checkpointStepFailure(
+                  await checkpointStepFailure(
                     run.id,
                     step.id,
                     "Validation failed, retrying",
@@ -185,7 +185,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
                 );
               } else {
                 // No successors — check if run is complete
-                updateWorkflowRun(run.id, {
+                await updateWorkflowRun(run.id, {
                   status: "completed",
                   context: ctx,
                   finishedAt: new Date().toISOString(),
@@ -196,7 +196,7 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
             // Execution threw — treat as failure
             const errorMsg = err instanceof Error ? err.message : String(err);
             const retryPolicy = node.retry || executor.retryPolicy;
-            checkpointStepFailure(run.id, step.id, errorMsg, step.retryCount, retryPolicy);
+            await checkpointStepFailure(run.id, step.id, errorMsg, step.retryCount, retryPolicy);
           }
         } catch (err) {
           console.error(`[workflows] Retry failed for step ${step.id}:`, err);

@@ -115,9 +115,9 @@ export const registerAppPatchTool = (server: McpServer) => {
             nextDefinition: parsed.definition,
             migration: input.migration,
             forceElementBreak: input.forceElementBreak,
-            snapshot: () => {
+            snapshot: async () => {
               try {
-                snapshotApp(input.appId, requestInfo.agentId);
+                await snapshotApp(input.appId, requestInfo.agentId);
               } catch {
                 throw new AppSnapshotFailure();
               }

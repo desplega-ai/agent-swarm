@@ -158,7 +158,7 @@ describe("skill tool gates (characterization)", () => {
 
   // skill-install.ts:40 — cross-agent install requires lead
   test("worker cannot install a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-install-deny",
       description: "d",
       content: skillMd("charact-install-deny"),
@@ -183,7 +183,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("lead can install a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-install-allow",
       description: "d",
       content: skillMd("charact-install-allow"),
@@ -245,7 +245,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("lead can uninstall a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-uninstall-allow",
       description: "d",
       content: skillMd("charact-uninstall-allow"),
@@ -253,7 +253,7 @@ describe("skill tool gates (characterization)", () => {
       scope: "agent",
       ownerAgentId: LEAD_ID,
     });
-    installSkill(OTHER_WORKER_ID, skill.id);
+    await installSkill(OTHER_WORKER_ID, skill.id);
 
     const result = await callTool("skill-uninstall", LEAD_ID, {
       skillId: skill.id,
@@ -267,7 +267,7 @@ describe("skill tool gates (characterization)", () => {
 
   // skill-delete.ts:46 — delete requires owner OR lead
   test("worker cannot delete a skill they don't own", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-deny",
       description: "d",
       content: skillMd("charact-delete-deny"),
@@ -293,7 +293,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("owner can delete their own skill", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-owner",
       description: "d",
       content: skillMd("charact-delete-owner"),
@@ -310,7 +310,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("lead can delete another agent's skill", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-lead",
       description: "d",
       content: skillMd("charact-delete-lead"),

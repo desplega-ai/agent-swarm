@@ -334,7 +334,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
         nodeType: "echo",
         input: {},
       });
-      updateWorkflowRunStep(step1Id, {
+      await updateWorkflowRunStep(step1Id, {
         status: "completed",
         output: { echo: "step1" },
         idempotencyKey: `${runId}:s1`,
@@ -342,7 +342,7 @@ describe("Workflow Retry v2 (Phase 4)", () => {
       });
 
       // Update run context
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         context: { s1: { echo: "step1" } },
       });
 
@@ -383,13 +383,13 @@ describe("Workflow Retry v2 (Phase 4)", () => {
         nodeType: "echo",
         input: {},
       });
-      updateWorkflowRunStep(step1Id, {
+      await updateWorkflowRunStep(step1Id, {
         status: "completed",
         output: { echo: "only" },
         idempotencyKey: `${runId}:s1`,
         finishedAt: new Date().toISOString(),
       });
-      updateWorkflowRun(runId, { context: { s1: { echo: "only" } } });
+      await updateWorkflowRun(runId, { context: { s1: { echo: "only" } } });
 
       const recovered = await recoverIncompleteRuns(registry);
       expect(recovered).toBeGreaterThanOrEqual(1);

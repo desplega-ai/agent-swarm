@@ -84,7 +84,7 @@ describe("WaitExecutor — recovery on startup", () => {
     const wf = makeWorkflow("wait-recovery-overdue", def);
 
     const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
     const step = createWorkflowRunStep({
       id: crypto.randomUUID(),
@@ -92,7 +92,7 @@ describe("WaitExecutor — recovery on startup", () => {
       nodeId: "w1",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
     await createWaitState({
       id: crypto.randomUUID(),
@@ -143,7 +143,7 @@ describe("WaitExecutor — recovery on startup", () => {
     };
     const wf = makeWorkflow("wait-recovery-idempotent", def);
     const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    updateWorkflowRun(run.id, { status: "waiting" });
+    await updateWorkflowRun(run.id, { status: "waiting" });
 
     const step = createWorkflowRunStep({
       id: crypto.randomUUID(),
@@ -151,7 +151,7 @@ describe("WaitExecutor — recovery on startup", () => {
       nodeId: "w1",
       nodeType: "wait",
     });
-    updateWorkflowRunStep(step.id, { status: "waiting" });
+    await updateWorkflowRunStep(step.id, { status: "waiting" });
 
     await createWaitState({
       id: crypto.randomUUID(),
