@@ -49,6 +49,8 @@ export interface DbClient extends DbExecutor {
   afterCommit(fn: () => void): void;
 }
 
+const LOCK_WATCHDOG_MS = 30_000;
+
 /**
  * FIFO promise-chain lock. All top-level operations are serialized through it
  * so a transaction's BEGIN..COMMIT window can never be interleaved by an
@@ -57,6 +59,8 @@ export interface DbClient extends DbExecutor {
  */
 class FifoLock {
   private tail: Promise<void> = Promise.resolve();
+  /** Callers holding or queued on the lock. Watchdog diagnostics only. */
+  private depth = 0;
 
   acquire(): Promise<() => void> {
     const prev = this.tail;
@@ -64,15 +68,31 @@ class FifoLock {
     this.tail = new Promise<void>((resolve) => {
       release = resolve;
     });
-    return prev.then(() => release);
+    this.depth += 1;
+    // Structured stack is captured here cheaply; the string only materializes
+    // if the watchdog fires.
+    const holder = new Error("db-client: FIFO lock acquired here");
+    return prev.then(() => {
+      // Watchdog: a holder that never releases wedges every DB operation in
+      // the process with no error and no log. One line beats a silent hang.
+      const watchdog = setTimeout(() => {
+        console.error(
+          `[db-client] FIFO lock held for ${LOCK_WATCHDOG_MS}ms (queue depth ${this.depth}). Holder:\n${holder.stack}`,
+        );
+      }, LOCK_WATCHDOG_MS);
+      if (typeof watchdog.unref === "function") watchdog.unref();
+      return () => {
+        clearTimeout(watchdog);
+        this.depth -= 1;
+        release();
+      };
+    });
   }
 }
 
 type TxContext = {
   /** Set once the outermost transaction commits or rolls back. */
   closed: boolean;
-  /** SAVEPOINT nesting depth (0 = outermost BEGIN). */
-  depth: number;
   /** Hooks to run after COMMIT; dropped on ROLLBACK. */
   afterCommit: (() => void)[];
 };
@@ -81,6 +101,7 @@ const txContext = new AsyncLocalStorage<TxContext>();
 
 class BunSqliteClient implements DbClient {
   private readonly lock = new FifoLock();
+  private savepointSeq = 0;
 
   constructor(private readonly getDatabase: () => Database) {}
 
@@ -106,7 +127,7 @@ class BunSqliteClient implements DbClient {
     }
 
     const release = await this.lock.acquire();
-    const ctx: TxContext = { closed: false, depth: 0, afterCommit: [] };
+    const ctx: TxContext = { closed: false, afterCommit: [] };
     let began = false;
     try {
       const db = this.getDatabase();
@@ -145,17 +166,28 @@ class BunSqliteClient implements DbClient {
   private scheduleHook(fn: () => void): void {
     // Queueing behind the FIFO lock keeps hooks ordered after already-queued
     // operations. The hook runs outside the lock so its own client calls
-    // re-acquire normally.
+    // re-acquire normally. A hook that throws synchronously must not become
+    // an unhandled rejection (and must not look like a lock failure).
     void this.lock.acquire().then((release) => {
       release();
-      fn();
+      try {
+        fn();
+      } catch (err) {
+        console.error("[db-client] afterCommit hook threw:", err);
+      }
     });
   }
 
   private async savepoint<T>(ctx: TxContext, fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
     const db = this.getDatabase();
-    ctx.depth += 1;
-    const name = `db_client_sp_${ctx.depth}`;
+    // Monotonic per-client counter, NOT nesting depth: two nested transactions
+    // running concurrently under one outer transaction would otherwise reuse a
+    // name, and the first RELEASE would silently swallow the sibling's writes.
+    // SQLite savepoints are still a stack, so out-of-LIFO release remains
+    // wrong — unique names turn that into a loud "no such savepoint" error
+    // instead of silent data loss.
+    this.savepointSeq += 1;
+    const name = `db_client_sp_${this.savepointSeq}`;
     const tx = this.boundExecutor(ctx);
     db.run(`SAVEPOINT ${name}`);
     try {
@@ -166,8 +198,6 @@ class BunSqliteClient implements DbClient {
       db.run(`ROLLBACK TO SAVEPOINT ${name}`);
       db.run(`RELEASE SAVEPOINT ${name}`);
       throw err;
-    } finally {
-      ctx.depth -= 1;
     }
   }
 

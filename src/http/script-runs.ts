@@ -386,22 +386,27 @@ export async function handleScriptRuns(
       }
     }
 
+    // Cap check and insert commit together: N concurrent POSTs otherwise all
+    // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
-    if ((await countActiveScriptRuns()) >= cap) {
+    const creation = await getDbClient().transaction(async () => {
+      if ((await countActiveScriptRuns()) >= cap) return null;
+      return await createScriptRun({
+        id: crypto.randomUUID(),
+        agentId: agent.id,
+        source: parsed.body.source,
+        args: parsed.body.args ?? null,
+        scriptName: parsed.body.scriptName,
+        idempotencyKey: parsed.body.idempotencyKey,
+        requestedByUserId: parsed.body.requestedByUserId,
+        createdBy: parsed.body.requestedByUserId,
+      });
+    });
+    if (!creation) {
       json(res, { error: "script_run_concurrency_cap", cap }, 429);
       return true;
     }
-
-    const { run, existing } = await createScriptRun({
-      id: crypto.randomUUID(),
-      agentId: agent.id,
-      source: parsed.body.source,
-      args: parsed.body.args ?? null,
-      scriptName: parsed.body.scriptName,
-      idempotencyKey: parsed.body.idempotencyKey,
-      requestedByUserId: parsed.body.requestedByUserId,
-      createdBy: parsed.body.requestedByUserId,
-    });
+    const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
       startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch(async (err) => {

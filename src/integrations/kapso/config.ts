@@ -1,4 +1,4 @@
-import { deleteKv, getKv, getSwarmConfigs, upsertKv } from "@/be/db";
+import { claimKv, deleteKv, getKv, getSwarmConfigs, upsertKv } from "@/be/db";
 
 /**
  * Native Kapso/WhatsApp integration — shared server-side config + mapping store.
@@ -96,13 +96,14 @@ export async function deleteKapsoNumberMapping(phoneNumberId: string): Promise<b
  * caller drops duplicates (Kapso retries deliveries).
  */
 export async function markKapsoMessageSeen(messageId: string): Promise<boolean> {
-  if (await getKv(KAPSO_DEDUPE_NAMESPACE, messageId)) return false;
-  await upsertKv({
+  // Single conditional write: a get-then-upsert pair is not atomic under the
+  // async seam, so two concurrent deliveries of the same id would both claim
+  // it and the message would be processed twice.
+  return claimKv({
     namespace: KAPSO_DEDUPE_NAMESPACE,
     key: messageId,
     value: 1,
     valueType: "integer",
     expiresAt: Date.now() + KAPSO_DEDUPE_TTL_MS,
   });
-  return true;
 }

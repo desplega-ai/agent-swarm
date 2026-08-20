@@ -25,10 +25,10 @@ ALLOWLIST=(
   src/be/seed-pricing.ts                        # boot: seeder
   src/be/rbac-roles.ts                          # boot: ensureRbacSeedsSynced
   src/be/asset-key-audit.ts                     # boot: startup audit (raw handle param)
-  src/be/memory/providers/sqlite-store.ts       # constructor-driven vec/FTS bootstrap (async init = future decision)
+  src/be/memory/providers/sqlite-store.ts       # constructor vec/FTS bootstrap; instance is boot-warmed by startMemoryGc()'s initial tick (async init = future decision)
   src/be/script-connections.ts                  # listScriptConnections feeds default parameter expressions (must stay sync)
-  src/http/db-query.ts                          # read-only guard needs Statement.columnNames introspection
-  src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys
+  src/http/db-query.ts                          # read-only admin guard needs Statement.columnNames introspection
+  src/http/assets.ts                            # passes the raw handle into the shared sync auditAssetKeys (wrapped in a client transaction at the call site)
 )
 
 PATTERN='(\bgetDb\s*\(|\.prepare\s*\(|from\s+["'\'']bun:sqlite)'

@@ -225,6 +225,71 @@ describe("db-client transactions", () => {
     expect(all.filter((n) => n.startsWith("top-")).length).toBe(200);
   });
 
+  test("afterCommit hook that throws does not break later hooks", async () => {
+    const ran: string[] = [];
+    const done = new Promise<void>((resolve) => {
+      client.afterCommit(() => {
+        ran.push("thrower");
+        throw new Error("hook blew up");
+      });
+      client.afterCommit(() => {
+        ran.push("survivor");
+        resolve();
+      });
+    });
+    await done;
+    expect(ran).toEqual(["thrower", "survivor"]);
+    // The client stays fully usable afterwards (no wedged lock, no unhandled
+    // rejection surfacing as a failed op).
+    const result = await client.run("INSERT INTO items (name) VALUES (?)", ["after-hooks"]);
+    expect(result.changes).toBe(1);
+  });
+
+  test("sequential nested transactions under one outer commit independently", async () => {
+    // Regression guard for monotonic savepoint naming: distinct sequential
+    // savepoints must still release cleanly and roll back independently.
+    await client.transaction(async (tx) => {
+      await tx.run("INSERT INTO items (name) VALUES (?)", ["outer"]);
+      await client.transaction(async (inner) => {
+        await inner.run("INSERT INTO items (name) VALUES (?)", ["nested-1"]);
+      });
+      await expect(
+        client.transaction(async (inner) => {
+          await inner.run("INSERT INTO items (name) VALUES (?)", ["nested-doomed"]);
+          throw new Error("inner boom");
+        }),
+      ).rejects.toThrow("inner boom");
+      await client.transaction(async (inner) => {
+        await inner.run("INSERT INTO items (name) VALUES (?)", ["nested-2"]);
+      });
+    });
+    expect(await names()).toEqual(["outer", "nested-1", "nested-2"]);
+  });
+
+  test("out-of-LIFO concurrent sibling savepoints fail loudly, not silently", async () => {
+    // SQLite savepoints are a stack: when the first-created sibling releases
+    // first it implicitly destroys the second. Monotonic names turn that into
+    // a loud "no such savepoint" error instead of silently discarding the
+    // sibling's writes; the outer transaction then rolls back whole.
+    await expect(
+      client.transaction(async () => {
+        await Promise.all([
+          client.transaction(async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES (?)", ["sib-a"]);
+            await Promise.resolve(); // release AFTER sib-b's savepoint opens
+          }),
+          client.transaction(async (tx) => {
+            await tx.run("INSERT INTO items (name) VALUES (?)", ["sib-b"]);
+            await Promise.resolve();
+            await Promise.resolve();
+            await Promise.resolve(); // release after sib-a already released
+          }),
+        ]);
+      }),
+    ).rejects.toThrow();
+    expect(await names()).toEqual([]);
+  });
+
   test("post-commit continuation with stale context falls back to top level", async () => {
     // Simulates emitTaskLifecycleTelemetryAfterCommit-style queueMicrotask
     // work that inherits the ALS context but runs after COMMIT.

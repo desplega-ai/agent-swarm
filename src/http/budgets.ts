@@ -14,6 +14,7 @@ import {
   deleteBudget,
   getBudget,
   getBudgets,
+  getDbClient,
   getRecentBudgetRefusalNotifications,
   upsertBudget,
 } from "../be/db";
@@ -172,8 +173,12 @@ export async function handleBudgets(
     if (!parsed) return true;
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
 
-    const before = await getBudget(parsed.params.scope, scopeId);
-    const updated = await upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd);
+    // One transaction so the audit log's `before` cannot be a stale read from
+    // a concurrent budget write.
+    const { before, updated } = await getDbClient().transaction(async () => ({
+      before: await getBudget(parsed.params.scope, scopeId),
+      updated: await upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd),
+    }));
 
     await createLogEntry({
       eventType: "budget.upserted",
@@ -195,8 +200,11 @@ export async function handleBudgets(
     if (!parsed) return true;
     const scopeId = parsed.params.scopeId === "_global" ? "" : parsed.params.scopeId;
 
-    const before = await getBudget(parsed.params.scope, scopeId);
-    const deleted = await deleteBudget(parsed.params.scope, scopeId);
+    // Same rationale as the upsert route above.
+    const { before, deleted } = await getDbClient().transaction(async () => ({
+      before: await getBudget(parsed.params.scope, scopeId),
+      deleted: await deleteBudget(parsed.params.scope, scopeId),
+    }));
     if (!deleted) {
       jsonError(res, "Budget not configured", 404);
       return true;

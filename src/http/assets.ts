@@ -7,6 +7,7 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   getAgentById,
   getDb,
+  getDbClient,
   getTaskById,
   listAssetSummaries,
   moveAssetKey,
@@ -245,7 +246,11 @@ export async function handleAssets(
     const parsed = await keyAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
-    keyAuditRoute.respond(res, 200, auditAssetKeys(getDb()));
+    // auditAssetKeys stays sync (shared with the boot audit); run it inside a
+    // client transaction so the read cannot observe another request's
+    // uncommitted writes on the shared connection.
+    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()));
+    keyAuditRoute.respond(res, 200, audit);
     return true;
   }
 

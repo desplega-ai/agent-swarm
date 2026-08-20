@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  claimKv,
   closeDb,
   countKv,
   deleteKv,
@@ -251,6 +252,53 @@ describe("kv-storage helpers", () => {
     const twoMiB = "x".repeat(2 * 1024 * 1024);
     const entry = await upsertKv({ namespace: NS, key: "big", value: twoMiB, valueType: "string" });
     expect((entry.value as string).length).toBe(2 * 1024 * 1024);
+  });
+
+  test("claimKv: first caller wins, live entry blocks the rest", async () => {
+    const key = `claim-${crypto.randomUUID()}`;
+    expect(
+      await claimKv({ namespace: NS, key, value: 1, valueType: "integer", expiresAt: null }),
+    ).toBe(true);
+    expect(
+      await claimKv({ namespace: NS, key, value: 1, valueType: "integer", expiresAt: null }),
+    ).toBe(false);
+  });
+
+  test("claimKv: two concurrent claims produce exactly one winner", async () => {
+    // Webhook-dedup shape (markKapsoMessageSeen): a get-then-upsert pair lets
+    // both concurrent deliveries win; the single conditional write must not.
+    const key = `claim-race-${crypto.randomUUID()}`;
+    const results = await Promise.all([
+      claimKv({ namespace: NS, key, value: 1, valueType: "integer", expiresAt: null }),
+      claimKv({ namespace: NS, key, value: 1, valueType: "integer", expiresAt: null }),
+    ]);
+    expect(results.filter(Boolean).length).toBe(1);
+  });
+
+  test("claimKv: an expired entry can be re-claimed (lazy TTL, mirrors getKv)", async () => {
+    const key = `claim-ttl-${crypto.randomUUID()}`;
+    expect(
+      await claimKv({
+        namespace: NS,
+        key,
+        value: 1,
+        valueType: "integer",
+        expiresAt: Date.now() - 1000,
+      }),
+    ).toBe(true);
+    expect(
+      await claimKv({
+        namespace: NS,
+        key,
+        value: 1,
+        valueType: "integer",
+        expiresAt: Date.now() + 60_000,
+      }),
+    ).toBe(true);
+    // Now live again — further claims lose.
+    expect(
+      await claimKv({ namespace: NS, key, value: 1, valueType: "integer", expiresAt: null }),
+    ).toBe(false);
   });
 });
 

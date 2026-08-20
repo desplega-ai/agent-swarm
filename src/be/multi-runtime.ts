@@ -338,20 +338,25 @@ export async function hasReadyLiveRuntime(agentId: string): Promise<boolean> {
  * busy agent back to idle.
  */
 export async function reconcileAgentStatusFromRuntimes(agentId: string): Promise<void> {
-  const agent = await getAgentById(agentId);
-  if (!agent) return;
-  if ((await countActiveRuntimeInstancesForAgent(agentId)) === 0) {
-    if (agent.status !== "offline") await updateAgentStatus(agentId, "offline");
-    return;
-  }
-  if (!(await hasReadyLiveRuntime(agentId))) {
-    if (agent.status !== "waiting_for_credentials") {
-      await updateAgentStatus(agentId, "waiting_for_credentials");
+  // Reads and the status write commit together: register and retire are
+  // overlapping HTTP events, and a stale computation writing last would park
+  // an agent offline while a live runtime is serving it.
+  await getDbClient().transaction(async () => {
+    const agent = await getAgentById(agentId);
+    if (!agent) return;
+    if ((await countActiveRuntimeInstancesForAgent(agentId)) === 0) {
+      if (agent.status !== "offline") await updateAgentStatus(agentId, "offline");
+      return;
     }
-    return;
-  }
-  const next = (await getActiveTaskCount(agentId)) > 0 ? "busy" : "idle";
-  if (agent.status !== next) await updateAgentStatus(agentId, next);
+    if (!(await hasReadyLiveRuntime(agentId))) {
+      if (agent.status !== "waiting_for_credentials") {
+        await updateAgentStatus(agentId, "waiting_for_credentials");
+      }
+      return;
+    }
+    const next = (await getActiveTaskCount(agentId)) > 0 ? "busy" : "idle";
+    if (agent.status !== next) await updateAgentStatus(agentId, next);
+  });
 }
 
 /**

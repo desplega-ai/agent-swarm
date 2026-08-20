@@ -25,7 +25,11 @@ import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
+import {
+  beginRequestAuthScope,
+  runWithoutRequestAuth,
+  setRequestAuth,
+} from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
@@ -126,6 +130,15 @@ export type ReloadConfigResult = {
  * pick up the new values without requiring a process restart.
  */
 export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
+  // Run outside any request-auth frame: this (re)starts long-lived
+  // integration clients (Slack socket, pollers, timers). Created inside a
+  // request's frame they capture that request's auth slot for their whole
+  // lifetime, and their later DB writes get attributed to whichever user
+  // happened to save config.
+  return runWithoutRequestAuth(() => reloadGlobalConfigsAndIntegrationsInner());
+}
+
+async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigResult> {
   const updated = await loadGlobalConfigsIntoEnv(true);
 
   // File-storage provider selection reads process.env once and memoizes; the

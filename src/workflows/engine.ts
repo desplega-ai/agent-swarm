@@ -2,6 +2,7 @@ import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
+  getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
   getStepCountForNode,
@@ -450,54 +451,66 @@ async function executeStep(
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<StepResult> {
-  // Use iteration-aware idempotency key to support loops.
-  // Count existing steps for this node to determine the current iteration.
-  const iteration = await getStepCountForNode(runId, node.id);
-  const idempotencyKey = `${runId}:${node.id}:${iteration}`;
+  // Use iteration-aware idempotency key to support loops. The iteration
+  // count, the dedup read, and the step insert commit together — and the key
+  // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
+  // concurrent executions of the same node instead of an orphan step row
+  // committing before a follow-up key UPDATE throws.
+  const dedup = await getDbClient().transaction(async () => {
+    // Count existing steps for this node to determine the current iteration.
+    const iteration = await getStepCountForNode(runId, node.id);
+    const idempotencyKey = `${runId}:${node.id}:${iteration}`;
 
-  // 1. Memoization / deduplication check (within same iteration)
-  const existingStep = await getStepByIdempotencyKey(idempotencyKey);
-  if (existingStep) {
-    if (existingStep.status === "completed") {
+    // 1. Memoization / deduplication check (within same iteration)
+    const existingStep = await getStepByIdempotencyKey(idempotencyKey);
+    if (
+      existingStep &&
+      (existingStep.status === "completed" || existingStep.status === "waiting")
+    ) {
+      return { existingStep, stepId: existingStep.id, deduped: true };
+    }
+    // For "pending" or "failed" steps, fall through to re-execute
+
+    // 2. Create step
+    // Redact resolved secret values from the persisted input so credentials
+    // stored in `ctx.input` (resolved via `secret.*` or sensitive `${ENV}`
+    // references) don't leak through `get-workflow-run` or any other reader of
+    // the `workflow_run_steps` table. The live `ctx` is untouched — executors
+    // still see real values.
+    const latestForeachStep =
+      node.type === "foreach" ? await getLatestStepForNode(runId, node.id) : undefined;
+    const reusableForeachStep =
+      latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
+        ? latestForeachStep
+        : undefined;
+    const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
+    if (!reusableForeachStep) {
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: node.id,
+        nodeType: node.type,
+        input: redactSecretsForStorage(ctx, secretKeys),
+        idempotencyKey,
+      });
+    }
+    return { existingStep, stepId, deduped: false };
+  });
+
+  if (dedup.deduped && dedup.existingStep) {
+    if (dedup.existingStep.status === "completed") {
       // Inject stored output into context
-      ctx[node.id] = existingStep.output;
+      ctx[node.id] = dedup.existingStep.output;
       // For memoized steps, return all successors (no port — use default)
       const successors = getSuccessors(def, node.id);
       return { outcome: "completed", successors };
     }
-    if (existingStep.status === "waiting") {
-      // Step already exists and is waiting for async completion (e.g., agent-task).
-      // Don't create a duplicate — just report as waiting.
-      return { outcome: "waiting", successors: [] };
-    }
-    // For "pending" or "failed" steps, fall through to re-execute
+    // Step already exists and is waiting for async completion (e.g., agent-task).
+    // Don't create a duplicate — just report as waiting.
+    return { outcome: "waiting", successors: [] };
   }
-
-  // 2. Create step
-  // Redact resolved secret values from the persisted input so credentials
-  // stored in `ctx.input` (resolved via `secret.*` or sensitive `${ENV}`
-  // references) don't leak through `get-workflow-run` or any other reader of
-  // the `workflow_run_steps` table. The live `ctx` is untouched — executors
-  // still see real values.
-  const latestForeachStep =
-    node.type === "foreach" ? await getLatestStepForNode(runId, node.id) : undefined;
-  const reusableForeachStep =
-    latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
-      ? latestForeachStep
-      : undefined;
-  const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
-  if (!reusableForeachStep) {
-    await createWorkflowRunStep({
-      id: stepId,
-      runId,
-      nodeId: node.id,
-      nodeType: node.type,
-      input: redactSecretsForStorage(ctx, secretKeys),
-    });
-
-    // Set idempotency key
-    await updateWorkflowRunStep(stepId, { idempotencyKey });
-  }
+  const existingStep = dedup.existingStep;
+  const stepId = dedup.stepId;
 
   // 3. Get executor
   const executor = registry.get(node.type);

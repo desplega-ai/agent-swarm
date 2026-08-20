@@ -214,9 +214,14 @@ function flushIntervalMs(): number {
 /** Start the periodic flush (2s tick). Idempotent. */
 export function startAuditWriter(intervalMs = flushIntervalMs()): void {
   if (flushTimer) return;
-  flushTimer = setInterval(() => {
-    void flushAuditBuffer();
-  }, intervalMs);
+  // Context-free like the threshold flush above: today this only starts from
+  // boot-path module scope, but a future caller inside a transaction must not
+  // hand its context to a long-lived timer.
+  flushTimer = scheduleContextFree(() =>
+    setInterval(() => {
+      void flushAuditBuffer();
+    }, intervalMs),
+  );
   if (typeof flushTimer?.unref === "function") flushTimer.unref();
 }
 
@@ -261,9 +266,12 @@ export async function startAuditGc(intervalMs = AUDIT_GC_INTERVAL_MS): Promise<v
     console.log(`[rbac-audit] Initial retention purge removed ${purged} audit row(s)`);
   }
 
-  auditGcTimer = setInterval(() => {
-    void runAuditGcTick();
-  }, intervalMs);
+  // Context-free for the same reason as startAuditWriter.
+  auditGcTimer = scheduleContextFree(() =>
+    setInterval(() => {
+      void runAuditGcTick();
+    }, intervalMs),
+  );
   if (typeof auditGcTimer?.unref === "function") auditGcTimer.unref();
 }
 

@@ -258,21 +258,26 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (result) {
             updatedTask = result;
 
-            ensure({
-              id: "completed",
-              flow: "task",
-              runId: taskId,
-              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
-              data: {
-                taskId,
-                agentId: existingTask.agentId,
-                previousStatus: existingTask.status,
-                hasOutput: !!output,
-              },
-              validator: (data) => data.previousStatus === "in_progress",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+            // afterCommit: the transaction can still roll back (e.g. a later
+            // capacity update throws) — business-use must not be told the
+            // task completed for a write that never landed.
+            getDbClient().afterCommit(() => {
+              ensure({
+                id: "completed",
+                flow: "task",
+                runId: taskId,
+                depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
+                data: {
+                  taskId,
+                  agentId: existingTask.agentId,
+                  previousStatus: existingTask.status,
+                  hasOutput: !!output,
+                },
+                validator: (data) => data.previousStatus === "in_progress",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+              });
             });
 
             if (existingTask.agentId) {
@@ -285,21 +290,25 @@ export const registerStoreProgressTool = (server: McpServer) => {
           if (result) {
             updatedTask = result;
 
-            ensure({
-              id: "failed",
-              flow: "task",
-              runId: taskId,
-              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
-              data: {
-                taskId,
-                agentId: existingTask.agentId,
-                previousStatus: existingTask.status,
-                failureReason: failureReason ?? "Unknown failure",
-              },
-              validator: (data) => data.previousStatus === "in_progress",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+            // afterCommit: mirrors the "completed" branch above — dropped if
+            // this transaction rolls back.
+            getDbClient().afterCommit(() => {
+              ensure({
+                id: "failed",
+                flow: "task",
+                runId: taskId,
+                depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
+                data: {
+                  taskId,
+                  agentId: existingTask.agentId,
+                  previousStatus: existingTask.status,
+                  failureReason: failureReason ?? "Unknown failure",
+                },
+                validator: (data) => data.previousStatus === "in_progress",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+              });
             });
 
             if (existingTask.agentId) {

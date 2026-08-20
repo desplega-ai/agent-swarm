@@ -46,6 +46,17 @@ export function getCurrentRequestAuth(): HttpRequestAuth | null {
   return authStorage.getStore()?.auth ?? null;
 }
 
+/**
+ * Run `fn` outside any request-auth frame (AsyncLocalStorage.exit). Use this
+ * around code that creates long-lived resources during a request — integration
+ * clients, sockets, timers. Async resources created inside a request's frame
+ * capture that request's slot for their whole lifetime, so their later DB
+ * writes would be attributed to whichever user happened to trigger them.
+ */
+export function runWithoutRequestAuth<T>(fn: () => T): T {
+  return authStorage.exit(fn);
+}
+
 export function getCurrentRequestUserId(): string | undefined {
   const auth = getCurrentRequestAuth();
   return auth?.kind === "user" ? auth.userId : undefined;

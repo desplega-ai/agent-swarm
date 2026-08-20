@@ -1022,6 +1022,13 @@ function withModelLocks<T>(
  * The snapshot and writeDefinition callbacks run while both lock levels are
  * held; they must not call withMutationLock or purgeAppRows for the same
  * app/model, which would self-deadlock.
+ *
+ * The callbacks also run inside an open DbClient transaction, which holds the
+ * process-global write lock. They may only do DB work through the seam
+ * (which routes into this transaction). Any foreign await — fetch, spawn, a
+ * timer, another lock — stalls every DB operation in the process for its
+ * duration, and one that itself needs the DB lock hangs the process
+ * permanently. Keep them pure-DB.
  */
 export async function migrateAppSchema<T>(input: {
   appId: string;

@@ -4118,7 +4118,10 @@ export async function moveAssetKey(input: {
   changedBy?: string;
 }): Promise<boolean> {
   const key = normalizeAssetKey(input.key);
-  const audit = auditAssetKeys(getDb());
+  // auditAssetKeys stays sync (shared with the boot audit); run it inside a
+  // client transaction so this request-path read cannot observe another
+  // request's uncommitted writes on the shared connection.
+  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()));
   if (!audit.ok) {
     throw new Error(
       "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
@@ -6462,29 +6465,45 @@ export async function createSessionLogs(logs: {
   cli: string;
   lines: string[];
 }): Promise<void> {
-  await getDbClient().transaction(async (tx) => {
-    for (let i = 0; i < logs.lines.length; i++) {
+  // Bounded batches, one short transaction each (reference shape:
+  // src/be/boot-scrub-logs.ts): worker log batches have unbounded line
+  // counts, and a single transaction across thousands of scrub+INSERT
+  // iterations would hold the global write lock — and the event loop — for
+  // the whole sweep. The regex scrub runs outside the transaction so only
+  // the inserts hold the lock.
+  const BATCH_SIZE = 200;
+  for (let start = 0; start < logs.lines.length; start += BATCH_SIZE) {
+    // Yield to the event loop between batches.
+    if (start > 0) await new Promise<void>((r) => setTimeout(r, 5));
+    const batch: { content: string; lineNumber: number }[] = [];
+    const end = Math.min(start + BATCH_SIZE, logs.lines.length);
+    for (let i = start; i < end; i++) {
       const line = logs.lines[i];
       if (line === undefined) continue;
-      await tx.run(
-        `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-        [
-          crypto.randomUUID(),
-          logs.taskId ?? null,
-          logs.sessionId,
-          logs.iteration,
-          logs.cli,
-          // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
-          // content that is already scrubbed at the adapter emit site. We scrub
-          // again here so any future write path that bypasses the adapter still
-          // lands clean text in the persistent session_logs table.
-          scrubSecrets(line),
-          i,
-        ],
-      );
+      // Defense-in-depth: callers (runner.ts → POST /api/session-logs) send
+      // content that is already scrubbed at the adapter emit site. We scrub
+      // again here so any future write path that bypasses the adapter still
+      // lands clean text in the persistent session_logs table.
+      batch.push({ content: scrubSecrets(line), lineNumber: i });
     }
-  });
+    await getDbClient().transaction(async (tx) => {
+      for (const { content, lineNumber } of batch) {
+        await tx.run(
+          `INSERT INTO session_logs (id, taskId, sessionId, iteration, cli, content, lineNumber, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+          [
+            crypto.randomUUID(),
+            logs.taskId ?? null,
+            logs.sessionId,
+            logs.iteration,
+            logs.cli,
+            content,
+            lineNumber,
+          ],
+        );
+      }
+    });
+  }
 }
 
 export async function getSessionLogsByTaskId(
@@ -9608,11 +9627,12 @@ export async function createWorkflowRunStep(data: {
   nodeId: string;
   nodeType: string;
   input?: unknown;
+  idempotencyKey?: string;
 }): Promise<WorkflowRunStep> {
   const now = new Date().toISOString();
   const row = await getDbClient().get<WorkflowRunStepRow>(
-    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input)
-       VALUES (?, ?, ?, ?, 'running', ?, ?) RETURNING *`,
+    `INSERT INTO workflow_run_steps (id, runId, nodeId, nodeType, status, startedAt, input, idempotencyKey)
+       VALUES (?, ?, ?, ?, 'running', ?, ?, ?) RETURNING *`,
     [
       data.id,
       data.runId,
@@ -9620,6 +9640,7 @@ export async function createWorkflowRunStep(data: {
       data.nodeType,
       now,
       data.input ? JSON.stringify(data.input) : null,
+      data.idempotencyKey ?? null,
     ],
   );
   if (!row) throw new Error("Failed to create workflow run step");
@@ -12018,46 +12039,17 @@ export async function getSkillFile(skillId: string, path: string): Promise<Skill
   return row ? rowToSkillFile(row) : null;
 }
 
-/**
- * Single-file upsert. Duplicates the write `upsertSkillFileUnchecked` does
- * rather than calling it, because that helper is shared with `upsertSkillFiles`'
- * bulk transaction.
- */
+/** Single-file upsert. */
 export async function upsertSkillFile(skillId: string, input: SkillFileInput): Promise<SkillFile> {
   const payload = normalizeSkillFileInput(input);
   await assertSkillFileLimits(skillId, [payload], false);
-
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
-  const row = await getDbClient().get<SkillFileRow>(
-    `INSERT INTO skill_files (
-        id, skillId, path, content, mimeType, isBinary, size, createdAt, lastUpdatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(skillId, path) DO UPDATE SET
-        content = excluded.content,
-        mimeType = excluded.mimeType,
-        isBinary = excluded.isBinary,
-        size = excluded.size,
-        lastUpdatedAt = excluded.lastUpdatedAt
-      RETURNING *`,
-    [
-      id,
-      skillId,
-      payload.path,
-      payload.content,
-      payload.mimeType,
-      payload.isBinary ? 1 : 0,
-      payload.size,
-      now,
-      now,
-    ],
+  return await upsertSkillFileUnchecked(
+    skillId,
+    payload,
+    crypto.randomUUID(),
+    new Date().toISOString(),
+    true,
   );
-  if (!row) throw new Error("Failed to upsert skill file");
-  await getDbClient().run(
-    "UPDATE skills SET version = version + 1, lastUpdatedAt = ? WHERE id = ?",
-    [now, skillId],
-  );
-  return rowToSkillFile(row);
 }
 
 async function upsertSkillFileUnchecked(
@@ -14633,6 +14625,37 @@ export async function upsertKv(input: {
   );
   if (!row) throw new Error("Failed to upsert kv entry");
   return decodeKvRow(row);
+}
+
+/**
+ * Insert a KV entry only when the key is absent or expired (mirrors `getKv`'s
+ * lazy-expiry semantics). Returns true when this caller created or refreshed
+ * the entry, false when a live entry already existed. A single conditional
+ * write, so it is safe as a concurrency claim (e.g. webhook dedup) where a
+ * get-then-upsert pair would let two concurrent callers both win.
+ */
+export async function claimKv(input: {
+  namespace: string;
+  key: string;
+  value: unknown;
+  valueType: KvValueType;
+  expiresAt?: number | null;
+}): Promise<boolean> {
+  const encoded = encodeKvValue(input.value, input.valueType);
+  const expiresAt = input.expiresAt ?? null;
+  const now = Date.now();
+  const result = await getDbClient().run(
+    `INSERT INTO kv_entries (namespace, key, value, value_type, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(namespace, key) DO UPDATE SET
+         value = excluded.value,
+         value_type = excluded.value_type,
+         expires_at = excluded.expires_at,
+         updated_at = excluded.updated_at
+       WHERE kv_entries.expires_at IS NOT NULL AND kv_entries.expires_at <= ?`,
+    [input.namespace, input.key, encoded, input.valueType, expiresAt, now, now, now],
+  );
+  return result.changes > 0;
 }
 
 /**

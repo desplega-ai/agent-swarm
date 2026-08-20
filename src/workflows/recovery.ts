@@ -9,16 +9,17 @@ import {
   getWorkflowRunStep,
   resolveApprovalRequest,
   updateWorkflowRun,
-  updateWorkflowRunStep,
 } from "../be/db";
-import { checkpointStep } from "./checkpoint";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
-import { completeTaskStepAndResolveSuccessors } from "./task-step-routing";
+import {
+  checkpointPortStepAndResolveSuccessors,
+  completeTaskStepAndResolveSuccessors,
+  failStepAndRunIfWaiting,
+} from "./task-step-routing";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -119,19 +120,13 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
       const taskCompleted = stuck.taskStatus === "completed";
       if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
+        // Claimed: this sweep runs on every heartbeat, so the live task.failed
+        // bus event may already have routed this step — a blind write here
+        // would kill a run that is already advancing.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
-        const now = new Date().toISOString();
-        await updateWorkflowRunStep(stuck.stepId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
-        await updateWorkflowRun(stuck.runId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
+        const claimed = await failStepAndRunIfWaiting(stuck.stepId, stuck.runId, reason);
+        if (!claimed) continue;
         recovered++;
         continue;
       }
@@ -233,25 +228,28 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
         responses,
       };
 
-      await checkpointStep(
+      // Use port-based routing to determine correct successors. Claimed: the
+      // live approval.resolved bus event may have routed this step between
+      // the sweep snapshot and here — routing it twice would create duplicate
+      // successor steps and duplicate spawned tasks.
+      const routing = await checkpointPortStepAndResolveSuccessors(
+        workflow.definition,
         stuck.runId,
         stuck.stepId,
         stuck.nodeId,
-        { output: stepOutput, nextPort },
+        stepOutput,
+        nextPort,
         ctx,
       );
-      await updateWorkflowRun(stuck.runId, { status: "running" });
+      if (!routing.claimed) continue;
 
-      // Use port-based routing to determine correct successors
-      const successors = getSuccessors(workflow.definition, stuck.nodeId, nextPort);
-
-      if (successors.length > 0) {
+      if (routing.successors.length > 0) {
         const secretKeys = getSecretInputKeys(workflow.input);
         await walkGraph(
           workflow.definition,
           stuck.runId,
           ctx,
-          successors,
+          routing.successors,
           registry,
           workflow.id,
           secretKeys,
