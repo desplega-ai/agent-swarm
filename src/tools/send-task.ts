@@ -294,78 +294,111 @@ export async function sendTaskHandler(
     }
   }
 
-  const existingTrackerWork = await findExistingLinearTrackerContextWork(
-    effectiveParentTask?.contextKey,
-  );
-  if (existingTrackerWork) {
-    const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
-    console.log(`[send-task] ${msg}`);
-    return toolOk(msg, {
-      data: { yourAgentId: creatorAgentId, task: existingTrackerWork.task },
-    });
-  }
-
-  // Dedup guard: check for similar recent tasks
-  if (!allowDuplicate && creatorAgentId) {
-    const duplicate = await findDuplicateTask({
-      taskDescription: task,
-      creatorAgentId,
-      targetAgentId: effectiveAgentId ?? undefined,
-    });
-    if (duplicate) {
-      const msg = `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`;
-      return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
+  // The three dedup guards are pure reads, so they run twice: once here as a
+  // fast path (keeping this tool's existing early-exit responses), and once
+  // inside the write transaction below, where the check is authoritative.
+  // Every read in this handler releases the FIFO lock, so two concurrent
+  // send-task calls with the same creator and text otherwise both pass the
+  // guards and both create a task (no UNIQUE index arbitrates them).
+  const evaluateDedupGuards = async (): Promise<{
+    ok: boolean;
+    message: string;
+    task?: AgentTask;
+  } | null> => {
+    const existingTrackerWork = await findExistingLinearTrackerContextWork(
+      effectiveParentTask?.contextKey,
+    );
+    if (existingTrackerWork) {
+      const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
+      console.log(`[send-task] ${msg}`);
+      return { ok: true, message: msg, task: existingTrackerWork.task };
     }
-  }
 
-  // Guard: prevent re-delegation from follow-up tasks
-  // When the source task is a "follow-up" (worker completed/failed notification),
-  // check if there are completed tasks in the same Slack thread recently.
-  // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
-  //
-  // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
-  // status='cancelled', or status='failed' with failureReason containing
-  // "cancelled"), bypass the guard. A cancellation means the work was
-  // interrupted — re-dispatch is the correct response, not a deduped no-op.
-  // Without this bypass, a cancelled worker permanently jams the thread
-  // against re-delegation when an earlier completed sibling exists.
-  //
-  // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
-  // supersede) is intentionally NOT in this guard — a resume IS the legitimate
-  // re-dispatch and bypassing the check is correct. Do not add "resume" here.
-  if (sourceTaskId) {
-    const sourceTask = await getTaskById(sourceTaskId);
-    if (
-      sourceTask?.taskType === "follow-up" &&
-      sourceTask.slackThreadTs &&
-      sourceTask.slackChannelId
-    ) {
-      const recentCompleted = await findCompletedTaskInThread(
-        sourceTask.slackChannelId,
-        sourceTask.slackThreadTs,
-        2880, // 48 hours in minutes
-      );
-      if (recentCompleted) {
-        const recentCancelled = await findRecentCancelledTaskInThread(
-          sourceTask.slackChannelId,
-          sourceTask.slackThreadTs,
-          2880,
-        );
-        const cancelledMoreRecent =
-          recentCancelled &&
-          new Date(recentCancelled.lastUpdatedAt).getTime() >
-            new Date(recentCompleted.lastUpdatedAt).getTime();
-        if (!cancelledMoreRecent) {
-          const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
-          return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
-        }
-        // else: fall through — the cancellation is more recent than the
-        // completion, so re-delegation is legitimate.
+    // Dedup guard: check for similar recent tasks
+    if (!allowDuplicate && creatorAgentId) {
+      const duplicate = await findDuplicateTask({
+        taskDescription: task,
+        creatorAgentId,
+        targetAgentId: effectiveAgentId ?? undefined,
+      });
+      if (duplicate) {
+        return {
+          ok: false,
+          message: `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`,
+        };
       }
     }
+
+    // Guard: prevent re-delegation from follow-up tasks
+    // When the source task is a "follow-up" (worker completed/failed notification),
+    // check if there are completed tasks in the same Slack thread recently.
+    // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
+    //
+    // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
+    // status='cancelled', or status='failed' with failureReason containing
+    // "cancelled"), bypass the guard. A cancellation means the work was
+    // interrupted — re-dispatch is the correct response, not a deduped no-op.
+    // Without this bypass, a cancelled worker permanently jams the thread
+    // against re-delegation when an earlier completed sibling exists.
+    //
+    // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
+    // supersede) is intentionally NOT in this guard — a resume IS the legitimate
+    // re-dispatch and bypassing the check is correct. Do not add "resume" here.
+    if (sourceTaskId) {
+      const sourceTask = await getTaskById(sourceTaskId);
+      if (
+        sourceTask?.taskType === "follow-up" &&
+        sourceTask.slackThreadTs &&
+        sourceTask.slackChannelId
+      ) {
+        const recentCompleted = await findCompletedTaskInThread(
+          sourceTask.slackChannelId,
+          sourceTask.slackThreadTs,
+          2880, // 48 hours in minutes
+        );
+        if (recentCompleted) {
+          const recentCancelled = await findRecentCancelledTaskInThread(
+            sourceTask.slackChannelId,
+            sourceTask.slackThreadTs,
+            2880,
+          );
+          const cancelledMoreRecent =
+            recentCancelled &&
+            new Date(recentCancelled.lastUpdatedAt).getTime() >
+              new Date(recentCompleted.lastUpdatedAt).getTime();
+          if (!cancelledMoreRecent) {
+            return {
+              ok: false,
+              message: `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`,
+            };
+          }
+          // else: fall through — the cancellation is more recent than the
+          // completion, so re-delegation is legitimate.
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const guard = await evaluateDedupGuards();
+  if (guard) {
+    const guardData = {
+      yourAgentId: creatorAgentId,
+      ...(guard.task ? { task: guard.task } : {}),
+    };
+    return guard.ok
+      ? toolOk(guard.message, { data: guardData })
+      : toolErr(guard.message, { data: guardData });
   }
 
   const result = await getDbClient().transaction(async () => {
+    // Authoritative re-check: the reads above are separated from the INSERT by
+    // the whole handler, so only a guard inside this transaction can see a
+    // concurrent send-task's committed task.
+    const raced = await evaluateDedupGuards();
+    if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
+
     const finalTags = tags;
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool

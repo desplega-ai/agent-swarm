@@ -32,14 +32,10 @@ import {
   WorkflowVersionSchema,
 } from "../types";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
-import {
-  applyDefinitionPatch,
-  definitionNodeIds,
-  generateEdges,
-  validateDefinition,
-} from "../workflows/definition";
+import { definitionNodeIds, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
+import { patchWorkflowDefinition } from "../workflows/patch-definition";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
 import { snapshotWorkflow } from "../workflows/version";
@@ -603,47 +599,32 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
 
-    const existing = await getWorkflow(id);
-    if (!existing) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-
-    // Convert single-node patch to bulk patch format
-    const patchResult = applyDefinitionPatch(existing.definition, {
-      update: [{ nodeId, node: parsed.body }],
-    });
-    if (patchResult.errors.length > 0) {
-      jsonError(res, patchResult.errors.join("; "), 400);
-      return true;
-    }
-
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
-      legacyNodeIds: definitionNodeIds(existing.definition),
-    });
-    if (!validation.valid) {
-      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
-      return true;
-    }
-
-    try {
-      await snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update
-    }
-
     const updatedBy0 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
-    const workflow = await updateWorkflow(id, {
-      definition: patchResult.definition,
-      updatedBy: updatedBy0,
+    // Convert single-node patch to bulk patch format
+    const result = await patchWorkflowDefinition({
+      id,
+      patch: { update: [{ nodeId, node: parsed.body }] },
+      registry: getExecutorRegistry(),
+      snapshotAgentId: myAgentId,
+      snapshotOptional: true,
+      updates: { updatedBy: updatedBy0 },
     });
-    if (!workflow) {
-      res.writeHead(404);
-      res.end();
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        res.writeHead(404);
+        res.end();
+        return true;
+      }
+      jsonError(
+        res,
+        result.reason === "patch"
+          ? result.errors.join("; ")
+          : `Invalid definition: ${result.errors.join("; ")}`,
+        400,
+      );
       return true;
     }
-    patchWorkflowNodeRoute.respond(res, 200, workflow);
+    patchWorkflowNodeRoute.respond(res, 200, result.workflow);
     return true;
   }
 
@@ -652,37 +633,8 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id } = parsed.params;
 
-    const existing = await getWorkflow(id);
-    if (!existing) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-
-    const patchResult = applyDefinitionPatch(existing.definition, parsed.body);
-    if (patchResult.errors.length > 0) {
-      jsonError(res, patchResult.errors.join("; "), 400);
-      return true;
-    }
-
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
-      legacyNodeIds: definitionNodeIds(existing.definition),
-    });
-    if (!validation.valid) {
-      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
-      return true;
-    }
-
-    try {
-      await snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update
-    }
-
     const updatedBy1 = await resolveHttpAuditUserId(req, myAgentId);
-    const updateArgs: Parameters<typeof updateWorkflow>[1] = {
-      definition: patchResult.definition,
-    };
+    const updateArgs: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
     if (parsed.body.key !== undefined) {
       try {
         updateArgs.key = await authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
@@ -700,13 +652,31 @@ export async function handleWorkflows(
     if (updatedBy1 !== null) {
       updateArgs.updatedBy = updatedBy1;
     }
-    const workflow = await updateWorkflow(id, updateArgs);
-    if (!workflow) {
-      res.writeHead(404);
-      res.end();
+
+    const result = await patchWorkflowDefinition({
+      id,
+      patch: parsed.body,
+      registry: getExecutorRegistry(),
+      snapshotAgentId: myAgentId,
+      snapshotOptional: true,
+      updates: updateArgs,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        res.writeHead(404);
+        res.end();
+        return true;
+      }
+      jsonError(
+        res,
+        result.reason === "patch"
+          ? result.errors.join("; ")
+          : `Invalid definition: ${result.errors.join("; ")}`,
+        400,
+      );
       return true;
     }
-    patchWorkflowRoute.respond(res, 200, workflow);
+    patchWorkflowRoute.respond(res, 200, result.workflow);
     return true;
   }
 

@@ -4,7 +4,7 @@ import { type AppValidationIssue, collectScriptReferences } from "../apps/defini
 import { getScriptAppTypes } from "../apps/script-types";
 import { listAppRecords } from "../apps/store";
 import { resolveHttpAuditUserId } from "../be/audit-user";
-import { getAgentById, recordInlineScriptRun, upsertKv } from "../be/db";
+import { getAgentById, getDbClient, recordInlineScriptRun, upsertKv } from "../be/db";
 import { createEvent } from "../be/events";
 import {
   getScriptApiConnectionDescriptors,
@@ -1012,28 +1012,35 @@ export async function handleScripts(
       scope: parsed.query.scope,
       scopeId: parsed.query.scope === "agent" ? agent.id : null,
     };
-    const existing = await getScript(identity);
-    if (existing) {
-      // An app that wires this script as a source or a script action would be
-      // left with a dangling reference: its definition stops parsing and every
-      // write 409s "needs repair". Refuse the delete instead. UPDATES stay
-      // allowed — a contract break there is a pass error with zero row churn.
-      const references = await appScriptReferenceIssues(existing.id);
-      if (references.length > 0) {
-        json(
-          res,
-          {
-            error: "script is referenced by an app definition",
-            issues: references,
-          },
-          409,
-        );
-        return true;
+    // The reference check and the delete run in one transaction: an app
+    // upsert that validated against this still-present script and committed a
+    // definition referencing it would otherwise slip between a check outside
+    // the transaction and the DELETE, leaving the app with a dangling
+    // scriptId that only an operator can edit out.
+    const outcome = await getDbClient().transaction(async () => {
+      const existing = await getScript(identity);
+      if (existing) {
+        // An app that wires this script as a source or a script action would be
+        // left with a dangling reference: its definition stops parsing and every
+        // write 409s "needs repair". Refuse the delete instead. UPDATES stay
+        // allowed — a contract break there is a pass error with zero row churn.
+        const references = await appScriptReferenceIssues(existing.id);
+        if (references.length > 0) return { blocked: references };
       }
+      return { deleted: await deleteScript(identity) };
+    });
+    if ("blocked" in outcome) {
+      json(
+        res,
+        {
+          error: "script is referenced by an app definition",
+          issues: outcome.blocked,
+        },
+        409,
+      );
+      return true;
     }
-
-    const deleted = await deleteScript(identity);
-    deleteRoute.respond(res, 200, { deleted });
+    deleteRoute.respond(res, 200, { deleted: outcome.deleted });
     return true;
   }
 

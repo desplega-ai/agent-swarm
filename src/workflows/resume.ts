@@ -15,9 +15,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
-import { checkpointStep } from "./checkpoint";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
@@ -502,8 +500,20 @@ export async function resumeWaitState(
     payload: cappedPayload === undefined ? undefined : cappedPayload,
   };
 
-  await checkpointStep(run.id, step.id, step.nodeId, { output: stepOutput, nextPort }, ctx);
-  await updateWorkflowRun(run.id, { status: "running" });
+  // The `waiting` checks above ran before getWorkflow's await. The wait-state
+  // claim only arbitrates two resumeWaitState callers, not a user cancel
+  // landing in that window (cancelWorkflowRun never touches wait_states), so
+  // the authoritative claim is the in-transaction re-read of the step.
+  const routing = await checkpointPortStepAndResolveSuccessors(
+    workflow.definition,
+    run.id,
+    step.id,
+    step.nodeId,
+    stepOutput,
+    nextPort,
+    ctx,
+  );
+  if (!routing.claimed) return;
 
   // 5. Bus listener bookkeeping: this wait is no longer pending, so drop it
   // from the per-event subscription set. If the set empties out, unwire the
@@ -512,7 +522,7 @@ export async function resumeWaitState(
     pruneWaitFromBus(waitRow.id, waitRow.eventName);
   }
 
-  const successors = getSuccessors(workflow.definition, step.nodeId, nextPort);
+  const successors = routing.successors;
   if (successors.length > 0) {
     const secretKeys = getSecretInputKeys(workflow.input);
     await walkGraph(

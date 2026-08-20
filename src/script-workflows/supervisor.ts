@@ -1,4 +1,9 @@
-import { getRunningScriptRuns, getScriptRun, updateScriptRun } from "../be/db";
+import {
+  getRunningScriptRuns,
+  getScriptRun,
+  updateScriptRun,
+  updateScriptRunIfRunning,
+} from "../be/db";
 import type { ScriptRun } from "../types";
 import { getApiKey } from "../utils/api-key";
 import {
@@ -56,7 +61,9 @@ export async function startScriptRunProcess(
             `[script-workflows] run ${run.id} subprocess exited ${exitCode}: ${stderr.trim() || "(no stderr)"}`,
           );
         }
-        await updateScriptRun(run.id, {
+        // Guarded write: the read above is followed by an await, so the
+        // harness's own final status POST (or a pause/cancel) can land first.
+        await updateScriptRunIfRunning(run.id, {
           status: exitCode === 0 ? "completed" : "failed",
           pid: null,
           finishedAt: new Date().toISOString(),

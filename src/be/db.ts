@@ -4896,16 +4896,6 @@ export async function createTaskExtended(
     }
   }
 
-  const existingTrackerWork = options?.bypassTrackerContextDedup
-    ? null
-    : await findExistingLinearTrackerContextWork(options?.contextKey);
-  if (existingTrackerWork) {
-    console.log(
-      `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,
-    );
-    return existingTrackerWork.task;
-  }
-
   // Auto-inherit Slack metadata from the creator's source task (deterministic via sourceTaskId)
   // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
   // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
@@ -4985,8 +4975,24 @@ export async function createTaskExtended(
 
   const auditUserId = getCurrentRequestUserId() ?? null;
   const assetKey = normalizeAssetKey(options?.key ?? defaultAssetKey("task", id));
-  const row = await getDbClient().get<AgentTaskRow>(
-    `INSERT INTO agent_tasks (
+  // The Linear tracker dedup guard and the INSERT commit as one unit. Two
+  // distinct webhook deliveries for the same issue are dispatched
+  // fire-and-forget (src/linear/webhook.ts), nothing serializes them, and
+  // `agent_tasks` has no UNIQUE index on contextKey, so a guard read separated
+  // from the INSERT by any await lets both deliveries create a task for one
+  // issue. The FIFO lock serializes whole transactions, so the loser's re-read
+  // observes the winner's committed row. Pre-checks at the call sites
+  // (src/tools/send-task.ts, src/linear/sync.ts) stay a fast path only.
+  const claim = await getDbClient().transaction<
+    { existing: ExistingTrackerContextWork } | { row: AgentTaskRow }
+  >(async () => {
+    const existingTrackerWork = options?.bypassTrackerContextDedup
+      ? null
+      : await findExistingLinearTrackerContextWork(options?.contextKey);
+    if (existingTrackerWork) return { existing: existingTrackerWork };
+
+    const inserted = await getDbClient().get<AgentTaskRow>(
+      `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
@@ -4996,61 +5002,70 @@ export async function createTaskExtended(
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, requestedByUserIdInherited, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    [
-      id,
-      assetKey,
-      options?.agentId ?? null,
-      options?.creatorAgentId ?? null,
-      task,
-      status,
-      options?.source ?? "mcp",
-      options?.taskType ?? null,
-      JSON.stringify(options?.tags ?? []),
-      options?.priority ?? 50,
-      JSON.stringify(options?.dependsOn ?? []),
-      options?.offeredTo ?? null,
-      options?.offeredTo ? now : null,
-      options?.slackChannelId ?? null,
-      options?.slackThreadTs ?? null,
-      options?.slackTriggerMessageTs ?? null,
-      options?.slackUserId ?? null,
-      options?.vcsProvider ?? null,
-      options?.vcsRepo ?? null,
-      options?.vcsEventType ?? null,
-      options?.vcsNumber ?? null,
-      options?.vcsCommentId ?? null,
-      options?.vcsAuthor ?? null,
-      options?.vcsUrl ?? null,
-      options?.vcsInstallationId ?? null,
-      options?.vcsNodeId ?? null,
-      options?.agentmailInboxId ?? null,
-      options?.agentmailMessageId ?? null,
-      options?.agentmailThreadId ?? null,
-      options?.mentionMessageId ?? null,
-      options?.mentionChannelId ?? null,
-      options?.dir ?? null,
-      options?.parentTaskId ?? null,
-      options?.model ?? null,
-      options?.modelTier ?? null,
-      options?.effort ?? null,
-      options?.scheduleId ?? null,
-      options?.workflowRunId ?? null,
-      options?.workflowRunStepId ?? null,
-      options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
-      options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
-      options?.requestedByUserId ?? null,
-      requestedByUserIdInherited ? 1 : 0,
-      options?.contextKey ?? null,
-      options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
-      pkg.version,
-      now,
-      now,
-      auditUserId,
-      auditUserId,
-    ],
-  );
+      [
+        id,
+        assetKey,
+        options?.agentId ?? null,
+        options?.creatorAgentId ?? null,
+        task,
+        status,
+        options?.source ?? "mcp",
+        options?.taskType ?? null,
+        JSON.stringify(options?.tags ?? []),
+        options?.priority ?? 50,
+        JSON.stringify(options?.dependsOn ?? []),
+        options?.offeredTo ?? null,
+        options?.offeredTo ? now : null,
+        options?.slackChannelId ?? null,
+        options?.slackThreadTs ?? null,
+        options?.slackTriggerMessageTs ?? null,
+        options?.slackUserId ?? null,
+        options?.vcsProvider ?? null,
+        options?.vcsRepo ?? null,
+        options?.vcsEventType ?? null,
+        options?.vcsNumber ?? null,
+        options?.vcsCommentId ?? null,
+        options?.vcsAuthor ?? null,
+        options?.vcsUrl ?? null,
+        options?.vcsInstallationId ?? null,
+        options?.vcsNodeId ?? null,
+        options?.agentmailInboxId ?? null,
+        options?.agentmailMessageId ?? null,
+        options?.agentmailThreadId ?? null,
+        options?.mentionMessageId ?? null,
+        options?.mentionChannelId ?? null,
+        options?.dir ?? null,
+        options?.parentTaskId ?? null,
+        options?.model ?? null,
+        options?.modelTier ?? null,
+        options?.effort ?? null,
+        options?.scheduleId ?? null,
+        options?.workflowRunId ?? null,
+        options?.workflowRunStepId ?? null,
+        options?.outputSchema ? JSON.stringify(options.outputSchema) : null,
+        options?.followUpConfig ? JSON.stringify(options.followUpConfig) : null,
+        options?.requestedByUserId ?? null,
+        requestedByUserIdInherited ? 1 : 0,
+        options?.contextKey ?? null,
+        options?.routingAffinity ? JSON.stringify(options.routingAffinity) : null,
+        pkg.version,
+        now,
+        now,
+        auditUserId,
+        auditUserId,
+      ],
+    );
+    if (!inserted) throw new Error("Failed to create task");
+    return { row: inserted };
+  });
 
-  if (!row) throw new Error("Failed to create task");
+  if ("existing" in claim) {
+    console.log(
+      `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${claim.existing.reason} ${claim.existing.task.id.slice(0, 8)} already exists`,
+    );
+    return claim.existing.task;
+  }
+  const row = claim.row;
 
   try {
     await createLogEntry({
@@ -8384,28 +8399,34 @@ export async function upsertSwarmConfig(data: {
 
   // Manual check for existing entry because SQLite's UNIQUE constraint
   // treats NULL != NULL, so ON CONFLICT never fires when scopeId is NULL (global scope).
-  const existing =
-    scopeId === null
-      ? await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-          [data.scope, data.key],
-        )
-      : await getDbClient().get<{ id: string }>(
-          "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-          [data.scope, scopeId, data.key],
-        );
+  //
+  // Lookup and write share one transaction: without it two concurrent saves of
+  // the same global key both read `existing = null` and both INSERT (the
+  // UNIQUE constraint cannot arbitrate a NULL scopeId), leaving a duplicate
+  // pair where env injection reads the last row and every later save updates
+  // the first one, i.e. a permanent silent no-op.
+  const row = await getDbClient().transaction(async () => {
+    const existing =
+      scopeId === null
+        ? await getDbClient().get<{ id: string }>(
+            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+            [data.scope, data.key],
+          )
+        : await getDbClient().get<{ id: string }>(
+            "SELECT id FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+            [data.scope, scopeId, data.key],
+          );
 
-  let row: SwarmConfigRow | null;
-
-  if (existing) {
-    row = await getDbClient().get<SwarmConfigRow>(
-      `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
+    if (existing) {
+      return await getDbClient().get<SwarmConfigRow>(
+        `UPDATE swarm_config SET value = ?, isSecret = ?, envPath = ?, description = ?, encrypted = ?, lastUpdatedAt = ?
          WHERE id = ? RETURNING *`,
-      [storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id],
-    );
-  } else {
+        [storedValue, isSecret, envPath, description, encryptedFlag, now, existing.id],
+      );
+    }
+
     const id = crypto.randomUUID();
-    row = await getDbClient().get<SwarmConfigRow>(
+    return await getDbClient().get<SwarmConfigRow>(
       `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
       [
@@ -8422,7 +8443,7 @@ export async function upsertSwarmConfig(data: {
         encryptedFlag,
       ],
     );
-  }
+  });
 
   if (!row) throw new Error("Failed to upsert swarm config");
 
@@ -11062,44 +11083,54 @@ export async function checkoutPromptTemplate(
 ): Promise<PromptTemplate> {
   const now = new Date().toISOString();
 
-  const existing = await getDbClient().get<PromptTemplateRow>(
-    "SELECT * FROM prompt_templates WHERE id = ?",
-    [id],
-  );
-  if (!existing) throw new Error(`Prompt template ${id} not found`);
+  // One transaction around read, version computation and both writes. A
+  // concurrent upsert (or a second checkout) between the read and the UPDATE
+  // would otherwise reuse the same `existing.version + 1`, leaving two
+  // prompt_template_history rows at one version (no UNIQUE on
+  // (templateId, version)) so a later checkout restores whichever body the
+  // index scan reaches first.
+  const row = await getDbClient().transaction(async () => {
+    const existing = await getDbClient().get<PromptTemplateRow>(
+      "SELECT * FROM prompt_templates WHERE id = ?",
+      [id],
+    );
+    if (!existing) throw new Error(`Prompt template ${id} not found`);
 
-  const historyEntry = await getDbClient().get<PromptTemplateHistoryRow>(
-    "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
-    [id, targetVersion],
-  );
-  if (!historyEntry)
-    throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
+    const historyEntry = await getDbClient().get<PromptTemplateHistoryRow>(
+      "SELECT * FROM prompt_template_history WHERE templateId = ? AND version = ?",
+      [id, targetVersion],
+    );
+    if (!historyEntry)
+      throw new Error(`No history entry at version ${targetVersion} for template ${id}`);
 
-  const newVersion = existing.version + 1;
+    const newVersion = existing.version + 1;
 
-  const row = await getDbClient().get<PromptTemplateRow>(
-    `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
+    const updated = await getDbClient().get<PromptTemplateRow>(
+      `UPDATE prompt_templates SET body = ?, state = ?, version = ?, updatedAt = ?
        WHERE id = ? RETURNING *`,
-    [historyEntry.body, historyEntry.state, newVersion, now, id],
-  );
+      [historyEntry.body, historyEntry.state, newVersion, now, id],
+    );
 
-  if (!row) throw new Error("Failed to checkout prompt template");
+    if (!updated) throw new Error("Failed to checkout prompt template");
 
-  // Create history entry for the checkout
-  await getDbClient().run(
-    `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
+    // Create history entry for the checkout
+    await getDbClient().run(
+      `INSERT INTO prompt_template_history (id, templateId, version, body, state, changedBy, changedAt, changeReason)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      crypto.randomUUID(),
-      id,
-      newVersion,
-      historyEntry.body,
-      historyEntry.state,
-      null,
-      now,
-      `Checked out from version ${targetVersion}`,
-    ],
-  );
+      [
+        crypto.randomUUID(),
+        id,
+        newVersion,
+        historyEntry.body,
+        historyEntry.state,
+        null,
+        now,
+        `Checked out from version ${targetVersion}`,
+      ],
+    );
+
+    return updated;
+  });
 
   return rowToPromptTemplate(row);
 }
@@ -15109,18 +15140,20 @@ export async function countActiveScriptRuns(): Promise<number> {
   return row?.count ?? 0;
 }
 
-export async function updateScriptRun(
-  id: string,
-  patch: Partial<{
-    status: ScriptRunStatus;
-    pid: number | null;
-    finishedAt: string | null;
-    output: unknown;
-    error: string | null;
-    lastHeartbeatAt: string | null;
-    updatedBy: string | null;
-  }>,
-): Promise<void> {
+export type ScriptRunPatch = Partial<{
+  status: ScriptRunStatus;
+  pid: number | null;
+  finishedAt: string | null;
+  output: unknown;
+  error: string | null;
+  lastHeartbeatAt: string | null;
+  updatedBy: string | null;
+}>;
+
+function scriptRunUpdateSets(patch: ScriptRunPatch): {
+  sets: string[];
+  vals: Array<string | number | null>;
+} {
   const sets: string[] = [];
   const vals: Array<string | number | null> = [];
   if (patch.status !== undefined) {
@@ -15151,9 +15184,64 @@ export async function updateScriptRun(
     sets.push("updated_by = ?");
     vals.push(patch.updatedBy);
   }
+  return { sets, vals };
+}
+
+export async function updateScriptRun(id: string, patch: ScriptRunPatch): Promise<void> {
+  const { sets, vals } = scriptRunUpdateSets(patch);
   if (sets.length === 0) return;
   vals.push(id);
   await getDbClient().run(`UPDATE script_runs SET ${sets.join(", ")} WHERE id = ?`, vals);
+}
+
+/**
+ * Terminal-guarded variant of `updateScriptRun`: the UPDATE re-checks the
+ * status its caller read, so a run that reached a terminal state in between
+ * is not rewritten. Callers read the run, then await (process termination,
+ * request parsing), so their own guard is advisory only: an operator cancel
+ * and the harness's own final status POST can otherwise both pass it and the
+ * loser overwrites the winner ("completed" stored as "cancelled" or the
+ * reverse). Returns false when nothing was claimed, which callers map to
+ * their already-terminal no-op branch. Heartbeat and pid writes keep using
+ * plain `updateScriptRun`.
+ */
+export async function updateScriptRunIfNotTerminal(
+  id: string,
+  patch: ScriptRunPatch,
+): Promise<boolean> {
+  return await updateScriptRunGuarded(
+    id,
+    patch,
+    "status NOT IN ('completed', 'failed', 'cancelled', 'aborted_limit')",
+  );
+}
+
+/**
+ * Same claim, narrower guard: only a run still `running` is written. The
+ * supervisor's exit handler reads the run and then awaits, so a final status
+ * posted by the harness (or a pause) in that window must win over the
+ * exit-code-derived status.
+ */
+export async function updateScriptRunIfRunning(
+  id: string,
+  patch: ScriptRunPatch,
+): Promise<boolean> {
+  return await updateScriptRunGuarded(id, patch, "status = 'running'");
+}
+
+async function updateScriptRunGuarded(
+  id: string,
+  patch: ScriptRunPatch,
+  predicate: string,
+): Promise<boolean> {
+  const { sets, vals } = scriptRunUpdateSets(patch);
+  if (sets.length === 0) return false;
+  vals.push(id);
+  const result = await getDbClient().run(
+    `UPDATE script_runs SET ${sets.join(", ")} WHERE id = ? AND ${predicate}`,
+    vals,
+  );
+  return result.changes > 0;
 }
 
 export async function getRunningScriptRuns(): Promise<ScriptRun[]> {

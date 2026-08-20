@@ -30,6 +30,7 @@ import {
   listRelationalCredentialBindings,
   listScriptConnections,
   refreshScriptConnection,
+  ScriptConnectionConflictError,
   type ScriptConnectionKind,
   type ScriptConnectionRecord,
   type ScriptCredentialBindingRecord,
@@ -1996,7 +1997,10 @@ export async function handleScriptConnections(
         connection: (await decorateConnections([connection]))[0]!,
       });
     } catch (err) {
-      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+      // A concurrent writer bumped the row's version between our read and the
+      // write: report the conflict instead of a generic 400.
+      const status = err instanceof ScriptConnectionConflictError ? err.statusCode : 400;
+      jsonError(res, err instanceof Error ? err.message : String(err), status);
     }
     return true;
   }

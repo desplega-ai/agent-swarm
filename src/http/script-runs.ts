@@ -17,6 +17,7 @@ import {
   listScriptRunJournalSteps,
   listScriptRuns,
   updateScriptRun,
+  updateScriptRunIfNotTerminal,
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
@@ -482,7 +483,10 @@ export async function handleScriptRuns(
       return true;
     }
     await terminateScriptRunProcess(run.id);
-    await updateScriptRun(run.id, {
+    // Terminal-guarded write: terminateScriptRunProcess awaits, and the run's
+    // own harness can post its final status in that window. A blind UPDATE
+    // would store a genuinely completed run as "cancelled".
+    await updateScriptRunIfNotTerminal(run.id, {
       status: "cancelled",
       pid: null,
       finishedAt: new Date().toISOString(),
@@ -572,7 +576,10 @@ export async function handleScriptRuns(
       res.end();
       return true;
     }
-    await updateScriptRun(parsed.params.runId, {
+    // Terminal-guarded write: the guard above ran before this handler's own
+    // awaits, so an operator DELETE cancelling the run in that window would
+    // otherwise be overwritten by this status.
+    await updateScriptRunIfNotTerminal(parsed.params.runId, {
       status: parsed.body.status,
       pid: null,
       finishedAt: parsed.body.status === "paused" ? null : new Date().toISOString(),

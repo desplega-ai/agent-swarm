@@ -134,10 +134,21 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   if (idsToDelete.length === 0) return 0;
 
   const placeholders = idsToDelete.map(() => "?").join(",");
+  // The candidate SELECT above is separated from this DELETE by four awaited
+  // reference scans, and a run that starts inside that window touches
+  // `updatedAt` before it executes (src/be/scripts/run-saved.ts). Re-checking
+  // the staleness predicate here keeps a script that was just used out of the
+  // delete set instead of removing it mid-run.
   // RETURNING counts scripts only; SQLite's change count includes cascaded rows.
   const deleted = await getDbClient().query<{ id: string }>(
-    `DELETE FROM scripts WHERE id IN (${placeholders}) RETURNING id`,
-    idsToDelete,
+    `DELETE FROM scripts
+     WHERE id IN (${placeholders})
+       AND scope = 'agent'
+       AND isScratch = 1
+       AND name GLOB 'scratch-*'
+       AND updatedAt < ?
+     RETURNING id`,
+    [...idsToDelete, cutoff],
   );
   return deleted.length;
 }

@@ -363,8 +363,15 @@ export async function walkGraph(
   // No more nodes to execute — check if the run should be completed.
   // Stay in current state if any steps are still waiting (async tasks
   // pending) or have pending retries.
-  const run = await getWorkflowRun(runId);
-  if (run && run.status === "running") {
+  //
+  // Read, guard, step snapshot and write share one transaction (same shape as
+  // finalizeOrWait): a cancel committing in between would otherwise be
+  // overwritten from a stale snapshot, resurrecting the run as `completed` or
+  // parking it in `waiting` with no waiting step left to ever finalize it.
+  await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || run.status !== "running") return;
+
     const finalSteps = await getWorkflowRunStepsByRunId(runId);
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
@@ -411,7 +418,7 @@ export async function walkGraph(
         });
       }
     }
-  }
+  });
 }
 
 /**

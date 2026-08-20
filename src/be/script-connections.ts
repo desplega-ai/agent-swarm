@@ -1065,6 +1065,22 @@ export class ConnectionAuthValidationError extends Error {
   }
 }
 
+/**
+ * Raised when an upsert's full-row UPDATE finds the connection at a newer
+ * version than the snapshot it was computed from. Another writer committed in
+ * between, so writing would silently revert their auth / allowedHosts change.
+ * Routes map this to 409; the caller re-reads and retries.
+ */
+export class ScriptConnectionConflictError extends Error {
+  readonly statusCode = 409;
+  constructor(id: string) {
+    super(
+      `Script connection ${id} was modified by another writer; re-read it and retry the update.`,
+    );
+    this.name = "ScriptConnectionConflictError";
+  }
+}
+
 async function deriveConnectionBinding(
   auth: ConnectionAuthInput,
   ctx: {
@@ -1881,10 +1897,23 @@ export async function upsertScriptConnection(data: {
             openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
             generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
             updated_at = ?, updated_by = ?, version = ?
-           WHERE id = ? RETURNING *`,
-          [...params, now, data.userId ?? null, existing.version + 1, existing.id],
+           WHERE id = ? AND version = ? RETURNING *`,
+          [
+            ...params,
+            now,
+            data.userId ?? null,
+            existing.version + 1,
+            existing.id,
+            existing.version,
+          ],
         );
-        if (!row) throw new Error("Failed to update script connection");
+        // `version` predicate: this UPDATE writes every column from a snapshot
+        // read many awaits ago (binding derivation, spec fetch, credential
+        // lookups). A writer that committed in between would be reverted
+        // wholesale, including auth and the SSRF allowlist this request never
+        // touched. `setScriptConnectionEnabled` bumps the same counter, so it
+        // is caught too.
+        if (!row) throw new ScriptConnectionConflictError(existing.id);
         return row;
       }
 
