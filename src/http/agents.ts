@@ -27,8 +27,10 @@ import {
 import { createEvent } from "../be/events";
 import {
   getRuntimeInstanceById,
+  listRuntimeInstancesForAgent,
   reconcileAgentMaxTasksPolicy,
   reconcileAgentStatusFromRuntimes,
+  runtimeStaleThresholdMinutes,
   setRuntimeCredentialReady,
   upsertRuntimeInstance,
 } from "../be/multi-runtime";
@@ -46,6 +48,7 @@ import {
   type ProviderName,
   ProviderNameSchema,
   ReasoningEffortSchema,
+  RuntimeInstanceSchema,
 } from "../types";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import {
@@ -240,6 +243,32 @@ const getAgentSetupScript = route({
       schema: z.object({
         setupScript: z.string().nullable(),
         globalSetupScript: z.string().nullable(),
+      }),
+    },
+    404: { description: "Agent not found" },
+  },
+});
+
+/** Operator view of a runtime instance: internal `metadata` omitted, server-derived `isLive` added. */
+const AgentRuntimeInstanceSchema = RuntimeInstanceSchema.omit({ metadata: true }).extend({
+  isLive: z.boolean(),
+});
+
+const listAgentRuntimeInstances = route({
+  method: "get",
+  path: "/api/agents/{id}/runtime-instances",
+  pattern: ["api", "agents", null, "runtime-instances"],
+  summary: "List runtime instances serving an agent",
+  description:
+    "Read-only view of the worker processes currently registered for a logical agent. Rows exist only for multi-runtime registrations (MULTI_RUNTIME_ENABLED), so the list is empty in the default configuration. `isLive` combines `status` with `lastSeenAt` freshness against the server's staleness cutoff (`staleThresholdMinutes`); `reportedSlots` is each process's self-reported capacity, distinct from the agent's logical `maxTasks` policy.",
+  tags: ["Agents"],
+  params: z.object({ id: z.string() }),
+  responses: {
+    200: {
+      description: "Runtime instances for the agent (empty when none are registered)",
+      schema: z.object({
+        runtimeInstances: z.array(AgentRuntimeInstanceSchema),
+        staleThresholdMinutes: z.number().int(),
       }),
     },
     404: { description: "Agent not found" },
@@ -604,6 +633,22 @@ export async function handleAgentsRest(
     getAgentSetupScript.respond(res, 200, {
       setupScript: agent.setupScript ?? null,
       globalSetupScript,
+    });
+    return true;
+  }
+
+  if (listAgentRuntimeInstances.match(req.method, pathSegments)) {
+    const parsed = await listAgentRuntimeInstances.parse(req, res, pathSegments, queryParams);
+    if (!parsed) return true;
+    if (!getAgentById(parsed.params.id)) {
+      jsonError(res, "Agent not found", 404);
+      return true;
+    }
+    listAgentRuntimeInstances.respond(res, 200, {
+      runtimeInstances: listRuntimeInstancesForAgent(parsed.params.id).map(
+        ({ metadata: _metadata, ...instance }) => instance,
+      ),
+      staleThresholdMinutes: runtimeStaleThresholdMinutes(),
     });
     return true;
   }

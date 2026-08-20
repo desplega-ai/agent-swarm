@@ -259,6 +259,25 @@ export function countActiveRuntimeInstancesForAgent(agentId: string): number {
 }
 
 /**
+ * Read-only listing for operator observability. `isLive` applies the same
+ * status+freshness conjunction as `isRuntimeInstanceLive`, so a stale row
+ * that the sweep has not pruned yet is never reported as live.
+ */
+export function listRuntimeInstancesForAgent(
+  agentId: string,
+): Array<RuntimeInstance & { isLive: boolean }> {
+  const rows = getDb()
+    .prepare<RuntimeInstanceRow & { is_live: number }, [string, string]>(
+      `SELECT *, (status = 'active' AND last_seen_at >= ?) AS is_live
+       FROM runtime_instances
+       WHERE agent_id = ?
+       ORDER BY created_at ASC, id ASC`,
+    )
+    .all(runtimeLivenessCutoff(), agentId);
+  return rows.map((row) => ({ ...rowToRuntimeInstance(row), isLive: row.is_live === 1 }));
+}
+
+/**
  * Whether this identity names a runtime of `agentId` that is still reporting.
  * Dispatch uses it so a retired process cannot be handed work alongside its
  * replacement; an absent identity is never live.

@@ -68,7 +68,7 @@ function createTestServer(): Server {
       if (handled) return;
     }
 
-    if (req.url?.includes("/credential-status")) {
+    if (req.url?.includes("/credential-status") || req.url?.includes("/runtime-instances")) {
       const handled = await handleAgentsRest(
         req,
         res,
@@ -604,6 +604,191 @@ describe("runtime instances", () => {
     const { status } = await register(id, { maxTasks: 5 });
     expect(status).toBe(400);
     expect(getAgentById(id)).toBeNull();
+  });
+});
+
+// ─── Runtime-instance read API ──────────────────────────────────────────────
+
+describe("GET /api/agents/{id}/runtime-instances", () => {
+  interface RuntimeInstanceEntry {
+    id: string;
+    agentId: string;
+    status: string;
+    isLive: boolean;
+    reportedSlots: number;
+    credentialReady?: boolean | null;
+    lastSeenAt: string;
+    createdAt: string;
+  }
+
+  async function listRuntimes(agentId: string): Promise<{
+    status: number;
+    body: {
+      runtimeInstances?: RuntimeInstanceEntry[];
+      staleThresholdMinutes?: number;
+      error?: string;
+    };
+  }> {
+    const res = await fetch(`${baseUrl}/api/agents/${agentId}/runtime-instances`);
+    return { status: res.status, body: (await res.json()) as never };
+  }
+
+  async function reportRuntimeReady(
+    agentId: string,
+    runtimeInstanceId: string,
+    ready: boolean,
+  ): Promise<number> {
+    const res = await fetch(`${baseUrl}/api/agents/${agentId}/credential-status`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Agent-ID": agentId,
+        "X-Runtime-Instance-ID": runtimeInstanceId,
+      },
+      body: JSON.stringify({ ready }),
+    });
+    await res.text();
+    return res.status;
+  }
+
+  test("an agent with no runtimes returns an empty list", async () => {
+    const id = makeAgent(2);
+    const { status, body } = await listRuntimes(id);
+    expect(status).toBe(200);
+    expect(body.runtimeInstances).toEqual([]);
+    expect(body.staleThresholdMinutes).toBe(5);
+  });
+
+  test("a nonexistent agent returns 404", async () => {
+    const { status, body } = await listRuntimes(crypto.randomUUID());
+    expect(status).toBe(404);
+    expect(body.error).toBe("Agent not found");
+  });
+
+  test("a live runtime is returned with its capacity, liveness, and identity", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 2, runtimeInstanceId: rt });
+
+    const { status, body } = await listRuntimes(id);
+    expect(status).toBe(200);
+    expect(body.runtimeInstances).toHaveLength(1);
+    const entry = body.runtimeInstances?.[0];
+    expect(entry?.id).toBe(rt);
+    expect(entry?.agentId).toBe(id);
+    expect(entry?.status).toBe("active");
+    expect(entry?.isLive).toBe(true);
+    expect(entry?.reportedSlots).toBe(2);
+    expect(entry?.credentialReady).toBeNull();
+    expect(Date.parse(entry?.lastSeenAt ?? "")).not.toBeNaN();
+    // metadata is server-internal and must not leak through the read API.
+    expect(entry).not.toContainKey("metadata");
+  });
+
+  test("every runtime serving the agent is returned independently", async () => {
+    const id = makeAgent(4);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rA = crypto.randomUUID();
+    const rB = crypto.randomUUID();
+    const rC = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rA });
+    await register(id, { maxTasks: 2, runtimeInstanceId: rB });
+    await register(id, { maxTasks: 1, runtimeInstanceId: rC });
+
+    const { body } = await listRuntimes(id);
+    expect(body.runtimeInstances).toHaveLength(3);
+    const byId = new Map(body.runtimeInstances?.map((r) => [r.id, r]));
+    expect(byId.get(rA)?.reportedSlots).toBe(1);
+    expect(byId.get(rB)?.reportedSlots).toBe(2);
+    expect(byId.get(rC)?.reportedSlots).toBe(1);
+  });
+
+  test("runtimes of another agent never appear", async () => {
+    const mine = makeAgent(2);
+    const other = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rMine = crypto.randomUUID();
+    const rOther = crypto.randomUUID();
+    await register(mine, { maxTasks: 1, runtimeInstanceId: rMine });
+    await register(other, { maxTasks: 1, runtimeInstanceId: rOther });
+
+    const { body } = await listRuntimes(mine);
+    expect(body.runtimeInstances?.map((r) => r.id)).toEqual([rMine]);
+  });
+
+  test("a stale unswept runtime keeps status active but is not presented as live", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const fresh = crypto.randomUUID();
+    const stale = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: fresh });
+    await register(id, { maxTasks: 1, runtimeInstanceId: stale });
+    makeRuntimeStale(stale);
+
+    const { body } = await listRuntimes(id);
+    const byId = new Map(body.runtimeInstances?.map((r) => [r.id, r]));
+    expect(byId.get(fresh)?.isLive).toBe(true);
+    expect(byId.get(stale)?.status).toBe("active");
+    expect(byId.get(stale)?.isLive).toBe(false);
+  });
+
+  test("a closed runtime is reported offline and not live", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    await closeRuntime(id, rt);
+
+    const { body } = await listRuntimes(id);
+    expect(body.runtimeInstances?.[0]?.status).toBe("offline");
+    expect(body.runtimeInstances?.[0]?.isLive).toBe(false);
+  });
+
+  test("credential readiness surfaces all three states", async () => {
+    const id = makeAgent(3);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const ready = crypto.randomUUID();
+    const waiting = crypto.randomUUID();
+    const silent = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: ready });
+    await register(id, { maxTasks: 1, runtimeInstanceId: waiting });
+    await register(id, { maxTasks: 1, runtimeInstanceId: silent });
+    expect(await reportRuntimeReady(id, ready, true)).toBe(200);
+    expect(await reportRuntimeReady(id, waiting, false)).toBe(200);
+
+    const { body } = await listRuntimes(id);
+    const byId = new Map(body.runtimeInstances?.map((r) => [r.id, r]));
+    expect(byId.get(ready)?.credentialReady).toBe(true);
+    expect(byId.get(waiting)?.credentialReady).toBe(false);
+    expect(byId.get(silent)?.credentialReady).toBeNull();
+  });
+
+  test("listing never mutates runtime state, with the flag on or off", async () => {
+    const id = makeAgent(2);
+    process.env.MULTI_RUNTIME_ENABLED = "true";
+    const rt = crypto.randomUUID();
+    await register(id, { maxTasks: 1, runtimeInstanceId: rt });
+    makeRuntimeStale(rt);
+    const before = getDb()
+      .prepare<{ last_seen_at: string; updated_at: string; status: string }, [string]>(
+        "SELECT last_seen_at, updated_at, status FROM runtime_instances WHERE id = ?",
+      )
+      .get(rt);
+
+    await listRuntimes(id);
+    // Rows written while the flag was on stay readable after a rollback.
+    delete process.env.MULTI_RUNTIME_ENABLED;
+    const { status, body } = await listRuntimes(id);
+    expect(status).toBe(200);
+    expect(body.runtimeInstances).toHaveLength(1);
+
+    const after = getDb()
+      .prepare<{ last_seen_at: string; updated_at: string; status: string }, [string]>(
+        "SELECT last_seen_at, updated_at, status FROM runtime_instances WHERE id = ?",
+      )
+      .get(rt);
+    expect(after).toEqual(before);
   });
 });
 

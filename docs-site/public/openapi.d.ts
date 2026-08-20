@@ -2482,6 +2482,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{id}/runtime-instances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List runtime instances serving an agent
+         * @description Read-only view of the worker processes currently registered for a logical agent. Rows exist only for multi-runtime registrations (MULTI_RUNTIME_ENABLED), so the list is empty in the default configuration. `isLive` combines `status` with `lastSeenAt` freshness against the server's staleness cutoff (`staleThresholdMinutes`); `reportedSlots` is each process's self-reported capacity, distinct from the agent's logical `maxTasks` policy.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Runtime instances for the agent (empty when none are registered) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            runtimeInstances: {
+                                id: string;
+                                agentId: string;
+                                /** @enum {string} */
+                                status: "active" | "offline";
+                                reportedSlots: number;
+                                credentialReady?: boolean | null;
+                                /** Format: date-time */
+                                lastSeenAt: string;
+                                /** Format: date-time */
+                                createdAt: string;
+                                /** Format: date-time */
+                                updatedAt: string;
+                                isLive: boolean;
+                            }[];
+                            staleThresholdMinutes: number;
+                        };
+                    };
+                };
+                /** @description Agent not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{id}/profile": {
         parameters: {
             query?: never;
