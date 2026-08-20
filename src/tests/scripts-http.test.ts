@@ -165,7 +165,7 @@ describe("/api/scripts HTTP", () => {
     expect(before.sdkTypes).not.toContain("namespace App_PmInbox");
     expect(before.stdlibTypes).not.toContain("namespace App_PmInbox");
 
-    createApp({
+    await createApp({
       name: "PM Inbox",
       definition: {
         models: { issue: { columns: { title: { kind: "string" } } } },
@@ -185,7 +185,7 @@ describe("/api/scripts HTTP", () => {
   });
 
   test("named-script types endpoint includes per-app types in both blobs", async () => {
-    createApp({
+    await createApp({
       name: "PM Inbox",
       definition: {
         models: { issue: { columns: { title: { kind: "string" } } } },

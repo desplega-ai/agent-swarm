@@ -1015,7 +1015,7 @@ export async function handleApps(
       return true;
     }
     createAppRoute.respond(res, 201, {
-      app: createApp({
+      app: await createApp({
         name: parsed.body.name,
         description: parsed.body.description,
         definition: definition.definition,
@@ -1025,7 +1025,7 @@ export async function handleApps(
   }
 
   if (listAppsRoute.match(req.method, pathSegments)) {
-    listAppsRoute.respond(res, 200, { apps: listApps() });
+    listAppsRoute.respond(res, 200, { apps: await listApps() });
     return true;
   }
 
@@ -1634,8 +1634,8 @@ export async function handleApps(
     // recovery path. The model list only picks purge lock names; the purge itself
     // sweeps the whole app namespace, so an empty list is safe.
     const purgeModels = app.definitionError ? [] : Object.keys(app.definition.models);
-    await purgeAppRows(app.id, purgeModels, () => {
-      deleted = deleteApp(app.id);
+    await purgeAppRows(app.id, purgeModels, async () => {
+      deleted = await deleteApp(app.id);
     });
     if (!deleted) {
       jsonError(res, "app not found", 404);
@@ -1676,7 +1676,7 @@ export async function handleApps(
     if (definitionNeedsRepair(res, app)) return true;
     const schema = app.definition.userConfig ?? {};
     const owner = await resolveHttpFavoriteOwner(req, myAgentId);
-    const stored = owner ? getAppUserConfigValues(app.id, owner.scope) : {};
+    const stored = owner ? await getAppUserConfigValues(app.id, owner.scope) : {};
     getUserConfigRoute.respond(res, 200, { values: mergeUserConfigValues(schema, stored), schema });
     return true;
   }
@@ -1722,7 +1722,7 @@ export async function handleApps(
       json(res, { error: "invalid userConfig values", issues }, 400);
       return true;
     }
-    upsertAppUserConfigValues(app.id, owner.scope, parsed.body.values);
+    await upsertAppUserConfigValues(app.id, owner.scope, parsed.body.values);
     putUserConfigRoute.respond(res, 200, {
       values: mergeUserConfigValues(schema, parsed.body.values),
       schema,

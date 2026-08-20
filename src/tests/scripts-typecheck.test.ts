@@ -355,8 +355,8 @@ describe("per-app generated types", () => {
     expect(result.ok).toBe(false);
   });
 
-  test("keeps the loose fallback overload for dynamic app ids", () => {
-    createTypedApp();
+  test("keeps the loose fallback overload for dynamic app ids", async () => {
+    await createTypedApp();
     const result = typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (args: { appId: string }, ctx: ScriptContext) =>
@@ -366,8 +366,8 @@ describe("per-app generated types", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("ignores an unparseable stored definition", () => {
-    createTypedApp();
+  test("ignores an unparseable stored definition", async () => {
+    await createTypedApp();
     getDb()
       .prepare(
         `INSERT INTO apps (id, name, description, definition, created_at, updated_at)

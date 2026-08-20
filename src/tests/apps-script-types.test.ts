@@ -295,9 +295,13 @@ describe("getScriptAppTypes", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("reads app records in created order", () => {
-    createApp({ id: "first-id", name: "First App", definition: issueDefinition() as never });
-    createApp({ id: "second-id", name: "Second App", definition: issueDefinition() as never });
+  test("reads app records in created order", async () => {
+    await createApp({ id: "first-id", name: "First App", definition: issueDefinition() as never });
+    await createApp({
+      id: "second-id",
+      name: "Second App",
+      definition: issueDefinition() as never,
+    });
 
     const rendered = getScriptAppTypes();
     expect(rendered.indexOf("namespace App_FirstApp")).toBeLessThan(

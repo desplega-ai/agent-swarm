@@ -42,7 +42,7 @@ async function main() {
   await Bun.$`mkdir -p src/scripts-runtime/types`;
   await Bun.write(
     "src/scripts-runtime/types/swarm-sdk.d.ts",
-    `declare module "swarm-sdk" {\n${scriptSdkTypesWithGeneratedApis().replace(/^/gm, "  ")}\n}\n`,
+    `declare module "swarm-sdk" {\n${(await scriptSdkTypesWithGeneratedApis()).replace(/^/gm, "  ")}\n}\n`,
   );
   await Bun.write("src/scripts-runtime/types/stdlib.d.ts", SCRIPT_STDLIB_TYPES.trimStart());
   await Bun.$`bunx biome format --write src/scripts-runtime/types/swarm-sdk.d.ts src/scripts-runtime/types/stdlib.d.ts`;

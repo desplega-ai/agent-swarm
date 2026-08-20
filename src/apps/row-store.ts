@@ -553,7 +553,7 @@ async function purgeNamespace(appId: string): Promise<void> {
 export function purgeAppRows(
   appId: string,
   models: string[],
-  afterPurge?: () => void,
+  afterPurge?: () => void | Promise<void>,
 ): Promise<void> {
   const lockNames = models.length > 0 ? [...new Set(models)].sort() : ["*"];
   const acquire = (index: number): Promise<void> => {
@@ -563,7 +563,7 @@ export function purgeAppRows(
       // retried instead of leaving orphaned KV entries.
       return (async () => {
         await purgeNamespace(appId);
-        afterPurge?.();
+        await afterPurge?.();
       })();
     }
     return withMutationLock(appId, lockNames[index]!, () => acquire(index + 1));

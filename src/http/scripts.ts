@@ -528,9 +528,9 @@ const deleteScriptApiRoute = route({
  * Cost: O(apps x definition size) per delete, all in memory. Deletes are rare
  * and single-app installs hold tens of apps, so no index is warranted.
  */
-function appScriptReferenceIssues(scriptId: string): AppValidationIssue[] {
+async function appScriptReferenceIssues(scriptId: string): Promise<AppValidationIssue[]> {
   const issues: AppValidationIssue[] = [];
-  for (const app of listAppRecords()) {
+  for (const app of await listAppRecords()) {
     const paths = collectScriptReferences(app.definition).get(scriptId) ?? [];
     if (
       paths.length === 0 &&
@@ -635,7 +635,7 @@ export async function handleScripts(
       }
     }
 
-    const typecheck = typecheckScript(parsed.body.source, { agentId: agent.id });
+    const typecheck = await typecheckScript(parsed.body.source, { agentId: agent.id });
     if (!typecheck.ok) {
       json(
         res,
@@ -896,10 +896,10 @@ export async function handleScripts(
   if (typeDefsRoute.match(req.method, pathSegments)) {
     const apiTypes = getScriptApiTypes();
     const mcpTypes = getScriptMcpTypes();
-    const appTypes = getScriptAppTypes();
+    const appTypes = await getScriptAppTypes();
     typeDefsRoute.respond(res, 200, {
-      sdkTypes: scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
-      stdlibTypes: scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
+      sdkTypes: await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
+      stdlibTypes: await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes),
     });
     return true;
   }
@@ -952,15 +952,15 @@ export async function handleScripts(
       argsJsonSchema: script.argsJsonSchema
         ? (JSON.parse(script.argsJsonSchema) as Record<string, unknown>)
         : null,
-      sdkTypes: scriptSdkTypesWithGeneratedApis(
+      sdkTypes: await scriptSdkTypesWithGeneratedApis(
         getScriptApiTypes({ agentId: agent.id }),
         getScriptMcpTypes({ agentId: agent.id }),
-        getScriptAppTypes({ agentId: agent.id }),
+        await getScriptAppTypes({ agentId: agent.id }),
       ),
-      stdlibTypes: scriptStdlibTypesWithGeneratedApis(
+      stdlibTypes: await scriptStdlibTypesWithGeneratedApis(
         getScriptApiTypes({ agentId: agent.id }),
         getScriptMcpTypes({ agentId: agent.id }),
-        getScriptAppTypes({ agentId: agent.id }),
+        await getScriptAppTypes({ agentId: agent.id }),
       ),
     });
     return true;
@@ -998,7 +998,7 @@ export async function handleScripts(
       // left with a dangling reference: its definition stops parsing and every
       // write 409s "needs repair". Refuse the delete instead. UPDATES stay
       // allowed — a contract break there is a pass error with zero row churn.
-      const references = appScriptReferenceIssues(existing.id);
+      const references = await appScriptReferenceIssues(existing.id);
       if (references.length > 0) {
         json(
           res,

@@ -94,7 +94,7 @@ describe("scratch script retention", () => {
     expect(getScript({ name: globalScratch.name, scope: "global" })).not.toBeNull();
   });
 
-  test("a stale scratch script referenced by an app definition survives the sweep", () => {
+  test("a stale scratch script referenced by an app definition survives the sweep", async () => {
     const wired = addScript("scratch-app-wired-a1b2c3d4", true);
     const unwired = addScript("scratch-app-unwired-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
@@ -117,11 +117,11 @@ describe("scratch script retention", () => {
       expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
       expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
     } finally {
-      deleteApp(app.id);
+      await deleteApp(app.id);
     }
   });
 
-  test("a stale scratch script referenced only by a broken app's raw definition string survives the sweep", () => {
+  test("a stale scratch script referenced only by a broken app's raw definition string survives the sweep", async () => {
     const wired = addScript("scratch-broken-wired-a1b2c3d4", true);
     const unwired = addScript("scratch-broken-unwired-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
@@ -150,7 +150,7 @@ describe("scratch script retention", () => {
       expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
       expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
     } finally {
-      deleteApp(app.id);
+      await deleteApp(app.id);
     }
   });
 

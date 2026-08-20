@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { getDb } from "../be/db";
+import { getDb, getDbClient } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
@@ -255,13 +255,13 @@ function scanRawElementReferences(
   }
 }
 
-function exportedElementCompatibilityIssues(
+async function exportedElementCompatibilityIssues(
   appId: string,
   previousDefinition: AppDefinition | undefined,
   previousRawDefinition: unknown,
   nextDefinition: AppDefinition,
   forceElementBreak: string[],
-): AppValidationIssue[] {
+): Promise<AppValidationIssue[]> {
   const previousElements = previousElementsForCompatibility(
     previousDefinition,
     previousRawDefinition,
@@ -302,11 +302,10 @@ function exportedElementCompatibilityIssues(
   // Phase 4 has no reverse ElementRef index yet. This scan shares no lock with
   // consumer writes, so a concurrent consumer-add can race a producer removal;
   // Phase 6's unresolved-reference error card is the fallback for that TOCTOU.
-  const rows = getDb()
-    .prepare<StoredAppDefinitionRow, [string]>(
-      "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
-    )
-    .all(appId);
+  const rows = await getDbClient().query<StoredAppDefinitionRow>(
+    "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
+    [appId],
+  );
   for (const row of rows) {
     let raw: unknown;
     let parseable = false;
@@ -914,13 +913,13 @@ async function buildPlan(
 ): Promise<MigrationPlan> {
   const issues = [
     ...validateDirectiveOrder(migration),
-    ...exportedElementCompatibilityIssues(
+    ...(await exportedElementCompatibilityIssues(
       appId,
       previousDefinition,
       previousRawDefinition,
       nextDefinition,
       forceElementBreak,
-    ),
+    )),
   ];
   const report = structuredClone(EMPTY_REPORT);
   const userConfigNames = new Set([

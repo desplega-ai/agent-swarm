@@ -160,7 +160,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
           data: { issues: parsed.issues },
         });
       }
-      const app = createApp({
+      const app = await createApp({
         name: input.name,
         description: input.description,
         definition: parsed.definition,

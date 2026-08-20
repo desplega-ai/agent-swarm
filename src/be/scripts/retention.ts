@@ -17,9 +17,9 @@ let scratchGcTimer: ReturnType<typeof setInterval> | null = null;
  * guard applies via `appScriptReferenceIssues` in src/http/scripts.ts — a
  * broken app is not consent to break it further.
  */
-function appReferencedScriptIds(candidateIds: readonly string[]): Set<string> {
+async function appReferencedScriptIds(candidateIds: readonly string[]): Promise<Set<string>> {
   const ids = new Set<string>();
-  for (const app of listAppRecords()) {
+  for (const app of await listAppRecords()) {
     for (const scriptId of collectScriptReferences(app.definition).keys()) {
       ids.add(scriptId);
     }
@@ -117,7 +117,7 @@ export async function purgeExpiredScratchScripts(now = new Date()): Promise<numb
   // guard the interactive scripts-API delete route enforces for app references via
   // appScriptReferenceIssues, applied here to the whole sweep at once, plus the two
   // durable reference kinds that guard doesn't cover either.
-  const referenced = appReferencedScriptIds(candidates.map((row) => row.id));
+  const referenced = await appReferencedScriptIds(candidates.map((row) => row.id));
   const apiReferenced = scriptApiReferencedScriptIds();
   const workflowReferenced = await workflowReferencedAgentScriptKeys();
   const ownerlessWorkflowReferencedNames =
