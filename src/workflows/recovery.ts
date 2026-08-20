@@ -1,6 +1,6 @@
 import {
   getCompletedStepNodeIds,
-  getDb,
+  getDbClient,
   getStuckApprovalRuns,
   getStuckWaitRuns,
   getStuckWorkflowRuns,
@@ -58,7 +58,7 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
 async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
   // Query for all running runs by scanning steps
   // We need to find runs where status = 'running' and figure out which nodes to resume
-  const runningRunIds = getRunIdsByStatus("running");
+  const runningRunIds = await getRunIdsByStatus("running");
   let recovered = 0;
 
   for (const runId of runningRunIds) {
@@ -320,9 +320,10 @@ function safeJsonParse(s: string): unknown {
 /**
  * Get run IDs by status. Simple query since there's no dedicated function for this.
  */
-function getRunIdsByStatus(status: string): string[] {
-  const rows = getDb()
-    .prepare<{ id: string }, [string]>("SELECT id FROM workflow_runs WHERE status = ?")
-    .all(status);
+async function getRunIdsByStatus(status: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ id: string }>(
+    "SELECT id FROM workflow_runs WHERE status = ?",
+    [status],
+  );
   return rows.map((r) => r.id);
 }
