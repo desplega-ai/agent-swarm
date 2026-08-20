@@ -253,7 +253,7 @@ describe("normal REST API user-bound token auth", () => {
   test("revoked user token is unauthorized for normal API", async () => {
     const user = createUser({ name: "Revoked REST User" });
     const { tokenId, plaintext } = mintToken(user.id, "revoked", ACTOR);
-    revokeToken(tokenId, ACTOR);
+    await revokeToken(tokenId, ACTOR);
 
     const res = await fetch(`http://localhost:${port}/api/tasks`, {
       method: "POST",

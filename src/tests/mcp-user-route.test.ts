@@ -200,7 +200,7 @@ describe("/mcp-user auth and tool surface", () => {
   test("request to /mcp-user with a revoked token returns 401", async () => {
     const user = createUser({ name: "Revoked User" });
     const token = mintToken(user.id, "revoked", ACTOR);
-    revokeToken(token.tokenId, ACTOR);
+    await revokeToken(token.tokenId, ACTOR);
 
     const { response } = await mcpPost(token.plaintext, {
       jsonrpc: "2.0",

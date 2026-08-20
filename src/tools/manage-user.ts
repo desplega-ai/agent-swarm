@@ -170,7 +170,7 @@ export const registerManageUserTool = (server: McpServer) => {
               metadata: input.metadata ?? undefined,
             });
             for (const ident of input.identities ?? []) {
-              linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
+              await linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
             }
             return toolOk(`User created: "${user.name}" (${user.id}).`, {
               details: JSON.stringify(user, null, 2),
@@ -216,12 +216,12 @@ export const registerManageUserTool = (server: McpServer) => {
 
               for (const ident of input.identities) {
                 if (!currentSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
               for (const ident of current) {
                 if (!desiredSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
             }

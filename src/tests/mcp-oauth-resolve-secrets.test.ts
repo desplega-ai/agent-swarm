@@ -80,7 +80,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     });
     await installMcpServer(agent.id, mcp.id);
     await setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "bearer-live-123",
       refreshToken: null,
@@ -121,7 +121,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     });
     await installMcpServer(agent.id, mcp.id);
     await setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "lowercase-token-xyz",
       refreshToken: null,
@@ -160,7 +160,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     });
     await installMcpServer(agent.id, mcp.id);
     await setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "mac-token-xyz",
       refreshToken: null,
@@ -220,7 +220,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     });
     await installMcpServer(agent.id, mcp.id);
     await setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "stale",
       refreshToken: null, // no refresh available → ensureMcpToken flips to 'expired'
@@ -260,7 +260,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     });
     await installMcpServer(agent.id, mcp.id);
     await setMcpServerAuthMethod(mcp.id, "oauth");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: mcp.id,
       accessToken: "new-bearer",
       refreshToken: null,

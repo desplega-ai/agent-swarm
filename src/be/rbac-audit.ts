@@ -3,11 +3,10 @@
  *
  * `enqueueAuditRow` is the concrete `AuditSink` wired into `can()` at server
  * boot (src/http/index.ts, src/stdio.ts). Rows buffer in memory and flush in
- * a single prepared-statement transaction every FLUSH_INTERVAL_MS (2s) or at
- * FLUSH_MAX_ROWS (200), whichever comes first. Every path is try/caught — a
- * failed flush logs a warning and DROPS the batch; auditing must never throw
- * into the request path. Rows are structured ids/verbs only (no payloads, no
- * secret-bearing content).
+ * a single transaction every FLUSH_INTERVAL_MS (2s) or at FLUSH_MAX_ROWS (200),
+ * whichever comes first. Every path is try/caught — a failed flush logs a
+ * warning and DROPS the batch; auditing must never throw into the request path.
+ * Rows are structured ids/verbs only (no payloads, no secret-bearing content).
  *
  * Kill-switch: `RBAC_AUDIT_DISABLED=true` makes the sink a no-op (checked per
  * call so tests and live config reloads can toggle it).
@@ -16,9 +15,10 @@
  * ticks daily and deletes rows older than RBAC_AUDIT_RETENTION_DAYS
  * (default 30).
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { AdmissionDecision, RbacCheck, RbacDecision } from "../rbac";
 import { isEnvFlagEnabled } from "../utils/env-flag";
-import { getDb, getDbClient } from "./db";
+import { getDbClient } from "./db";
 
 type AuditRow = {
   principalType: "agent" | "user" | "operator";
@@ -41,6 +41,14 @@ let buffer: AuditRow[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let auditGcTimer: ReturnType<typeof setInterval> | null = null;
 let thresholdFlushScheduled = false;
+
+// A timer inherits the AsyncLocalStorage context of whoever scheduled it, and
+// the threshold flush is scheduled from inside `can()` — which can run while
+// the request already holds an open DbClient transaction. Inheriting that
+// context would nest the flush into that transaction as a SAVEPOINT, so an
+// unrelated rollback would erase the deny rows explaining it. This snapshot is
+// taken at module load, where no transaction context exists.
+const scheduleContextFree = AsyncLocalStorage.snapshot();
 
 function isAuditDisabled(): boolean {
   return isEnvFlagEnabled("RBAC_AUDIT_DISABLED", false);
@@ -96,10 +104,12 @@ function enqueueRow(row: AuditRow): void {
   // that happens to be the 200th never pays for the SQLite transaction itself.
   if (buffer.length >= FLUSH_MAX_ROWS && !thresholdFlushScheduled) {
     thresholdFlushScheduled = true;
-    const t = setTimeout(() => {
-      thresholdFlushScheduled = false;
-      flushAuditBuffer();
-    }, 0);
+    const t = scheduleContextFree(() =>
+      setTimeout(() => {
+        thresholdFlushScheduled = false;
+        void flushAuditBuffer();
+      }, 0),
+    );
     if (typeof t.unref === "function") t.unref();
   }
 }
@@ -158,33 +168,31 @@ export function enqueueAdmissionRow(input: AdmissionAuditInput): void {
  * flush interval, the 200-row threshold, and shutdown. A failed flush logs a
  * warning and drops the batch — never throws.
  */
-export function flushAuditBuffer(): void {
+export async function flushAuditBuffer(): Promise<void> {
   if (buffer.length === 0) return;
   const rows = buffer;
   buffer = [];
   try {
-    const db = getDb();
-    const stmt = db.prepare(
-      `INSERT INTO permission_audit
-         (principalType, principalId, originatorUserId, verb, resourceType, resourceId, decision, reason, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
-    const insertAll = db.transaction((batch: AuditRow[]) => {
-      for (const r of batch) {
-        stmt.run(
-          r.principalType,
-          r.principalId,
-          r.originatorUserId,
-          r.verb,
-          r.resourceType,
-          r.resourceId,
-          r.decision,
-          r.reason,
-          r.source,
+    await getDbClient().transaction(async (tx) => {
+      for (const r of rows) {
+        await tx.run(
+          `INSERT INTO permission_audit
+             (principalType, principalId, originatorUserId, verb, resourceType, resourceId, decision, reason, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            r.principalType,
+            r.principalId,
+            r.originatorUserId,
+            r.verb,
+            r.resourceType,
+            r.resourceId,
+            r.decision,
+            r.reason,
+            r.source,
+          ],
         );
       }
     });
-    insertAll(rows);
   } catch (err) {
     console.warn(
       `[rbac-audit] flush failed, dropping ${rows.length} row(s):`,
@@ -206,7 +214,9 @@ function flushIntervalMs(): number {
 /** Start the periodic flush (2s tick). Idempotent. */
 export function startAuditWriter(intervalMs = flushIntervalMs()): void {
   if (flushTimer) return;
-  flushTimer = setInterval(() => flushAuditBuffer(), intervalMs);
+  flushTimer = setInterval(() => {
+    void flushAuditBuffer();
+  }, intervalMs);
   if (typeof flushTimer?.unref === "function") flushTimer.unref();
 }
 

@@ -210,7 +210,7 @@ export async function exchangeCode(
   code: string,
   state: string,
 ): Promise<OAuthTokenResponse> {
-  const pending = consumeOAuthPending(state);
+  const pending = await consumeOAuthPending(state);
   if (!pending) {
     throw new Error("Invalid or expired OAuth state");
   }

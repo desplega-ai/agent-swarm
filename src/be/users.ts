@@ -1,8 +1,8 @@
 /**
  * Canonical API-side identity surface — the only path that mutates identity
  * tables. Every mutating helper wraps row mutation + event emission in a
- * single `db.transaction()` so the invariant "every identity mutation has a
- * matching event row" (Q9) holds even on partial failures.
+ * single `getDbClient().transaction()` so the invariant "every identity
+ * mutation has a matching event row" (Q9) holds even on partial failures.
  *
  * This module is API-side ONLY. The DB-boundary checker (`scripts/check-db-boundary.sh`)
  * enforces that worker-side code paths (`src/commands/`, `src/hooks/`,
@@ -114,9 +114,8 @@ export function findUserByExternalId(kind: string, externalId: string): User | n
  * `emailAliases != '[]'` in the alias branch so the rare row with NULL
  * aliases doesn't blow up the JOIN.
  *
- * DEFERRED (transaction rule): called synchronously by `findOrCreateUserByEmail`
- * before that function's own `db.transaction()` — that whole function is
- * deferred, so this stays on the raw sync handle too.
+ * DEFERRED (transaction rule): the synchronous `resolveIdentityByEmail`
+ * identity primitive calls it without awaiting — stays on the raw sync handle.
  */
 export function findUserByEmail(email: string): User | null {
   const lower = email.toLowerCase();
@@ -294,10 +293,9 @@ export async function listUserTokens(userId: string): Promise<UserTokenSummary[]
  * `budget_changed` / `status_changed` directly (the mutating helpers below
  * already emit their own events in-transaction).
  *
- * DEFERRED (transaction rule): called from inside the synchronous
- * `db.transaction()` callbacks of `findOrCreateUserByEmail`, `linkIdentity`,
- * `unlinkIdentity`, `mintToken`, and `revokeToken` below — stays on the raw
- * sync handle.
+ * Stays on the raw sync handle: the mutating helpers below call it from inside
+ * their transaction callbacks, where the shared connection puts its INSERT in
+ * the same open transaction.
  */
 export function recordIdentityEvent(
   userId: string,
@@ -345,13 +343,15 @@ export function recordIdentityEvent(
  * - Otherwise create a new row with `name` from hints (or the email
  *   local-part) and emit `identity_added` with the new row in `afterJson`.
  *
- * Wrapped in `db.transaction()` so create + event land together.
+ * Only the create branch is wrapped in `getDbClient().transaction()` so the
+ * new row + its event land together; the `findUserByEmail` read and the
+ * `auto_merge` event above it run outside any transaction.
  */
-export function findOrCreateUserByEmail(
+export async function findOrCreateUserByEmail(
   email: string,
   hints: { name?: string; role?: string; notes?: string; preferredChannel?: string },
   actor: IdentityActor,
-): { user: User; created: boolean } {
+): Promise<{ user: User; created: boolean }> {
   const existing = findUserByEmail(email);
   if (existing) {
     recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
@@ -361,29 +361,29 @@ export function findOrCreateUserByEmail(
   const id = randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const name = hints.name?.trim() || email.split("@")[0] || email;
-  const db = getDb();
 
-  const created = db.transaction(() => {
-    db.prepare(
+  const created = await getDbClient().transaction(async (tx) => {
+    await tx.run(
       `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-    ).run(
-      id,
-      name,
-      email,
-      hints.role ?? null,
-      hints.notes ?? null,
-      "[]",
-      hints.preferredChannel ?? "slack",
-      null,
-      now,
-      now,
+      [
+        id,
+        name,
+        email,
+        hints.role ?? null,
+        hints.notes ?? null,
+        "[]",
+        hints.preferredChannel ?? "slack",
+        null,
+        now,
+        now,
+      ],
     );
-    const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+    const row = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
     if (!row) throw new Error("Failed to create user");
     recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
-  })();
+  });
 
   return { user: created, created: true };
 }
@@ -399,21 +399,20 @@ export function findOrCreateUserByEmail(
  *
  * Atomic: INSERT + event in one transaction.
  */
-export function linkIdentity(
+export async function linkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)").run(
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)", [
       userId,
       kind,
       externalId,
-    );
+    ]);
     recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
-  })();
+  });
 }
 
 /**
@@ -421,19 +420,20 @@ export function linkIdentity(
  * still emit the event with the same before/after for the audit trail.
  * Atomic: DELETE + event in one transaction.
  */
-export function unlinkIdentity(
+export async function unlinkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare(
-      "DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?",
-    ).run(userId, kind, externalId);
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run("DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?", [
+      userId,
+      kind,
+      externalId,
+    ]);
     recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
-  })();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -464,11 +464,11 @@ function sha256Hex(input: string): string {
  *
  * Token shape: `aswt_` + 24 base62 chars = >140 bits of entropy.
  */
-export function mintToken(
+export async function mintToken(
   userId: string,
   label: string | null,
   actor: IdentityActor,
-): { tokenId: string; plaintext: string } {
+): Promise<{ tokenId: string; plaintext: string }> {
   // 24 base62 chars from 24 random bytes (~143 bits of entropy).
   const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -476,14 +476,14 @@ export function mintToken(
   const preview = plaintext.slice(-4);
   const now = new Date().toISOString();
 
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare(
+  await getDbClient().transaction(async (tx) => {
+    await tx.run(
       `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(tokenId, userId, label, hash, preview, now);
+      [tokenId, userId, label, hash, preview, now],
+    );
     recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
-  })();
+  });
 
   return { tokenId, plaintext };
 }
@@ -492,21 +492,19 @@ export function mintToken(
  * Revoke a previously-minted token. Sets `revokedAt = now` and emits
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
-export function revokeToken(tokenId: string, actor: IdentityActor): void {
-  const db = getDb();
-  db.transaction(() => {
-    const row = db
-      .prepare<{ userId: string; label: string | null; tokenPreview: string }, string>(
-        "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
-      )
-      .get(tokenId);
+export async function revokeToken(tokenId: string, actor: IdentityActor): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<{ userId: string; label: string | null; tokenPreview: string }>(
+      "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
+      [tokenId],
+    );
     if (!row) {
       throw new Error(`Token not found: ${tokenId}`);
     }
-    db.prepare("UPDATE user_tokens SET revokedAt = ? WHERE id = ?").run(
+    await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [
       new Date().toISOString(),
       tokenId,
-    );
+    ]);
     recordIdentityEvent(
       row.userId,
       "token_revoked",
@@ -514,7 +512,7 @@ export function revokeToken(tokenId: string, actor: IdentityActor): void {
       { tokenId, label: row.label, preview: row.tokenPreview },
       null,
     );
-  })();
+  });
 }
 
 /**

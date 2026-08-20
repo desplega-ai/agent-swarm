@@ -127,9 +127,9 @@ function createTokenForUser(name: string): { userId: string; plaintext: string }
   return { userId: user.id, plaintext };
 }
 
-function narrowUserToRequester(userId: string): void {
-  detachRole(userId, "admin");
-  attachRole(userId, "requester");
+async function narrowUserToRequester(userId: string): void {
+  await detachRole(userId, "admin");
+  await attachRole(userId, "requester");
 }
 
 function admissionAuditRows(): AdmissionAuditRow[] {
@@ -164,7 +164,7 @@ beforeEach(async () => {
   initDb(TEST_DB_PATH);
   ensureRbacSeedsSynced({ quiet: true });
   createAgent({ id: LEAD_ID, name: "Admission Lead", isLead: true, status: "idle" });
-  flushAuditBuffer();
+  await flushAuditBuffer();
   getDb().run("DELETE FROM permission_audit");
 
   server = createTestServer();
@@ -172,7 +172,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  flushAuditBuffer();
+  await flushAuditBuffer();
   await closeServer(server);
   server = undefined;
   closeDb();
@@ -361,7 +361,7 @@ describe("decideToolAdmission", () => {
 describe("handleCore admission wiring", () => {
   test("flag off leaves narrowed user-token REST writes untouched and unaudited", async () => {
     const { userId, plaintext } = createTokenForUser("Flag Off User");
-    detachRole(userId, "admin");
+    await detachRole(userId, "admin");
 
     const res = await api(port, "POST", "/api/tasks", {
       bearer: plaintext,
@@ -369,7 +369,7 @@ describe("handleCore admission wiring", () => {
     });
 
     expect(res.status).toBe(201);
-    flushAuditBuffer();
+    await flushAuditBuffer();
     expect(admissionAuditRows()).toEqual([]);
   });
 
@@ -403,7 +403,7 @@ describe("handleCore admission wiring", () => {
     expect(flagOff.status).not.toBe(403);
     expect(flagOff.status).toBe(404);
 
-    flushAuditBuffer();
+    await flushAuditBuffer();
     expect(
       admissionAuditRows().find(
         (row) =>
@@ -428,7 +428,7 @@ describe("handleCore admission wiring", () => {
     });
 
     expect(res.status).toBe(201);
-    flushAuditBuffer();
+    await flushAuditBuffer();
     expect(admissionAuditRows()).toEqual([]);
   });
 
@@ -458,7 +458,7 @@ describe("handleCore admission wiring", () => {
     expect(declaredVerb.status).toBe(404);
     expect(declaredVerb.body).toEqual({ error: "Task not found" });
 
-    flushAuditBuffer();
+    await flushAuditBuffer();
     const rows = admissionAuditRows();
     expect(rows).toHaveLength(3);
 

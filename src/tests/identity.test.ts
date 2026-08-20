@@ -28,9 +28,9 @@ afterAll(async () => {
 });
 
 describe("resolveIdentity", () => {
-  test("resolved: linked (kind, externalId) returns the user", () => {
+  test("resolved: linked (kind, externalId) returns the user", async () => {
     const user = createUser({ name: "Luis", email: "luis@example.com" });
-    linkIdentity(user.id, "slack", "U016H7XKZGS", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U016H7XKZGS", SYSTEM_ACTOR);
 
     const resolution = resolveIdentity("slack", "U016H7XKZGS");
     expect(resolution).toEqual({
@@ -52,9 +52,9 @@ describe("resolveIdentity", () => {
     });
   });
 
-  test("is provider-agnostic — any kind string works identically", () => {
+  test("is provider-agnostic — any kind string works identically", async () => {
     const user = createUser({ name: "Jira Reporter", email: "jira-reporter@example.com" });
-    linkIdentity(user.id, "jira", "5b10a2844c20165700ede21g", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "jira", "5b10a2844c20165700ede21g", SYSTEM_ACTOR);
 
     const resolution = resolveIdentity("jira", "5b10a2844c20165700ede21g");
     expect(resolution.status).toBe("resolved");

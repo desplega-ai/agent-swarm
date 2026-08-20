@@ -105,7 +105,7 @@ describe("GET /api/whoami", () => {
   test("revoked token is rejected at auth (401)", async () => {
     const user = createUser({ name: "Revoked User" });
     const { plaintext, tokenId } = mintToken(user.id, "rest", ACTOR);
-    revokeToken(tokenId, ACTOR);
+    await revokeToken(tokenId, ACTOR);
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);

@@ -178,7 +178,7 @@ export async function handleMessageReceived(
   const senderName = extractNameFromField(from);
   let requestedByUserId: string | undefined;
   if (senderEmail) {
-    const { user } = findOrCreateUserByEmail(
+    const { user } = await findOrCreateUserByEmail(
       senderEmail,
       { name: senderName ?? undefined },
       { kind: "system", id: "webhook:agentmail" },

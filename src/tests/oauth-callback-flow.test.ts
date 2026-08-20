@@ -378,7 +378,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
       url: `${providerBase}/mcp`,
       scope: "swarm",
     });
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "mcp-static-state",
       mcpServerId: mcpServer.id,
       codeVerifier: "mcp-verifier",

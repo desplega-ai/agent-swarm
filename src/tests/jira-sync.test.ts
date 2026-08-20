@@ -317,7 +317,7 @@ describe("handleCommentEvent — short-circuits", () => {
 describe("identity resolution — Jira routes through resolveIdentity, never raw displayName", () => {
   test("issue-assigned: reporter linked by accountId -> requestedByUserId set + rendered pair in task text", async () => {
     const reporter = createUser({ name: "Zbigniew Reporter", email: "zbigniew-jira@example.com" });
-    linkIdentity(reporter.id, "jira", "reporter-linked-1", SYSTEM_ACTOR);
+    await linkIdentity(reporter.id, "jira", "reporter-linked-1", SYSTEM_ACTOR);
 
     const event = makeIssueAssignedEvent("10030", "KAN-30", "Linked reporter issue");
     event.issue.fields.reporter = {
@@ -371,7 +371,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
 
   test("comment-mention: linked author -> requestedByUserId set + rendered pair as comment_author", async () => {
     const author = createUser({ name: "Manuel Commenter", email: "manuel-jira@example.com" });
-    linkIdentity(author.id, "jira", "commenter-linked-1", SYSTEM_ACTOR);
+    await linkIdentity(author.id, "jira", "commenter-linked-1", SYSTEM_ACTOR);
 
     await handleCommentEvent(
       makeCommentEvent("10033", "KAN-33", "commenter-linked-1", "please take a look", [

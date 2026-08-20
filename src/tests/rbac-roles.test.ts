@@ -87,31 +87,31 @@ afterAll(async () => {
 });
 
 describe("getUserGrant", () => {
-  test("unions verbs from all non-wildcard user roles", () => {
+  test("unions verbs from all non-wildcard user roles", async () => {
     const user = createUser({ name: "Union User" });
-    detachRole(user.id, "admin");
+    await detachRole(user.id, "admin");
     insertCustomRole("custom-role-reviewer", "reviewer", ["user.manage"]);
 
-    attachRole(user.id, "requester");
-    attachRole(user.id, "reviewer");
+    await attachRole(user.id, "requester");
+    await attachRole(user.id, "reviewer");
 
     const grant = getUserGrant(user.id);
     expect(grant.grantsAll).toBe(false);
     expect(sortedVerbs(grant.verbs)).toEqual([...REQUESTER_VERBS, "user.manage"].sort());
   });
 
-  test("short-circuits to grantsAll when any attached role is a wildcard", () => {
+  test("short-circuits to grantsAll when any attached role is a wildcard", async () => {
     const user = createUser({ name: "Wildcard User" });
-    attachRole(user.id, "requester");
+    await attachRole(user.id, "requester");
 
     const grant = getUserGrant(user.id);
     expect(grant.grantsAll).toBe(true);
     expect(grant.verbs.size).toBe(0);
   });
 
-  test("returns an empty fail-closed grant for a user with no roles", () => {
+  test("returns an empty fail-closed grant for a user with no roles", async () => {
     const user = createUser({ name: "Detached User" });
-    detachRole(user.id, "admin");
+    await detachRole(user.id, "admin");
 
     const grant = getUserGrant(user.id);
     expect(grant.grantsAll).toBe(false);
@@ -125,9 +125,9 @@ describe("getUserGrant", () => {
     expect(grant.verbs.size).toBe(0);
   });
 
-  test("skips invalid database grant verbs fail-closed without throwing", () => {
+  test("skips invalid database grant verbs fail-closed without throwing", async () => {
     const user = createUser({ name: "Malformed Grant User" });
-    detachRole(user.id, "admin");
+    await detachRole(user.id, "admin");
     const db = getDb();
     db.transaction(() => {
       db.prepare(
@@ -165,15 +165,15 @@ describe("getUserGrant", () => {
 });
 
 describe("role attachment helpers", () => {
-  test("attachRole and detachRole are idempotent", () => {
+  test("attachRole and detachRole are idempotent", async () => {
     const user = createUser({ name: "Idempotent User" });
 
-    attachRole(user.id, "requester");
-    attachRole(user.id, "requester");
+    await attachRole(user.id, "requester");
+    await attachRole(user.id, "requester");
     expect(roleNames(user.id)).toEqual(["admin", "requester"]);
 
-    detachRole(user.id, "requester");
-    detachRole(user.id, "requester");
+    await detachRole(user.id, "requester");
+    await detachRole(user.id, "requester");
     expect(roleNames(user.id)).toEqual(["admin"]);
   });
 
@@ -257,9 +257,9 @@ describe("ensureRbacSeedsSynced", () => {
     expect(listUserRoles(user.id).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
   });
 
-  test("backfills the default role for users with zero roles", () => {
+  test("backfills the default role for users with zero roles", async () => {
     const user = createUser({ name: "Backfilled User" });
-    detachRole(user.id, "admin");
+    await detachRole(user.id, "admin");
     expect(listUserRoles(user.id)).toEqual([]);
 
     const stats = ensureRbacSeedsSynced({ quiet: true });
@@ -268,10 +268,10 @@ describe("ensureRbacSeedsSynced", () => {
     expect(listUserRoles(user.id).map((role) => role.id)).toEqual([DEFAULT_ROLE_ID]);
   });
 
-  test("does not touch users deliberately narrowed to requester-only", () => {
+  test("does not touch users deliberately narrowed to requester-only", async () => {
     const user = createUser({ name: "Requester Only User" });
-    attachRole(user.id, "requester");
-    detachRole(user.id, "admin");
+    await attachRole(user.id, "requester");
+    await detachRole(user.id, "admin");
     expect(listUserRoles(user.id).map((role) => role.id)).toEqual([REQUESTER_ROLE_ID]);
 
     const stats = ensureRbacSeedsSynced({ quiet: true });
@@ -308,7 +308,7 @@ describe("runRbacCliCommand", () => {
 
   test("reports users backfilled by bootstrap once", async () => {
     const user = createUser({ name: "CLI Backfilled User" });
-    detachRole(user.id, "admin");
+    await detachRole(user.id, "admin");
     const logSpy = spyOn(console, "log").mockImplementation(() => {});
 
     try {

@@ -452,7 +452,7 @@ async function shutdown() {
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
   stopAuditWriter();
-  flushAuditBuffer();
+  await flushAuditBuffer();
   clearAuditSink();
 
   if (globalState.__apiGcInterval) {

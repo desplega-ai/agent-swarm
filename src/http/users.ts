@@ -567,7 +567,7 @@ export async function handleUsers(
       const user = await createUser(userFields);
       await syncUserBudgetMirror(user.id, userFields.dailyBudgetUsd);
       for (const ident of identities ?? []) {
-        linkIdentity(user.id, ident.kind, ident.externalId, actor);
+        await linkIdentity(user.id, ident.kind, ident.externalId, actor);
       }
       if (userFields.dailyBudgetUsd !== undefined) {
         recordIdentityEvent(user.id, "budget_changed", actor, null, {
@@ -630,7 +630,7 @@ export async function handleUsers(
         });
         targetUserId = created.id;
       }
-      linkIdentity(targetUserId, kind, externalId, actor);
+      await linkIdentity(targetUserId, kind, externalId, actor);
       // Clear both kv rows (best-effort — DELETE is idempotent).
       const ns = `integration:unmapped:${kind}`;
       await deleteKv(ns, `${externalId}:meta`);
@@ -671,7 +671,11 @@ export async function handleUsers(
     }
 
     try {
-      const { tokenId, plaintext } = mintToken(parsed.params.id, parsed.body.label ?? null, actor);
+      const { tokenId, plaintext } = await mintToken(
+        parsed.params.id,
+        parsed.body.label ?? null,
+        actor,
+      );
       const token = (await listUserTokens(parsed.params.id)).find((t) => t.id === tokenId);
       mintUserMcpTokenRoute.respond(res, 200, {
         plaintext,
@@ -704,7 +708,7 @@ export async function handleUsers(
     }
 
     try {
-      revokeToken(parsed.params.tokenId, actor);
+      await revokeToken(parsed.params.tokenId, actor);
       revokeUserMcpTokenRoute.respond(res, 200, { user: await composeUser(parsed.params.id) });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to revoke token";
@@ -728,7 +732,7 @@ export async function handleUsers(
       return true;
     }
     try {
-      linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
+      await linkIdentity(parsed.params.id, parsed.body.kind, parsed.body.externalId, actor);
       addIdentityRoute.respond(res, 200, {
         identities: await getUserIdentities(parsed.params.id),
       });
@@ -754,7 +758,7 @@ export async function handleUsers(
       // be unlinked from the UI.
       const kind = decodeURIComponent(parsed.params.kind);
       const externalId = decodeURIComponent(parsed.params.externalId);
-      unlinkIdentity(parsed.params.id, kind, externalId, actor);
+      await unlinkIdentity(parsed.params.id, kind, externalId, actor);
       deleteIdentityRoute.respond(res, 200, {
         identities: await getUserIdentities(parsed.params.id),
       });
@@ -791,8 +795,8 @@ export async function handleUsers(
     try {
       // Move every identity from source → target.
       for (const ident of sourceBefore.identities) {
-        unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
-        linkIdentity(targetId, ident.kind, ident.externalId, actor);
+        await unlinkIdentity(sourceId, ident.kind, ident.externalId, actor);
+        await linkIdentity(targetId, ident.kind, ident.externalId, actor);
       }
 
       // Merge email aliases — append source.email + source.emailAliases into
@@ -965,12 +969,12 @@ export async function handleUsers(
         const afterKeys = new Set(identities.map((i) => `${i.kind}:${i.externalId}`));
         for (const i of identities) {
           if (!beforeKeys.has(`${i.kind}:${i.externalId}`)) {
-            linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            await linkIdentity(parsed.params.id, i.kind, i.externalId, actor);
           }
         }
         for (const i of beforeIds) {
           if (!afterKeys.has(`${i.kind}:${i.externalId}`)) {
-            unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
+            await unlinkIdentity(parsed.params.id, i.kind, i.externalId, actor);
           }
         }
       }

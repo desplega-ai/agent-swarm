@@ -131,7 +131,7 @@ describe("routeKapsoInbound", () => {
       createdAt: new Date().toISOString(),
     });
     const user = createUser({ name: "Known WhatsApp Sender" });
-    linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
+    await linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
 
     const routing = await routeKapsoInbound(
       makePayload({

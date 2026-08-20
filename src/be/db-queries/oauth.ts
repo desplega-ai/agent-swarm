@@ -623,19 +623,18 @@ export async function createOAuthPending(input: {
  * treated as invalid, so a stalled/failed GC timer cannot widen the validity
  * window.
  */
-export function consumeOAuthPending(state: string): OAuthPendingRecord | null {
-  return getDb().transaction(() => {
-    const row = getDb()
-      .query(
-        `SELECT state, appId, label, flow, codeVerifier, nonce, redirectUri,
-                finalRedirect, userId, contextJson, createdAt
-         FROM oauth_pending
-         WHERE state = ? AND flow IN ('generic', 'tracker')`,
-      )
-      .get(state) as OAuthPendingRow | null;
+export async function consumeOAuthPending(state: string): Promise<OAuthPendingRecord | null> {
+  return await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<OAuthPendingRow>(
+      `SELECT state, appId, label, flow, codeVerifier, nonce, redirectUri,
+              finalRedirect, userId, contextJson, createdAt
+       FROM oauth_pending
+       WHERE state = ? AND flow IN ('generic', 'tracker')`,
+      [state],
+    );
     if (!row) return null;
     // Single-use: always delete, whether valid or expired.
-    getDb().query("DELETE FROM oauth_pending WHERE state = ?").run(state);
+    await tx.run("DELETE FROM oauth_pending WHERE state = ?", [state]);
     const createdAt = normalizeDateRequired(row.createdAt);
     const createdMs = new Date(createdAt).getTime();
     if (Number.isNaN(createdMs) || Date.now() - createdMs > OAUTH_PENDING_TTL_MS) {
@@ -646,7 +645,7 @@ export function consumeOAuthPending(state: string): OAuthPendingRecord | null {
       codeVerifier: decryptSecret(row.codeVerifier, getEncryptionKey()),
       createdAt,
     };
-  })();
+  });
 }
 
 /** GC expired generic/tracker pending rows. MCP rows are GC'd separately. */

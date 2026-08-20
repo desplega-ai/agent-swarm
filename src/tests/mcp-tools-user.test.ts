@@ -92,7 +92,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
 
   test("matches by (kind, externalId) → findUserByExternalId hit", async () => {
     const user = createUser({ name: "Slack User One", email: "one@example.com" });
-    linkIdentity(user.id, "slack", "U_SLACK_ONE", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U_SLACK_ONE", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", {
       kind: "slack",
@@ -206,8 +206,8 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
 
   test("response includes externalIds populated from user_external_ids rows", async () => {
     const user = createUser({ name: "External ID User", email: "extid@example.com" });
-    linkIdentity(user.id, "github", "extid-gh-handle", SYSTEM_ACTOR);
-    linkIdentity(user.id, "slack", "U_EXTID", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "extid-gh-handle", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U_EXTID", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", {
       kind: "github",
@@ -234,7 +234,7 @@ describe("resolve-user MCP tool (new {kind, externalId, email} shape)", () => {
 
   test("userId lookup returns user profile with externalIds", async () => {
     const user = createUser({ name: "User ID Lookup", email: "uidlookup@example.com" });
-    linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "linear", "L_UIDLOOKUP", SYSTEM_ACTOR);
 
     const result = await callTool(server, "resolve-user", { userId: user.id });
     const parsed = structuredOf(result);

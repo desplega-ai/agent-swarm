@@ -69,7 +69,7 @@ describe("ensureMcpToken", () => {
 
   test("returns fresh token without calling fetch", async () => {
     const input = makeToken();
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     let fetchCalled = false;
     globalThis.fetch = async () => {
@@ -88,7 +88,7 @@ describe("ensureMcpToken", () => {
       status: "revoked",
       expiresAt: new Date(Date.now() - 1000).toISOString(), // expired
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async () => {
       throw new Error("should not fetch for revoked tokens");
@@ -104,7 +104,7 @@ describe("ensureMcpToken", () => {
       refreshToken: null,
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     const token = await ensureMcpToken(input.mcpServerId);
     expect(token!.status).toBe("expired");
@@ -119,7 +119,7 @@ describe("ensureMcpToken", () => {
     const input = makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     let calls = 0;
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
@@ -150,7 +150,7 @@ describe("ensureMcpToken", () => {
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
       tokenEndpointAuthMethod: null,
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = init?.headers as Record<string, string>;
@@ -172,7 +172,7 @@ describe("ensureMcpToken", () => {
     const input = makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async () => new Response('{"error":"invalid_grant"}', { status: 400 });
 
@@ -188,7 +188,7 @@ describe("ensureMcpToken", () => {
     const input = makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     // The automatic refresh path (ensureMcpToken, used by the proxy/server
     // resolution) must invalidate the stored client on invalid_client just
@@ -209,7 +209,7 @@ describe("ensureMcpToken", () => {
     const input = makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     let calls = 0;
     globalThis.fetch = async () => {

@@ -70,9 +70,9 @@ const base = (mcpServerId: string) => ({
 });
 
 describe("mcp_oauth_tokens encryption roundtrip", () => {
-  test("upsert + read decrypts accessToken, refreshToken, dcrClientSecret", () => {
+  test("upsert + read decrypts accessToken, refreshToken, dcrClientSecret", async () => {
     const server = makeServer("mcp-enc-roundtrip");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     const token = getMcpOAuthToken(server.id);
 
     expect(token).not.toBeNull();
@@ -92,7 +92,7 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
 
   test("access token is encrypted at rest (not stored plaintext)", async () => {
     const server = makeServer("mcp-enc-at-rest");
-    upsertMcpOAuthToken({ ...base(server.id), accessToken: "UNIQUE_PLAINTEXT_TOKEN_ABC" });
+    await upsertMcpOAuthToken({ ...base(server.id), accessToken: "UNIQUE_PLAINTEXT_TOKEN_ABC" });
 
     // Use raw SQL to inspect the row bypassing the decrypt helper.
     const { getDb } = await import("../be/db");
@@ -110,10 +110,10 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     expect(row!.accessToken.length).toBeGreaterThan(24);
   });
 
-  test("upsert conflict updates by (mcpServerId, userId)", () => {
+  test("upsert conflict updates by (mcpServerId, userId)", async () => {
     const server = makeServer("mcp-upsert-conflict");
-    upsertMcpOAuthToken(base(server.id));
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken({
       ...base(server.id),
       accessToken: "access-updated",
       refreshToken: undefined,
@@ -126,12 +126,12 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
     expect(token!.refreshToken).toBe("refresh-456");
   });
 
-  test("refresh CAS uses the tokenVersion observed before the provider request", () => {
+  test("refresh CAS uses the tokenVersion observed before the provider request", async () => {
     const server = makeServer("mcp-refresh-cas");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     const observed = getMcpOAuthToken(server.id)!;
 
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       accessToken: "concurrent-winner",
       refreshToken: "refresh-456",
@@ -154,7 +154,7 @@ describe("mcp_oauth_tokens encryption roundtrip", () => {
 describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
   test("status flip writes status and error message", async () => {
     const server = makeServer("mcp-status-flip");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     const original = getMcpOAuthToken(server.id)!;
     await markMcpOAuthTokenStatus(original.id, "expired", "refresh token missing");
 
@@ -163,9 +163,9 @@ describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
     expect(updated.lastErrorMessage).toBe("refresh token missing");
   });
 
-  test("disconnect revokes in place and reconnect reuses the authorization id", () => {
+  test("disconnect revokes in place and reconnect reuses the authorization id", async () => {
     const server = makeServer("mcp-revoke-row");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     const original = getMcpOAuthToken(server.id)!;
     expect(deleteMcpOAuthToken(server.id)).toBe(true);
     expect(getMcpOAuthToken(server.id)).toMatchObject({
@@ -177,7 +177,7 @@ describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
       status: "revoked",
     });
 
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       accessToken: "reconnected-access",
       refreshToken: "reconnected-refresh",
@@ -190,16 +190,16 @@ describe("markMcpOAuthTokenStatus + deleteMcpOAuthToken", () => {
     });
   });
 
-  test("listMcpOAuthTokensForMcp returns multiple user rows", () => {
+  test("listMcpOAuthTokensForMcp returns multiple user rows", async () => {
     const server = makeServer("mcp-multi-user");
     const userA = createUser({ name: "user-a" });
     const userB = createUser({ name: "user-b" });
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       userId: userA.id,
       resourceUrl: "https://user-a.example.com",
     });
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       userId: userB.id,
       resourceUrl: "https://user-b.example.com",
@@ -253,9 +253,9 @@ describe("isMcpTokenExpiringSoon", () => {
 });
 
 describe("mcp_oauth_pending (state PK)", () => {
-  test("insert → consume returns decrypted codeVerifier and deletes row", () => {
+  test("insert → consume returns decrypted codeVerifier and deletes row", async () => {
     const server = makeServer("mcp-pending-basic");
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "state-1",
       mcpServerId: server.id,
       codeVerifier: "verifier-plain-1",
@@ -285,10 +285,10 @@ describe("mcp_oauth_pending (state PK)", () => {
     ).toBe(0);
   });
 
-  test("concurrent pending states preserve independent AS context", () => {
+  test("concurrent pending states preserve independent AS context", async () => {
     const server = makeServer("mcp-pending-concurrent");
     for (const suffix of ["a", "b"]) {
-      insertMcpOAuthPending({
+      await insertMcpOAuthPending({
         state: `state-${suffix}`,
         mcpServerId: server.id,
         codeVerifier: `verifier-${suffix}`,
@@ -316,10 +316,10 @@ describe("mcp_oauth_pending (state PK)", () => {
     });
   });
 
-  test("pending authorization does not mutate a connected app", () => {
+  test("pending authorization does not mutate a connected app", async () => {
     const server = makeServer("mcp-pending-connected");
-    upsertMcpOAuthToken(base(server.id));
-    insertMcpOAuthPending({
+    await upsertMcpOAuthToken(base(server.id));
+    await insertMcpOAuthPending({
       state: "state-reconnect",
       mcpServerId: server.id,
       codeVerifier: "reconnect-verifier",
@@ -344,9 +344,9 @@ describe("mcp_oauth_pending (state PK)", () => {
     });
   });
 
-  test("gcMcpOAuthPending deletes rows older than TTL", () => {
+  test("gcMcpOAuthPending deletes rows older than TTL", async () => {
     const server = makeServer("mcp-pending-gc");
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "state-gc-old",
       mcpServerId: server.id,
       codeVerifier: "v",
@@ -382,9 +382,9 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
   });
 
-  test("reuses a connected token's DCR client (re-authorize case)", () => {
+  test("reuses a connected token's DCR client (re-authorize case)", async () => {
     const server = makeServer("mcp-reuse-connected");
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       authorizationServerIssuer: "https://issuer.example.com",
       registrationEndpoint: "https://issuer.example.com/register",
@@ -400,7 +400,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     });
   });
 
-  test("upsertMcpOAuthToken persists redirectUri onto the app row (first-connect reuse case)", () => {
+  test("upsertMcpOAuthToken persists redirectUri onto the app row (first-connect reuse case)", async () => {
     const server = makeServer("mcp-reuse-connected-redirect-uri");
     // Before this fix, upsertMcpOAuthToken never passed redirectUri through
     // to upsertMcpApp, so the FIRST successful connect (which always creates
@@ -409,7 +409,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     // redirectUri as "" — silently failing every subsequent
     // `reusable.redirectUri === callbackRedirectUri()` reuse check and
     // forcing a fresh DCR registration on every re-authorize.
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       ...base(server.id),
       redirectUri: "https://swarm.example.com/api/mcp-oauth/callback",
     });
@@ -418,9 +418,9 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(reusable?.redirectUri).toBe("https://swarm.example.com/api/mcp-oauth/callback");
   });
 
-  test("reuses a still-live pending's client when no token exists yet", () => {
+  test("reuses a still-live pending's client when no token exists yet", async () => {
     const server = makeServer("mcp-reuse-pending");
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "reuse-pending-state",
       mcpServerId: server.id,
       codeVerifier: "verifier",
@@ -451,7 +451,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
         "SELECT count(*) AS count FROM oauth_apps WHERE mcpServerId = ?",
       )
       .get(server.id)?.count;
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "reuse-pending-state-2",
       mcpServerId: server.id,
       codeVerifier: "verifier-2",
@@ -472,15 +472,15 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(after).toBe(before);
   });
 
-  test("manual clientSource is never surfaced through the reuse path", () => {
+  test("manual clientSource is never surfaced through the reuse path", async () => {
     const server = makeServer("mcp-reuse-manual");
-    upsertMcpOAuthToken({ ...base(server.id), clientSource: "manual" });
+    await upsertMcpOAuthToken({ ...base(server.id), clientSource: "manual" });
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
   });
 
   test("invalidate flips the flag; a subsequent lookup misses until the next legitimate write", async () => {
     const server = makeServer("mcp-reuse-invalidate");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     expect(findReusableMcpOAuthClient(server.id)).not.toBeNull();
 
     await invalidateMcpOAuthClient(server.id);
@@ -488,7 +488,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
 
     // A fresh legitimate write (e.g. re-registering after invalidation)
     // clears the flag again.
-    upsertMcpOAuthToken({ ...base(server.id), accessToken: "fresh-access" });
+    await upsertMcpOAuthToken({ ...base(server.id), accessToken: "fresh-access" });
     expect(findReusableMcpOAuthClient(server.id)).not.toBeNull();
   });
 
@@ -498,7 +498,7 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
 
   test("invalidate is idempotent for an already-invalidated client", async () => {
     const server = makeServer("mcp-reuse-invalidate-idempotent");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
 
     await invalidateMcpOAuthClient(server.id);
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
@@ -512,9 +512,9 @@ describe("findReusableMcpOAuthClient / invalidateMcpOAuthClient", () => {
     expect(findReusableMcpOAuthClient(server.id)).toBeNull();
   });
 
-  test("disconnect clears the stored DCR client so Reconnect forces a fresh registration", () => {
+  test("disconnect clears the stored DCR client so Reconnect forces a fresh registration", async () => {
     const server = makeServer("mcp-disconnect-clears-client");
-    upsertMcpOAuthToken(base(server.id));
+    await upsertMcpOAuthToken(base(server.id));
     expect(findReusableMcpOAuthClient(server.id)).not.toBeNull();
 
     expect(deleteMcpOAuthToken(server.id)).toBe(true);

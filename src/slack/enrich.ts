@@ -139,14 +139,14 @@ export async function resolveSlackUserId(
     const cached = await getKv(ENRICHMENT_NAMESPACE, slackUserId);
     const name = (cached?.value as EnrichedSlackUser | undefined)?.name ?? undefined;
 
-    const { user } = findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
+    const { user } = await findOrCreateUserByEmail(email, { name }, SLACK_WEBHOOK_ACTOR);
 
     // Link the Slack identity to whichever user we resolved to. PK collision
     // on `(slack, <id>)` shouldn't happen — we just confirmed no existing
     // mapping in step 1 — but guard defensively so a race doesn't 500 the
     // webhook.
     try {
-      linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
+      await linkIdentity(user.id, "slack", slackUserId, SLACK_WEBHOOK_ACTOR);
     } catch (error) {
       console.warn(
         `[Slack] linkIdentity('slack', ${slackUserId}) failed — likely a concurrent enroll`,

@@ -115,9 +115,9 @@ describe("resolveTaskAuditUserId", () => {
     expect(resolveTaskAuditUserId(undefined, idleAgent.id)).toBeNull();
   });
 
-  test("machine-carried external-ID fallback: no requestedByUserId but a linked Slack id resolves the user", () => {
+  test("machine-carried external-ID fallback: no requestedByUserId but a linked Slack id resolves the user", async () => {
     const slackLinkedUser = createUser({ name: "Slack Fallback User" });
-    linkIdentity(slackLinkedUser.id, "slack", "U_AUDIT_FALLBACK", SYSTEM_ACTOR);
+    await linkIdentity(slackLinkedUser.id, "slack", "U_AUDIT_FALLBACK", SYSTEM_ACTOR);
 
     const fallbackAgent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
     const fallbackTask = createTaskExtended("slack-originated task, requester never stamped", {

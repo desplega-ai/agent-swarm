@@ -133,7 +133,7 @@ describe("auth", () => {
 describe("GET /api/users", () => {
   test("returns users composed with identities, tokens, recentEvents", async () => {
     const u = createUser({ name: "Composed", email: "c@x.com" });
-    linkIdentity(u.id, "slack", "U_COMP", { kind: "operator", id: OPERATOR_FP });
+    await linkIdentity(u.id, "slack", "U_COMP", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch("/api/users");
     expect(r.status).toBe(200);
@@ -246,7 +246,7 @@ describe("PATCH /api/users/:id", () => {
 
   test("identities complete-list diff adds + removes", async () => {
     const u = createUser({ name: "IdDiff" });
-    linkIdentity(u.id, "slack", "U_OLD", { kind: "operator", id: OPERATOR_FP });
+    await linkIdentity(u.id, "slack", "U_OLD", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
@@ -389,9 +389,9 @@ describe("GET /api/users/:id/events", () => {
     const u = createUser({ name: "EventList" });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     // Emit a sequence of events with monotonically-increasing createdAt.
-    linkIdentity(u.id, "slack", "E1", actor);
-    linkIdentity(u.id, "slack", "E2", actor);
-    linkIdentity(u.id, "slack", "E3", actor);
+    await linkIdentity(u.id, "slack", "E1", actor);
+    await linkIdentity(u.id, "slack", "E2", actor);
+    await linkIdentity(u.id, "slack", "E3", actor);
 
     const r = await authedFetch(`/api/users/${u.id}/events?limit=2`);
     expect(r.status).toBe(200);
@@ -628,8 +628,8 @@ describe("POST /api/users/:id/merge", () => {
     const target = createUser({ name: "Target", email: "t@x.com" });
     const source = createUser({ name: "Source", email: "s@x.com", emailAliases: ["alt@x.com"] });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
-    linkIdentity(source.id, "slack", "U_SRC", actor);
-    linkIdentity(source.id, "github", "src-gh", actor);
+    await linkIdentity(source.id, "slack", "U_SRC", actor);
+    await linkIdentity(source.id, "github", "src-gh", actor);
 
     const r = await authedFetch(`/api/users/${target.id}/merge`, {
       method: "POST",

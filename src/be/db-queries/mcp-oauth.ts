@@ -554,8 +554,8 @@ export interface UpsertMcpOAuthTokenInput {
   redirectUri?: string;
 }
 
-export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
-  getDb().transaction(() => {
+export async function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): Promise<void> {
+  await getDbClient().transaction(async () => {
     const userId = input.userId ?? null;
     const existing = rawMcpToken(input.mcpServerId, userId);
     const appId = upsertMcpApp({
@@ -590,7 +590,7 @@ export function upsertMcpOAuthToken(input: UpsertMcpOAuthTokenInput): void {
       lastRefreshedAt: input.lastRefreshedAt ?? null,
       ...(input.connectedByUserId != null ? { connectedByUserId: input.connectedByUserId } : {}),
     });
-  })();
+  });
 }
 
 export async function applyMcpOAuthRefresh(
@@ -689,8 +689,8 @@ export interface InsertMcpOAuthPendingInput {
   finalRedirect?: string | null;
 }
 
-export function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): void {
-  getDb().transaction(() => {
+export async function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
     const userId = input.userId ?? null;
     const existingToken = rawMcpToken(input.mcpServerId, userId);
     const clientSource = existingToken
@@ -760,14 +760,12 @@ export function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): void {
       tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? null,
       clientSource,
     });
-    getDb()
-      .query(
-        `INSERT INTO oauth_pending (
+    await tx.run(
+      `INSERT INTO oauth_pending (
          state, appId, label, flow, codeVerifier, nonce,
          redirectUri, finalRedirect, userId, contextJson
        ) VALUES (?, ?, ?, 'mcp', ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
+      [
         input.state,
         appId,
         userId ? `user:${userId}` : "default",
@@ -777,8 +775,9 @@ export function insertMcpOAuthPending(input: InsertMcpOAuthPendingInput): void {
         input.finalRedirect ?? null,
         userId,
         contextJson,
-      );
-  })();
+      ],
+    );
+  });
 }
 
 type UnifiedPendingRow = {
@@ -818,11 +817,11 @@ function deleteOrphanMcpApp(appId: string): void {
     .run(appId);
 }
 
-export function consumeMcpOAuthPending(state: string): McpOAuthPendingRow | null {
-  return getDb().transaction(() => {
+export async function consumeMcpOAuthPending(state: string): Promise<McpOAuthPendingRow | null> {
+  return await getDbClient().transaction(async (tx) => {
     const row = rawPending(state);
     if (!row) return null;
-    getDb().query("DELETE FROM oauth_pending WHERE state = ? AND flow = 'mcp'").run(state);
+    await tx.run("DELETE FROM oauth_pending WHERE state = ? AND flow = 'mcp'", [state]);
     const context = parseObject(row.contextJson);
     deleteOrphanMcpApp(row.appId);
     const encryptedClientSecret =
@@ -859,23 +858,22 @@ export function consumeMcpOAuthPending(state: string): McpOAuthPendingRow | null
       finalRedirect: row.finalRedirect,
       createdAt: normalizeDateRequired(row.createdAt),
     };
-  })();
+  });
 }
 
-export function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): number {
+export async function gcMcpOAuthPending(olderThanMs = 10 * 60 * 1000): Promise<number> {
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
-  return getDb().transaction(() => {
-    const appIds = getDb()
-      .query<{ appId: string }, [string]>(
-        "SELECT DISTINCT appId FROM oauth_pending WHERE flow = 'mcp' AND createdAt < ?",
-      )
-      .all(cutoff);
-    const result = getDb()
-      .query("DELETE FROM oauth_pending WHERE flow = 'mcp' AND createdAt < ?")
-      .run(cutoff);
+  return await getDbClient().transaction(async (tx) => {
+    const appIds = await tx.query<{ appId: string }>(
+      "SELECT DISTINCT appId FROM oauth_pending WHERE flow = 'mcp' AND createdAt < ?",
+      [cutoff],
+    );
+    const result = await tx.run("DELETE FROM oauth_pending WHERE flow = 'mcp' AND createdAt < ?", [
+      cutoff,
+    ]);
     for (const { appId } of appIds) deleteOrphanMcpApp(appId);
     return result.changes;
-  })();
+  });
 }
 
 export type McpAuthMethod = "static" | "oauth" | "auto";

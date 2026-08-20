@@ -189,7 +189,7 @@ function getLatestTaskText(): string | null {
 describe("known github sender", () => {
   test("PR event from a mapped user populates requestedByUserId and writes no kv rows", async () => {
     const user = createUser({ name: "Mapped User", email: "mapped@example.com" });
-    linkIdentity(user.id, "github", "mapped-login", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "mapped-login", SYSTEM_ACTOR);
 
     const result = await handlePullRequest(makePREvent("mapped-login", 100));
     // Even if the PR doesn't create a task (no mention), the sender resolution
@@ -201,7 +201,7 @@ describe("known github sender", () => {
 
   test("PR with bot assignment from mapped user puts user id on the task", async () => {
     const user = createUser({ name: "Mapped Assigner", email: "assigner@example.com" });
-    linkIdentity(user.id, "github", "assigner", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "assigner", SYSTEM_ACTOR);
 
     const event: PullRequestEvent = {
       action: "assigned",
@@ -221,7 +221,7 @@ describe("known github sender", () => {
 
   test("comment event with bot mention from mapped user puts user id on the task", async () => {
     const user = createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
-    linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
 
     const result = await handleComment(
       makeCommentEvent("commenter", `Hey @${GITHUB_BOT_NAME} please take a look`),
@@ -237,7 +237,7 @@ describe("known github sender", () => {
 
   test("review event from mapped user puts user id on the task", async () => {
     const user = createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
-    linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("reviewer"));
     expect(result.created).toBe(true);
@@ -250,7 +250,7 @@ describe("known github sender", () => {
 
   test("review event from mapped user renders the resolved identity pair, never the raw login", async () => {
     const user = createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
-    linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("pair-reviewer", 1001));
     expect(result.created).toBe(true);

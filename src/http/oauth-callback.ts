@@ -167,7 +167,7 @@ export async function completeGenericOAuthCallback(
   const state = query.state;
   if (!state) return { handled: false };
 
-  const pending = consumeOAuthPending(state);
+  const pending = await consumeOAuthPending(state);
   if (!pending) return { handled: false };
 
   const app = getOAuthAppById(pending.appId);
@@ -317,7 +317,7 @@ let gcTimer: ReturnType<typeof setInterval> | null = null;
 
 async function runOAuthPendingGcTick(): Promise<void> {
   try {
-    const removed = (await gcOAuthPending()) + gcMcpOAuthPending();
+    const removed = (await gcOAuthPending()) + (await gcMcpOAuthPending());
     if (removed > 0) {
       console.debug(`[oauth] GC removed ${removed} expired pending session(s)`);
     }

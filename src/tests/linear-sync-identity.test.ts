@@ -105,7 +105,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
     const issue = makeIssue();
     const linearUserId = "lin-user-fastpath-001";
     const u = createUser({ name: "Existing Human", email: "existing@example.com" });
-    linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
+    await linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
 
     const beforeUsers = usersCount();
     const beforeExt = externalIdsCount();
@@ -310,7 +310,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     const linearUserId = "lin-user-prompted-fastpath-001";
     const u = createUser({ name: "Prompted Human", email: "pf@example.com" });
-    linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
+    await linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
 
     const event = {
       type: "AgentSessionEvent",

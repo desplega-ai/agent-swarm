@@ -198,26 +198,26 @@ export async function getUserGrant(userId: string): Promise<EffectiveGrant> {
   return { grantsAll: false, verbs };
 }
 
-export function attachRole(userId: string, roleName: string): void {
-  const db = getDb();
-  db.transaction(() => {
+export async function attachRole(userId: string, roleName: string): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
     const roleId = requireRoleId(roleName);
-    db.prepare(
+    await tx.run(
       `INSERT OR IGNORE INTO principal_roles (principalType, principalId, roleId)
        VALUES ('user', ?, ?)`,
-    ).run(userId, roleId);
-  })();
+      [userId, roleId],
+    );
+  });
 }
 
-export function detachRole(userId: string, roleName: string): void {
-  const db = getDb();
-  db.transaction(() => {
+export async function detachRole(userId: string, roleName: string): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
     const roleId = requireRoleId(roleName);
-    db.prepare(
+    await tx.run(
       `DELETE FROM principal_roles
        WHERE principalType = 'user' AND principalId = ? AND roleId = ?`,
-    ).run(userId, roleId);
-  })();
+      [userId, roleId],
+    );
+  });
 }
 
 export async function listUserRoles(userId: string): Promise<UserRole[]> {

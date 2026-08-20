@@ -422,12 +422,12 @@ async function resolveLinearActor(
 
   const trimmedEmail = typeof email === "string" ? email.trim() : "";
   if (trimmedEmail !== "") {
-    const { user: linked } = findOrCreateUserByEmail(
+    const { user: linked } = await findOrCreateUserByEmail(
       trimmedEmail,
       { name: name?.trim() || undefined },
       LINEAR_WEBHOOK_ACTOR,
     );
-    linkIdentity(linked.id, "linear", linearUserId, LINEAR_WEBHOOK_ACTOR);
+    await linkIdentity(linked.id, "linear", linearUserId, LINEAR_WEBHOOK_ACTOR);
     return linked.id;
   }
 

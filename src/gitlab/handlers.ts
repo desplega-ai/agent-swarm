@@ -87,12 +87,12 @@ async function resolveGitLabSender(
   // Some GitLab installations emit `email: ""` instead of omitting the field.
   const inlineEmail = typeof user.email === "string" ? user.email.trim() : "";
   if (inlineEmail !== "") {
-    const { user: linked } = findOrCreateUserByEmail(
+    const { user: linked } = await findOrCreateUserByEmail(
       inlineEmail,
       { name: user.name },
       GITLAB_WEBHOOK_ACTOR,
     );
-    linkIdentity(linked.id, "gitlab", user.username, GITLAB_WEBHOOK_ACTOR);
+    await linkIdentity(linked.id, "gitlab", user.username, GITLAB_WEBHOOK_ACTOR);
     return linked.id;
   }
 

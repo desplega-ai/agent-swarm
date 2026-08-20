@@ -110,10 +110,10 @@ describe("createUser", () => {
     expect(user.email).toBe("bob@example.com");
     expect(user.emailAliases).toEqual(["bob2@example.com", "robert@example.com"]);
 
-    linkIdentity(user.id, "slack", "U_BOB", SYSTEM_ACTOR);
-    linkIdentity(user.id, "linear", "lin-bob-uuid", SYSTEM_ACTOR);
-    linkIdentity(user.id, "github", "bob-gh", SYSTEM_ACTOR);
-    linkIdentity(user.id, "gitlab", "bob-gl", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U_BOB", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "linear", "lin-bob-uuid", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "github", "bob-gh", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "gitlab", "bob-gl", SYSTEM_ACTOR);
 
     const ids = getUserIdentities(user.id);
     expect(ids).toContainEqual({ kind: "slack", externalId: "U_BOB" });
@@ -139,19 +139,19 @@ describe("linkIdentity", () => {
   test("rejects duplicate (kind, externalId) — PK collision", async () => {
     const u1 = await createUser({ name: "Dup1" });
     const u2 = await createUser({ name: "Dup2" });
-    linkIdentity(u1.id, "slack", "U_DUP", SYSTEM_ACTOR);
+    await linkIdentity(u1.id, "slack", "U_DUP", SYSTEM_ACTOR);
     expect(() => linkIdentity(u2.id, "slack", "U_DUP", SYSTEM_ACTOR)).toThrow();
   });
 
   test("rejects duplicate (kind, externalId) — same user, second call", async () => {
     const u = await createUser({ name: "SelfDup" });
-    linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR);
+    await linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR);
     expect(() => linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR)).toThrow();
   });
 
   test("emits identity_added event in the same transaction", async () => {
     const u = await createUser({ name: "EventLink" });
-    linkIdentity(u.id, "slack", "U_EVENTLINK", SYSTEM_ACTOR);
+    await linkIdentity(u.id, "slack", "U_EVENTLINK", SYSTEM_ACTOR);
     const events = eventsFor(u.id);
     expect(events.length).toBe(1);
     expect(events[0]!.eventType).toBe("identity_added");
@@ -166,10 +166,10 @@ describe("linkIdentity", () => {
 describe("unlinkIdentity", () => {
   test("removes the mapping and emits identity_removed", async () => {
     const u = await createUser({ name: "Unlink" });
-    linkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
+    await linkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_UNLINK")).not.toBeNull();
 
-    unlinkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
+    await unlinkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_UNLINK")).toBeNull();
 
     const events = eventsFor(u.id);
@@ -197,8 +197,8 @@ describe("getUserById / getUserIdentities", () => {
 
   test("getUserIdentities returns sorted (kind, externalId) tuples", async () => {
     const u = await createUser({ name: "IdList" });
-    linkIdentity(u.id, "slack", "U_LIST", SYSTEM_ACTOR);
-    linkIdentity(u.id, "github", "list-gh", SYSTEM_ACTOR);
+    await linkIdentity(u.id, "slack", "U_LIST", SYSTEM_ACTOR);
+    await linkIdentity(u.id, "github", "list-gh", SYSTEM_ACTOR);
     const list = getUserIdentities(u.id);
     expect(list.length).toBe(2);
     expect(list).toEqual([
@@ -270,7 +270,7 @@ describe("deleteUser", () => {
 
   test("clears requestedByUserId on tasks AND cascades user_external_ids", async () => {
     const user = await createUser({ name: "TaskOwner" });
-    linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
 
     const task = createTaskExtended("test task with user", {
@@ -297,10 +297,10 @@ describe("findUserByExternalId", () => {
       name: "Resolve TestUser",
       email: "resolve-test@example.com",
     });
-    linkIdentity(testUser.id, "slack", "U_RESOLVE_SLACK", SYSTEM_ACTOR);
-    linkIdentity(testUser.id, "linear", "lin-resolve-uuid", SYSTEM_ACTOR);
-    linkIdentity(testUser.id, "github", "resolve-gh", SYSTEM_ACTOR);
-    linkIdentity(testUser.id, "gitlab", "resolve-gl", SYSTEM_ACTOR);
+    await linkIdentity(testUser.id, "slack", "U_RESOLVE_SLACK", SYSTEM_ACTOR);
+    await linkIdentity(testUser.id, "linear", "lin-resolve-uuid", SYSTEM_ACTOR);
+    await linkIdentity(testUser.id, "github", "resolve-gh", SYSTEM_ACTOR);
+    await linkIdentity(testUser.id, "gitlab", "resolve-gl", SYSTEM_ACTOR);
   });
 
   test("resolves by slack identity", () => {
@@ -456,7 +456,7 @@ describe("mintToken / revokeToken / resolveUserByToken", () => {
   test("revokeToken sets revokedAt + emits token_revoked + resolveUserByToken returns null", async () => {
     const user = await createUser({ name: "RevokeUser" });
     const { tokenId, plaintext } = mintToken(user.id, "to-revoke", OPERATOR_ACTOR);
-    revokeToken(tokenId, OPERATOR_ACTOR);
+    await revokeToken(tokenId, OPERATOR_ACTOR);
 
     const row = getDb()
       .prepare<{ revokedAt: string | null }, string>(

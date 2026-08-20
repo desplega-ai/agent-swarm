@@ -68,13 +68,13 @@ async function resolveJiraActor(
 
   const trimmedEmail = typeof email === "string" ? email.trim() : "";
   if (trimmedEmail !== "") {
-    const { user } = findOrCreateUserByEmail(
+    const { user } = await findOrCreateUserByEmail(
       trimmedEmail,
       { name: name?.trim() || undefined },
       JIRA_WEBHOOK_ACTOR,
     );
     try {
-      linkIdentity(user.id, "jira", accountId, JIRA_WEBHOOK_ACTOR);
+      await linkIdentity(user.id, "jira", accountId, JIRA_WEBHOOK_ACTOR);
     } catch (error) {
       console.warn(
         `[Jira Sync] linkIdentity('jira', ${accountId}) failed — likely a concurrent enroll`,

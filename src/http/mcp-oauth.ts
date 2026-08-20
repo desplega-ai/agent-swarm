@@ -623,7 +623,7 @@ async function runAuthorizeFlow(
     extraParams,
   });
 
-  insertMcpOAuthPending({
+  await insertMcpOAuthPending({
     state: built.state,
     mcpServerId,
     userId,
@@ -668,7 +668,7 @@ export async function completeMcpOAuthCallback(
 ): Promise<boolean> {
   const state = query.state;
   if (!state) return false;
-  const pending = consumeMcpOAuthPending(state);
+  const pending = await consumeMcpOAuthPending(state);
   if (!pending) return false;
 
   const dashboardBaseUrl = pending.finalRedirect ?? defaultFinalRedirect(pending.mcpServerId);
@@ -720,7 +720,7 @@ export async function completeMcpOAuthCallback(
       existing?.clientSource ??
       (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
 
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: pending.mcpServerId,
       userId: pending.userId,
       accessToken: tokens.access_token,
@@ -1076,7 +1076,7 @@ export async function handleMcpOAuth(
 
       // Write the provisional token row with status='error' until /authorize
       // completes. The callback flips status=connected on success.
-      upsertMcpOAuthToken({
+      await upsertMcpOAuthToken({
         mcpServerId: parsed.params.mcpServerId,
         accessToken: "pending",
         refreshToken: null,

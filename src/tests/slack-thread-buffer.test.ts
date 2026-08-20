@@ -139,7 +139,7 @@ describe("Slack thread buffer", () => {
       const linked = createUser({ name: "Luis", email: "luis-buf@example.com" });
       // Slack user ids are uppercase-alphanumeric only (matches the
       // `/<@([A-Z0-9]+)>/g` mention regex) — no underscores.
-      linkIdentity(linked.id, "slack", "U1000LINKED", SYSTEM_ACTOR);
+      await linkIdentity(linked.id, "slack", "U1000LINKED", SYSTEM_ACTOR);
 
       bufferThreadMessage(
         channelId,

@@ -294,8 +294,8 @@ describe("resolveSlackUserId — three-step cascade", () => {
     const winner = createUser({ name: "Race winner", email: "winner@example.com" });
     const originalLinkIdentity = usersModule.linkIdentity;
     const linkSpy = spyOn(usersModule, "linkIdentity").mockImplementationOnce(
-      (_userId, kind, externalId, actor) => {
-        originalLinkIdentity(winner.id, kind, externalId, actor);
+      async (_userId, kind, externalId, actor) => {
+        await originalLinkIdentity(winner.id, kind, externalId, actor);
         throw new Error("simulated concurrent enrollment");
       },
     );
@@ -382,9 +382,9 @@ describe("findUserByExternalId — sanity check after cascade", () => {
 });
 
 describe("rewriteSlackMentions — pure DB, zero Slack API calls", () => {
-  test("resolved mention renders '<@id|Name>' — the canonical pair", () => {
+  test("resolved mention renders '<@id|Name>' — the canonical pair", async () => {
     const user = createUser({ name: "Manuel", email: "manuel-rw@example.com" });
-    linkIdentity(user.id, "slack", "U3000RESOLVED", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U3000RESOLVED", SYSTEM_ACTOR);
 
     const rewritten = rewriteSlackMentions("hey <@U3000RESOLVED> can you look at this");
     expect(rewritten).toBe("hey <@U3000RESOLVED|Manuel> can you look at this");
@@ -400,9 +400,9 @@ describe("rewriteSlackMentions — pure DB, zero Slack API calls", () => {
     expect(rewritten).toBe("hey <@U123SWARMBOT> (that's you)");
   });
 
-  test("multiple mentions in one string are each rewritten independently", () => {
+  test("multiple mentions in one string are each rewritten independently", async () => {
     const user = createUser({ name: "Tainá", email: "taina-rw@example.com" });
-    linkIdentity(user.id, "slack", "U5000RESOLVED", SYSTEM_ACTOR);
+    await linkIdentity(user.id, "slack", "U5000RESOLVED", SYSTEM_ACTOR);
 
     const rewritten = rewriteSlackMentions("<@U5000RESOLVED> and <@U6000UNKNOWN> both here");
     expect(rewritten).toBe("<@U5000RESOLVED|Tainá> and <@U6000UNKNOWN> (unknown user) both here");

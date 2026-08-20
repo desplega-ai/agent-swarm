@@ -735,7 +735,7 @@ describe("identity resolution — MR handler", () => {
 
   test("known GitLab user → requestedByUserId populated, no unmapped entry", async () => {
     const known = createUser({ name: "Known User" });
-    linkIdentity(known.id, "gitlab", "knownuser", { kind: "system", id: "test" });
+    await linkIdentity(known.id, "gitlab", "knownuser", { kind: "system", id: "test" });
 
     const event = makeMREvent({
       user: { id: 11, name: "Known User", username: "knownuser", avatar_url: "" },
@@ -991,7 +991,7 @@ describe("identity resolution — Note handler", () => {
 
   test("known GitLab user commenting -> requestedByUserId populated + rendered pair, never the raw username", async () => {
     const known = createUser({ name: "Known Commenter" });
-    linkIdentity(known.id, "gitlab", "knowncommenter", { kind: "system", id: "test" });
+    await linkIdentity(known.id, "gitlab", "knowncommenter", { kind: "system", id: "test" });
 
     const event = makeNoteEvent({
       user: { id: 32, name: "Known Commenter", username: "knowncommenter", avatar_url: "" },
@@ -1031,7 +1031,7 @@ describe("identity resolution — Note handler", () => {
 describe("identity resolution — Pipeline handler", () => {
   test("known GitLab user triggers pipeline -> requestedByUserId populated on the task", async () => {
     const known = createUser({ name: "Pipeline Trigger" });
-    linkIdentity(known.id, "gitlab", "pipelinetrigger", { kind: "system", id: "test" });
+    await linkIdentity(known.id, "gitlab", "pipelinetrigger", { kind: "system", id: "test" });
 
     createTaskExtended("[GitLab MR #970] Pipeline identity test", {
       source: "gitlab",
