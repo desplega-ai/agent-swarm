@@ -86,7 +86,7 @@ describe("MCP server resolvedEnv key mapping", () => {
   const agentId = crypto.randomUUID();
 
   beforeAll(async () => {
-    createAgent({
+    await createAgent({
       id: agentId,
       name: "test-agent",
       status: "idle",

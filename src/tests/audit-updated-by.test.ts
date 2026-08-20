@@ -71,7 +71,7 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const agent = createAgent({ name: "audit-test-agent", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "audit-test-agent", isLead: false, status: "idle" });
   agentId = agent.id;
 
   // Create a real user in the users table (requestedByUserId is a FK)
@@ -79,7 +79,7 @@ beforeAll(async () => {
   humanUserId = user.id;
 
   // Create a task with a human requester
-  const task = createTaskExtended("test task for audit", {
+  const task = await createTaskExtended("test task for audit", {
     agentId,
     requestedByUserId: humanUserId,
   });
@@ -174,7 +174,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     await updateScheduledTask(schedule.id, { updatedBy: humanUserId });
 
     // Task with no human requester
-    const automationTask = createTaskExtended("automation task", { agentId });
+    const automationTask = await createTaskExtended("automation task", { agentId });
 
     const result = await callTool(
       server,
@@ -257,7 +257,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     });
     await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation wf task", { agentId });
+    const automationTask = await createTaskExtended("automation wf task", { agentId });
 
     const result = await callTool(
       server,
@@ -309,7 +309,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     });
     await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation patch task", { agentId });
+    const automationTask = await createTaskExtended("automation patch task", { agentId });
 
     const result = await callTool(
       server,
@@ -335,15 +335,15 @@ describe("resolveTaskAuditUserId — source-task ownership gate", () => {
     expect(resolveTaskAuditUserId(sourceTaskId, agentId)).toBe(humanUserId);
   });
 
-  test("returns null when the source task belongs to a different agent (no spoofing)", () => {
-    const otherAgent = createAgent({
+  test("returns null when the source task belongs to a different agent (no spoofing)", async () => {
+    const otherAgent = await createAgent({
       name: `audit-other-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
     // A task owned by another agent but with a human requester — a caller must
     // NOT be able to attribute a write to this task's requester.
-    const foreignTask = createTaskExtended("foreign task", {
+    const foreignTask = await createTaskExtended("foreign task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -358,8 +358,8 @@ describe("resolveTaskAuditUserId — source-task ownership gate", () => {
     expect(resolveTaskAuditUserId(sourceTaskId, undefined)).toBeNull();
   });
 
-  test("returns null when the owned source task has no human requester", () => {
-    const autoTask = createTaskExtended("automation only", { agentId });
+  test("returns null when the owned source task has no human requester", async () => {
+    const autoTask = await createTaskExtended("automation only", { agentId });
     expect(resolveTaskAuditUserId(autoTask.id, agentId)).toBeNull();
   });
 });
@@ -388,13 +388,13 @@ describe("resolveHttpAuditUserId — trusted request context", () => {
     expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
-  test("ignores a source task the caller does not own", () => {
-    const otherAgent = createAgent({
+  test("ignores a source task the caller does not own", async () => {
+    const otherAgent = await createAgent({
       name: `audit-other-http-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign http task", {
+    const foreignTask = await createTaskExtended("foreign http task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -497,12 +497,12 @@ describe("HTTP create paths — created_by column", () => {
   });
 
   test("POST /api/schedules does not stamp created_by for a foreign source task", async () => {
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-sched-foreign-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign sched task", {
+    const foreignTask = await createTaskExtended("foreign sched task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -533,12 +533,12 @@ describe("HTTP create paths — created_by column", () => {
   });
 
   test("POST /api/workflows does not stamp created_by for a foreign source task", async () => {
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-wf-foreign-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign wf task", {
+    const foreignTask = await createTaskExtended("foreign wf task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -588,7 +588,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     });
     await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation patchnode task", { agentId });
+    const automationTask = await createTaskExtended("automation patchnode task", { agentId });
 
     const result = await callTool(
       server,
@@ -613,12 +613,12 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     });
     await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-patchnode-other-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign patchnode task", {
+    const foreignTask = await createTaskExtended("foreign patchnode task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });

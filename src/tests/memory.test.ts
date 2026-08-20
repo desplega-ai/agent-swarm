@@ -25,8 +25,8 @@ describe("Memory System", () => {
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
 
-    createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
+    await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
   });
 
   afterAll(async () => {
@@ -328,14 +328,14 @@ describe("Memory System", () => {
     const searchAgentId = "cccc0000-0000-4000-8000-000000000003";
     const searchAgentId2 = "dddd0000-0000-4000-8000-000000000004";
 
-    beforeAll(() => {
-      createAgent({
+    beforeAll(async () => {
+      await createAgent({
         id: searchAgentId,
         name: "Search Agent",
         isLead: false,
         status: "idle",
       });
-      createAgent({
+      await createAgent({
         id: searchAgentId2,
         name: "Search Agent 2",
         isLead: false,
@@ -459,9 +459,9 @@ describe("Memory System", () => {
   });
 
   describe("store.list (listMemoriesByAgent)", () => {
-    test("lists agent memories with pagination", () => {
+    test("lists agent memories with pagination", async () => {
       const listAgent = "eeee0000-0000-4000-8000-000000000005";
-      createAgent({ id: listAgent, name: "List Agent", isLead: false, status: "idle" });
+      await createAgent({ id: listAgent, name: "List Agent", isLead: false, status: "idle" });
 
       for (let i = 0; i < 5; i++) {
         store.store({
@@ -480,9 +480,9 @@ describe("Memory System", () => {
       expect(page2.length).toBe(2);
     });
 
-    test("counts memories with the same filters used by list", () => {
+    test("counts memories with the same filters used by list", async () => {
       const countAgent = "eeee0000-0000-4000-8000-000000000105";
-      createAgent({ id: countAgent, name: "Count Agent", isLead: false, status: "idle" });
+      await createAgent({ id: countAgent, name: "Count Agent", isLead: false, status: "idle" });
 
       store.store({
         agentId: countAgent,
@@ -583,9 +583,9 @@ describe("Memory System", () => {
   });
 
   describe("store.getStats (getMemoryStats)", () => {
-    test("returns correct stats", () => {
+    test("returns correct stats", async () => {
       const statsAgent = "ffff0000-0000-4000-8000-000000000006";
-      createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
+      await createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
 
       store.store({
         agentId: statsAgent,
@@ -627,8 +627,8 @@ describe("Memory System", () => {
   describe("memory ingestion (API logic)", () => {
     const ingestAgent = "1111aaaa-0000-4000-8000-000000000007";
 
-    beforeAll(() => {
-      createAgent({ id: ingestAgent, name: "Ingest Agent", isLead: false, status: "idle" });
+    beforeAll(async () => {
+      await createAgent({ id: ingestAgent, name: "Ingest Agent", isLead: false, status: "idle" });
     });
 
     test("creates memory records from content", () => {

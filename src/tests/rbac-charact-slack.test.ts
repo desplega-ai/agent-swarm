@@ -96,8 +96,8 @@ beforeAll(async () => {
   savedKapsoApiKey = process.env.KAPSO_API_KEY;
   delete process.env.KAPSO_API_KEY;
 
-  createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
 
   server = new McpServer({ name: "test-rbac-charact-slack", version: "1.0.0" });
   registerSlackPostTool(server);

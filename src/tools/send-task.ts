@@ -170,14 +170,14 @@ const TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES = new Set([
  * original → R1 (pin) → R1 → original (reaper) → original → R2 (here). No-op for
  * non-resume tasks or when the parent has no tracker_sync rows.
  */
-function transferTrackerSyncToResumeChild(args: {
+async function transferTrackerSyncToResumeChild(args: {
   parentTaskId?: string;
   taskType?: string;
   child: AgentTask;
-}): void {
+}): Promise<void> {
   if (args.taskType !== "resume" || !args.parentTaskId) return;
 
-  const parent = getTaskById(args.parentTaskId);
+  const parent = await getTaskById(args.parentTaskId);
   if (!parent || !TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES.has(parent.status)) return;
 
   const repointed = repointTrackerSyncBySwarmId(parent.id, args.child.id);
@@ -223,7 +223,7 @@ export async function sendTaskHandler(
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
-  const callerTask = sourceTaskId ? getTaskById(sourceTaskId) : null;
+  const callerTask = sourceTaskId ? await getTaskById(sourceTaskId) : null;
   const requestedByUserId =
     ctx.kind === "user"
       ? ctx.userId
@@ -240,7 +240,9 @@ export async function sendTaskHandler(
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
-  const effectiveParentTask = effectiveParentTaskId ? getTaskById(effectiveParentTaskId) : null;
+  const effectiveParentTask = effectiveParentTaskId
+    ? await getTaskById(effectiveParentTaskId)
+    : null;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -295,7 +297,9 @@ export async function sendTaskHandler(
     }
   }
 
-  const existingTrackerWork = findExistingLinearTrackerContextWork(effectiveParentTask?.contextKey);
+  const existingTrackerWork = await findExistingLinearTrackerContextWork(
+    effectiveParentTask?.contextKey,
+  );
   if (existingTrackerWork) {
     const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
     console.log(`[send-task] ${msg}`);
@@ -333,7 +337,7 @@ export async function sendTaskHandler(
   // supersede) is intentionally NOT in this guard — a resume IS the legitimate
   // re-dispatch and bypassing the check is correct. Do not add "resume" here.
   if (sourceTaskId) {
-    const sourceTask = getTaskById(sourceTaskId);
+    const sourceTask = await getTaskById(sourceTaskId);
     if (
       sourceTask?.taskType === "follow-up" &&
       sourceTask.slackThreadTs &&
@@ -369,7 +373,7 @@ export async function sendTaskHandler(
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
     if (!effectiveAgentId) {
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         key: assetKey,
         creatorAgentId,
         requestedByUserId,
@@ -397,7 +401,7 @@ export async function sendTaskHandler(
           ? { capabilities: requiredCapabilities }
           : undefined,
       });
-      transferTrackerSyncToResumeChild({
+      await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
@@ -410,7 +414,7 @@ export async function sendTaskHandler(
       };
     }
 
-    const agent = getAgentById(effectiveAgentId);
+    const agent = await getAgentById(effectiveAgentId);
 
     if (!agent) {
       return {
@@ -427,8 +431,8 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!offerMode && !hasCapacity(effectiveAgentId)) {
-      const activeCount = getActiveTaskCount(effectiveAgentId);
+    if (!offerMode && !(await hasCapacity(effectiveAgentId))) {
+      const activeCount = await getActiveTaskCount(effectiveAgentId);
       return {
         success: false,
         message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
@@ -437,7 +441,7 @@ export async function sendTaskHandler(
 
     if (offerMode) {
       // Offer the task to the agent (they must accept/reject)
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         key: assetKey,
         offeredTo: effectiveAgentId,
         creatorAgentId,
@@ -459,7 +463,7 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
       });
-      transferTrackerSyncToResumeChild({
+      await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
@@ -473,7 +477,7 @@ export async function sendTaskHandler(
     }
 
     // Direct assignment
-    const newTask = createTaskExtended(task, {
+    const newTask = await createTaskExtended(task, {
       key: assetKey,
       agentId: effectiveAgentId,
       creatorAgentId,
@@ -495,7 +499,7 @@ export async function sendTaskHandler(
       overrideSlackContext,
       followUpConfig,
     });
-    transferTrackerSyncToResumeChild({
+    await transferTrackerSyncToResumeChild({
       parentTaskId: effectiveParentTaskId,
       taskType,
       child: newTask,

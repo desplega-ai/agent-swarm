@@ -52,7 +52,7 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   const db = getDb();
   db.prepare("DELETE FROM session_costs").run();
   db.prepare("DELETE FROM budget_refusal_notifications").run();
@@ -62,7 +62,7 @@ beforeEach(() => {
   db.prepare("DELETE FROM user_tokens").run();
   db.prepare("DELETE FROM users").run();
   db.prepare("DELETE FROM agents").run();
-  createAgent({
+  await createAgent({
     id: "agent-1",
     name: "agent-1",
     isLead: false,
@@ -80,7 +80,7 @@ async function insertUserTaskSpend(
   totalCostUsd: number,
   createdAt = `${TODAY}T12:00:00.000Z`,
 ) {
-  const task = createTaskExtended(`task for ${userId}`, {
+  const task = await createTaskExtended(`task for ${userId}`, {
     requestedByUserId: userId,
     status: "unassigned",
   });
@@ -228,7 +228,7 @@ describe("user budget scope", () => {
     await insertUserTaskSpend(userA.id, 99, "2026-04-27T23:59:59.999Z");
     await insertUserTaskSpend(userB.id, 10);
 
-    const unownedTask = createTaskExtended("unowned", { status: "unassigned" });
+    const unownedTask = await createTaskExtended("unowned", { status: "unassigned" });
     await createSessionCost({
       sessionId: `sess-${crypto.randomUUID()}`,
       taskId: unownedTask.id,
@@ -301,8 +301,13 @@ describe("user budget scope", () => {
     const server = createMcpUserTestServer();
     const port = await listen(server);
     try {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
-      const worker = createAgent({ name: "worker", isLead: false, status: "idle", maxTasks: 1 });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
+      const worker = await createAgent({
+        name: "worker",
+        isLead: false,
+        status: "idle",
+        maxTasks: 1,
+      });
       const user = createUser({ name: "MCP Budget User", dailyBudgetUsd: 0.5 });
       await upsertBudget("user", user.id, 0.5);
       const token = mintToken(user.id, "qa", ACTOR);
@@ -347,7 +352,7 @@ describe("user budget scope", () => {
       expect((firstPoll.body.trigger as { cause: string }).cause).toBe("user");
       expect((firstPoll.body.trigger as { userSpend: number }).userSpend).toBe(0.5);
       expect((firstPoll.body.trigger as { userBudget: number }).userBudget).toBe(0.5);
-      expect(getTaskById(taskId)?.status).toBe("unassigned");
+      expect((await getTaskById(taskId))?.status).toBe("unassigned");
 
       const firstDedup = getDb()
         .prepare<{ follow_up_task_id: string | null; user_spend_usd: number | null }, [string]>(
@@ -357,7 +362,7 @@ describe("user budget scope", () => {
       expect(firstDedup?.user_spend_usd).toBe(0.5);
       expect(firstDedup?.follow_up_task_id).toBeTruthy();
       const firstFollowUpId = firstDedup?.follow_up_task_id;
-      expect(firstFollowUpId ? getTaskById(firstFollowUpId)?.agentId : null).toBe(lead.id);
+      expect(firstFollowUpId ? (await getTaskById(firstFollowUpId))?.agentId : null).toBe(lead.id);
 
       const secondPoll = await callPoll(worker.id);
       expect(secondPoll.status).toBe(200);

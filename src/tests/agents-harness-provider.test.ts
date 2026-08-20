@@ -99,8 +99,8 @@ describe("migration 054_agent_harness_provider", () => {
     expect(cols).toContain("harness_provider");
   });
 
-  test("existing agent rows default to NULL `harness_provider`", () => {
-    const a = createAgent({
+  test("existing agent rows default to NULL `harness_provider`", async () => {
+    const a = await createAgent({
       name: "legacy-agent",
       isLead: false,
       status: "idle",
@@ -113,19 +113,19 @@ describe("migration 054_agent_harness_provider", () => {
 // ─── DB helpers ──────────────────────────────────────────────────────────────
 
 describe("DB helpers", () => {
-  test("setAgentHarnessProvider writes and returns the updated row", () => {
-    const a = createAgent({ name: "a1", isLead: false, status: "idle", capabilities: [] });
+  test("setAgentHarnessProvider writes and returns the updated row", async () => {
+    const a = await createAgent({ name: "a1", isLead: false, status: "idle", capabilities: [] });
     expect(a.harnessProvider).toBeNull();
 
-    const updated = setAgentHarnessProvider(a.id, "codex");
+    const updated = await setAgentHarnessProvider(a.id, "codex");
     expect(updated?.harnessProvider).toBe("codex");
 
-    const fetched = getAgentById(a.id);
+    const fetched = await getAgentById(a.id);
     expect(fetched?.harnessProvider).toBe("codex");
   });
 
-  test("setAgentHarnessProvider can clear the column with null", () => {
-    const a = createAgent({
+  test("setAgentHarnessProvider can clear the column with null", async () => {
+    const a = await createAgent({
       name: "a-clear",
       isLead: false,
       status: "idle",
@@ -134,38 +134,38 @@ describe("DB helpers", () => {
     });
     expect(a.harnessProvider).toBe("claude");
 
-    const updated = setAgentHarnessProvider(a.id, null);
+    const updated = await setAgentHarnessProvider(a.id, null);
     expect(updated?.harnessProvider).toBeNull();
   });
 
-  test("setAgentHarnessProvider returns null when agent not found", () => {
-    const result = setAgentHarnessProvider("nonexistent-id", "claude");
+  test("setAgentHarnessProvider returns null when agent not found", async () => {
+    const result = await setAgentHarnessProvider("nonexistent-id", "claude");
     expect(result).toBeNull();
   });
 
-  test("getAgentHarnessProviders aggregates by provider, excluding NULL", () => {
-    createAgent({
+  test("getAgentHarnessProviders aggregates by provider, excluding NULL", async () => {
+    await createAgent({
       name: "x1",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "claude",
     });
-    createAgent({
+    await createAgent({
       name: "x2",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "claude",
     });
-    createAgent({
+    await createAgent({
       name: "x3",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "codex",
     });
-    createAgent({ name: "x4", isLead: false, status: "idle", capabilities: [] }); // NULL — excluded
+    await createAgent({ name: "x4", isLead: false, status: "idle", capabilities: [] }); // NULL — excluded
 
     const counts = getAgentHarnessProviders();
     expect(counts).toEqual([
@@ -191,7 +191,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
     });
     expect(res.status).toBe(201);
 
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("claude");
   });
 
@@ -212,7 +212,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("codex");
   });
 
@@ -235,7 +235,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
 
     // Existing value preserved (so PATCH overrides aren't clobbered by
     // older workers re-registering without the field).
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("claude");
   });
 
@@ -257,7 +257,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
 
 describe("PATCH /api/agents/:id/harness-provider", () => {
   test("updates the column on a known agent", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-1",
       isLead: false,
       status: "idle",
@@ -271,12 +271,12 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(a.id);
+    const row = await getAgentById(a.id);
     expect(row?.harnessProvider).toBe("codex");
   });
 
   test("rejects unknown provider names with 400", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-2",
       isLead: false,
       status: "idle",
@@ -301,7 +301,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
   });
 
   test("PATCH also upserts swarm_config (scope=agent) so the worker reconciles", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-3",
       isLead: false,
       status: "idle",
@@ -336,7 +336,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
 
 describe("PATCH /api/agents/:id/runtime", () => {
   test("updates harness_provider and agent-scoped runtime config rows", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "runtime-target-1",
       isLead: false,
       status: "idle",
@@ -350,7 +350,7 @@ describe("PATCH /api/agents/:id/runtime", () => {
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(a.id);
+    const row = await getAgentById(a.id);
     expect(row?.harnessProvider).toBe("codex");
 
     const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
@@ -359,7 +359,7 @@ describe("PATCH /api/agents/:id/runtime", () => {
   });
 
   test("rejects non-local harnesses for runtime editing", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "runtime-target-2",
       isLead: false,
       status: "idle",
@@ -379,7 +379,7 @@ describe("PATCH /api/agents/:id/runtime", () => {
 
 describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   test("happy path: sets REASONING_EFFORT_OVERRIDE for a supported harness/model", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-1",
       isLead: false,
       status: "idle",
@@ -403,7 +403,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   });
 
   test("validation failure: rejects xhigh on a non-max Codex model with 400 + allowed array", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-2",
       isLead: false,
       status: "idle",
@@ -438,7 +438,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   });
 
   test("clearing: reasoning_effort: null removes the REASONING_EFFORT_OVERRIDE row", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-3",
       isLead: false,
       status: "idle",
@@ -479,7 +479,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   });
 
   test("symmetric fix: model: null removes the MODEL_OVERRIDE row (regression coverage)", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-4",
       isLead: false,
       status: "idle",
@@ -515,7 +515,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   });
 
   test("omitted reasoning_effort leaves an existing override untouched", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-5",
       isLead: false,
       status: "idle",
@@ -545,7 +545,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   });
 
   test("reasoning_effort-only PATCH (model omitted) validates against the persisted MODEL_OVERRIDE, not an empty string", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-6",
       isLead: false,
       status: "idle",
@@ -581,7 +581,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
 
 describe("PUT /api/agents/:id/credential-status — reasoningEffort echo", () => {
   test("latest_model.reasoningEffort merges into cred_status", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "cred-status-reasoning-1",
       isLead: false,
       status: "idle",
@@ -623,7 +623,7 @@ describe("deleteSwarmConfigByKey", () => {
   });
 
   test("removes an existing row and returns true", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "delete-by-key-target",
       isLead: false,
       status: "idle",

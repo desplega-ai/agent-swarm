@@ -33,14 +33,14 @@ afterAll(() => {
 
 describe("findCompletedTaskInThread", () => {
   test("finds completed tasks in a thread within the time window", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "dedup-worker-1",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const task = createTaskExtended("test task for thread", {
+    const task = await createTaskExtended("test task for thread", {
       agentId: agent.id,
       slackChannelId: "C_DEDUP_1",
       slackThreadTs: "1000.0001",
@@ -56,8 +56,8 @@ describe("findCompletedTaskInThread", () => {
     expect(result!.status).toBe("completed");
   });
 
-  test("returns null when no completed tasks exist in the thread", () => {
-    const agent = createAgent({
+  test("returns null when no completed tasks exist in the thread", async () => {
+    const agent = await createAgent({
       name: "dedup-worker-2",
       isLead: false,
       status: "idle",
@@ -65,7 +65,7 @@ describe("findCompletedTaskInThread", () => {
     });
 
     // Create a task but don't complete it
-    createTaskExtended("pending task in thread", {
+    await createTaskExtended("pending task in thread", {
       agentId: agent.id,
       slackChannelId: "C_DEDUP_2",
       slackThreadTs: "2000.0001",
@@ -76,14 +76,14 @@ describe("findCompletedTaskInThread", () => {
   });
 
   test("returns null outside the time window", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "dedup-worker-3",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const task = createTaskExtended("old completed task", {
+    const task = await createTaskExtended("old completed task", {
       agentId: agent.id,
       slackChannelId: "C_DEDUP_3",
       slackThreadTs: "3000.0001",
@@ -104,14 +104,14 @@ describe("findCompletedTaskInThread", () => {
   });
 
   test("returns null for a different thread", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "dedup-worker-4",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const task = createTaskExtended("task in different thread", {
+    const task = await createTaskExtended("task in different thread", {
       agentId: agent.id,
       slackChannelId: "C_DEDUP_4",
       slackThreadTs: "4000.0001",
@@ -129,14 +129,14 @@ describe("follow-up re-delegation guard logic", () => {
   let leadAgent: ReturnType<typeof createAgent>;
   let workerAgent: ReturnType<typeof createAgent>;
 
-  beforeAll(() => {
-    leadAgent = createAgent({
+  beforeAll(async () => {
+    leadAgent = await createAgent({
       name: "guard-lead",
       isLead: true,
       status: "idle",
       capabilities: [],
     });
-    workerAgent = createAgent({
+    workerAgent = await createAgent({
       name: "guard-worker",
       isLead: false,
       status: "idle",
@@ -147,7 +147,7 @@ describe("follow-up re-delegation guard logic", () => {
 
   test("blocks re-delegation when source task is a follow-up and thread has completed work", async () => {
     // Step 1: Create and complete a worker task in a Slack thread
-    const workerTask = createTaskExtended("implement feature X", {
+    const workerTask = await createTaskExtended("implement feature X", {
       agentId: workerAgent.id,
       slackChannelId: "C_GUARD_1",
       slackThreadTs: "5000.0001",
@@ -155,7 +155,7 @@ describe("follow-up re-delegation guard logic", () => {
     await completeTask(workerTask.id, "Feature X implemented");
 
     // Step 2: Create a follow-up task (as store-progress would)
-    const followUpTask = createTaskExtended("Worker task completed — review needed.", {
+    const followUpTask = await createTaskExtended("Worker task completed — review needed.", {
       agentId: leadAgent.id,
       source: "system",
       taskType: "follow-up",
@@ -166,7 +166,7 @@ describe("follow-up re-delegation guard logic", () => {
 
     // Step 3: Simulate the guard logic from send-task.ts
     // The lead's sourceTaskId would be the follow-up task
-    const sourceTask = getTaskById(followUpTask.id);
+    const sourceTask = await getTaskById(followUpTask.id);
     expect(sourceTask).not.toBeNull();
     expect(sourceTask!.taskType).toBe("follow-up");
     expect(sourceTask!.slackChannelId).toBe("C_GUARD_1");
@@ -184,9 +184,9 @@ describe("follow-up re-delegation guard logic", () => {
     // → Guard would block: re-delegation should be prevented
   });
 
-  test("allows delegation when source task is NOT a follow-up (normal behavior)", () => {
+  test("allows delegation when source task is NOT a follow-up (normal behavior)", async () => {
     // Create a normal Slack task (not a follow-up)
-    const slackTask = createTaskExtended("user asked a question", {
+    const slackTask = await createTaskExtended("user asked a question", {
       agentId: leadAgent.id,
       source: "slack",
       taskType: "inbox",
@@ -196,7 +196,7 @@ describe("follow-up re-delegation guard logic", () => {
 
     // Even if there are completed tasks in the thread, guard shouldn't trigger
     // because the source task is not a "follow-up"
-    const sourceTask = getTaskById(slackTask.id);
+    const sourceTask = await getTaskById(slackTask.id);
     expect(sourceTask).not.toBeNull();
     expect(sourceTask!.taskType).not.toBe("follow-up");
 
@@ -207,9 +207,9 @@ describe("follow-up re-delegation guard logic", () => {
     expect(shouldBlock).toBeFalsy();
   });
 
-  test("allows delegation when source task is a follow-up but thread has NO completed work", () => {
+  test("allows delegation when source task is a follow-up but thread has NO completed work", async () => {
     // Create a follow-up task in a thread with no completed work
-    const followUpTask = createTaskExtended("Worker task failed — action needed.", {
+    const followUpTask = await createTaskExtended("Worker task failed — action needed.", {
       agentId: leadAgent.id,
       source: "system",
       taskType: "follow-up",
@@ -217,7 +217,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackThreadTs: "7000.0001",
     });
 
-    const sourceTask = getTaskById(followUpTask.id);
+    const sourceTask = await getTaskById(followUpTask.id);
     expect(sourceTask).not.toBeNull();
     expect(sourceTask!.taskType).toBe("follow-up");
 
@@ -233,13 +233,13 @@ describe("follow-up re-delegation guard logic", () => {
   });
 
   test("findRecentCancelledTaskInThread finds tasks with status='cancelled'", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "cancel-thread-worker-1",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    const task = createTaskExtended("cancelled work", {
+    const task = await createTaskExtended("cancelled work", {
       agentId: agent.id,
       slackChannelId: "C_CANCEL_1",
       slackThreadTs: "9000.0001",
@@ -253,13 +253,13 @@ describe("follow-up re-delegation guard logic", () => {
   });
 
   test("findRecentCancelledTaskInThread finds failed tasks with 'cancelled' failureReason", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "cancel-thread-worker-2",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    const task = createTaskExtended("aborted work", {
+    const task = await createTaskExtended("aborted work", {
       agentId: agent.id,
       slackChannelId: "C_CANCEL_2",
       slackThreadTs: "9000.0002",
@@ -273,13 +273,13 @@ describe("follow-up re-delegation guard logic", () => {
   });
 
   test("findRecentCancelledTaskInThread finds failed tasks with 'exit 130' failureReason", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "cancel-thread-worker-3",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    const task = createTaskExtended("aborted work via SIGINT", {
+    const task = await createTaskExtended("aborted work via SIGINT", {
       agentId: agent.id,
       slackChannelId: "C_CANCEL_3",
       slackThreadTs: "9000.0003",
@@ -292,13 +292,13 @@ describe("follow-up re-delegation guard logic", () => {
   });
 
   test("findRecentCancelledTaskInThread ignores plain failed tasks (no cancellation marker)", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "cancel-thread-worker-4",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    const task = createTaskExtended("genuinely failed work", {
+    const task = await createTaskExtended("genuinely failed work", {
       agentId: agent.id,
       slackChannelId: "C_CANCEL_4",
       slackThreadTs: "9000.0004",
@@ -314,7 +314,7 @@ describe("follow-up re-delegation guard logic", () => {
     const thread = "10000.0001";
 
     // Step 1: An old completed task in the thread
-    const completedTask = createTaskExtended("first attempt — completed", {
+    const completedTask = await createTaskExtended("first attempt — completed", {
       agentId: workerAgent.id,
       slackChannelId: channel,
       slackThreadTs: thread,
@@ -329,7 +329,7 @@ describe("follow-up re-delegation guard logic", () => {
     ]);
 
     // Step 2: A more-recent cancellation in the same thread
-    const cancelledTask = createTaskExtended("second attempt — cancelled mid-work", {
+    const cancelledTask = await createTaskExtended("second attempt — cancelled mid-work", {
       agentId: workerAgent.id,
       slackChannelId: channel,
       slackThreadTs: thread,
@@ -357,7 +357,7 @@ describe("follow-up re-delegation guard logic", () => {
     const thread = "11000.0001";
 
     // Step 1: A cancelled task (older)
-    const cancelledTask = createTaskExtended("attempt 1 — cancelled", {
+    const cancelledTask = await createTaskExtended("attempt 1 — cancelled", {
       agentId: workerAgent.id,
       slackChannelId: channel,
       slackThreadTs: thread,
@@ -372,7 +372,7 @@ describe("follow-up re-delegation guard logic", () => {
     ]);
 
     // Step 2: A more-recent completion (the retry succeeded)
-    const completedTask = createTaskExtended("attempt 2 — completed", {
+    const completedTask = await createTaskExtended("attempt 2 — completed", {
       agentId: workerAgent.id,
       slackChannelId: channel,
       slackThreadTs: thread,
@@ -396,7 +396,7 @@ describe("follow-up re-delegation guard logic", () => {
 
   test("allows delegation when source task is a follow-up but completed work is outside time window", async () => {
     // Create and complete a worker task, then backdate it
-    const oldWorkerTask = createTaskExtended("old task", {
+    const oldWorkerTask = await createTaskExtended("old task", {
       agentId: workerAgent.id,
       slackChannelId: "C_GUARD_4",
       slackThreadTs: "8000.0001",
@@ -411,7 +411,7 @@ describe("follow-up re-delegation guard logic", () => {
     ]);
 
     // Create a follow-up in the same thread
-    const followUpTask = createTaskExtended("Worker task completed — review needed.", {
+    const followUpTask = await createTaskExtended("Worker task completed — review needed.", {
       agentId: leadAgent.id,
       source: "system",
       taskType: "follow-up",
@@ -419,7 +419,7 @@ describe("follow-up re-delegation guard logic", () => {
       slackThreadTs: "8000.0001",
     });
 
-    const sourceTask = getTaskById(followUpTask.id);
+    const sourceTask = await getTaskById(followUpTask.id);
     const recentCompleted = findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,

@@ -37,7 +37,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       }
 
       // Validate caller is the lead agent
-      const callerAgent = getAgentById(requestInfo.agentId);
+      const callerAgent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -53,7 +53,7 @@ export const registerInjectLearningTool = (server: McpServer) => {
       }
 
       // Validate target agent exists
-      const targetAgent = getAgentById(targetAgentId);
+      const targetAgent = await getAgentById(targetAgentId);
       if (!targetAgent) {
         return toolErr(`Agent with ID "${targetAgentId}" not found in the swarm.`);
       }

@@ -93,26 +93,26 @@ describe("validateJsonSchema — enum and const extensions", () => {
 // ─── DB: outputSchema storage ────────────────────────────────
 
 describe("Task outputSchema storage", () => {
-  test("createTaskExtended stores outputSchema", () => {
+  test("createTaskExtended stores outputSchema", async () => {
     const schema = {
       type: "object",
       properties: { fileCount: { type: "number" } },
       required: ["fileCount"],
     };
-    const task = createTaskExtended("Count files", {
+    const task = await createTaskExtended("Count files", {
       source: "api",
       outputSchema: schema,
     });
 
-    const fetched = getTaskById(task.id);
+    const fetched = await getTaskById(task.id);
     expect(fetched).toBeDefined();
     expect(fetched!.outputSchema).toBeDefined();
     expect(fetched!.outputSchema).toEqual(schema);
   });
 
-  test("createTaskExtended without outputSchema returns undefined", () => {
-    const task = createTaskExtended("Simple task", { source: "api" });
-    const fetched = getTaskById(task.id);
+  test("createTaskExtended without outputSchema returns undefined", async () => {
+    const task = await createTaskExtended("Simple task", { source: "api" });
+    const fetched = await getTaskById(task.id);
     expect(fetched).toBeDefined();
     expect(fetched!.outputSchema).toBeUndefined();
   });
@@ -322,7 +322,7 @@ describe("Workflow agent-task creates task with outputSchema", () => {
 
     expect(result.status).toBe("success");
     const taskId = (result as { correlationId?: string }).correlationId!;
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
     expect(task).toBeDefined();
     expect(task!.outputSchema).toEqual(schema);
   });
@@ -368,7 +368,7 @@ describe("Workflow agent-task creates task with outputSchema", () => {
 
     expect(result.status).toBe("success");
     const taskId = (result as { correlationId?: string }).correlationId!;
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
     expect(task).toBeDefined();
     expect(task!.followUpConfig).toEqual(followUpConfig);
   });

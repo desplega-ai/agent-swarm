@@ -298,11 +298,11 @@ describe("/mcp-user auth and tool surface", () => {
     expect(response.status).toBe(200);
     const result = payload as { result: { structuredContent: { task: { id: string } } } };
     const taskId = result.result.structuredContent.task.id;
-    expect(getTaskById(taskId)?.requestedByUserId).toBe(user.id);
-    const foreignTask = createTaskExtended("foreign user mcp task", {
+    expect((await getTaskById(taskId))?.requestedByUserId).toBe(user.id);
+    const foreignTask = await createTaskExtended("foreign user mcp task", {
       requestedByUserId: otherUser.id,
     });
-    createTaskExtended("owner-only task");
+    await createTaskExtended("owner-only task");
 
     const listResponse = await mcpPost(
       token,
@@ -380,8 +380,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("owner /mcp path initializes with a known agent and rejects a different X-Agent-ID on the session", async () => {
-    const owner = createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
-    const other = createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
+    const owner = await createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
+    const other = await createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
     const ownerHeaders = { "X-Agent-ID": owner.id };
     const sessionId = await initialize(API_KEY, "/mcp", ownerHeaders);
     await notifyInitialized(API_KEY, sessionId, "/mcp", ownerHeaders);

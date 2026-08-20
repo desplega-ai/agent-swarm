@@ -102,9 +102,14 @@ beforeAll(async () => {
   closeDb();
   initDb(TEST_DB_PATH);
 
-  createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Charact Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
+  await createAgent({
+    id: OTHER_WORKER_ID,
+    name: "Charact Other Worker",
+    isLead: false,
+    status: "idle",
+  });
 
   server = new McpServer({ name: "test-rbac-charact-skills", version: "1.0.0" });
   registerSkillCreateTool(server);

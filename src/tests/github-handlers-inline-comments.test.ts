@@ -50,7 +50,7 @@ beforeAll(async () => {
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   initDb(TEST_DB_PATH);
-  createAgent({
+  await createAgent({
     id: "lead-inline-test",
     name: "InlineTestLead",
     status: "idle",

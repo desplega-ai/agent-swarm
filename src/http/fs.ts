@@ -291,9 +291,9 @@ export async function handleFs(
   if (deleteTaskFileRoute.match(req.method, pathSegments)) {
     const parsed = await deleteTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.taskId);
+    const task = await getTaskById(parsed.params.taskId);
     if (!task) return notFound(res, "Task not found");
-    if (!canMutateTask(task, myAgentId, req)) return forbidden(res);
+    if (!(await canMutateTask(task, myAgentId, req))) return forbidden(res);
     const attachment = getTaskAttachments(task.id).find(
       (item) => item.id === parsed.params.attachmentId,
     );
@@ -305,16 +305,16 @@ export async function handleFs(
     if (enforceContentLengthCap(req, res, MAX_UPLOAD_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await uploadTaskFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.taskId);
+    const task = await getTaskById(parsed.params.taskId);
     if (!task) return notFound(res, "Task not found");
-    if (!canMutateTask(task, myAgentId, req)) return forbidden(res);
+    if (!(await canMutateTask(task, myAgentId, req))) return forbidden(res);
     return sendUpload(req, res, parsed.params.taskId, parsed.query, myAgentId ?? null);
   }
 
   if (listTaskFilesRoute.match(req.method, pathSegments)) {
     const parsed = await listTaskFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getTaskById(parsed.params.taskId)) return notFound(res, "Task not found");
+    if (!(await getTaskById(parsed.params.taskId))) return notFound(res, "Task not found");
     listTaskFilesRoute.respond(res, 200, { attachments: getTaskAttachments(parsed.params.taskId) });
     return true;
   }
@@ -516,11 +516,11 @@ function findAttachment(
   return attachment;
 }
 
-function canMutateTask(
+async function canMutateTask(
   task: { id: string; agentId: string | null; creatorAgentId?: string },
   myAgentId: string | undefined,
   req: IncomingMessage,
-): boolean {
+): Promise<boolean> {
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
@@ -541,7 +541,7 @@ function canMutateTask(
     // A missing caller identity cannot be lead/assignee/creator — same denial
     // as before (no separate "agent not found" branch).
     if (!myAgentId) return false;
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     principal = { kind: "agent", agentId: myAgentId, isLead: agent?.isLead ?? false };
   }
   return can({ principal, verb: "task.fs.mutate", resource, source: "http" }).allow;

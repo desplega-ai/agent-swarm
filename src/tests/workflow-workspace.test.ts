@@ -26,7 +26,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
 
   // Create a test agent for task assignment
-  createAgent({ name: "test-workspace-agent", isLead: false, status: "idle" });
+  await createAgent({ name: "test-workspace-agent", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {

@@ -95,7 +95,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "workflow-e2e-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({ name: "workflow-e2e-agent", isLead: true, status: "idle" });
   agentId = agent.id;
 
   eventBus = new InProcessEventBus();

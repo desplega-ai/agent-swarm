@@ -236,18 +236,18 @@ describe("resolveScriptsOnlyMode", () => {
 
 describe("scripts-only MCP gating", () => {
   test("uses the full surface with no environment override or config row", async () => {
-    const agent = createAgent({ name: "full-surface-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "full-surface-agent", isLead: false, status: "idle" });
 
     expectFullSurface(await listTools(agent.id));
   });
 
   test("isolates concurrent environment overrides across MCP handshakes", async () => {
-    const scriptsOnlyAgent = createAgent({
+    const scriptsOnlyAgent = await createAgent({
       name: "concurrent-scripts-only-agent",
       isLead: false,
       status: "idle",
     });
-    const fullSurfaceAgent = createAgent({
+    const fullSurfaceAgent = await createAgent({
       name: "concurrent-full-surface-agent",
       isLead: false,
       status: "idle",
@@ -263,12 +263,12 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("gates one configured agent without affecting another", async () => {
-    const scriptsOnlyAgent = createAgent({
+    const scriptsOnlyAgent = await createAgent({
       name: "scripts-only-agent",
       isLead: false,
       status: "idle",
     });
-    const fullSurfaceAgent = createAgent({
+    const fullSurfaceAgent = await createAgent({
       name: "neighbor-agent",
       isLead: false,
       status: "idle",
@@ -285,14 +285,18 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("uses a global config row when the agent has no override", async () => {
-    const agent = createAgent({ name: "global-scripts-only-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({
+      name: "global-scripts-only-agent",
+      isLead: false,
+      status: "idle",
+    });
     await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
     expect(await listTools(agent.id)).toEqual(SCRIPT_TOOL_NAMES);
   });
 
   test("gives a non-empty environment override precedence over an agent row", async () => {
-    const agent = createAgent({ name: "env-wins-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "env-wins-agent", isLead: false, status: "idle" });
     await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
@@ -303,7 +307,7 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("treats an empty environment value as unset", async () => {
-    const agent = createAgent({ name: "empty-env-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "empty-env-agent", isLead: false, status: "idle" });
     await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,

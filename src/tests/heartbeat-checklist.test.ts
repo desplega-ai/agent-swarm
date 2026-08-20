@@ -138,10 +138,10 @@ describe("Heartbeat Checklist", () => {
       expect(status).toContain("Offline: 0");
     });
 
-    test("reflects actual task and agent counts", () => {
-      const agent = createAgent({ name: "test-worker", isLead: false, status: "busy" });
-      createTaskExtended("Test task 1", { agentId: agent.id });
-      createTaskExtended("Test task 2");
+    test("reflects actual task and agent counts", async () => {
+      const agent = await createAgent({ name: "test-worker", isLead: false, status: "busy" });
+      await createTaskExtended("Test task 1", { agentId: agent.id });
+      await createTaskExtended("Test task 2");
 
       const status = gatherSystemStatus();
       // One task assigned (pending), one unassigned
@@ -150,10 +150,10 @@ describe("Heartbeat Checklist", () => {
       expect(status).toContain("1 busy");
     });
 
-    test("shows stalled tasks section when stalled tasks exist", () => {
-      const agent = createAgent({ name: "stall-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Stalled task", { agentId: agent.id });
-      startTask(task.id);
+    test("shows stalled tasks section when stalled tasks exist", async () => {
+      const agent = await createAgent({ name: "stall-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Stalled task", { agentId: agent.id });
+      await startTask(task.id);
 
       // Make task stale (45 min)
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
@@ -170,7 +170,7 @@ describe("Heartbeat Checklist", () => {
 
   describe("checkHeartbeatChecklist", () => {
     test("skips when no lead agent registered", async () => {
-      createAgent({ name: "worker", isLead: false, status: "idle" });
+      await createAgent({ name: "worker", isLead: false, status: "idle" });
 
       await checkHeartbeatChecklist();
 
@@ -181,7 +181,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("skips when heartbeatMd is NULL", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await checkHeartbeatChecklist();
 
@@ -192,7 +192,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("skips when heartbeatMd is effectively empty (all comments/headers)", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n<!-- No items yet -->\n",
       });
@@ -206,7 +206,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("creates task when heartbeatMd has real content", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "# Heartbeat Checklist\n\n- Check if any tasks are stuck\n",
       });
@@ -222,7 +222,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("dedup: skips when active heartbeat-checklist task exists for lead", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
@@ -240,7 +240,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task includes system status with [auto-generated] labels", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Review stalled tasks\n",
       });
@@ -256,7 +256,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task includes HEARTBEAT.md content", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n- Review blocked tasks\n",
       });
@@ -272,7 +272,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task enforces HEARTBEAT tracked-item cap and seeded audit call", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Watch PR #123 until 2026-06-07\n",
       });
@@ -292,7 +292,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("created task has correct tags", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
@@ -317,7 +317,7 @@ describe("Heartbeat Checklist", () => {
 
   describe("createBootTriageTask", () => {
     test("skips when no lead agent registered", async () => {
-      createAgent({ name: "worker", isLead: false, status: "idle" });
+      await createAgent({ name: "worker", isLead: false, status: "idle" });
 
       await createBootTriageTask();
 
@@ -326,7 +326,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("creates boot-triage task for lead", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -339,7 +339,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage task includes reboot context", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -353,7 +353,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage task includes system status", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -365,7 +365,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("shows fallback text when heartbeatMd is empty", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -376,7 +376,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("includes heartbeatMd content when available", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check Slack for unaddressed requests\n",
       });
@@ -390,7 +390,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage task enforces HEARTBEAT cap and seeded boot-triage call", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -406,7 +406,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("dedup: skips when active boot-triage task exists", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
@@ -419,7 +419,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage has correct tags", async () => {
-      createAgent({ name: "lead", isLead: true, status: "idle" });
+      await createAgent({ name: "lead", isLead: true, status: "idle" });
 
       await createBootTriageTask();
 
@@ -433,7 +433,7 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("boot-triage and heartbeat-checklist are independent (different taskTypes)", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "lead", isLead: true, status: "idle" });
       await updateAgentProfile(lead.id, {
         heartbeatMd: "- Check tasks\n",
       });
@@ -458,9 +458,9 @@ describe("Heartbeat Checklist", () => {
 
   describe("gatherSystemStatus boot triage", () => {
     test("isBootTriage includes Reboot-Interrupted Work section after reboot sweep", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Important feature work", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Important feature work", { agentId: agent.id });
+      await startTask(task.id);
 
       // Backdate so reboot sweep picks it up
       const past = new Date(Date.now() - 1000).toISOString();
@@ -475,9 +475,9 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("isBootTriage shows full task IDs (not truncated)", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Test task for ID check", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Test task for ID check", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
@@ -490,9 +490,9 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("isBootTriage shows retry task ID when retry was created", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Retryable task", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Retryable task", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
@@ -504,12 +504,12 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("isBootTriage shows 'no retry (system task)' for system tasks", async () => {
-      const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
-      const task = createTaskExtended("Heartbeat check", {
+      const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
+      const task = await createTaskExtended("Heartbeat check", {
         agentId: lead.id,
         taskType: "heartbeat-checklist",
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
@@ -520,13 +520,13 @@ describe("Heartbeat Checklist", () => {
       expect(status).toContain("→ no retry (system task)");
     });
 
-    test("isBootTriage includes Orphaned Tasks for pending tasks on offline agents", () => {
-      const offlineAgent = createAgent({
+    test("isBootTriage includes Orphaned Tasks for pending tasks on offline agents", async () => {
+      const offlineAgent = await createAgent({
         name: "offline-worker",
         isLead: false,
         status: "offline",
       });
-      createTaskExtended("Orphaned pending task", { agentId: offlineAgent.id });
+      await createTaskExtended("Orphaned pending task", { agentId: offlineAgent.id });
 
       const status = gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("## Orphaned Tasks [auto-generated, NEEDS ATTENTION]");
@@ -535,9 +535,9 @@ describe("Heartbeat Checklist", () => {
     });
 
     test("non-boot mode does NOT include reboot or orphan sections", async () => {
-      const agent = createAgent({ name: "dead-worker", isLead: false, status: "busy" });
-      const task = createTaskExtended("Some task", { agentId: agent.id });
-      startTask(task.id);
+      const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Some task", { agentId: agent.id });
+      await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
       getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
@@ -550,13 +550,13 @@ describe("Heartbeat Checklist", () => {
       expect(status).not.toContain("Orphaned Tasks");
     });
 
-    test("orphaned tasks note about re-registering workers is included", () => {
-      const offlineAgent = createAgent({
+    test("orphaned tasks note about re-registering workers is included", async () => {
+      const offlineAgent = await createAgent({
         name: "recovering-worker",
         isLead: false,
         status: "offline",
       });
-      createTaskExtended("Waiting task", { agentId: offlineAgent.id });
+      await createTaskExtended("Waiting task", { agentId: offlineAgent.id });
 
       const status = gatherSystemStatus({ isBootTriage: true });
       expect(status).toContain("Some workers may appear offline briefly while re-registering");

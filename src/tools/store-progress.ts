@@ -145,7 +145,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       }
 
       const result = await getDbClient().transaction(async () => {
-        const agent = getAgentById(requestInfo.agentId ?? "");
+        const agent = await getAgentById(requestInfo.agentId ?? "");
 
         if (!agent) {
           return {
@@ -154,7 +154,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           };
         }
 
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
 
         if (!existingTask) {
           return {
@@ -216,7 +216,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // A caller may explicitly force a text-only correction; that path returns
         // before every terminal side effect and deliberately leaves all lifecycle
         // fields untouched.
-        const terminalResultGuard = guardTerminalTaskResultWrite(existingTask, {
+        const terminalResultGuard = await guardTerminalTaskResultWrite(existingTask, {
           status,
           output,
           failureReason,
@@ -236,7 +236,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             Date.now() - new Date(existingTask.lastUpdatedAt).getTime() < 5 * 60 * 1000;
 
           if (!isDuplicate) {
-            const result = updateTaskProgress(taskId, progress);
+            const result = await updateTaskProgress(taskId, progress);
             if (result) updatedTask = result;
           }
         }
@@ -277,7 +277,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else if (status === "failed") {
@@ -304,13 +304,13 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else {
           // Progress update - ensure status reflects current load
           if (existingTask.agentId) {
-            updateAgentStatusFromCapacity(existingTask.agentId);
+            await updateAgentStatusFromCapacity(existingTask.agentId);
           }
         }
 
@@ -460,7 +460,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         !("wasForcedOverwrite" in result && result.wasForcedOverwrite)
       ) {
         try {
-          const followUp = createWorkerTaskFollowUp({
+          const followUp = await createWorkerTaskFollowUp({
             task: result.task,
             status,
             output,

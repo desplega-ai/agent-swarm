@@ -32,36 +32,38 @@ function restoreEnv(name: string, value: string | undefined): void {
   else process.env[name] = value;
 }
 
-function createRunningSlackTask(
+async function createRunningSlackTask(
   agentId: string,
   channelId: string,
   threadTs: string,
   task = "existing Slack task",
 ) {
-  const created = createTaskExtended(task, {
+  const created = await createTaskExtended(task, {
     agentId,
     source: "slack",
     slackChannelId: channelId,
     slackThreadTs: threadTs,
     slackUserId: "U_REQUESTER",
   });
-  const started = startTask(created.id);
+  const started = await startTask(created.id);
   expect(started?.status).toBe("in_progress");
   return started!;
 }
 
 const previousSteeringEnabled = process.env.STEERING_ENABLED;
 
-beforeAll(() => {
+beforeAll(async () => {
   process.env.STEERING_ENABLED = "true";
   initDb(TEST_DB_PATH);
-  leadId = createAgent({
-    name: "slack-steering-lead",
-    isLead: true,
-    status: "busy",
-    capabilities: [],
-    harnessProvider: "pi",
-  }).id;
+  leadId = (
+    await createAgent({
+      name: "slack-steering-lead",
+      isLead: true,
+      status: "busy",
+      capabilities: [],
+      harnessProvider: "pi",
+    })
+  ).id;
 });
 
 afterAll(() => {
@@ -94,7 +96,7 @@ describe("Slack thread steering", () => {
     process.env.SLACK_THREAD_STEERING = "off";
     const channelId = "C_STEER_OFF";
     const threadTs = "1000.0001";
-    const leadTask = createRunningSlackTask(leadId, channelId, threadTs);
+    const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
     bufferThreadMessage(channelId, threadTs, "follow up after the current task", "U1", "1000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
@@ -103,12 +105,12 @@ describe("Slack thread steering", () => {
     expect(getChildTasks(leadTask.id)).toHaveLength(1);
   });
 
-  test("lead mode sends one steering message to an in-progress lead and creates no task", () => {
+  test("lead mode sends one steering message to an in-progress lead and creates no task", async () => {
     process.env.SLACK_THREAD_STEERING = "lead";
     process.env.SLACK_THREAD_STEERING_MODE = "steer";
     const channelId = "C_STEER_LEAD";
     const threadTs = "2000.0001";
-    const leadTask = createRunningSlackTask(leadId, channelId, threadTs);
+    const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
     const result = requestSlackThreadSteering({
       channelId,
@@ -139,14 +141,16 @@ describe("Slack thread steering", () => {
     process.env.SLACK_THREAD_STEERING_MODE = "queue";
     const channelId = "C_STEER_WORKER";
     const threadTs = "3000.0001";
-    const workerId = createAgent({
-      name: "slack-steering-worker",
-      isLead: false,
-      status: "busy",
-      capabilities: [],
-      harnessProvider: "pi",
-    }).id;
-    const workerTask = createRunningSlackTask(workerId, channelId, threadTs);
+    const workerId = (
+      await createAgent({
+        name: "slack-steering-worker",
+        isLead: false,
+        status: "busy",
+        capabilities: [],
+        harnessProvider: "pi",
+      })
+    ).id;
+    const workerTask = await createRunningSlackTask(workerId, channelId, threadTs);
 
     expect(
       requestSlackThreadSteering({ channelId, threadTs, message: "do not steer the worker" }),
@@ -163,8 +167,8 @@ describe("Slack thread steering", () => {
     process.env.SLACK_THREAD_STEERING = "lead";
     const channelId = "C_STEER_TERMINAL";
     const threadTs = "4000.0001";
-    const leadTask = createRunningSlackTask(leadId, channelId, threadTs);
-    expect(completeTask(leadTask.id)?.status).toBe("completed");
+    const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
+    expect((await completeTask(leadTask.id))?.status).toBe("completed");
 
     expect(requestSlackThreadSteering({ channelId, threadTs, message: "follow up" })).toBeNull();
 
@@ -180,7 +184,7 @@ describe("Slack thread steering", () => {
     process.env.SLACK_THREAD_STEERING_MODE = "queue";
     const channelId = "C_STEER_BUFFER";
     const threadTs = "5000.0001";
-    const leadTask = createRunningSlackTask(leadId, channelId, threadTs);
+    const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
     bufferThreadMessage(channelId, threadTs, "first correction", "U1", "5000.0002");
     bufferThreadMessage(channelId, threadTs, "second correction", "U1", "5000.0003");
@@ -195,18 +199,20 @@ describe("Slack thread steering", () => {
     expect(getChildTasks(leadTask.id)).toEqual([]);
   });
 
-  test("all mode targets the latest active task", () => {
+  test("all mode targets the latest active task", async () => {
     process.env.SLACK_THREAD_STEERING = "all";
     const channelId = "C_STEER_ALL";
     const threadTs = "6000.0001";
-    const workerId = createAgent({
-      name: "slack-steering-all-worker",
-      isLead: false,
-      status: "busy",
-      capabilities: [],
-      harnessProvider: "pi",
-    }).id;
-    const workerTask = createRunningSlackTask(workerId, channelId, threadTs);
+    const workerId = (
+      await createAgent({
+        name: "slack-steering-all-worker",
+        isLead: false,
+        status: "busy",
+        capabilities: [],
+        harnessProvider: "pi",
+      })
+    ).id;
+    const workerTask = await createRunningSlackTask(workerId, channelId, threadTs);
 
     expect(
       requestSlackThreadSteering({ channelId, threadTs, message: "all-mode correction" }),
@@ -216,10 +222,10 @@ describe("Slack thread steering", () => {
     });
   });
 
-  test("the mention gate is unchanged with steering off and lead modes", () => {
+  test("the mention gate is unchanged with steering off and lead modes", async () => {
     const channelId = "C_STEER_MENTION";
     const threadTs = "7000.0001";
-    createRunningSlackTask(leadId, channelId, threadTs);
+    await createRunningSlackTask(leadId, channelId, threadTs);
     process.env.SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION = "true";
 
     for (const mode of ["off", "lead"]) {

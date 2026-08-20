@@ -171,7 +171,7 @@ export async function handlePricing(
       return true;
     }
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.deleted",
       metadata: {
         provider: parsed.params.provider,
@@ -215,7 +215,7 @@ export async function handlePricing(
         pricePerMillionUsd: parsed.body.pricePerMillionUsd,
       });
 
-      createLogEntry({
+      await createLogEntry({
         eventType: "pricing.inserted",
         metadata: {
           provider: parsed.params.provider,

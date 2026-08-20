@@ -46,14 +46,14 @@ describe("pagination metrics", () => {
     }
   });
 
-  test("getTasksCount is filter-aware and independent of limit/offset", () => {
+  test("getTasksCount is filter-aware and independent of limit/offset", async () => {
     const totalBefore = getTasksCount();
 
     for (let i = 0; i < 7; i++) {
-      createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
+      await createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
     }
     for (let i = 0; i < 3; i++) {
-      createTaskExtended(`beta task ${i}`, { tags: ["beta"] });
+      await createTaskExtended(`beta task ${i}`, { tags: ["beta"] });
     }
 
     // Filtered count matches the number of matching rows...
@@ -71,15 +71,25 @@ describe("pagination metrics", () => {
     expect(getTasksCount() - totalBefore).toBe(10);
   });
 
-  test("getTasksCount filter-aware on search", () => {
-    createTaskExtended("needle-xyz unique marker", {});
+  test("getTasksCount filter-aware on search", async () => {
+    await createTaskExtended("needle-xyz unique marker", {});
     expect(getTasksCount({ search: "needle-xyz" })).toBe(1);
     expect(getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
   });
 
   test("countAllPages and countPagesByAgent", async () => {
-    const a1 = createAgent({ id: "pm-agent-1", name: "PM Agent 1", isLead: false, status: "idle" });
-    const a2 = createAgent({ id: "pm-agent-2", name: "PM Agent 2", isLead: false, status: "busy" });
+    const a1 = await createAgent({
+      id: "pm-agent-1",
+      name: "PM Agent 1",
+      isLead: false,
+      status: "idle",
+    });
+    const a2 = await createAgent({
+      id: "pm-agent-2",
+      name: "PM Agent 2",
+      isLead: false,
+      status: "busy",
+    });
     for (let i = 0; i < 4; i++) {
       await createPage({
         agentId: a1.id,
@@ -115,10 +125,10 @@ describe("pagination metrics", () => {
     const bothBefore = await countSessions({ source: ["mcp", "slack"] });
 
     for (let i = 0; i < 5; i++) {
-      createTaskExtended(`mcp session ${i}`, { source: "mcp" });
+      await createTaskExtended(`mcp session ${i}`, { source: "mcp" });
     }
     for (let i = 0; i < 2; i++) {
-      createTaskExtended(`slack session ${i}`, { source: "slack" });
+      await createTaskExtended(`slack session ${i}`, { source: "slack" });
     }
 
     expect((await countSessions({ source: ["mcp"] })) - mcpBefore).toBe(5);

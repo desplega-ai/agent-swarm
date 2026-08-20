@@ -185,8 +185,8 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // The writer agent IS the lead: owner-less global sources resolve run-as to
   // the lead, and only that identity (or the operator) may wire them.
-  createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: true, status: "idle" });
-  createAgent({ id: OTHER_AGENT_ID, name: "apps-sync-other", isLead: false, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: true, status: "idle" });
+  await createAgent({ id: OTHER_AGENT_ID, name: "apps-sync-other", isLead: false, status: "idle" });
 
   const fixture = {
     source: "export default function run() { return { records: [] }; }",

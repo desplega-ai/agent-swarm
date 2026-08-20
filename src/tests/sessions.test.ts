@@ -38,14 +38,14 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(chain).toEqual([]);
   });
 
-  test("single-root chain — chain length 1", () => {
-    const agent = createAgent({
+  test("single-root chain — chain length 1", async () => {
+    const agent = await createAgent({
       id: "sessions-test-agent-1",
       name: "Sessions Test Agent 1",
       isLead: false,
       status: "idle",
     });
-    const root = createTaskExtended("root only", { agentId: agent.id });
+    const root = await createTaskExtended("root only", { agentId: agent.id });
 
     const chain = getRootTaskChain(root.id);
     expect(chain).toHaveLength(1);
@@ -53,19 +53,19 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(chain[0].parentTaskId).toBeUndefined();
   });
 
-  test("3-level chain — root → child → grandchild", () => {
-    const agent = createAgent({
+  test("3-level chain — root → child → grandchild", async () => {
+    const agent = await createAgent({
       id: "sessions-test-agent-2",
       name: "Sessions Test Agent 2",
       isLead: false,
       status: "idle",
     });
-    const root = createTaskExtended("root", { agentId: agent.id });
-    const child = createTaskExtended("child", {
+    const root = await createTaskExtended("root", { agentId: agent.id });
+    const child = await createTaskExtended("child", {
       agentId: agent.id,
       parentTaskId: root.id,
     });
-    const grandchild = createTaskExtended("grandchild", {
+    const grandchild = await createTaskExtended("grandchild", {
       agentId: agent.id,
       parentTaskId: child.id,
     });
@@ -80,19 +80,19 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(chain[2].parentTaskId).toBe(child.id);
   });
 
-  test("parallel siblings — root with two children", () => {
-    const agent = createAgent({
+  test("parallel siblings — root with two children", async () => {
+    const agent = await createAgent({
       id: "sessions-test-agent-3",
       name: "Sessions Test Agent 3",
       isLead: false,
       status: "idle",
     });
-    const root = createTaskExtended("parallel root", { agentId: agent.id });
-    const sibA = createTaskExtended("sibling A", {
+    const root = await createTaskExtended("parallel root", { agentId: agent.id });
+    const sibA = await createTaskExtended("sibling A", {
       agentId: agent.id,
       parentTaskId: root.id,
     });
-    const sibB = createTaskExtended("sibling B", {
+    const sibB = await createTaskExtended("sibling B", {
       agentId: agent.id,
       parentTaskId: root.id,
     });
@@ -142,25 +142,25 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     }
   });
 
-  test("listRecentSessions — requestedByUserId filter: positive / negative / NULL exclusion / compat", () => {
+  test("listRecentSessions — requestedByUserId filter: positive / negative / NULL exclusion / compat", async () => {
     const userA = createUser({ name: "Test User A" });
     const userB = createUser({ name: "Test User B" });
 
-    const agent = createAgent({
+    const agent = await createAgent({
       id: "sessions-test-agent-user-filter",
       name: "Sessions Test Agent UserFilter",
       isLead: false,
       status: "idle",
     });
-    createTaskExtended("user-a session 1", {
+    await createTaskExtended("user-a session 1", {
       agentId: agent.id,
       requestedByUserId: userA.id,
     });
-    createTaskExtended("user-a session 2", {
+    await createTaskExtended("user-a session 2", {
       agentId: agent.id,
       requestedByUserId: userA.id,
     });
-    createTaskExtended("user-b session 1", {
+    await createTaskExtended("user-b session 1", {
       agentId: agent.id,
       requestedByUserId: userB.id,
     });
@@ -195,13 +195,13 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
   });
 
   test("custom title — surfaces in listRecentSessions (slim + full) and is searchable via q", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: "sessions-test-agent-title",
       name: "Sessions Test Agent Title",
       isLead: false,
       status: "idle",
     });
-    const root = createTaskExtended("investigate the flaky deploy pipeline", {
+    const root = await createTaskExtended("investigate the flaky deploy pipeline", {
       agentId: agent.id,
     });
     expect(root.title).toBeUndefined();

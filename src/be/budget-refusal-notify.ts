@@ -88,9 +88,9 @@ export async function emitBudgetRefusalSideEffects(
   // 1. Lead-facing follow-up task (first refusal of the day only).
   if (inserted) {
     try {
-      const leadAgent = getLeadAgent();
+      const leadAgent = await getLeadAgent();
       if (leadAgent) {
-        const refusingAgent = getAgentById(ctx.agentId);
+        const refusingAgent = await getAgentById(ctx.agentId);
         const agentName = refusingAgent?.name || ctx.agentId.slice(0, 8);
         const userName = ctx.task.requestedByUserId
           ? ((await getUserById(ctx.task.requestedByUserId))?.name ??
@@ -113,7 +113,7 @@ export async function emitBudgetRefusalSideEffects(
           { agentId: ctx.agentId },
         );
 
-        const followUp = createTaskExtended(resolved.text, {
+        const followUp = await createTaskExtended(resolved.text, {
           agentId: leadAgent.id,
           source: "system",
           taskType: "follow-up",

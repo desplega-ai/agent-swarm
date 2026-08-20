@@ -880,14 +880,14 @@ describe("Approval Requests", () => {
 
   // ─── Follow-up task flow ─────────────────────────────────────
   describe("Follow-up task: Slack metadata inheritance", () => {
-    test("sourceTaskId is stored and returned on resolved approval request", () => {
+    test("sourceTaskId is stored and returned on resolved approval request", async () => {
       // Create a source task with Slack metadata
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "test-follow-up-agent",
         isLead: false,
         status: "idle",
       });
-      const sourceTask = createTaskExtended("original task with slack context", {
+      const sourceTask = await createTaskExtended("original task with slack context", {
         agentId: agent.id,
         source: "mcp",
         slackChannelId: "C_TEST_CHANNEL",
@@ -909,13 +909,13 @@ describe("Approval Requests", () => {
       expect(resolved!.sourceTaskId).toBe(sourceTask.id);
     });
 
-    test("follow-up task inherits Slack metadata from source task via parentTaskId", () => {
-      const agent = createAgent({
+    test("follow-up task inherits Slack metadata from source task via parentTaskId", async () => {
+      const agent = await createAgent({
         name: "test-slack-inherit-agent",
         isLead: false,
         status: "idle",
       });
-      const sourceTask = createTaskExtended("source task", {
+      const sourceTask = await createTaskExtended("source task", {
         agentId: agent.id,
         source: "mcp",
         slackChannelId: "C_FOLLOW_UP",
@@ -924,7 +924,7 @@ describe("Approval Requests", () => {
       });
 
       // Simulate what the respond handler does: create follow-up with parentTaskId
-      const followUp = createTaskExtended("follow-up task text", {
+      const followUp = await createTaskExtended("follow-up task text", {
         agentId: sourceTask.agentId ?? undefined,
         parentTaskId: sourceTask.id,
         source: "system",
@@ -943,13 +943,13 @@ describe("Approval Requests", () => {
       expect(followUp.taskType).toBe("hitl-follow-up");
     });
 
-    test("follow-up task inherits Slack metadata even without explicit pass (auto-inheritance)", () => {
-      const agent = createAgent({
+    test("follow-up task inherits Slack metadata even without explicit pass (auto-inheritance)", async () => {
+      const agent = await createAgent({
         name: "test-auto-inherit-agent",
         isLead: false,
         status: "idle",
       });
-      const sourceTask = createTaskExtended("source task auto", {
+      const sourceTask = await createTaskExtended("source task auto", {
         agentId: agent.id,
         source: "mcp",
         slackChannelId: "C_AUTO",
@@ -958,7 +958,7 @@ describe("Approval Requests", () => {
       });
 
       // Without explicit Slack metadata — relies on auto-inheritance from parentTaskId
-      const followUp = createTaskExtended("auto-inherit follow-up", {
+      const followUp = await createTaskExtended("auto-inherit follow-up", {
         agentId: sourceTask.agentId ?? undefined,
         parentTaskId: sourceTask.id,
         source: "system",
@@ -998,27 +998,27 @@ describe("Approval Requests", () => {
 
   // ─── Server-side sourceTaskId fallback ───────────────────────
   describe("getAgentCurrentTask fallback for sourceTaskId", () => {
-    test("returns the most recent in-progress task for an agent", () => {
-      const agent = createAgent({
+    test("returns the most recent in-progress task for an agent", async () => {
+      const agent = await createAgent({
         name: "test-current-task-agent",
         isLead: true,
         status: "idle",
       });
 
       // Create a task and set it to in_progress
-      const task = createTaskExtended("lead agent task", {
+      const task = await createTaskExtended("lead agent task", {
         agentId: agent.id,
         source: "mcp",
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const currentTask = getAgentCurrentTask(agent.id);
       expect(currentTask).not.toBeNull();
       expect(currentTask!.id).toBe(task.id);
     });
 
-    test("returns null when agent has no in-progress tasks", () => {
-      const agent = createAgent({
+    test("returns null when agent has no in-progress tasks", async () => {
+      const agent = await createAgent({
         name: "test-no-task-agent",
         isLead: true,
         status: "idle",
@@ -1028,20 +1028,20 @@ describe("Approval Requests", () => {
       expect(currentTask).toBeNull();
     });
 
-    test("fallback sourceTaskId resolves correctly for approval request", () => {
-      const agent = createAgent({
+    test("fallback sourceTaskId resolves correctly for approval request", async () => {
+      const agent = await createAgent({
         name: "test-fallback-agent",
         isLead: true,
         status: "idle",
       });
-      const task = createTaskExtended("lead task calling request-human-input", {
+      const task = await createTaskExtended("lead task calling request-human-input", {
         agentId: agent.id,
         source: "mcp",
         slackChannelId: "C_LEAD_CHANNEL",
         slackThreadTs: "1111111111.000000",
         slackUserId: "U_LEAD_USER",
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       // Simulate what the fixed request-human-input tool does:
       // sourceTaskId from header is missing, so fall back to agent's current task

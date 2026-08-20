@@ -995,16 +995,16 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function ensureConnectionAdmin(
+async function ensureConnectionAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
   const decision = can({
     principal: {
       kind: "agent",
@@ -1027,18 +1027,18 @@ function ensureConnectionAdmin(
  * {@link ensureConnectionAdmin} but keys on the OAuth-specific verbs so the two
  * surfaces can diverge in a future role-based rollout.
  */
-function ensureVerbAdmin(
+async function ensureVerbAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
   verb: "oauth-app.manage" | "oauth-authorization.manage",
   denyMessage: string,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
   const decision = can({
     principal: { kind: "agent", agentId: callerAgentId ?? "", isLead: agent?.isLead ?? false },
     verb,
@@ -1052,12 +1052,12 @@ function ensureVerbAdmin(
   return true;
 }
 
-function ensureOAuthAppAdmin(
+async function ensureOAuthAppAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
-  return ensureVerbAdmin(
+): Promise<boolean> {
+  return await ensureVerbAdmin(
     req,
     res,
     agentId,
@@ -1066,12 +1066,12 @@ function ensureOAuthAppAdmin(
   );
 }
 
-function ensureOAuthAuthorizationAdmin(
+async function ensureOAuthAuthorizationAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
-  return ensureVerbAdmin(
+): Promise<boolean> {
+  return await ensureVerbAdmin(
     req,
     res,
     agentId,
@@ -1875,7 +1875,7 @@ export async function handleScriptConnections(
   if (upsertConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await upsertConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
 
     try {
       if (
@@ -1998,7 +1998,7 @@ export async function handleScriptConnections(
   if (refreshConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await refreshConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
     try {
       const refreshed = await refreshHttpConnection(
         parsed.params.id,
@@ -2021,7 +2021,7 @@ export async function handleScriptConnections(
   if (setConnectionEnabledRoute.match(req.method, pathSegments)) {
     const parsed = await setConnectionEnabledRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
     const updated = await setScriptConnectionEnabled(
       parsed.params.id,
       parsed.body.enabled,
@@ -2053,7 +2053,7 @@ export async function handleScriptConnections(
   if (upsertCredentialBindingRoute.match(req.method, pathSegments)) {
     const parsed = await upsertCredentialBindingRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
 
     try {
       const scope = parsed.body.scope ?? "global";
@@ -2116,7 +2116,7 @@ export async function handleScriptConnections(
   if (upsertOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await upsertOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     try {
       const body = parsed.body;
@@ -2231,7 +2231,7 @@ export async function handleScriptConnections(
   if (discoverOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await discoverOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
     try {
       const discovered = await discoverOAuthApp(parsed.body.url);
       discoverOAuthAppRoute.respond(res, 200, discovered);
@@ -2244,7 +2244,7 @@ export async function handleScriptConnections(
   if (deleteOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
     const deletion = await deleteOAuthApp(parsed.params.provider);
     if (!deletion.deleted) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
@@ -2274,7 +2274,7 @@ export async function handleScriptConnections(
   if (authorizeUrlRoute.match(req.method, pathSegments)) {
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
     const app = getOAuthAppById(parsed.params.id);
     if (!app || app.mcpServerId !== null) {
@@ -2307,7 +2307,7 @@ export async function handleScriptConnections(
   if (deleteAuthorizationRoute.match(req.method, pathSegments)) {
     const parsed = await deleteAuthorizationRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
     const authorization = getAuthorizationById(parsed.params.id);
     if (!authorization) {
@@ -2327,7 +2327,7 @@ export async function handleScriptConnections(
   if (refreshAuthorizationRoute.match(req.method, pathSegments)) {
     const parsed = await refreshAuthorizationRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
     const authorization = getAuthorizationById(parsed.params.id);
     if (!authorization) {
@@ -2432,7 +2432,7 @@ export async function handleScriptConnections(
   if (disconnectOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await disconnectOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     const app = getOAuthApp(parsed.params.provider);
     if (!app) {
@@ -2456,7 +2456,7 @@ export async function handleScriptConnections(
   if (refreshOAuthAppTokensRoute.match(req.method, pathSegments)) {
     const parsed = await refreshOAuthAppTokensRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     const provider = parsed.params.provider;
     if (!getOAuthApp(provider)) {

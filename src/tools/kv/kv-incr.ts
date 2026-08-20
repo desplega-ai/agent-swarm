@@ -42,11 +42,11 @@ export const registerKvIncrTool = (server: McpServer) => {
       }),
     },
     async ({ key, by, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
-      const authErr = kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return toolErr(authErr, {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },

@@ -195,7 +195,7 @@ let agentId: string;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "otel-metrics-test", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "otel-metrics-test", isLead: false, status: "idle" })).id;
   server = createTestServer();
   port = await listen(server);
 });

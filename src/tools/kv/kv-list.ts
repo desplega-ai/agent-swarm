@@ -60,7 +60,7 @@ export const registerKvListTool = (server: McpServer) => {
       }),
     },
     async ({ prefix, limit, offset, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }

@@ -84,7 +84,7 @@ beforeAll(async () => {
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const worker = createAgent({ name: "ext-api-worker", isLead: false, status: "idle" });
+  const worker = await createAgent({ name: "ext-api-worker", isLead: false, status: "idle" });
   workerId = worker.id;
 });
 

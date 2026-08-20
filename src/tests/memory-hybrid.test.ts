@@ -58,7 +58,7 @@ describe("memory hybrid search", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Hybrid Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Hybrid Test Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 

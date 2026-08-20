@@ -41,7 +41,7 @@ async function handleRequest(req: {
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -59,7 +59,7 @@ async function handleRequest(req: {
     pathSegments[3] === "pause"
   ) {
     const taskId = pathSegments[2];
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -85,7 +85,7 @@ async function handleRequest(req: {
     pathSegments[3] === "resume"
   ) {
     const taskId = pathSegments[2];
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -170,28 +170,28 @@ describe("Task Pause/Resume", () => {
 
   describe("pauseTask database function", () => {
     test("should pause an in_progress task", async () => {
-      const leadAgent = createAgent({
+      const leadAgent = await createAgent({
         id: "lead-agent-pause",
         name: "Lead Agent",
         isLead: true,
         status: "idle",
       });
 
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-agent-pause",
         name: "Worker Agent",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to pause", {
+      const task = await createTaskExtended("Task to pause", {
         creatorAgentId: leadAgent.id,
         agentId: workerAgent.id,
       });
 
       // Start the task first
-      startTask(task.id);
-      const startedTask = getTaskById(task.id);
+      await startTask(task.id);
+      const startedTask = await getTaskById(task.id);
       expect(startedTask?.status).toBe("in_progress");
 
       // Now pause it
@@ -203,14 +203,14 @@ describe("Task Pause/Resume", () => {
     });
 
     test("should not pause a pending task", async () => {
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-pending-pause",
         name: "Worker Pending",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Pending task", {
+      const task = await createTaskExtended("Pending task", {
         creatorAgentId: "lead-agent-pause",
         agentId: workerAgent.id,
       });
@@ -222,7 +222,7 @@ describe("Task Pause/Resume", () => {
     });
 
     test("should not pause a completed task", async () => {
-      const task = createTaskExtended("Completed task for pause test", {
+      const task = await createTaskExtended("Completed task for pause test", {
         creatorAgentId: "lead-agent-pause",
       });
 
@@ -232,7 +232,7 @@ describe("Task Pause/Resume", () => {
         task.id,
       ]);
 
-      const completedTask = getTaskById(task.id);
+      const completedTask = await getTaskById(task.id);
       expect(completedTask?.status).toBe("completed");
 
       const result = await pauseTask(task.id);
@@ -240,7 +240,7 @@ describe("Task Pause/Resume", () => {
     });
 
     test("should not pause a failed task", async () => {
-      const task = createTaskExtended("Failed task for pause test", {
+      const task = await createTaskExtended("Failed task for pause test", {
         creatorAgentId: "lead-agent-pause",
       });
 
@@ -250,7 +250,7 @@ describe("Task Pause/Resume", () => {
         task.id,
       ]);
 
-      const failedTask = getTaskById(task.id);
+      const failedTask = await getTaskById(task.id);
       expect(failedTask?.status).toBe("failed");
 
       const result = await pauseTask(task.id);
@@ -265,23 +265,23 @@ describe("Task Pause/Resume", () => {
 
   describe("resumeTask database function", () => {
     test("should resume a paused task", async () => {
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-resume-test",
         name: "Worker Resume",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to resume", {
+      const task = await createTaskExtended("Task to resume", {
         creatorAgentId: "lead-agent-pause",
         agentId: workerAgent.id,
       });
 
       // Start and then pause the task
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
-      const pausedTask = getTaskById(task.id);
+      const pausedTask = await getTaskById(task.id);
       expect(pausedTask?.status).toBe("paused");
 
       // Now resume it
@@ -293,22 +293,22 @@ describe("Task Pause/Resume", () => {
     });
 
     test("should not resume a non-paused task", async () => {
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-not-paused",
         name: "Worker Not Paused",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task not paused", {
+      const task = await createTaskExtended("Task not paused", {
         creatorAgentId: "lead-agent-pause",
         agentId: workerAgent.id,
       });
 
       // Start but don't pause
-      startTask(task.id);
+      await startTask(task.id);
 
-      const runningTask = getTaskById(task.id);
+      const runningTask = await getTaskById(task.id);
       expect(runningTask?.status).toBe("in_progress");
 
       const result = await resumeTask(task.id);
@@ -321,14 +321,14 @@ describe("Task Pause/Resume", () => {
     });
 
     test("should not resume a pending task", async () => {
-      const workerAgent = createAgent({
+      const workerAgent = await createAgent({
         id: "worker-pending-resume",
         name: "Worker Pending Resume",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Pending task for resume", {
+      const task = await createTaskExtended("Pending task for resume", {
         creatorAgentId: "lead-agent-pause",
         agentId: workerAgent.id,
       });
@@ -343,26 +343,26 @@ describe("Task Pause/Resume", () => {
   describe("getPausedTasksForAgent database function", () => {
     test("should return paused tasks for an agent", async () => {
       const agentId = "worker-get-paused";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Get Paused",
         isLead: false,
         status: "idle",
       });
 
-      const task1 = createTaskExtended("Paused task 1", {
+      const task1 = await createTaskExtended("Paused task 1", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
-      const task2 = createTaskExtended("Paused task 2", {
+      const task2 = await createTaskExtended("Paused task 2", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
       // Start and pause both tasks
-      startTask(task1.id);
+      await startTask(task1.id);
       await pauseTask(task1.id);
-      startTask(task2.id);
+      await startTask(task2.id);
       await pauseTask(task2.id);
 
       const pausedTasks = await getPausedTasksForAgent(agentId);
@@ -377,31 +377,31 @@ describe("Task Pause/Resume", () => {
       const agentA = "agent-a-paused-isolated";
       const agentB = "agent-b-paused-isolated";
 
-      createAgent({
+      await createAgent({
         id: agentA,
         name: "Agent A Paused",
         isLead: false,
         status: "idle",
       });
-      createAgent({
+      await createAgent({
         id: agentB,
         name: "Agent B Paused",
         isLead: false,
         status: "idle",
       });
 
-      const taskA = createTaskExtended("Task for Agent A pause", {
+      const taskA = await createTaskExtended("Task for Agent A pause", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentA,
       });
-      const taskB = createTaskExtended("Task for Agent B pause", {
+      const taskB = await createTaskExtended("Task for Agent B pause", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentB,
       });
 
-      startTask(taskA.id);
+      await startTask(taskA.id);
       await pauseTask(taskA.id);
-      startTask(taskB.id);
+      await startTask(taskB.id);
       await pauseTask(taskB.id);
 
       const pausedForA = await getPausedTasksForAgent(agentA);
@@ -412,27 +412,27 @@ describe("Task Pause/Resume", () => {
 
     test("should return tasks ordered by creation time (FIFO)", async () => {
       const agentId = "worker-fifo-paused";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker FIFO Paused",
         isLead: false,
         status: "idle",
       });
 
-      const task1 = createTaskExtended("First paused task", {
+      const task1 = await createTaskExtended("First paused task", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
       // Small delay to ensure different timestamps
-      const task2 = createTaskExtended("Second paused task", {
+      const task2 = await createTaskExtended("Second paused task", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task1.id);
+      await startTask(task1.id);
       await pauseTask(task1.id);
-      startTask(task2.id);
+      await startTask(task2.id);
       await pauseTask(task2.id);
 
       const pausedTasks = await getPausedTasksForAgent(agentId);
@@ -446,7 +446,7 @@ describe("Task Pause/Resume", () => {
 
     test("should return empty array if no paused tasks", async () => {
       const agentId = "worker-no-paused-tasks";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker No Paused",
         isLead: false,
@@ -463,7 +463,7 @@ describe("Task Pause/Resume", () => {
   describe("updateAgentStatusFromCapacity after pause", () => {
     test("should update agent status to idle after task is paused", async () => {
       const agentId = "worker-capacity-pause";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Capacity Pause",
         isLead: false,
@@ -471,14 +471,14 @@ describe("Task Pause/Resume", () => {
         maxTasks: 1,
       });
 
-      const task = createTaskExtended("Task for capacity pause test", {
+      const task = await createTaskExtended("Task for capacity pause test", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
       // Start the task - agent should be busy
-      startTask(task.id);
-      let agent = getAgentById(agentId);
+      await startTask(task.id);
+      let agent = await getAgentById(agentId);
       expect(agent?.status).toBe("busy");
 
       // Pause the task
@@ -486,9 +486,9 @@ describe("Task Pause/Resume", () => {
       expect(paused).not.toBeNull();
 
       // Update agent status based on capacity
-      updateAgentStatusFromCapacity(agentId);
+      await updateAgentStatusFromCapacity(agentId);
 
-      agent = getAgentById(agentId);
+      agent = await getAgentById(agentId);
       expect(agent?.status).toBe("idle");
     });
   });
@@ -510,19 +510,19 @@ describe("Task Pause/Resume", () => {
 
     test("should return paused tasks for agent", async () => {
       const agentId = "worker-endpoint-paused";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Endpoint Paused",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task for endpoint pause test", {
+      const task = await createTaskExtended("Task for endpoint pause test", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/paused-tasks`, {
@@ -544,19 +544,19 @@ describe("Task Pause/Resume", () => {
   describe("POST /api/tasks/:id/pause endpoint", () => {
     test("should pause an in_progress task", async () => {
       const agentId = "worker-api-pause";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker API Pause",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to pause via API", {
+      const task = await createTaskExtended("Task to pause via API", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task.id);
+      await startTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/pause`, {
         method: "POST",
@@ -581,14 +581,14 @@ describe("Task Pause/Resume", () => {
 
     test("should return 400 for non-in_progress task", async () => {
       const agentId = "worker-api-pause-invalid";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker API Pause Invalid",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Pending task cannot be paused via API", {
+      const task = await createTaskExtended("Pending task cannot be paused via API", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
@@ -609,19 +609,19 @@ describe("Task Pause/Resume", () => {
   describe("POST /api/tasks/:id/resume endpoint", () => {
     test("should resume a paused task", async () => {
       const agentId = "worker-api-resume";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker API Resume",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Task to resume via API", {
+      const task = await createTaskExtended("Task to resume via API", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/resume`, {
@@ -647,19 +647,19 @@ describe("Task Pause/Resume", () => {
 
     test("should return 400 for non-paused task", async () => {
       const agentId = "worker-api-resume-invalid";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker API Resume Invalid",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("Running task cannot be resumed via API", {
+      const task = await createTaskExtended("Running task cannot be resumed via API", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task.id);
+      await startTask(task.id);
       // Don't pause the task - it's still in_progress
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/resume`, {
@@ -676,7 +676,7 @@ describe("Task Pause/Resume", () => {
   describe("Full pause/resume workflow", () => {
     test("should support full pause and resume cycle", async () => {
       const agentId = "worker-full-cycle";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Worker Full Cycle",
         isLead: false,
@@ -684,13 +684,13 @@ describe("Task Pause/Resume", () => {
       });
 
       // Create and start a task
-      const task = createTaskExtended("Task for full cycle test", {
+      const task = await createTaskExtended("Task for full cycle test", {
         creatorAgentId: "lead-agent-pause",
         agentId: agentId,
       });
 
-      startTask(task.id);
-      let currentTask = getTaskById(task.id);
+      await startTask(task.id);
+      let currentTask = await getTaskById(task.id);
       expect(currentTask?.status).toBe("in_progress");
 
       // Pause the task via API
@@ -700,7 +700,7 @@ describe("Task Pause/Resume", () => {
       });
       expect(pauseResponse.status).toBe(200);
 
-      currentTask = getTaskById(task.id);
+      currentTask = await getTaskById(task.id);
       expect(currentTask?.status).toBe("paused");
 
       // Verify it shows in paused tasks list
@@ -720,7 +720,7 @@ describe("Task Pause/Resume", () => {
       });
       expect(resumeResponse.status).toBe(200);
 
-      currentTask = getTaskById(task.id);
+      currentTask = await getTaskById(task.id);
       expect(currentTask?.status).toBe("in_progress");
 
       // Verify it's no longer in paused tasks list

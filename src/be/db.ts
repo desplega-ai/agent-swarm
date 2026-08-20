@@ -172,8 +172,21 @@ function emitTaskLifecycleTelemetryAfterCommit(
   // microtasks drain before COMMIT, so the verify read could observe
   // uncommitted state. afterSettled runs strictly post-COMMIT/ROLLBACK.
   getDbClient().afterSettled(() => {
-    if (verify && !verify(getTaskById(props.taskId))) return;
-    telemetry.taskEvent(event, props);
+    if (!verify) {
+      telemetry.taskEvent(event, props);
+      return;
+    }
+    getTaskById(props.taskId)
+      .then((task) => {
+        if (!verify(task)) return;
+        telemetry.taskEvent(event, props);
+      })
+      .catch((err) =>
+        console.error(
+          "[db] emitTaskLifecycleTelemetryAfterCommit verify read failed:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
   });
 }
 
@@ -517,7 +530,7 @@ function rowToContextVersion(row: ContextVersionRow): ContextVersion {
   };
 }
 
-export function createContextVersion(params: {
+export async function createContextVersion(params: {
   agentId: string;
   field: VersionableField;
   content: string;
@@ -527,31 +540,14 @@ export function createContextVersion(params: {
   changeReason?: string | null;
   contentHash: string;
   previousVersionId?: string | null;
-}): ContextVersion {
+}): Promise<ContextVersion> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  const row = getDb()
-    .prepare<
-      ContextVersionRow,
-      [
-        string,
-        string,
-        string,
-        string,
-        number,
-        string,
-        string | null,
-        string | null,
-        string,
-        string | null,
-        string,
-      ]
-    >(
-      `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, changedByAgentId, changeReason, contentHash, previousVersionId, createdAt)
+  const row = await getDbClient().get<ContextVersionRow>(
+    `INSERT INTO context_versions (id, agentId, field, content, version, changeSource, changedByAgentId, changeReason, contentHash, previousVersionId, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       params.agentId,
       params.field,
@@ -563,21 +559,21 @@ export function createContextVersion(params: {
       params.contentHash,
       params.previousVersionId ?? null,
       now,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create context version");
   return rowToContextVersion(row);
 }
 
-export function getLatestContextVersion(
+export async function getLatestContextVersion(
   agentId: string,
   field: VersionableField,
-): ContextVersion | null {
-  const row = getDb()
-    .prepare<ContextVersionRow, [string, string]>(
-      `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT 1`,
-    )
-    .get(agentId, field);
+): Promise<ContextVersion | null> {
+  const row = await getDbClient().get<ContextVersionRow>(
+    `SELECT * FROM context_versions WHERE agentId = ? AND field = ? ORDER BY version DESC LIMIT 1`,
+    [agentId, field],
+  );
 
   return row ? rowToContextVersion(row) : null;
 }
@@ -749,27 +745,6 @@ function rowToAgent(row: AgentRow, slim = false): Agent {
   };
 }
 
-export const agentQueries = {
-  insert: () =>
-    getDb().prepare<
-      AgentRow,
-      [string, string, number, AgentStatus, number, string | null, string | null]
-    >(
-      "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
-    ),
-
-  getById: () => getDb().prepare<AgentRow, [string]>("SELECT * FROM agents WHERE id = ?"),
-
-  getAll: () => getDb().prepare<AgentRow, []>("SELECT * FROM agents ORDER BY name"),
-
-  updateStatus: () =>
-    getDb().prepare<AgentRow, [AgentStatus, string]>(
-      "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-    ),
-
-  delete: () => getDb().prepare<null, [string]>("DELETE FROM agents WHERE id = ?"),
-};
-
 /**
  * Phase 3 of the worker credential safe-loop plan.
  *
@@ -786,7 +761,7 @@ export async function updateAgentCredentialState(
   ready: boolean,
   missing: string[] | null,
 ): Promise<Agent | null> {
-  const prev = getAgentById(agentId);
+  const prev = await getAgentById(agentId);
   const status: AgentStatus = ready ? "idle" : "waiting_for_credentials";
   const missingJson = ready ? null : missing && missing.length > 0 ? JSON.stringify(missing) : null;
   const row = await getDbClient().get<AgentRow>(
@@ -797,18 +772,18 @@ export async function updateAgentCredentialState(
   // (waiting_for_credentials -> ready), so routine post-task `ready:true`
   // reports don't clobber a legitimately accumulated count and defeat the
   // MAX_EMPTY_POLLS polling gate.
-  if (ready && prev?.status === "waiting_for_credentials") resetEmptyPollCount(agentId);
+  if (ready && prev?.status === "waiting_for_credentials") await resetEmptyPollCount(agentId);
   return row ? rowToAgent(row) : null;
 }
 
-export function createAgent(
+export async function createAgent(
   agent: Omit<Agent, "id" | "createdAt" | "lastUpdatedAt"> & { id?: string },
-): Agent {
+): Promise<Agent> {
   const id = agent.id ?? crypto.randomUUID();
   const maxTasks = agent.maxTasks ?? 1;
-  const row = agentQueries
-    .insert()
-    .get(
+  const row = await getDbClient().get<AgentRow>(
+    "INSERT INTO agents (id, name, isLead, status, maxTasks, provider, harness_provider, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *",
+    [
       id,
       agent.name,
       agent.isLead ? 1 : 0,
@@ -816,7 +791,8 @@ export function createAgent(
       maxTasks,
       agent.provider ?? null,
       agent.harnessProvider ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create agent");
   try {
     installSystemDefaultSkillsForAgent(id);
@@ -827,25 +803,23 @@ export function createAgent(
     );
   }
   try {
-    createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
+    await createLogEntry({ eventType: "agent_joined", agentId: id, newValue: agent.status });
   } catch {}
   return rowToAgent(row);
 }
 
-export function getAgentById(id: string): Agent | null {
-  const row = agentQueries.getById().get(id);
+export async function getAgentById(id: string): Promise<Agent | null> {
+  const row = await getDbClient().get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
   return row ? rowToAgent(row) : null;
 }
 
-export function getAllAgents(opts?: { slim?: boolean }): Agent[] {
-  return agentQueries
-    .getAll()
-    .all()
-    .map((row) => rowToAgent(row, opts?.slim ?? false));
+export async function getAllAgents(opts?: { slim?: boolean }): Promise<Agent[]> {
+  const rows = await getDbClient().query<AgentRow>("SELECT * FROM agents ORDER BY name");
+  return rows.map((row) => rowToAgent(row, opts?.slim ?? false));
 }
 
-export function getLeadAgent(): Agent | null {
-  const leads = getAllAgents().filter((a) => a.isLead);
+export async function getLeadAgent(): Promise<Agent | null> {
+  const leads = (await getAllAgents()).filter((a) => a.isLead);
   // Prefer a usable (non-offline) lead so callers route to one that can actually
   // poll — e.g. an old offline lead must not shadow a live replacement. Falls
   // back to any lead (incl. offline) so existing "is there a lead at all?"
@@ -854,12 +828,15 @@ export function getLeadAgent(): Agent | null {
   return leads.find((a) => a.status !== "offline") ?? leads[0] ?? null;
 }
 
-export function updateAgentStatus(id: string, status: AgentStatus): Agent | null {
-  const oldAgent = getAgentById(id);
-  const row = agentQueries.updateStatus().get(status, id);
+export async function updateAgentStatus(id: string, status: AgentStatus): Promise<Agent | null> {
+  const oldAgent = await getAgentById(id);
+  const row = await getDbClient().get<AgentRow>(
+    "UPDATE agents SET status = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+    [status, id],
+  );
   if (row && oldAgent) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "agent_status_change",
         agentId: id,
         oldValue: oldAgent.status,
@@ -870,23 +847,24 @@ export function updateAgentStatus(id: string, status: AgentStatus): Agent | null
   return row ? rowToAgent(row) : null;
 }
 
-export function updateAgentMaxTasks(id: string, maxTasks: number): Agent | null {
-  const row = getDb()
-    .prepare<AgentRow, [number, string]>(
-      `UPDATE agents SET maxTasks = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+export async function updateAgentMaxTasks(id: string, maxTasks: number): Promise<Agent | null> {
+  const row = await getDbClient().get<AgentRow>(
+    `UPDATE agents SET maxTasks = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(maxTasks, id);
+    [maxTasks, id],
+  );
   return row ? rowToAgent(row) : null;
 }
 
-export function updateAgentProvider(id: string, provider: ProviderName): Agent | null {
-  const row = getDb()
-    .prepare<AgentRow, [string, string]>(
-      `UPDATE agents SET provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+export async function updateAgentProvider(
+  id: string,
+  provider: ProviderName,
+): Promise<Agent | null> {
+  const row = await getDbClient().get<AgentRow>(
+    `UPDATE agents SET provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(provider, id);
+    [provider, id],
+  );
   return row ? rowToAgent(row) : null;
 }
 
@@ -897,13 +875,15 @@ export function updateAgentProvider(id: string, provider: ProviderName): Agent |
  *
  * Returns the updated row, or null if the agent does not exist.
  */
-export function setAgentHarnessProvider(id: string, provider: ProviderName | null): Agent | null {
-  const row = getDb()
-    .prepare<AgentRow, [string | null, string]>(
-      `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+export async function setAgentHarnessProvider(
+  id: string,
+  provider: ProviderName | null,
+): Promise<Agent | null> {
+  const row = await getDbClient().get<AgentRow>(
+    `UPDATE agents SET harness_provider = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(provider, id);
+    [provider, id],
+  );
   return row ? rowToAgent(row) : null;
 }
 
@@ -1001,8 +981,8 @@ export async function incrementEmptyPollCount(agentId: string): Promise<number> 
  * Reset the empty poll count for an agent to zero.
  * Called when a task is assigned or agent re-registers.
  */
-export function resetEmptyPollCount(agentId: string): void {
-  getDb().run(
+export async function resetEmptyPollCount(agentId: string): Promise<void> {
+  await getDbClient().run(
     `UPDATE agents
      SET emptyPollCount = 0,
          lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -1014,16 +994,16 @@ export function resetEmptyPollCount(agentId: string): void {
 /**
  * Check if an agent has exceeded the maximum empty poll count.
  */
-export function shouldBlockPolling(agentId: string): boolean {
-  const agent = getAgentById(agentId);
+export async function shouldBlockPolling(agentId: string): Promise<boolean> {
+  const agent = await getAgentById(agentId);
   return (agent?.emptyPollCount ?? 0) >= MAX_EMPTY_POLLS;
 }
 
 export async function deleteAgent(id: string): Promise<boolean> {
-  const agent = getAgentById(id);
+  const agent = await getAgentById(id);
   if (agent) {
     try {
-      createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
+      await createLogEntry({ eventType: "agent_left", agentId: id, oldValue: agent.status });
     } catch {}
   }
   const result = await getDbClient().run("DELETE FROM agents WHERE id = ?", [id]);
@@ -1038,32 +1018,31 @@ export async function deleteAgent(id: string): Promise<boolean> {
  * Get the count of active (in_progress) tasks for an agent.
  * Used to determine current capacity usage.
  */
-export function getActiveTaskCount(agentId: string): number {
-  const result = getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
-    )
-    .get(agentId);
+export async function getActiveTaskCount(agentId: string): Promise<number> {
+  const result = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'in_progress'",
+    [agentId],
+  );
   return result?.count ?? 0;
 }
 
 /**
  * Check if an agent has capacity to accept more tasks.
  */
-export function hasCapacity(agentId: string): boolean {
-  const agent = getAgentById(agentId);
+export async function hasCapacity(agentId: string): Promise<boolean> {
+  const agent = await getAgentById(agentId);
   if (!agent) return false;
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   return activeCount < (agent.maxTasks ?? 1);
 }
 
 /**
  * Get remaining capacity (available task slots) for an agent.
  */
-export function getRemainingCapacity(agentId: string): number {
-  const agent = getAgentById(agentId);
+export async function getRemainingCapacity(agentId: string): Promise<number> {
+  const agent = await getAgentById(agentId);
   if (!agent) return 0;
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   return Math.max(0, (agent.maxTasks ?? 1) - activeCount);
 }
 
@@ -1072,19 +1051,19 @@ export function getRemainingCapacity(agentId: string): number {
  * Agent is 'busy' when any tasks are in progress, 'idle' when none.
  * Does not modify 'offline' status.
  */
-export function updateAgentStatusFromCapacity(agentId: string): void {
-  const agent = getAgentById(agentId);
+export async function updateAgentStatusFromCapacity(agentId: string): Promise<void> {
+  const agent = await getAgentById(agentId);
   if (!agent || agent.status === "offline") return;
   // `waiting_for_credentials` is owned by the worker's credential-wait
   // tick — task-completion shouldn't accidentally promote a blocked agent
   // back to idle.
   if (agent.status === "waiting_for_credentials") return;
 
-  const activeCount = getActiveTaskCount(agentId);
+  const activeCount = await getActiveTaskCount(agentId);
   const newStatus = activeCount > 0 ? "busy" : "idle";
 
   if (agent.status !== newStatus) {
-    updateAgentStatus(agentId, newStatus);
+    await updateAgentStatus(agentId, newStatus);
   }
 }
 
@@ -1112,8 +1091,10 @@ export function isPoolAffinityEnforcementEnabled(): boolean {
  * callers fall back to the parent's own (inherited) `routingAffinity` via
  * `createTaskExtended`'s parentTaskId inheritance block.
  */
-export function buildRoutingAffinityFromAgent(agentId: string): RoutingAffinity | null {
-  const agent = getAgentById(agentId);
+export async function buildRoutingAffinityFromAgent(
+  agentId: string,
+): Promise<RoutingAffinity | null> {
+  const agent = await getAgentById(agentId);
   if (!agent) return null;
   return {
     sourceAgentId: agent.id,
@@ -1394,10 +1375,6 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
   };
 }
 
-export const taskQueries = {
-  getById: () => getDb().prepare<AgentTaskRow, [string]>("SELECT * FROM agent_tasks WHERE id = ?"),
-};
-
 export async function createTask(
   agentId: string,
   task: string,
@@ -1428,7 +1405,7 @@ export async function createTask(
   );
   if (!row) throw new Error("Failed to create task");
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "task_created",
       agentId,
       taskId: id,
@@ -1439,18 +1416,17 @@ export async function createTask(
   return rowToAgentTask(row);
 }
 
-export function getPendingTaskForAgent(agentId: string): AgentTask | null {
+export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
-  const rows = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
-    )
-    .all(agentId);
+  const rows = await getDbClient().query<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE agentId = ? AND status = 'pending' ORDER BY priority DESC, createdAt ASC",
+    [agentId],
+  );
 
   // Find the first task whose dependencies are met
   for (const row of rows) {
     const task = rowToAgentTask(row);
-    const { ready } = checkDependencies(task.id);
+    const { ready } = await checkDependencies(task.id);
     if (ready) {
       return task;
     }
@@ -1459,17 +1435,20 @@ export function getPendingTaskForAgent(agentId: string): AgentTask | null {
   return null;
 }
 
-export function assignUnassignedTaskPending(taskId: string, agentId: string): AgentTask | null {
+export async function assignUnassignedTaskPending(
+  taskId: string,
+  agentId: string,
+): Promise<AgentTask | null> {
   // Eligibility pre-check (routing affinity) — defense in depth for the
   // heartbeat's `autoAssignPoolTasks`, which already filters candidates via
   // `isAgentEligibleForTask` before calling this, but any other caller gets
   // the same guard for free.
   if (isPoolAffinityEnforcementEnabled()) {
-    const task = getTaskById(taskId);
-    const agent = getAgentById(agentId);
+    const task = await getTaskById(taskId);
+    const agent = await getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
       try {
-        createLogEntry({
+        await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
@@ -1484,16 +1463,15 @@ export function assignUnassignedTaskPending(taskId: string, agentId: string): Ag
   }
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET agentId = ?, status = 'pending', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    )
-    .get(agentId, now, taskId);
+    [agentId, now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         agentId,
         taskId,
@@ -1507,8 +1485,8 @@ export function assignUnassignedTaskPending(taskId: string, agentId: string): Ag
   return row ? rowToAgentTask(row) : null;
 }
 
-export function startTask(taskId: string): AgentTask | null {
-  const oldTask = getTaskById(taskId);
+export async function startTask(taskId: string): Promise<AgentTask | null> {
+  const oldTask = await getTaskById(taskId);
   if (!oldTask) return null;
 
   // Guard: never revive tasks that are already in a terminal state
@@ -1516,15 +1494,14 @@ export function startTask(taskId: string): AgentTask | null {
     return null;
   }
 
-  const row = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
-    )
-    .get(taskId);
+    [taskId],
+  );
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId: row.agentId ?? undefined,
@@ -1541,8 +1518,8 @@ export function startTask(taskId: string): AgentTask | null {
   return result;
 }
 
-export function getTaskById(id: string): AgentTask | null {
-  const row = taskQueries.getById().get(id);
+export async function getTaskById(id: string): Promise<AgentTask | null> {
+  const row = await getDbClient().get<AgentTaskRow>("SELECT * FROM agent_tasks WHERE id = ?", [id]);
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -1970,20 +1947,19 @@ export async function hasNonTerminalResumeChild(parentId: string): Promise<boole
  * children of the original cannot suppress a needed decision, and nothing else
  * is mistaken for one.
  */
-export function hasNonTerminalRerouteDecisionChild(parentId: string): boolean {
-  const row = getDb()
-    .prepare(
-      `SELECT 1 FROM agent_tasks
+export async function hasNonTerminalRerouteDecisionChild(parentId: string): Promise<boolean> {
+  const row = await getDbClient().get<Record<string, number>>(
+    `SELECT 1 FROM agent_tasks
        WHERE parentTaskId = ?
          AND taskType = 'reroute-decision'
          AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        LIMIT 1`,
-    )
-    .get(parentId);
+    [parentId],
+  );
   return row !== undefined && row !== null;
 }
 
-export function updateTaskClaudeSessionId(
+export async function updateTaskClaudeSessionId(
   taskId: string,
   claudeSessionId: string,
   provider?: ProviderName,
@@ -1991,7 +1967,7 @@ export function updateTaskClaudeSessionId(
   model?: string,
   harnessVariant?: string,
   harnessVariantMeta?: Record<string, unknown>,
-): AgentTask | null {
+): Promise<AgentTask | null> {
   const setClauses = ["claudeSessionId = ?", "lastUpdatedAt = ?"];
   const params: (string | null)[] = [claudeSessionId, new Date().toISOString()];
 
@@ -2018,11 +1994,10 @@ export function updateTaskClaudeSessionId(
 
   params.push(taskId);
 
-  const row = getDb()
-    .prepare<AgentTaskRow, (string | null)[]>(
-      `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...params);
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET ${setClauses.join(", ")} WHERE id = ? RETURNING *`,
+    params,
+  );
   return row ? rowToAgentTask(row) : null;
 }
 
@@ -2062,13 +2037,12 @@ export async function updateTaskVcs(
   return row ? rowToAgentTask(row) : null;
 }
 
-export function getTasksByAgentId(agentId: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
-    )
-    .all(agentId)
-    .map(rowToAgentTask);
+export async function getTasksByAgentId(agentId: string): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE agentId = ? ORDER BY createdAt DESC",
+    [agentId],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -2275,19 +2249,26 @@ export async function getAllTasks(
 
   // Filter for ready tasks (dependencies met) if requested. Both the full and
   // the slim row shapes carry `id` + `dependsOn`, so the same predicate works.
-  const isReady = (task: { id: string; dependsOn: string[] }): boolean => {
-    if (!task.dependsOn || task.dependsOn.length === 0) return true;
-    return checkDependencies(task.id).ready;
+  const filterReady = async <T extends { id: string; dependsOn: string[] }>(
+    items: T[],
+  ): Promise<T[]> => {
+    const readyFlags = await Promise.all(
+      items.map(async (task) => {
+        if (!task.dependsOn || task.dependsOn.length === 0) return true;
+        return (await checkDependencies(task.id)).ready;
+      }),
+    );
+    return items.filter((_, i) => readyFlags[i]);
   };
 
   if (opts?.slim) {
     let tasks = rows.map(rowToAgentTaskSummary);
-    if (filters?.readyOnly) tasks = tasks.filter(isReady);
+    if (filters?.readyOnly) tasks = await filterReady(tasks);
     return tasks;
   }
 
   let tasks = rows.map(rowToAgentTask);
-  if (filters?.readyOnly) tasks = tasks.filter(isReady);
+  if (filters?.readyOnly) tasks = await filterReady(tasks);
   return tasks;
 }
 
@@ -2570,22 +2551,21 @@ export async function getSlackTasksMissingTree(): Promise<AgentTask[]> {
  *
  * See src/tasks/context-key.ts for the key schema.
  */
-export function getInProgressTasksByContextKey(
+export async function getInProgressTasksByContextKey(
   contextKey: string,
   statuses: AgentTaskStatus[] = ["pending", "in_progress", "offered", "paused"],
-): AgentTask[] {
+): Promise<AgentTask[]> {
   if (!contextKey || statuses.length === 0) return [];
   const placeholders = statuses.map(() => "?").join(",");
-  return getDb()
-    .prepare<AgentTaskRow, (string | AgentTaskStatus)[]>(
-      `SELECT * FROM agent_tasks
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND status IN (${placeholders})
        ORDER BY lastUpdatedAt DESC
        LIMIT 200`,
-    )
-    .all(contextKey, ...statuses)
-    .map(rowToAgentTask);
+    [contextKey, ...statuses],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 export type ExistingTrackerContextWorkReason = "active_task" | "linked_open_pr";
@@ -2608,27 +2588,25 @@ function isLinearTrackerContextKey(contextKey: string | null | undefined): conte
  * metadata is also treated as existing work because the task can be complete
  * while the PR is still awaiting review/merge.
  */
-export function findExistingLinearTrackerContextWork(
+export async function findExistingLinearTrackerContextWork(
   contextKey: string | null | undefined,
-): ExistingTrackerContextWork | null {
+): Promise<ExistingTrackerContextWork | null> {
   if (!isLinearTrackerContextKey(contextKey)) return null;
 
-  const activeRow = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const activeRow = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    )
-    .get(contextKey);
+    [contextKey],
+  );
   if (activeRow) {
     return { task: rowToAgentTask(activeRow), reason: "active_task" };
   }
 
-  const linkedPrRow = getDb()
-    .prepare<AgentTaskRow, [string]>(
-      `SELECT * FROM agent_tasks
+  const linkedPrRow = await getDbClient().get<AgentTaskRow>(
+    `SELECT * FROM agent_tasks
        WHERE contextKey = ?
        AND status = 'completed'
        AND vcsProvider IS NOT NULL
@@ -2637,8 +2615,8 @@ export function findExistingLinearTrackerContextWork(
        AND vcsUrl IS NOT NULL
        ORDER BY lastUpdatedAt DESC
        LIMIT 1`,
-    )
-    .get(contextKey);
+    [contextKey],
+  );
   if (linkedPrRow) {
     return { task: rowToAgentTask(linkedPrRow), reason: "linked_open_pr" };
   }
@@ -2828,7 +2806,7 @@ export async function findRecentCancelledTaskInThread(
 }
 
 export async function completeTask(id: string, output?: string): Promise<AgentTask | null> {
-  const oldTask = getTaskById(id);
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-complete a task already in a terminal state.
@@ -2839,19 +2817,17 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
   }
 
   const finishedAt = new Date().toISOString();
-  let row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
-    )
-    .get("completed", finishedAt, id);
+  let row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *`,
+    ["completed", finishedAt, id],
+  );
   if (!row) return null;
 
   if (output) {
-    row = getDb()
-      .prepare<AgentTaskRow, [string, string]>(
-        "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
-      )
-      .get(scrubSecrets(output), id);
+    row = await getDbClient().get<AgentTaskRow>(
+      "UPDATE agent_tasks SET output = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ? RETURNING *",
+      [scrubSecrets(output), id],
+    );
   }
 
   if (row && oldTask) {
@@ -2868,7 +2844,7 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
     );
 
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -2908,7 +2884,7 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
 }
 
 export async function failTask(id: string, reason: string): Promise<AgentTask | null> {
-  const oldTask = getTaskById(id);
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-fail a task already in a terminal state.
@@ -2920,12 +2896,11 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
 
   const finishedAt = new Date().toISOString();
   const scrubbedReason = scrubSecrets(reason);
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(scrubbedReason, finishedAt, id);
+    [scrubbedReason, finishedAt, id],
+  );
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
       "failed",
@@ -2940,7 +2915,7 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
     );
 
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -2992,11 +2967,11 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
  * side effects or moving any lifecycle timestamps. Callers must opt in to
  * this narrow escape hatch; ordinary completion remains first-call-wins.
  */
-export function overwriteTerminalTaskResultText(
+export async function overwriteTerminalTaskResultText(
   id: string,
   patch: { output?: string; failureReason?: string },
-): AgentTask | null {
-  const task = getTaskById(id);
+): Promise<AgentTask | null> {
+  const task = await getTaskById(id);
   if (!task || !isTerminalTaskStatus(task.status)) return null;
 
   const output = patch.output !== undefined ? scrubSecrets(patch.output) : (task.output ?? null);
@@ -3004,20 +2979,18 @@ export function overwriteTerminalTaskResultText(
     patch.failureReason !== undefined
       ? scrubSecrets(patch.failureReason)
       : (task.failureReason ?? null);
-  const row =
-    getDb()
-      .prepare<AgentTaskRow, [string | null, string | null, string]>(
-        `UPDATE agent_tasks SET output = ?, failureReason = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET output = ?, failureReason = ?
        WHERE id = ? AND status IN ('completed', 'failed', 'cancelled', 'superseded')
        RETURNING *`,
-      )
-      .get(output, failureReason, id) ?? null;
+    [output, failureReason, id],
+  );
 
   return row ? rowToAgentTask(row) : task;
 }
 
 export async function cancelTask(id: string, reason?: string): Promise<AgentTask | null> {
-  const oldTask = getTaskById(id);
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Only cancel tasks that are not already in a terminal state
@@ -3027,12 +3000,11 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
 
   const finishedAt = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'cancelled', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(cancelReason, finishedAt, id);
+    [cancelReason, finishedAt, id],
+  );
 
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
@@ -3050,7 +3022,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
     );
 
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -3110,7 +3082,7 @@ export async function supersedeTask(
   id: string,
   args: { reason: string; resumeTaskId: string | null },
 ): Promise<AgentTask | null> {
-  const oldTask = getTaskById(id);
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Idempotency guard: don't re-supersede a task already in a terminal state.
@@ -3146,7 +3118,7 @@ export async function supersedeTask(
     );
 
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_superseded",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -3222,7 +3194,7 @@ export async function backfillSupersedeTaskResumeTaskId(
  * Unlike failTask, paused tasks retain their agent assignment and can be resumed.
  */
 export async function pauseTask(id: string): Promise<AgentTask | null> {
-  const oldTask = getTaskById(id);
+  const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
   // Only pause tasks that are in progress
@@ -3242,7 +3214,7 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -3261,7 +3233,7 @@ export async function pauseTask(id: string): Promise<AgentTask | null> {
  * Called when worker restarts and picks up paused work.
  */
 export async function resumeTask(taskId: string): Promise<AgentTask | null> {
-  const oldTask = getTaskById(taskId);
+  const oldTask = await getTaskById(taskId);
   if (!oldTask || oldTask.status !== "paused") return null;
 
   const row = await getDbClient().get<AgentTaskRow>(
@@ -3276,7 +3248,7 @@ export async function resumeTask(taskId: string): Promise<AgentTask | null> {
 
   if (row && oldTask) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId: row.agentId ?? undefined,
@@ -3350,7 +3322,7 @@ export async function resetOrphanedInProgressTasksForAgent(
 
   for (const row of rows) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId: row.id,
         agentId,
@@ -3387,19 +3359,18 @@ export async function deleteTask(id: string): Promise<boolean> {
   return result.changes > 0;
 }
 
-export function updateTaskProgress(id: string, progress: string): AgentTask | null {
+export async function updateTaskProgress(id: string, progress: string): Promise<AgentTask | null> {
   const scrubbedProgress = scrubSecrets(progress);
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET progress = ?,
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET progress = ?,
        status = CASE WHEN status IN ('completed', 'failed', 'cancelled', 'superseded') THEN status ELSE 'in_progress' END,
        lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
        WHERE id = ? RETURNING *`,
-    )
-    .get(scrubbedProgress, id);
+    [scrubbedProgress, id],
+  );
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_progress",
         taskId: id,
         agentId: row.agentId ?? undefined,
@@ -3546,7 +3517,7 @@ export async function insertTaskAttachment(
   return await getDbClient().transaction(async () => {
     const attachment = insertTaskAttachmentRow(input);
     if (attachment.kind === "agent-fs" && attachment.providerId && attachment.providerKey) {
-      const task = getTaskById(input.taskId);
+      const task = await getTaskById(input.taskId);
       if (!task) throw new Error(`Task not found while mapping attachment: ${input.taskId}`);
       await upsertAssetKeyMapping({
         providerId: attachment.providerId,
@@ -3750,24 +3721,18 @@ function insertAssetKeyHistory(input: {
   );
 }
 
-export function getAssetKeyMappingByProvider(input: {
+export async function getAssetKeyMappingByProvider(input: {
   providerId: string;
   providerOrgId?: string;
   providerDriveId?: string;
   providerKey: string;
-}): AssetKeyMapping | null {
-  const row = getDb()
-    .prepare<AssetKeyMappingRow, [string, string, string, string]>(
-      `SELECT * FROM asset_key_mappings
+}): Promise<AssetKeyMapping | null> {
+  const row = await getDbClient().get<AssetKeyMappingRow>(
+    `SELECT * FROM asset_key_mappings
        WHERE provider_id = ? AND provider_org_id = ?
          AND provider_drive_id = ? AND provider_key = ?`,
-    )
-    .get(
-      input.providerId,
-      input.providerOrgId ?? "",
-      input.providerDriveId ?? "",
-      input.providerKey,
-    );
+    [input.providerId, input.providerOrgId ?? "", input.providerDriveId ?? "", input.providerKey],
+  );
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -3783,7 +3748,7 @@ export async function upsertAssetKeyMapping(
   const now = new Date().toISOString();
 
   return await getDbClient().transaction(async (tx) => {
-    const existing = getAssetKeyMappingByProvider(input);
+    const existing = await getAssetKeyMappingByProvider(input);
     if (existing) {
       const key = normalizeAssetKey(input.key ?? existing.key);
       const row = await tx.get<AssetKeyMappingRow>(
@@ -3849,10 +3814,11 @@ export async function upsertAssetKeyMapping(
   });
 }
 
-export function getAssetKeyMapping(id: string): AssetKeyMapping | null {
-  const row = getDb()
-    .prepare<AssetKeyMappingRow, [string]>("SELECT * FROM asset_key_mappings WHERE id = ?")
-    .get(id);
+export async function getAssetKeyMapping(id: string): Promise<AssetKeyMapping | null> {
+  const row = await getDbClient().get<AssetKeyMappingRow>(
+    "SELECT * FROM asset_key_mappings WHERE id = ?",
+    [id],
+  );
   return row ? rowToAssetKeyMapping(row) : null;
 }
 
@@ -3974,48 +3940,54 @@ export async function listAssetSummaries(filters?: AssetSummaryFilters): Promise
   }));
 }
 
-function currentAssetKey(entityType: AssetEntityType, id: string): string | null {
+async function currentAssetKey(entityType: AssetEntityType, id: string): Promise<string | null> {
   switch (entityType) {
-    case "task":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM agent_tasks WHERE id = ?')
-          .get(id)?.key ?? null
+    case "task": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM agent_tasks WHERE id = ?',
+        [id],
       );
-    case "workflow":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM workflows WHERE id = ?')
-          .get(id)?.key ?? null
+      return row?.key ?? null;
+    }
+    case "workflow": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM workflows WHERE id = ?',
+        [id],
       );
-    case "schedule":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>(
-            'SELECT "key" AS key FROM scheduled_tasks WHERE id = ?',
-          )
-          .get(id)?.key ?? null
+      return row?.key ?? null;
+    }
+    case "schedule": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM scheduled_tasks WHERE id = ?',
+        [id],
       );
-    case "page":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM pages WHERE id = ?')
-          .get(id)?.key ?? null
+      return row?.key ?? null;
+    }
+    case "page": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM pages WHERE id = ?',
+        [id],
       );
-    case "app":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
-          .get(id)?.key ?? null
+      return row?.key ?? null;
+    }
+    case "app": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM apps WHERE id = ?',
+        [id],
       );
-    case "script":
-      return (
-        getDb()
-          .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
-          .get(id)?.key ?? null
+      return row?.key ?? null;
+    }
+    case "script": {
+      const row = await getDbClient().get<{ key: string }>(
+        'SELECT "key" AS key FROM scripts WHERE id = ?',
+        [id],
       );
-    case "file":
-      return getAssetKeyMapping(id)?.key ?? null;
+      return row?.key ?? null;
+    }
+    case "file": {
+      const mapping = await getAssetKeyMapping(id);
+      return mapping?.key ?? null;
+    }
   }
 }
 
@@ -4032,11 +4004,11 @@ export async function moveAssetKey(input: {
       "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
     );
   }
-  const previousKey = currentAssetKey(input.entityType, input.id);
+  const previousKey = await currentAssetKey(input.entityType, input.id);
   if (!previousKey) return false;
   if (previousKey === key) return true;
   if (input.entityType === "file") {
-    const mapping = getAssetKeyMapping(input.id);
+    const mapping = await getAssetKeyMapping(input.id);
     if (mapping?.sourceEntityType === "task-attachment") {
       throw new Error(
         "Task attachment namespaces move with their parent task; move the task instead.",
@@ -4283,7 +4255,7 @@ export async function createSteeringMessage(
   if (!row) throw new Error("Failed to create steering message");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "task_steering",
       taskId: args.taskId,
       agentId: args.createdByAgentId,
@@ -4321,13 +4293,12 @@ export function getSteeringMessagesForTask(
   return rows.map(rowToSteeringMessage);
 }
 
-export function getSteeringMessageById(id: string): SteeringMessage | null {
-  const row = getDb()
-    .prepare<TaskSteeringMessageRow, [string]>(
-      `SELECT * FROM task_steering_messages
+export async function getSteeringMessageById(id: string): Promise<SteeringMessage | null> {
+  const row = await getDbClient().get<TaskSteeringMessageRow>(
+    `SELECT * FROM task_steering_messages
        WHERE id = ?`,
-    )
-    .get(id);
+    [id],
+  );
   return row ? rowToSteeringMessage(row) : null;
 }
 
@@ -4363,7 +4334,7 @@ export async function markSteeringDelivered(
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_steering",
         taskId: row.task_id,
         newValue: "delivered",
@@ -4395,16 +4366,18 @@ export async function markSteeringHandled(
   return row ? rowToSteeringMessage(row) : null;
 }
 
-export function markSteeringPromoted(id: string, promotedTaskId: string): SteeringMessage | null {
-  const row = getDb()
-    .prepare<TaskSteeringMessageRow, [string, string]>(
-      `UPDATE task_steering_messages
+export async function markSteeringPromoted(
+  id: string,
+  promotedTaskId: string,
+): Promise<SteeringMessage | null> {
+  const row = await getDbClient().get<TaskSteeringMessageRow>(
+    `UPDATE task_steering_messages
        SET status = 'promoted',
            promoted_task_id = ?
        WHERE id = ? AND status = 'pending'
        RETURNING *`,
-    )
-    .get(promotedTaskId, id);
+    [promotedTaskId, id],
+  );
   return row ? rowToSteeringMessage(row) : null;
 }
 
@@ -4435,21 +4408,23 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 
 export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
   return await getDbClient().transaction(async () => {
-    const agent = getAgentById(id);
+    const agent = await getAgentById(id);
     if (!agent) return null;
 
-    const tasks = getTasksByAgentId(id);
+    const tasks = await getTasksByAgentId(id);
     return { ...agent, tasks };
   });
 }
 
 export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
   return await getDbClient().transaction(async () => {
-    const agents = getAllAgents({ slim: opts?.slim ?? false });
-    return agents.map((agent) => ({
-      ...agent,
-      tasks: getTasksByAgentId(agent.id),
-    }));
+    const agents = await getAllAgents({ slim: opts?.slim ?? false });
+    return await Promise.all(
+      agents.map(async (agent) => ({
+        ...agent,
+        tasks: await getTasksByAgentId(agent.id),
+      })),
+    );
   });
 }
 
@@ -4481,25 +4456,20 @@ function rowToAgentLog(row: AgentLogRow): AgentLog {
   };
 }
 
-export function createLogEntry(entry: {
+export async function createLogEntry(entry: {
   eventType: AgentLogEventType;
   agentId?: string;
   taskId?: string;
   oldValue?: string;
   newValue?: string;
   metadata?: Record<string, unknown>;
-}): AgentLog {
+}): Promise<AgentLog> {
   const id = crypto.randomUUID();
   const metaJson = entry.metadata ? JSON.stringify(entry.metadata) : null;
-  const row = getDb()
-    .prepare<
-      AgentLogRow,
-      [string, string, string | null, string | null, string | null, string | null, string | null]
-    >(
-      `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
+  const row = await getDbClient().get<AgentLogRow>(
+    `INSERT INTO agent_log (id, eventType, agentId, taskId, oldValue, newValue, metadata, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) RETURNING *`,
-    )
-    .get(
+    [
       id,
       entry.eventType,
       entry.agentId ?? null,
@@ -4507,7 +4477,8 @@ export function createLogEntry(entry: {
       entry.oldValue ?? null,
       entry.newValue ? scrubSecrets(entry.newValue) : null,
       metaJson ? scrubSecrets(metaJson) : null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create log entry");
   return rowToAgentLog(row);
 }
@@ -4606,7 +4577,10 @@ export async function findRecentSimilarTasks(opts: {
   return rows.map(rowToAgentTask);
 }
 
-export function createTaskExtended(task: string, options?: CreateTaskOptions): AgentTask {
+export async function createTaskExtended(
+  task: string,
+  options?: CreateTaskOptions,
+): Promise<AgentTask> {
   if (typeof task !== "string" || task.trim().length === 0) {
     throw new Error("createTaskExtended: 'task' must be a non-empty string");
   }
@@ -4627,7 +4601,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
   // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
   if (options?.parentTaskId) {
-    const parent = getTaskById(options.parentTaskId);
+    const parent = await getTaskById(options.parentTaskId);
     if (parent) {
       // Identity & routing — anything that says "what work is this, who asked
       // for it, where does it run" carries forward to every child (follow-ups,
@@ -4768,7 +4742,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
   const existingTrackerWork = options?.bypassTrackerContextDedup
     ? null
-    : findExistingLinearTrackerContextWork(options?.contextKey);
+    : await findExistingLinearTrackerContextWork(options?.contextKey);
   if (existingTrackerWork) {
     console.log(
       `[task-dedup] Skipping Linear tracker task creation for ${options?.contextKey}: ${existingTrackerWork.reason} ${existingTrackerWork.task.id.slice(0, 8)} already exists`,
@@ -4780,7 +4754,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   // Priority: explicit params > parentTaskId inheritance > sourceTaskId lookup
   // sourceTaskId is set by the adapter's X-Source-Task-Id header — each adapter carries its taskId natively
   if (options?.creatorAgentId && !options.slackChannelId && options.sourceTaskId) {
-    const sourceTask = getTaskById(options.sourceTaskId);
+    const sourceTask = await getTaskById(options.sourceTaskId);
     if (sourceTask?.slackChannelId) {
       options.slackChannelId = sourceTask.slackChannelId;
       options.slackThreadTs = sourceTask.slackThreadTs;
@@ -4855,9 +4829,8 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
 
   const auditUserId = getCurrentRequestUserId() ?? null;
   const assetKey = normalizeAssetKey(options?.key ?? defaultAssetKey("task", id));
-  const row = getDb()
-    .prepare<AgentTaskRow, (string | number | null)[]>(
-      `INSERT INTO agent_tasks (
+  const row = await getDbClient().get<AgentTaskRow>(
+    `INSERT INTO agent_tasks (
         id, "key", agentId, creatorAgentId, task, status, source,
         taskType, tags, priority, dependsOn, offeredTo, offeredAt,
         slackChannelId, slackThreadTs, slackTriggerMessageTs, slackUserId,
@@ -4867,8 +4840,7 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
         mentionMessageId, mentionChannelId, dir, parentTaskId, model, modelTier, effort, scheduleId,
         workflowRunId, workflowRunStepId, outputSchema, followUpConfig, requestedByUserId, contextKey, routingAffinity, swarmVersion, createdAt, lastUpdatedAt, created_by, updated_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+    [
       id,
       assetKey,
       options?.agentId ?? null,
@@ -4918,12 +4890,13 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
       now,
       auditUserId,
       auditUserId,
-    );
+    ],
+  );
 
   if (!row) throw new Error("Failed to create task");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: status === "offered" ? "task_offered" : "task_created",
       agentId: options?.creatorAgentId,
       taskId: id,
@@ -4968,16 +4941,16 @@ export function createTaskExtended(task: string, options?: CreateTaskOptions): A
   return rowToAgentTask(row);
 }
 
-export function claimTask(taskId: string, agentId: string): AgentTask | null {
+export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
   // Eligibility pre-check (routing affinity): static per (agent, task), so
   // pre-filtering here does NOT reopen the claim race — the atomic UPDATE
   // below still arbitrates concurrent claims by eligible agents.
   if (isPoolAffinityEnforcementEnabled()) {
-    const task = getTaskById(taskId);
-    const agent = getAgentById(agentId);
+    const task = await getTaskById(taskId);
+    const agent = await getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
       try {
-        createLogEntry({
+        await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
@@ -4996,16 +4969,15 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   // Status goes directly to 'in_progress' because the claiming session is
   // already working on the task (prevents duplicate task_assigned triggers).
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string]>(
-      `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET agentId = ?, status = 'in_progress', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    )
-    .get(agentId, now, taskId);
+    [agentId, now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_claimed",
         agentId,
         taskId,
@@ -5023,23 +4995,22 @@ export function claimTask(taskId: string, agentId: string): AgentTask | null {
   return result;
 }
 
-export function releaseTask(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function releaseTask(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Allow releasing both 'pending' (directly assigned) and 'in_progress' (pool-claimed) tasks
   if (task.status !== "pending" && task.status !== "in_progress") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET agentId = NULL, status = 'unassigned', lastUpdatedAt = ?
        WHERE id = ? AND status IN ('pending', 'in_progress') RETURNING *`,
-    )
-    .get(now, taskId);
+    [now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_released",
         agentId: task.agentId ?? undefined,
         taskId,
@@ -5052,24 +5023,23 @@ export function releaseTask(taskId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function acceptTask(taskId: string, agentId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Accept both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string, string, string]>(
-      `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET agentId = ?, status = 'pending', acceptedAt = ?, lastUpdatedAt = ?
        WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    )
-    .get(agentId, now, now, taskId);
+    [agentId, now, now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_accepted",
         agentId,
         taskId,
@@ -5082,26 +5052,29 @@ export function acceptTask(taskId: string, agentId: string): AgentTask | null {
   return row ? rowToAgentTask(row) : null;
 }
 
-export function rejectTask(taskId: string, agentId: string, reason?: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function rejectTask(
+  taskId: string,
+  agentId: string,
+  reason?: string,
+): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   // Reject both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string | null, string, string]>(
-      `UPDATE agent_tasks SET
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET
         status = 'unassigned', offeredTo = NULL, offeredAt = NULL,
         rejectionReason = ?, lastUpdatedAt = ?
        WHERE id = ? AND status IN ('offered', 'reviewing') RETURNING *`,
-    )
-    .get(reason ?? null, now, taskId);
+    [reason ?? null, now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_rejected",
         agentId,
         taskId,
@@ -5119,22 +5092,21 @@ export function rejectTask(taskId: string, agentId: string, reason?: string): Ag
  * Move a task to backlog status. Task must be unassigned (in pool).
  * Backlog tasks are not returned by pool queries.
  */
-export function moveTaskToBacklog(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function moveTaskToBacklog(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "unassigned") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'backlog', lastUpdatedAt = ?
        WHERE id = ? AND status = 'unassigned' RETURNING *`,
-    )
-    .get(now, taskId);
+    [now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         oldValue: "unassigned",
@@ -5149,22 +5121,21 @@ export function moveTaskToBacklog(taskId: string): AgentTask | null {
 /**
  * Move a task from backlog to unassigned (pool). Task must be in backlog status.
  */
-export function moveTaskFromBacklog(taskId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "backlog") return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ?
        WHERE id = ? AND status = 'backlog' RETURNING *`,
-    )
-    .get(now, taskId);
+    [now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         oldValue: "backlog",
@@ -5193,13 +5164,12 @@ export async function releaseStaleReviewingTasks(timeoutMinutes: number = 30): P
   return result.changes;
 }
 
-export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
-  return getDb()
-    .prepare<AgentTaskRow, [string]>(
-      "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
-    )
-    .all(agentId)
-    .map(rowToAgentTask);
+export async function getOfferedTasksForAgent(agentId: string): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    "SELECT * FROM agent_tasks WHERE offeredTo = ? AND status = 'offered' ORDER BY createdAt ASC, rowid ASC",
+    [agentId],
+  );
+  return rows.map(rowToAgentTask);
 }
 
 /**
@@ -5207,22 +5177,21 @@ export function getOfferedTasksForAgent(agentId: string): AgentTask[] {
  * Marks it as 'reviewing' to prevent duplicate polling.
  * Returns null if task is not offered to this agent or already claimed.
  */
-export function claimOfferedTask(taskId: string, agentId: string): AgentTask | null {
-  const task = getTaskById(taskId);
+export async function claimOfferedTask(taskId: string, agentId: string): Promise<AgentTask | null> {
+  const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
 
   const now = new Date().toISOString();
-  const row = getDb()
-    .prepare<AgentTaskRow, [string, string]>(
-      `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET status = 'reviewing', lastUpdatedAt = ?
        WHERE id = ? AND status = 'offered' RETURNING *`,
-    )
-    .get(now, taskId);
+    [now, taskId],
+  );
 
   if (row) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "task_status_change",
         taskId,
         agentId,
@@ -5276,8 +5245,8 @@ const ELIGIBILITY_SCAN_CAP = Number(process.env.ELIGIBILITY_SCAN_CAP) || 500;
  * scanned so a pool full of ineligible tasks can't turn every poll into an
  * unbounded scan.
  */
-export function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): string[] {
-  const agent = getAgentById(agentId);
+export async function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): Promise<string[]> {
+  const agent = await getAgentById(agentId);
   if (!agent) return [];
 
   const batchSize = Math.max(limit * 5, ELIGIBILITY_SCAN_BATCH_SIZE);
@@ -5285,11 +5254,10 @@ export function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): strin
   let offset = 0;
 
   while (eligible.length < limit && offset < ELIGIBILITY_SCAN_CAP) {
-    const rows = getDb()
-      .prepare<AgentTaskRow, [number, number]>(
-        "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
-      )
-      .all(batchSize, offset);
+    const rows = await getDbClient().query<AgentTaskRow>(
+      "SELECT * FROM agent_tasks WHERE status = 'unassigned' ORDER BY priority DESC, createdAt ASC, rowid ASC LIMIT ? OFFSET ?",
+      [batchSize, offset],
+    );
     if (rows.length === 0) break;
 
     for (const row of rows) {
@@ -5311,18 +5279,18 @@ export function getUnassignedTaskIdsForAgent(agentId: string, limit = 10): strin
 // Dependency Checking
 // ============================================================================
 
-export function checkDependencies(taskId: string): {
+export async function checkDependencies(taskId: string): Promise<{
   ready: boolean;
   blockedBy: string[];
-} {
-  const task = getTaskById(taskId);
+}> {
+  const task = await getTaskById(taskId);
   if (!task || !task.dependsOn || task.dependsOn.length === 0) {
     return { ready: true, blockedBy: [] };
   }
 
   const blockedBy: string[] = [];
   for (const depId of task.dependsOn) {
-    const depTask = getTaskById(depId);
+    const depTask = await getTaskById(depId);
     if (!depTask || depTask.status !== "completed") {
       blockedBy.push(depId);
     }
@@ -5473,10 +5441,10 @@ export async function updateAgentProfile(
 
       if (newHash === currentHash) continue; // No actual change
 
-      const latestVersion = getLatestContextVersion(id, field);
+      const latestVersion = await getLatestContextVersion(id, field);
       const version = (latestVersion?.version ?? 0) + 1;
 
-      createContextVersion({
+      await createContextVersion({
         agentId: id,
         field,
         content: newValue,
@@ -5627,7 +5595,7 @@ export async function getMessageById(id: string): Promise<ChannelMessage | null>
     [id],
   );
   if (!row) return null;
-  const agent = row.agentId ? getAgentById(row.agentId) : null;
+  const agent = row.agentId ? await getAgentById(row.agentId) : null;
   return rowToChannelMessage(row, agent?.name);
 }
 
@@ -5686,7 +5654,7 @@ export async function postMessage(
   if (!row) throw new Error("Failed to post message");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "channel_message",
       agentId: agentId ?? undefined,
       metadata: { channelId, messageId: id },
@@ -5707,7 +5675,7 @@ export async function postMessage(
 
   // Only create tasks when /task prefix is used
   if (isTaskMessage && targetMentions.length > 0) {
-    const sender = agentId ? getAgentById(agentId) : null;
+    const sender = agentId ? await getAgentById(agentId) : null;
     const channel = getChannelById(channelId);
     const senderName = sender?.name ?? "Human";
     const channelName = channel?.name ?? "unknown";
@@ -5720,12 +5688,12 @@ export async function postMessage(
 
     for (const mentionedAgentId of uniqueMentions) {
       // Skip if agent doesn't exist
-      const mentionedAgent = getAgentById(mentionedAgentId);
+      const mentionedAgent = await getAgentById(mentionedAgentId);
       if (!mentionedAgent) continue;
 
       const taskDescription = `Task from ${senderName} in #${channelName}: "${truncated}"`;
 
-      const task = createTaskExtended(taskDescription, {
+      const task = await createTaskExtended(taskDescription, {
         agentId: mentionedAgentId, // Direct assignment
         creatorAgentId: agentId ?? undefined,
         source: "mcp",
@@ -5751,7 +5719,7 @@ export async function postMessage(
   }
 
   // Get agent name for the response - re-fetch to get updated content
-  const agent = agentId ? getAgentById(agentId) : null;
+  const agent = agentId ? await getAgentById(agentId) : null;
   const updatedRow = await getDbClient().get<ChannelMessageRow>(
     `SELECT m.*, a.name as agentName FROM channel_messages m
        LEFT JOIN agents a ON m.agentId = a.id WHERE m.id = ?`,
@@ -6191,7 +6159,7 @@ export async function createService(
   if (!row) throw new Error("Failed to create service");
 
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "service_registered",
       agentId,
       newValue: name,
@@ -6279,7 +6247,7 @@ export async function updateServiceStatus(
 
   if (row && oldService.status !== status) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_status_change",
         agentId: oldService.agentId,
         oldValue: oldService.status,
@@ -6296,7 +6264,7 @@ export async function deleteService(id: string): Promise<boolean> {
   const service = await getServiceById(id);
   if (service) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_unregistered",
         agentId: service.agentId,
         oldValue: service.name,
@@ -6354,7 +6322,7 @@ export async function deleteServicesByAgentId(agentId: string): Promise<number> 
   const services = await getServicesByAgentId(agentId);
   for (const service of services) {
     try {
-      createLogEntry({
+      await createLogEntry({
         eventType: "service_unregistered",
         agentId,
         oldValue: service.name,
@@ -8575,16 +8543,17 @@ export function failPendingResumeIfUnclaimed(
     .get(status, scrubbedReason, now, now, taskId);
 
   if (row) {
-    try {
-      createLogEntry({
-        eventType: "task_status_change",
-        taskId,
-        agentId: row.agentId ?? undefined,
-        oldValue: "pending",
-        newValue: status,
-        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
-      });
-    } catch {}
+    // failPendingResumeIfUnclaimed stays synchronous (reached from a still-sync
+    // getDb().transaction() callback in heartbeat.ts) — fire-and-forget with an
+    // explicit .catch() instead of awaiting inside a try/catch.
+    createLogEntry({
+      eventType: "task_status_change",
+      taskId,
+      agentId: row.agentId ?? undefined,
+      oldValue: "pending",
+      newValue: status,
+      metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
+    }).catch(() => {});
   }
 
   return row ? rowToAgentTask(row) : null;
@@ -8594,19 +8563,20 @@ export function failPendingResumeIfUnclaimed(
  * Get idle, non-lead, non-offline agents that have capacity for more tasks.
  * Used by the heartbeat for auto-assignment of pool tasks.
  */
-export function getIdleWorkersWithCapacity(): Agent[] {
-  const agents = getDb()
-    .prepare<AgentRow, []>(
-      `SELECT * FROM agents
+export async function getIdleWorkersWithCapacity(): Promise<Agent[]> {
+  const rows = await getDbClient().query<AgentRow>(
+    `SELECT * FROM agents
        WHERE status = 'idle' AND isLead = 0`,
-    )
-    .all()
-    .map((row) => rowToAgent(row));
+  );
+  const agents = rows.map((row) => rowToAgent(row));
 
-  return agents.filter((agent) => {
-    const activeCount = getActiveTaskCount(agent.id);
-    return activeCount < (agent.maxTasks ?? 1);
-  });
+  const withCapacity = await Promise.all(
+    agents.map(async (agent) => {
+      const activeCount = await getActiveTaskCount(agent.id);
+      return activeCount < (agent.maxTasks ?? 1) ? agent : null;
+    }),
+  );
+  return withCapacity.filter((agent): agent is Agent => agent !== null);
 }
 
 /**
@@ -12498,7 +12468,7 @@ export interface ContextSummary {
 }
 
 export async function getContextSummaryByTaskId(taskId: string): Promise<ContextSummary> {
-  const task = getTaskById(taskId);
+  const task = await getTaskById(taskId);
   const countRow = await getDbClient().get<{ cnt: number }>(
     "SELECT COUNT(*) as cnt FROM task_context_snapshots WHERE taskId = ?",
     [taskId],

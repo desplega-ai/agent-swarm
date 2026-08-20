@@ -183,7 +183,7 @@ export async function taskActionHandler(
           return { success: false, message: `Task ID is required for '${action}' action.` };
         }
 
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -198,7 +198,7 @@ export async function taskActionHandler(
               message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
             };
           }
-          const backlogTask = moveTaskToBacklog(taskId);
+          const backlogTask = await moveTaskToBacklog(taskId);
           if (!backlogTask) {
             return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
           }
@@ -215,7 +215,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
           };
         }
-        const unassignedTask = moveTaskFromBacklog(taskId);
+        const unassignedTask = await moveTaskFromBacklog(taskId);
         if (!unassignedTask) {
           return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
         }
@@ -261,7 +261,7 @@ export async function taskActionHandler(
             message: "Task description is required for 'create' action.",
           };
         }
-        const newTask = createTaskExtended(task, {
+        const newTask = await createTaskExtended(task, {
           key: assetKey,
           creatorAgentId: agentId,
           taskType,
@@ -288,9 +288,9 @@ export async function taskActionHandler(
           return { success: false, message: "Task ID is required for 'claim' action." };
         }
         // Check capacity before claiming
-        if (!hasCapacity(agentId)) {
-          const activeCount = getActiveTaskCount(agentId);
-          const agent = getAgentById(agentId);
+        if (!(await hasCapacity(agentId))) {
+          const activeCount = await getActiveTaskCount(agentId);
+          const agent = await getAgentById(agentId);
           return {
             success: false,
             message: `You have no capacity (${activeCount}/${agent?.maxTasks ?? 1} tasks). Complete a task first.`,
@@ -298,7 +298,7 @@ export async function taskActionHandler(
         }
         // Pre-checks for informative error messages (the atomic UPDATE in
         // claimTask is the real guard against race conditions)
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -309,7 +309,7 @@ export async function taskActionHandler(
           };
         }
         // Check if task dependencies are met
-        const { ready, blockedBy } = checkDependencies(taskId);
+        const { ready, blockedBy } = await checkDependencies(taskId);
         if (!ready) {
           return {
             success: false,
@@ -319,7 +319,7 @@ export async function taskActionHandler(
         // Routing-affinity pre-check for an informative rejection (the gate
         // inside claimTask below is the real guard — this just lets the
         // agent self-correct instead of retry-looping on a silent null).
-        const claimingAgent = getAgentById(agentId);
+        const claimingAgent = await getAgentById(agentId);
         if (claimingAgent && !isAgentEligibleForTask(claimingAgent, existingTask)) {
           return {
             success: false,
@@ -327,7 +327,7 @@ export async function taskActionHandler(
           };
         }
         // Atomic claim — only one agent can win this race
-        const claimedTask = claimTask(taskId, agentId);
+        const claimedTask = await claimTask(taskId, agentId);
         if (!claimedTask) {
           return {
             success: false,
@@ -347,7 +347,7 @@ export async function taskActionHandler(
           }
           // Propagate provider session ID (e.g. claudeSessionId) to the task
           if (activeSession.providerSessionId) {
-            updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
+            await updateTaskClaudeSessionId(taskId, activeSession.providerSessionId);
           }
         }
 
@@ -362,7 +362,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'release' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -375,7 +375,7 @@ export async function taskActionHandler(
             message: `Cannot release task in status "${existingTask.status}". Only 'pending' or 'in_progress' tasks can be released.`,
           };
         }
-        const releasedTask = releaseTask(taskId);
+        const releasedTask = await releaseTask(taskId);
         if (!releasedTask) {
           return { success: false, message: `Failed to release task "${taskId}".` };
         }
@@ -390,7 +390,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'accept' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -401,7 +401,7 @@ export async function taskActionHandler(
           return { success: false, message: `Task "${taskId}" was not offered to you.` };
         }
         // Check if task dependencies are met
-        const { ready, blockedBy } = checkDependencies(taskId);
+        const { ready, blockedBy } = await checkDependencies(taskId);
         if (!ready) {
           return {
             success: false,
@@ -471,7 +471,7 @@ export async function taskActionHandler(
             },
           };
         }
-        const acceptedTask = acceptTask(taskId, agentId);
+        const acceptedTask = await acceptTask(taskId, agentId);
         if (!acceptedTask) {
           return { success: false, message: `Failed to accept task "${taskId}".` };
         }
@@ -486,7 +486,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'reject' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -496,7 +496,7 @@ export async function taskActionHandler(
         if (existingTask.offeredTo !== agentId) {
           return { success: false, message: `Task "${taskId}" was not offered to you.` };
         }
-        const rejectedTask = rejectTask(taskId, agentId, reason);
+        const rejectedTask = await rejectTask(taskId, agentId, reason);
         if (!rejectedTask) {
           return { success: false, message: `Failed to reject task "${taskId}".` };
         }
@@ -511,7 +511,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'to_backlog' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -521,7 +521,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not unassigned (status: ${existingTask.status}). Only unassigned tasks can be moved to backlog.`,
           };
         }
-        const backlogTask = moveTaskToBacklog(taskId);
+        const backlogTask = await moveTaskToBacklog(taskId);
         if (!backlogTask) {
           return { success: false, message: `Failed to move task "${taskId}" to backlog.` };
         }
@@ -536,7 +536,7 @@ export async function taskActionHandler(
         if (!taskId) {
           return { success: false, message: "Task ID is required for 'from_backlog' action." };
         }
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
         if (!existingTask) {
           return { success: false, message: `Task "${taskId}" not found.` };
         }
@@ -546,7 +546,7 @@ export async function taskActionHandler(
             message: `Task "${taskId}" is not in backlog (status: ${existingTask.status}).`,
           };
         }
-        const unassignedTask = moveTaskFromBacklog(taskId);
+        const unassignedTask = await moveTaskFromBacklog(taskId);
         if (!unassignedTask) {
           return { success: false, message: `Failed to move task "${taskId}" from backlog.` };
         }

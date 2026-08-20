@@ -22,10 +22,10 @@ const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test" };
 
 const TEST_DB_PATH = "./test-slack-thread-buffer.sqlite";
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Create a lead agent for flush to assign tasks to
-  createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
+  await createAgent({ name: "lead-agent", isLead: true, status: "idle", capabilities: [] });
 });
 
 afterAll(() => {
@@ -164,7 +164,7 @@ describe("Slack thread buffer", () => {
       const threadTs = "7000.0001";
 
       // Create a worker agent that owns a task in this thread
-      const worker = createAgent({
+      const worker = await createAgent({
         name: "buf-worker-1",
         isLead: false,
         status: "idle",
@@ -172,7 +172,7 @@ describe("Slack thread buffer", () => {
       });
 
       // Create an existing pending task assigned to the worker in this thread
-      const existingTask = createTaskExtended("original task", {
+      const existingTask = await createTaskExtended("original task", {
         agentId: worker.id,
         source: "slack",
         slackChannelId: channelId,
@@ -234,13 +234,13 @@ describe("Slack thread buffer", () => {
       const threadTs = "9000.0001";
 
       // Create a worker agent and an active task in this thread
-      const worker = createAgent({
+      const worker = await createAgent({
         name: "buf-worker-2",
         isLead: false,
         status: "idle",
         capabilities: [],
       });
-      createTaskExtended("active task", {
+      await createTaskExtended("active task", {
         agentId: worker.id,
         source: "slack",
         slackChannelId: channelId,

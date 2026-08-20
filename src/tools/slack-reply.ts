@@ -49,7 +49,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.");
       }
@@ -73,7 +73,7 @@ export const registerSlackReplyTool = (server: McpServer) => {
         // Mark as responded
         await markInboxMessageResponded(inboxMessageId, message);
       } else if (taskId) {
-        const task = getTaskById(taskId);
+        const task = await getTaskById(taskId);
         if (!task) {
           return toolErr("Task not found.");
         }

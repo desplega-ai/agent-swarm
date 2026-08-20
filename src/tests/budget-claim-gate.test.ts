@@ -119,8 +119,8 @@ async function insertSpend(agentId: string, totalCostUsd: number): Promise<void>
 
 describe("Phase 3 — /api/poll budget admission gate", () => {
   test("no budgets configured + pending task → trigger=task_assigned (existing behavior preserved)", async () => {
-    const worker = createAgent({ name: "w1", isLead: false, status: "idle", maxTasks: 1 });
-    const task = createTaskExtended("do the thing", { agentId: worker.id });
+    const worker = await createAgent({ name: "w1", isLead: false, status: "idle", maxTasks: 1 });
+    const task = await createTaskExtended("do the thing", { agentId: worker.id });
     expect(task.status).toBe("pending");
 
     const { status, body } = await callPoll(worker.id);
@@ -128,18 +128,23 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("task_assigned");
     expect((body.trigger as { taskId: string }).taskId).toBe(task.id);
-    expect(getAgentById(worker.id)?.status).toBe("busy");
+    expect((await getAgentById(worker.id))?.status).toBe("busy");
   });
 
   test("pending task trigger includes requester role and notes", async () => {
-    const worker = createAgent({ name: "w-requester", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-requester",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     const requester = createUser({
       name: "Requester One",
       email: "requester@example.com",
       role: "engineering manager",
       notes: "Include implementation detail and test coverage.",
     });
-    createTaskExtended("profile-aware task", {
+    await createTaskExtended("profile-aware task", {
       agentId: worker.id,
       requestedByUserId: requester.id,
     });
@@ -157,7 +162,12 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("no budgets configured + no work → trigger=null", async () => {
-    const worker = createAgent({ name: "w-empty", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-empty",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     const { status, body } = await callPoll(worker.id);
     expect(status).toBe(200);
     if ("error" in body) throw new Error("unexpected error response");
@@ -165,10 +175,15 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("budgets present but spend below ceiling → trigger=task_assigned", async () => {
-    const worker = createAgent({ name: "w-below", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-below",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 10.0);
     await insertSpend(worker.id, 1.0); // well below 10.0
-    const task = createTaskExtended("budgeted task", { agentId: worker.id });
+    const task = await createTaskExtended("budgeted task", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
     if ("error" in body) throw new Error("unexpected error response");
@@ -177,10 +192,15 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("agent budget blown → trigger=budget_refused with cause='agent'", async () => {
-    const worker = createAgent({ name: "w-over", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-over",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05); // blows the 0.01 budget
-    createTaskExtended("blocked task", { agentId: worker.id });
+    await createTaskExtended("blocked task", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
     if ("error" in body) throw new Error("unexpected error response");
@@ -197,10 +217,15 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("global budget blown → trigger=budget_refused with cause='global'", async () => {
-    const worker = createAgent({ name: "w-glob", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-glob",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("global", "", 0.01);
     await insertSpend(worker.id, 0.1); // blows the global budget
-    createTaskExtended("blocked-by-global", { agentId: worker.id });
+    await createTaskExtended("blocked-by-global", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
     if ("error" in body) throw new Error("unexpected error response");
@@ -213,11 +238,16 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("budget refusal in pool path: blows the gate without claiming an unassigned task", async () => {
-    const worker = createAgent({ name: "w-pool", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-pool",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
     // Unassigned (pool) task — no `agentId`.
-    const pooled = createTaskExtended("pool task", {});
+    const pooled = await createTaskExtended("pool task", {});
     expect(pooled.status).toBe("unassigned");
 
     const { body } = await callPoll(worker.id);
@@ -232,14 +262,19 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("refused poll does NOT auto-increment server-side empty-poll counter", async () => {
-    const worker = createAgent({ name: "w-emptyp", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "w-emptyp",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
-    createTaskExtended("blocked", { agentId: worker.id });
+    await createTaskExtended("blocked", { agentId: worker.id });
 
-    const before = getAgentById(worker.id)?.emptyPollCount ?? 0;
+    const before = (await getAgentById(worker.id))?.emptyPollCount ?? 0;
     await callPoll(worker.id);
-    const after = getAgentById(worker.id)?.emptyPollCount ?? 0;
+    const after = (await getAgentById(worker.id))?.emptyPollCount ?? 0;
     // /api/poll never increments emptyPollCount itself — that's the MCP
     // poll-task tool's job — and a refusal must not flip that invariant.
     // We assert "no increment" specifically for the refusal path.
@@ -254,10 +289,10 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("two-agent race: only one task is claimed; the other gets task_assigned for a different task or null", async () => {
-    const w1 = createAgent({ name: "race-1", isLead: false, status: "idle", maxTasks: 1 });
-    const w2 = createAgent({ name: "race-2", isLead: false, status: "idle", maxTasks: 1 });
+    const w1 = await createAgent({ name: "race-1", isLead: false, status: "idle", maxTasks: 1 });
+    const w2 = await createAgent({ name: "race-2", isLead: false, status: "idle", maxTasks: 1 });
     // One unassigned task in the pool.
-    const t = createTaskExtended("race task", {});
+    const t = await createTaskExtended("race task", {});
     expect(t.status).toBe("unassigned");
 
     // Sequentially poll both; race correctness is enforced by SQLite
@@ -275,22 +310,22 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
   });
 
   test("pool claim marks the agent busy before the poll transaction returns", async () => {
-    const worker = createAgent({
+    const worker = await createAgent({
       name: "claim-status",
       isLead: false,
       status: "idle",
       maxTasks: 1,
     });
-    const pooled = createTaskExtended("claim status task", {});
+    const pooled = await createTaskExtended("claim status task", {});
 
-    expect(getAgentById(worker.id)?.status).toBe("idle");
+    expect((await getAgentById(worker.id))?.status).toBe("idle");
 
     const { body } = await callPoll(worker.id);
 
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("task_assigned");
     expect((body.trigger as { taskId: string }).taskId).toBe(pooled.id);
-    expect(getAgentById(worker.id)?.status).toBe("busy");
+    expect((await getAgentById(worker.id))?.status).toBe("busy");
   });
 });
 
@@ -311,7 +346,12 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
     // direct canClaim assertion gives us coverage parity without the
     // server-boot overhead.
     const { canClaim } = await import("../be/budget-admission");
-    const worker = createAgent({ name: "accept-w", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "accept-w",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
 
@@ -327,7 +367,12 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
 
   test("accept allows when no budgets configured", async () => {
     const { canClaim } = await import("../be/budget-admission");
-    const worker = createAgent({ name: "accept-ok", isLead: false, status: "idle", maxTasks: 1 });
+    const worker = await createAgent({
+      name: "accept-ok",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     const result = canClaim(worker.id, new Date());
     expect(result.allowed).toBe(true);
   });

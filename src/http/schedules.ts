@@ -343,7 +343,7 @@ export async function handleSchedules(
     }
 
     if (body.targetAgentId) {
-      const agent = getAgentById(body.targetAgentId);
+      const agent = await getAgentById(body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
         return true;
@@ -568,7 +568,7 @@ export async function handleSchedules(
     }
 
     if (parsed.body.targetAgentId) {
-      const agent = getAgentById(parsed.body.targetAgentId);
+      const agent = await getAgentById(parsed.body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
         return true;

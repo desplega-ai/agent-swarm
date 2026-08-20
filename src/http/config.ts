@@ -78,15 +78,15 @@ async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean)
  * Returns true when the request may proceed; on denial it writes a 403 and
  * returns false.
  */
-function ensureConfigAdmin(
+async function ensureConfigAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
   const agentId = singleHeader(req, "x-agent-id");
-  const agent = agentId ? getAgentById(agentId) : undefined;
+  const agent = agentId ? await getAgentById(agentId) : undefined;
   const decision = can({
     principal: { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false },
     verb,
@@ -368,7 +368,7 @@ export async function handleConfig(
   if (upsertConfig.match(req.method, pathSegments)) {
     const parsed = await upsertConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConfigAdmin(req, res, "config.write.any")) return true;
+    if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     const { scope, scopeId, key, value, isSecret, envPath, description } = parsed.body;
 
     if (scope === "global" && scopeId) {
@@ -421,7 +421,7 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConfigAdmin(req, res, "config.delete.any")) return true;
+    if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
     const existing = await getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);

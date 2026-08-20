@@ -29,7 +29,7 @@ export const registerDeleteConfigTool = (server: McpServer) => {
       // Deleting any config entry is lead-gated (DES-445 follow-up): a delete
       // previously had NO gate, letting any agent remove any entry (including
       // SCRIPT_CREDENTIAL_BINDINGS, routing around the set-config write gate).
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

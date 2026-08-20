@@ -390,7 +390,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
 
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -403,8 +403,8 @@ export async function handleCore(
 
     // Add capacity info and polling limit check to agent response
     const agentResponse = {
-      ...agentWithCapacity(agent),
-      shouldBlockPolling: shouldBlockPolling(myAgentId),
+      ...(await agentWithCapacity(agent)),
+      shouldBlockPolling: await shouldBlockPolling(myAgentId),
     };
 
     if (includeInbox) {
@@ -431,7 +431,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
@@ -444,7 +444,7 @@ export async function handleCore(
 
     if (taskId) {
       // Check if specific task is cancelled
-      const task = getTaskById(taskId);
+      const task = await getTaskById(taskId);
       if (task && task.status === "cancelled") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -481,7 +481,7 @@ export async function handleCore(
     }
 
     const found = await getDbClient().transaction(async () => {
-      const agent = getAgentById(myAgentId);
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return false;
@@ -498,7 +498,7 @@ export async function handleCore(
         status = "waiting_for_credentials";
       }
 
-      updateAgentStatus(agent.id, status);
+      await updateAgentStatus(agent.id, status);
 
       return true;
     });
@@ -522,13 +522,13 @@ export async function handleCore(
     }
 
     const found = await getDbClient().transaction(async () => {
-      const agent = getAgentById(myAgentId);
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return false;
       }
 
-      updateAgentStatus(agent.id, "offline");
+      await updateAgentStatus(agent.id, "offline");
 
       return true;
     });

@@ -133,8 +133,8 @@ describe("memory_link DB surface", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentX, name: "Link Agent X", isLead: false, status: "idle" });
-    createAgent({ id: agentY, name: "Link Agent Y", isLead: false, status: "idle" });
+    await createAgent({ id: agentX, name: "Link Agent X", isLead: false, status: "idle" });
+    await createAgent({ id: agentY, name: "Link Agent Y", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 

@@ -52,7 +52,7 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
         return toolErr("Schedule not found.");
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.");
       }

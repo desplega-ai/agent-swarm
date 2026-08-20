@@ -20,7 +20,7 @@ describe("applyRating", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
     // Real agent_tasks rows so the memory_rating.taskId FK passes.
     const insertTask = getDb().prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)

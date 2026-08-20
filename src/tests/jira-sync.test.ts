@@ -38,7 +38,7 @@ beforeAll(async () => {
   });
 
   // Seed a lead agent so task creation has a target.
-  createAgent({
+  await createAgent({
     name: "lead-1",
     isLead: true,
     status: "idle",
@@ -131,7 +131,7 @@ describe("handleIssueEvent — assignee→bot", () => {
     expect(sync?.lastSyncOrigin).toBe("external");
     expect(sync?.swarmId).toBeTruthy();
 
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.source).toBe("jira");
     expect(task?.taskType).toBe("jira-issue");
@@ -212,7 +212,7 @@ describe("handleIssueEvent — assignee→bot", () => {
     expect(taskCount.c).toBe(2);
     const afterSync = getTrackerSyncByExternalId("jira", "task", "10005");
     expect(afterSync?.swarmId).not.toBe(firstTaskId ?? "");
-    const followupTask = getTaskById(afterSync?.swarmId ?? "");
+    const followupTask = await getTaskById(afterSync?.swarmId ?? "");
     expect(followupTask?.task).toContain("Follow-up");
   });
 });
@@ -291,7 +291,7 @@ describe("handleCommentEvent — short-circuits", () => {
     );
     const sync = getTrackerSyncByExternalId("jira", "task", "10014");
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task?.source).toBe("jira");
   });
 
@@ -327,7 +327,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     await handleIssueEvent(event);
 
     const sync = getTrackerSyncByExternalId("jira", "task", "10030");
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId).toBe(reporter.id);
     expect(task?.task).toContain("Zbigniew Reporter (jira:reporter-linked-1)");
@@ -348,7 +348,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     expect(linked?.name).toBe("Auto Linked");
 
     const sync = getTrackerSyncByExternalId("jira", "task", "10031");
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task?.requestedByUserId).toBe(linked?.id);
     expect(task?.task).toContain("Auto Linked (jira:reporter-autolink-1)");
   });
@@ -362,7 +362,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     await handleIssueEvent(event);
 
     const sync = getTrackerSyncByExternalId("jira", "task", "10032");
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId ?? null).toBeNull();
     expect(task?.task).toContain("jira:reporter-unknown-1 (unknown user)");
@@ -380,7 +380,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     );
 
     const sync = getTrackerSyncByExternalId("jira", "task", "10033");
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId).toBe(author.id);
     expect(task?.task).toContain("Manuel Commenter (jira:commenter-linked-1)");
@@ -393,7 +393,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     );
 
     const sync = getTrackerSyncByExternalId("jira", "task", "10034");
-    const task = getTaskById(sync?.swarmId ?? "");
+    const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId ?? null).toBeNull();
     expect(task?.task).toContain("jira:commenter-unknown-1 (unknown user)");

@@ -9,10 +9,15 @@ const TEST_DB_PATH = "./test-slack-router.sqlite";
 let leadAgent: Agent;
 let workerAgent: Agent;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  leadAgent = createAgent({ name: "test-lead", isLead: true, status: "idle", capabilities: [] });
-  workerAgent = createAgent({
+  leadAgent = await createAgent({
+    name: "test-lead",
+    isLead: true,
+    status: "idle",
+    capabilities: [],
+  });
+  workerAgent = await createAgent({
     name: "test-worker",
     isLead: false,
     status: "idle",
@@ -33,12 +38,12 @@ afterAll(() => {
 
 describe("Slack router — thread follow-up routing", () => {
   describe("message in thread with active worker routes to worker", () => {
-    test("routes to worker with in_progress task in thread", () => {
+    test("routes to worker with in_progress task in thread", async () => {
       const channelId = "C100";
       const threadTs = "1000.0001";
 
       // Create an in_progress task assigned to the worker in this thread
-      createTaskExtended("original task", {
+      await createTaskExtended("original task", {
         agentId: workerAgent.id,
         source: "slack",
         slackChannelId: channelId,
@@ -71,12 +76,12 @@ describe("Slack router — thread follow-up routing", () => {
   });
 
   describe("message in thread with offline worker falls through to lead", () => {
-    test("routes to lead when worker is offline", () => {
+    test("routes to lead when worker is offline", async () => {
       const channelId = "C300";
       const threadTs = "3000.0001";
 
       // Create an offline worker
-      const offlineWorker = createAgent({
+      const offlineWorker = await createAgent({
         name: "offline-worker",
         isLead: false,
         status: "offline",
@@ -84,7 +89,7 @@ describe("Slack router — thread follow-up routing", () => {
       });
 
       // Create an in_progress task assigned to the offline worker
-      createTaskExtended("task for offline worker", {
+      await createTaskExtended("task for offline worker", {
         agentId: offlineWorker.id,
         source: "slack",
         slackChannelId: channelId,
@@ -102,12 +107,12 @@ describe("Slack router — thread follow-up routing", () => {
   });
 
   describe("thread follow-up does not override explicit swarm#<uuid>", () => {
-    test("swarm#<uuid> takes priority over thread context", () => {
+    test("swarm#<uuid> takes priority over thread context", async () => {
       const channelId = "C400";
       const threadTs = "4000.0001";
 
       // Create a second worker
-      const worker2 = createAgent({
+      const worker2 = await createAgent({
         name: "worker-2",
         isLead: false,
         status: "idle",
@@ -115,7 +120,7 @@ describe("Slack router — thread follow-up routing", () => {
       });
 
       // Worker 1 has an active task in this thread
-      createTaskExtended("worker1 task", {
+      await createTaskExtended("worker1 task", {
         agentId: workerAgent.id,
         source: "slack",
         slackChannelId: channelId,
@@ -137,12 +142,12 @@ describe("Slack router — thread follow-up routing", () => {
       expect(matches[0].matchedText).toBe(`swarm#${worker2.id}`);
     });
 
-    test("swarm#all takes priority over thread context", () => {
+    test("swarm#all takes priority over thread context", async () => {
       const channelId = "C500";
       const threadTs = "5000.0001";
 
       // Worker has an active task in this thread
-      createTaskExtended("worker task in thread", {
+      await createTaskExtended("worker task in thread", {
         agentId: workerAgent.id,
         source: "slack",
         slackChannelId: channelId,

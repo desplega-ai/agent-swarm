@@ -104,7 +104,7 @@ describe("swarm-config reserved keys guard", () => {
     // set/delete/get-config are lead-gated (DES-445 follow-up). The default MCP
     // request agent must be a lead so these reserved-key/remediation tests
     // exercise config behavior rather than tripping the RBAC gate.
-    createAgent({
+    await createAgent({
       id: "11111111-1111-1111-1111-111111111111",
       name: "reserved-keys-test-lead",
       isLead: true,
@@ -283,7 +283,7 @@ describe("swarm-config reserved keys guard", () => {
     });
 
     test("rejects arbitrary config writes from non-lead set-config callers", async () => {
-      const worker = createAgent({
+      const worker = await createAgent({
         name: "config-worker",
         isLead: false,
         status: "idle",

@@ -10,15 +10,15 @@ const TEST_DB_PATH = "./test-slack-bot-filter.sqlite";
 let leadAgent: Agent;
 let workerAgent: Agent;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  leadAgent = createAgent({
+  leadAgent = await createAgent({
     name: "filter-lead",
     isLead: true,
     status: "idle",
     capabilities: [],
   });
-  workerAgent = createAgent({
+  workerAgent = await createAgent({
     name: "filter-worker",
     isLead: false,
     status: "idle",
@@ -84,10 +84,10 @@ describe("hasOtherUserMention", () => {
 describe("routeMessage — thread follow-up skips messages aimed at other users", () => {
   const BOT_ID = "UBOT123";
 
-  test("plain follow-up (no mentions) still routes to active worker", () => {
+  test("plain follow-up (no mentions) still routes to active worker", async () => {
     const channelId = "C_BF_100";
     const threadTs = "1100.0001";
-    createTaskExtended("original", {
+    await createTaskExtended("original", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,
@@ -104,10 +104,10 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
     expect(matches[0].agent.id).toBe(workerAgent.id);
   });
 
-  test("follow-up mentioning another bot (Devin) does NOT route", () => {
+  test("follow-up mentioning another bot (Devin) does NOT route", async () => {
     const channelId = "C_BF_200";
     const threadTs = "1200.0001";
-    createTaskExtended("original", {
+    await createTaskExtended("original", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,
@@ -123,10 +123,10 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
     expect(matches).toHaveLength(0);
   });
 
-  test("follow-up mentioning BOTH our bot and another bot routes to swarm", () => {
+  test("follow-up mentioning BOTH our bot and another bot routes to swarm", async () => {
     const channelId = "C_BF_300";
     const threadTs = "1300.0001";
-    createTaskExtended("original", {
+    await createTaskExtended("original", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: channelId,

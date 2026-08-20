@@ -34,28 +34,32 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
 
-  const agent = createAgent({ name: "audit-user-test-agent", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "audit-user-test-agent", isLead: false, status: "idle" });
   agentId = agent.id;
 
-  const other = createAgent({ name: "audit-user-other-agent", isLead: false, status: "idle" });
+  const other = await createAgent({
+    name: "audit-user-other-agent",
+    isLead: false,
+    status: "idle",
+  });
   otherAgentId = other.id;
 
   const user = createUser({ name: "Audit User Test", email: "audit-user-test@example.com" });
   humanUserId = user.id;
 
-  const ownedTask = createTaskExtended("owned task", {
+  const ownedTask = await createTaskExtended("owned task", {
     agentId,
     requestedByUserId: humanUserId,
   });
   ownedTaskId = ownedTask.id;
 
-  const foreignTask = createTaskExtended("foreign task", {
+  const foreignTask = await createTaskExtended("foreign task", {
     agentId: otherAgentId,
     requestedByUserId: humanUserId,
   });
   foreignTaskId = foreignTask.id;
 
-  const noRequesterTask = createTaskExtended("automation task", { agentId });
+  const noRequesterTask = await createTaskExtended("automation task", { agentId });
   noRequesterTaskId = noRequesterTask.id;
 });
 
@@ -99,19 +103,23 @@ describe("resolveTaskAuditUserId", () => {
     expect(resolveTaskAuditUserId(noRequesterTaskId, agentId)).toBeNull();
   });
 
-  test("ambient-task fallback: no sourceTaskId resolves via the caller's current in-progress task", () => {
-    const ambientAgent = createAgent({ name: "ambient-agent", isLead: false, status: "idle" });
-    const ambientTask = createTaskExtended("ambient task", {
+  test("ambient-task fallback: no sourceTaskId resolves via the caller's current in-progress task", async () => {
+    const ambientAgent = await createAgent({
+      name: "ambient-agent",
+      isLead: false,
+      status: "idle",
+    });
+    const ambientTask = await createTaskExtended("ambient task", {
       agentId: ambientAgent.id,
       requestedByUserId: humanUserId,
     });
-    startTask(ambientTask.id);
+    await startTask(ambientTask.id);
 
     expect(resolveTaskAuditUserId(undefined, ambientAgent.id)).toBe(humanUserId);
   });
 
-  test("ambient-task fallback: no in-progress task for the caller still returns null", () => {
-    const idleAgent = createAgent({ name: "idle-agent", isLead: false, status: "idle" });
+  test("ambient-task fallback: no in-progress task for the caller still returns null", async () => {
+    const idleAgent = await createAgent({ name: "idle-agent", isLead: false, status: "idle" });
     expect(resolveTaskAuditUserId(undefined, idleAgent.id)).toBeNull();
   });
 
@@ -119,22 +127,29 @@ describe("resolveTaskAuditUserId", () => {
     const slackLinkedUser = createUser({ name: "Slack Fallback User" });
     await linkIdentity(slackLinkedUser.id, "slack", "U_AUDIT_FALLBACK", SYSTEM_ACTOR);
 
-    const fallbackAgent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
-    const fallbackTask = createTaskExtended("slack-originated task, requester never stamped", {
-      agentId: fallbackAgent.id,
-      slackUserId: "U_AUDIT_FALLBACK",
+    const fallbackAgent = await createAgent({
+      name: "fallback-agent",
+      isLead: false,
+      status: "idle",
     });
+    const fallbackTask = await createTaskExtended(
+      "slack-originated task, requester never stamped",
+      {
+        agentId: fallbackAgent.id,
+        slackUserId: "U_AUDIT_FALLBACK",
+      },
+    );
 
     expect(resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBe(slackLinkedUser.id);
   });
 
-  test("machine-carried external-ID fallback: unlinked Slack id still returns null (no guess)", () => {
-    const fallbackAgent = createAgent({
+  test("machine-carried external-ID fallback: unlinked Slack id still returns null (no guess)", async () => {
+    const fallbackAgent = await createAgent({
       name: "fallback-agent-unlinked",
       isLead: false,
       status: "idle",
     });
-    const fallbackTask = createTaskExtended("slack-originated task, unlinked sender", {
+    const fallbackTask = await createTaskExtended("slack-originated task, unlinked sender", {
       agentId: fallbackAgent.id,
       slackUserId: "U_NEVER_LINKED_AUDIT",
     });

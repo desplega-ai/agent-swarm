@@ -153,7 +153,7 @@ beforeAll(async () => {
   } catch {}
   initDb(TEST_DB_PATH);
 
-  createAgent({
+  await createAgent({
     id: "lead-gl-001",
     name: "GitLabTestLead",
     status: "idle",
@@ -197,7 +197,7 @@ describe("handleMergeRequest", () => {
     expect(result.taskId).toBeDefined();
 
     // Verify task has correct vcs fields
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task).not.toBeNull();
     expect(task?.source).toBe("gitlab");
     expect(task?.vcsProvider).toBe("gitlab");
@@ -229,7 +229,7 @@ describe("handleMergeRequest", () => {
 
   test("cancels task when MR is closed", async () => {
     // Create an active task for MR #60
-    createTaskExtended("[GitLab MR #60] Test", {
+    await createTaskExtended("[GitLab MR #60] Test", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -263,12 +263,12 @@ describe("handleMergeRequest", () => {
     expect(result.created).toBe(false);
 
     // Task should be failed/cancelled
-    const task = getTaskById(existing!.id);
+    const task = await getTaskById(existing!.id);
     expect(task?.status).toBe("failed");
   });
 
   test("cancels task when MR is merged", async () => {
-    createTaskExtended("[GitLab MR #61] Test merge", {
+    await createTaskExtended("[GitLab MR #61] Test merge", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -372,7 +372,7 @@ describe("handleIssue", () => {
     expect(result.created).toBe(true);
     expect(result.taskId).toBeDefined();
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.source).toBe("gitlab");
     expect(task?.vcsProvider).toBe("gitlab");
     expect(task?.vcsNumber).toBe(20);
@@ -417,7 +417,7 @@ describe("handleIssue", () => {
   });
 
   test("cancels task when issue is closed", async () => {
-    createTaskExtended("[GitLab Issue #30] Test close", {
+    await createTaskExtended("[GitLab Issue #30] Test close", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -483,7 +483,7 @@ describe("handleNote", () => {
     const result = await handleNote(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.vcsProvider).toBe("gitlab");
     expect(task?.vcsEventType).toBe("note_on_mr");
     expect(task?.vcsNumber).toBe(80);
@@ -516,7 +516,7 @@ describe("handleNote", () => {
     const result = await handleNote(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.vcsEventType).toBe("note_on_issue");
     expect(task?.vcsNumber).toBe(40);
   });
@@ -559,7 +559,7 @@ describe("handleNote", () => {
 
   test("links to existing task when commenting on entity with active task", async () => {
     // Create active task for MR #85
-    createTaskExtended("[GitLab MR #85] Existing", {
+    await createTaskExtended("[GitLab MR #85] Existing", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -597,7 +597,7 @@ describe("handleNote", () => {
     const result = await handleNote(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     // Should have parentTaskId linking to existing task
     expect(task?.parentTaskId).toBeDefined();
   });
@@ -610,7 +610,7 @@ describe("handleNote", () => {
 describe("handlePipeline", () => {
   test("creates task for failed pipeline with active MR task", async () => {
     // Create active task for MR #90
-    createTaskExtended("[GitLab MR #90] Pipeline test", {
+    await createTaskExtended("[GitLab MR #90] Pipeline test", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -641,7 +641,7 @@ describe("handlePipeline", () => {
     const result = await handlePipeline(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.vcsProvider).toBe("gitlab");
     expect(task?.vcsEventType).toBe("pipeline");
     expect(task?.parentTaskId).toBeDefined();
@@ -757,7 +757,7 @@ describe("identity resolution — MR handler", () => {
     const result = await handleMergeRequest(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBe(known.id);
 
     expect(await getUnmappedMeta("knownuser")).toBeNull();
@@ -799,7 +799,7 @@ describe("identity resolution — MR handler", () => {
     expect(user?.email).toBe("inline@example.com");
     expect(user?.name).toBe("Inline User");
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBe(user!.id);
 
     // user_external_ids gained exactly one row for this auto-link.
@@ -831,7 +831,7 @@ describe("identity resolution — MR handler", () => {
     const result = await handleMergeRequest(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
 
     const meta = await getUnmappedMeta("ghostuser");
@@ -926,7 +926,7 @@ describe("identity resolution — Issue handler", () => {
     const result = await handleIssue(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
 
     const meta = await getUnmappedMeta("issueghost");
@@ -983,7 +983,7 @@ describe("identity resolution — Note handler", () => {
     // The dead-coded `_requestedByUserId` is now wired: undefined for an
     // unresolvable sender, and the UNKNOWN sentinel (never the raw
     // username) is rendered as the comment author in the task text.
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
     expect(task?.task).toContain("gitlab:noteghost (unknown user)");
     expect(task?.task).not.toContain("Note Ghost");
@@ -1022,7 +1022,7 @@ describe("identity resolution — Note handler", () => {
     const result = await handleNote(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBe(known.id);
     expect(task?.task).toContain("Known Commenter (gitlab:knowncommenter)");
   });
@@ -1033,7 +1033,7 @@ describe("identity resolution — Pipeline handler", () => {
     const known = createUser({ name: "Pipeline Trigger" });
     await linkIdentity(known.id, "gitlab", "pipelinetrigger", { kind: "system", id: "test" });
 
-    createTaskExtended("[GitLab MR #970] Pipeline identity test", {
+    await createTaskExtended("[GitLab MR #970] Pipeline identity test", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -1065,12 +1065,12 @@ describe("identity resolution — Pipeline handler", () => {
     const result = await handlePipeline(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBe(known.id);
   });
 
   test("unknown GitLab user triggers pipeline -> requestedByUserId stays undefined", async () => {
-    createTaskExtended("[GitLab MR #971] Pipeline identity test", {
+    await createTaskExtended("[GitLab MR #971] Pipeline identity test", {
       source: "gitlab",
       vcsProvider: "gitlab",
       vcsRepo: "group/project",
@@ -1102,7 +1102,7 @@ describe("identity resolution — Pipeline handler", () => {
     const result = await handlePipeline(event);
     expect(result.created).toBe(true);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task?.requestedByUserId).toBeFalsy();
   });
 });

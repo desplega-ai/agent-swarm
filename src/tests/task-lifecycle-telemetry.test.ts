@@ -38,7 +38,7 @@ describe("task lifecycle telemetry", () => {
     closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
-    createAgent({ id: WORKER_ID, name: "Telemetry Worker", isLead: false, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Telemetry Worker", isLead: false, status: "idle" });
 
     calls = [];
     taskEventSpy = spyOn(telemetry, "taskEvent").mockImplementation((event, props) => {
@@ -53,7 +53,7 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits task.created from createTaskExtended after the task is committed", async () => {
-    const task = createTaskExtended("create telemetry", {
+    const task = await createTaskExtended("create telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
       tags: ["telemetry"],
@@ -78,8 +78,8 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("does not emit task.created when an enclosing transaction rolls back", async () => {
-    const txn = getDb().transaction(() => {
-      createTaskExtended("rolled back telemetry", {
+    const txn = getDb().transaction(async () => {
+      await createTaskExtended("rolled back telemetry", {
         agentId: WORKER_ID,
         source: "mcp",
       });
@@ -94,7 +94,7 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits terminal lifecycle events from universal status helpers", async () => {
-    const completedTask = createTaskExtended("complete telemetry", {
+    const completedTask = await createTaskExtended("complete telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
     });
@@ -111,7 +111,7 @@ describe("task lifecycle telemetry", () => {
     });
     expect(typeof calls[0]?.props.durationMs).toBe("number");
 
-    const failedTask = createTaskExtended("fail telemetry", {
+    const failedTask = await createTaskExtended("fail telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
     });
@@ -128,7 +128,7 @@ describe("task lifecycle telemetry", () => {
     });
     expect(typeof calls[0]?.props.durationMs).toBe("number");
 
-    const cancelledTask = createTaskExtended("cancel telemetry", {
+    const cancelledTask = await createTaskExtended("cancel telemetry", {
       agentId: WORKER_ID,
       source: "api",
     });
@@ -152,12 +152,12 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits structured task provider and harness context instead of tags", async () => {
-    const task = createTaskExtended("complete telemetry with harness context", {
+    const task = await createTaskExtended("complete telemetry with harness context", {
       agentId: WORKER_ID,
       source: "mcp",
       tags: ["telemetry"],
     });
-    updateTaskClaudeSessionId(
+    await updateTaskClaudeSessionId(
       task.id,
       "provider-session-1",
       "codex",

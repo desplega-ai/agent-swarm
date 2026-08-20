@@ -90,7 +90,7 @@ beforeEach(async () => {
   initDb(TEST_DB_PATH);
   // Ensure a lead exists so handler's findLeadAgent() returns truthy and a
   // task gets created on the "no inbox mapping" path.
-  createAgent({ name: "LeadAgent", isLead: true, status: "idle" });
+  await createAgent({ name: "LeadAgent", isLead: true, status: "idle" });
   // Re-register agentmail templates — prompt-template-resolver.test.ts and
   // prompt-template-session.test.ts call clearTemplateDefinitions() and never
   // restore the shared (process-wide) registry, so if either runs first in
@@ -128,7 +128,7 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     expect(events.map((e) => e.eventType)).toEqual(["identity_added"]);
     expect(events[0]!.actor).toBe("system:webhook:agentmail");
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task).not.toBeNull();
     expect(task!.requestedByUserId).toBe(user!.id);
     // The resolved canonical name renders in the task text — never the raw
@@ -149,7 +149,7 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     const events = eventsFor(existing.id);
     expect(events.map((e) => e.eventType)).toContain("auto_merge");
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBe(existing.id);
   });
 
@@ -170,7 +170,7 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     const events = eventsFor(existing.id);
     expect(events.map((e) => e.eventType)).toContain("auto_merge");
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBe(existing.id);
   });
 
@@ -184,7 +184,7 @@ describe("handleMessageReceived — identity auto-link via findOrCreateUserByEma
     expect(result.created).toBe(true);
     expect(getAllUsers().length).toBe(beforeCount);
 
-    const task = getTaskById(result.taskId!);
+    const task = await getTaskById(result.taskId!);
     expect(task!.requestedByUserId).toBeFalsy();
     // No display name — not even the raw provider label — is ever rendered
     // for an unresolved sender. The task text carries only the non-name

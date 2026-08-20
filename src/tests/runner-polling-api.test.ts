@@ -48,16 +48,16 @@ async function handleRequest(
 
     const agentId = myAgentId || crypto.randomUUID();
 
-    const result = getDb().transaction(() => {
-      const existingAgent = getAgentById(agentId);
+    const result = getDb().transaction(async () => {
+      const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
-          updateAgentStatus(existingAgent.id, "idle");
+          await updateAgentStatus(existingAgent.id, "idle");
         }
-        return { agent: getAgentById(agentId), created: false };
+        return { agent: await getAgentById(agentId), created: false };
       }
 
-      const agent = createAgent({
+      const agent = await createAgent({
         id: agentId,
         name: parsedBody.name,
         isLead: parsedBody.isLead ?? false,
@@ -79,13 +79,13 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const result = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const result = getDb().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
       if (!agent) {
         return { error: "Agent not found", status: 404 };
       }
 
-      const offeredTasks = getOfferedTasksForAgent(myAgentId);
+      const offeredTasks = await getOfferedTasksForAgent(myAgentId);
       const firstOfferedTask = offeredTasks[0];
       if (firstOfferedTask) {
         return {
@@ -97,7 +97,7 @@ async function handleRequest(
         };
       }
 
-      const pendingTask = getPendingTaskForAgent(myAgentId);
+      const pendingTask = await getPendingTaskForAgent(myAgentId);
       if (pendingTask) {
         return {
           trigger: {
@@ -396,7 +396,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create a pending task assigned to this agent
-      const task = createTaskExtended("Test task for worker", {
+      const task = await createTaskExtended("Test task for worker", {
         agentId,
         creatorAgentId: "test-lead-001",
       });
@@ -434,7 +434,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create an offered task for this agent (using offeredTo sets status to "offered")
-      const task = createTaskExtended("Offered task for worker", {
+      const task = await createTaskExtended("Offered task for worker", {
         offeredTo: agentId,
         creatorAgentId: "test-lead-001",
       });
@@ -472,7 +472,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create an unassigned task (no agentId means status = "unassigned")
-      createTaskExtended("Unassigned task in pool", {
+      await createTaskExtended("Unassigned task in pool", {
         creatorAgentId: leadId,
         // No agentId = unassigned
       });

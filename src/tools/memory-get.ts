@@ -143,7 +143,7 @@ export const registerMemoryGetTool = (server: McpServer) => {
       // as the memory-search visibility rules.
       let linkBlocks: MemoryLinksResult = { links: [], backlinks: [] };
       try {
-        const agent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : undefined;
+        const agent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : undefined;
         linkBlocks = await getLinksForMemory(memory.id, {
           viewerAgentId: requestInfo.agentId,
           isLead: agent?.isLead ?? false,

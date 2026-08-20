@@ -85,7 +85,7 @@ export async function handleScriptConnectionProxy(
     return true;
   }
   const syntheticPrincipal = isSyntheticScriptPrincipal(agentId);
-  const agent = syntheticPrincipal ? null : getAgentById(agentId);
+  const agent = syntheticPrincipal ? null : await getAgentById(agentId);
   if (!agent && !syntheticPrincipal) {
     jsonError(res, "Agent not found", 404);
     return true;

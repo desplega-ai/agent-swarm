@@ -379,7 +379,7 @@ describe("asset namespace key migrations", () => {
     ).toBe(2);
   });
 
-  test("preserves asset keys when upgrading a legacy restrictive task status schema", () => {
+  test("preserves asset keys when upgrading a legacy restrictive task status schema", async () => {
     closeDb();
     initDb(LEGACY_STATUS_DB);
     dropMigration115ForHistoricalFixture();
@@ -483,7 +483,7 @@ describe("asset namespace key migrations", () => {
     expect(() =>
       getDb().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', ["INVALID", taskId]),
     ).toThrow("invalid asset namespace key");
-    const createdAfterUpgrade = createTaskExtended("post-upgrade task");
+    const createdAfterUpgrade = await createTaskExtended("post-upgrade task");
     expect(createdAfterUpgrade.key).toBe(`shared/task:${createdAfterUpgrade.id}/`);
   });
 

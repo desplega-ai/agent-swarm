@@ -33,7 +33,7 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
 
       // Cross-agent install requires lead
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",

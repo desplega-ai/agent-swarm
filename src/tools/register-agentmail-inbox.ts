@@ -51,7 +51,7 @@ export const registerRegisterAgentmailInboxTool = (server: McpServer) => {
       }
 
       try {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         if (!agent) {
           return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
         }

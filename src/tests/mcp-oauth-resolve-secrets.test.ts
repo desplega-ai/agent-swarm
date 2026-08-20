@@ -65,7 +65,7 @@ async function agentMcpServers(
 
 describe("resolveSecrets integration — OAuth Authorization injection", () => {
   test("OAuth server with connected token gets Bearer header", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent",
       status: "idle",
@@ -106,7 +106,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     // `token_type: "bearer"`. Some resource servers then reject the lowercase
     // prefix with 401. The fix in src/http/mcp-servers.ts normalizes the
     // scheme to capital "Bearer". See GitHub issue #368.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-lowercase",
       status: "idle",
@@ -145,7 +145,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   test("non-bearer tokenType (e.g. 'MAC') is preserved verbatim in Authorization header", async () => {
     // RFC 6749 allows non-bearer token types. The normalization must only
     // touch the bearer scheme and leave others alone.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-mac",
       status: "idle",
@@ -181,7 +181,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("OAuth server without token row surfaces authError", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-missing",
       status: "idle",
@@ -205,7 +205,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("OAuth server with expired token (no refresh) reports lastErrorMessage", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-expired",
       status: "idle",
@@ -244,7 +244,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
     // Seed a server that sets a static "Authorization" header via headerConfigKeys,
     // then flip it to authMethod=oauth with a connected token. The oauth branch
     // should OVERRIDE the static header even if the config key resolves.
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "oauth-agent-strip",
       status: "idle",
@@ -279,7 +279,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
   });
 
   test("static server retains default authError=null in the response shape", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: crypto.randomUUID(),
       name: "static-agent",
       status: "idle",

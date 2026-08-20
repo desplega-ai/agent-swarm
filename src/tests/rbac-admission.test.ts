@@ -163,7 +163,7 @@ beforeEach(async () => {
 
   initDb(TEST_DB_PATH);
   ensureRbacSeedsSynced({ quiet: true });
-  createAgent({ id: LEAD_ID, name: "Admission Lead", isLead: true, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Admission Lead", isLead: true, status: "idle" });
   await flushAuditBuffer();
   getDb().run("DELETE FROM permission_audit");
 

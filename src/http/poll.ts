@@ -262,17 +262,17 @@ export async function handlePoll(
     let result: PollTxnResult;
     try {
       result = await getDbClient().transaction(async () => {
-        const agent = getAgentById(myAgentId);
+        const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
         }
 
         // Check for offered tasks first (highest priority for both workers and leads)
         // Atomically claim the task for review to prevent duplicate processing
-        const offeredTasks = getOfferedTasksForAgent(myAgentId);
+        const offeredTasks = await getOfferedTasksForAgent(myAgentId);
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
-          const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);
+          const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
             return {
               trigger: {
@@ -286,8 +286,8 @@ export async function handlePoll(
 
         // Check for pending tasks (assigned directly to this agent)
         // Only return a task if agent has capacity (server-side enforcement)
-        if (hasCapacity(myAgentId)) {
-          const pendingTask = getPendingTaskForAgent(myAgentId);
+        if (await hasCapacity(myAgentId)) {
+          const pendingTask = await getPendingTaskForAgent(myAgentId);
           if (pendingTask) {
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
@@ -337,8 +337,8 @@ export async function handlePoll(
             }
 
             // Mark task as in_progress immediately to prevent duplicate polling
-            startTask(pendingTask.id);
-            updateAgentStatusFromCapacity(myAgentId);
+            await startTask(pendingTask.id);
+            await updateAgentStatusFromCapacity(myAgentId);
 
             // Lifecycle announcements go through `afterSettled`, not straight
             // line: they must not claim "this task started" for a claim the
@@ -445,8 +445,8 @@ export async function handlePoll(
           // `getUnassignedTaskIds`) pre-filters candidates through
           // `isAgentEligibleForTask`, so an ineligible task is never even
           // offered to the budget gate below or the claim loop.
-          if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
+          if (await hasCapacity(myAgentId)) {
+            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
@@ -457,7 +457,7 @@ export async function handlePoll(
             // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
               const candidateId = unassignedIds[0]!;
-              const candidateTask = getTaskById(candidateId);
+              const candidateTask = await getTaskById(candidateId);
               const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
@@ -504,9 +504,9 @@ export async function handlePoll(
               }
             }
             for (const candidateId of unassignedIds) {
-              const claimed = claimTask(candidateId, myAgentId);
+              const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
-                updateAgentStatusFromCapacity(myAgentId);
+                await updateAgentStatusFromCapacity(myAgentId);
                 // Post-commit (see the `started` path above): a rolled-back
                 // claim must not report the task as claimed.
                 getDbClient().afterSettled(() => {
@@ -567,7 +567,7 @@ export async function handlePoll(
       process.env.LEAD_MONITOR_CHANNELS === "true" &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {
-      const agent = getAgentById(myAgentId);
+      const agent = await getAgentById(myAgentId);
       if (agent?.isLead) {
         lastChannelActivityCheckAt = Date.now();
         try {

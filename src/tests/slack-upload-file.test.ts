@@ -54,7 +54,7 @@ describe("slack-upload-file", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    const agent = createAgent({ name: "Upload Worker", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "Upload Worker", isLead: false, status: "idle" });
     agentId = agent.id;
   });
 
@@ -72,7 +72,7 @@ describe("slack-upload-file", () => {
   });
 
   test("uses the visible DM tree message as thread_ts for task uploads", async () => {
-    const task = createTaskExtended("dm upload task", {
+    const task = await createTaskExtended("dm upload task", {
       agentId,
       source: "slack",
       slackChannelId: "D_UPLOAD",
@@ -103,7 +103,7 @@ describe("slack-upload-file", () => {
   });
 
   test("keeps channel task uploads threaded under the original Slack thread", async () => {
-    const task = createTaskExtended("channel upload task", {
+    const task = await createTaskExtended("channel upload task", {
       agentId,
       source: "slack",
       slackChannelId: "C_UPLOAD",

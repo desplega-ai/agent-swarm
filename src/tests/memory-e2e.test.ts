@@ -18,8 +18,8 @@ describe("Memory E2E Lifecycle", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "E2E Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "E2E Agent B", isLead: true, status: "idle" });
+    await createAgent({ id: agentA, name: "E2E Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "E2E Agent B", isLead: true, status: "idle" });
     store = new SqliteMemoryStore();
   });
 

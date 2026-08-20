@@ -172,7 +172,7 @@ async function slackFlush(
     );
 
     const app = getSlackApp();
-    const agent = steering.task.agentId ? getAgentById(steering.task.agentId) : undefined;
+    const agent = steering.task.agentId ? await getAgentById(steering.task.agentId) : undefined;
     if (app) {
       if (!isSlackRenderV2Enabled()) {
         try {
@@ -194,7 +194,7 @@ async function slackFlush(
     return;
   }
 
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
 
   // Thread context for the task
   const threadContext = await getThreadContextForBuffer(channelId, threadTs);
@@ -207,7 +207,7 @@ async function slackFlush(
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
   const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
-  const task = createTaskWithSiblingAwareness(fullDescription, {
+  const task = await createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
     source: "slack",
     slackChannelId: channelId,

@@ -617,8 +617,8 @@ export function registerMessageHandler(app: App): void {
         fullTaskDescription = taskDescription;
       }
 
-      const lead = getLeadAgent();
-      const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+      const lead = await getLeadAgent();
+      const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -692,7 +692,7 @@ export function registerMessageHandler(app: App): void {
     } = { assigned: [], queued: [], steered: [], failed: [] };
 
     for (const match of matches) {
-      const agent = getAgentById(match.agent.id);
+      const agent = await getAgentById(match.agent.id);
 
       if (!agent) {
         results.failed.push({ agentName: match.agent.name, reason: "not found" });
@@ -720,7 +720,7 @@ export function registerMessageHandler(app: App): void {
             continue;
           }
 
-          const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+          const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -737,7 +737,7 @@ export function registerMessageHandler(app: App): void {
         }
 
         // Workers receive tasks as before
-        const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+        const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
@@ -750,7 +750,7 @@ export function registerMessageHandler(app: App): void {
         await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
-        const agentTasks = getTasksByAgentId(agent.id);
+        const agentTasks = await getTasksByAgentId(agent.id);
         const inProgressInThread = agentTasks.find(
           (t) => t.id !== task.id && t.status === "in_progress" && t.slackThreadTs === threadTs,
         );

@@ -80,7 +80,7 @@ export const registerSlackReadTool = (server: McpServer) => {
         return toolErr("Agent ID not found.", { data: { messages: [] } });
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.", { data: { messages: [] } });
       }
@@ -100,7 +100,7 @@ export const registerSlackReadTool = (server: McpServer) => {
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
       } else if (taskId) {
-        const task = getTaskById(taskId);
+        const task = await getTaskById(taskId);
         if (!task) {
           return toolErr("Task not found.", { data: { messages: [] } });
         }

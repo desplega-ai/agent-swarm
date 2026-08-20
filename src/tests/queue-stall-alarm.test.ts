@@ -46,8 +46,8 @@ function setCreatedAt(taskId: string, createdAt: string): void {
 
 describe("queue stall alarm", () => {
   test("positive control: alerts when a claimable task is older than 30 minutes", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Old claimable task", { agentId: worker.id });
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Old claimable task", { agentId: worker.id });
     setCreatedAt(task.id, "2026-08-17T16:29:59.000Z");
     const notify = mock(async (_message: string) => {});
 
@@ -72,7 +72,7 @@ describe("queue stall alarm", () => {
   });
 
   test("does not alert for a non-empty but fresh queue", async () => {
-    const task = createTaskExtended("Fresh pool task");
+    const task = await createTaskExtended("Fresh pool task");
     setCreatedAt(task.id, "2026-08-17T16:45:00.000Z");
     const notify = mock(async (_message: string) => {});
 
@@ -84,7 +84,7 @@ describe("queue stall alarm", () => {
   });
 
   test("measures queue age from a backlog task becoming claimable", async () => {
-    const task = createTaskExtended("Released backlog task");
+    const task = await createTaskExtended("Released backlog task");
     setCreatedAt(task.id, "2026-08-17T12:00:00.000Z");
     getDb().run("UPDATE agent_tasks SET status = 'backlog' WHERE id = ?", [task.id]);
     getDb().run("UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ? WHERE id = ?", [
@@ -106,9 +106,9 @@ describe("queue stall alarm", () => {
   });
 
   test("measures queue age from the final dependency completing", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Newly unblocked", {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Newly unblocked", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
@@ -128,7 +128,7 @@ describe("queue stall alarm", () => {
   });
 
   test("does not reset queue age when VCS metadata updates a claimable task", async () => {
-    const task = createTaskExtended("Old task with new VCS metadata");
+    const task = await createTaskExtended("Old task with new VCS metadata");
     setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
 
     await updateTaskVcs(task.id, {
@@ -144,9 +144,9 @@ describe("queue stall alarm", () => {
   });
 
   test("does not reset claimable age when VCS metadata updates a completed dependency", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Completed prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Waiting after prerequisite", {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Completed prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Waiting after prerequisite", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
@@ -169,10 +169,10 @@ describe("queue stall alarm", () => {
     expect(isQueueStalled(snapshot)).toBe(true);
   });
 
-  test("excludes pending tasks whose dependencies are not complete", () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Blocked", {
+  test("excludes pending tasks whose dependencies are not complete", async () => {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Blocked", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
@@ -184,9 +184,9 @@ describe("queue stall alarm", () => {
     expect(snapshot.oldestTaskId).toBe(prerequisite.id);
   });
 
-  test("reports direct and pool pickup transitions as diagnostic context", () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Queued", { agentId: worker.id });
+  test("reports direct and pool pickup transitions as diagnostic context", async () => {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Queued", { agentId: worker.id });
     getDb().run(
       `INSERT INTO agent_log (id, eventType, taskId, agentId, oldValue, newValue, createdAt)
        VALUES (?, 'task_status_change', ?, ?, 'pending', 'in_progress', ?)`,
@@ -211,7 +211,7 @@ describe("queue stall alarm", () => {
   });
 
   test("deduplicates an active alarm and sends recovery", async () => {
-    const task = createTaskExtended("Old pool task");
+    const task = await createTaskExtended("Old pool task");
     setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
     const notify = mock(async (_message: string) => {});
 

@@ -23,8 +23,8 @@ describe("getAllTasks search filter", () => {
     }
   });
 
-  test("matches by id prefix and substring, plus description", () => {
-    const agent = createAgent({
+  test("matches by id prefix and substring, plus description", async () => {
+    const agent = await createAgent({
       id: "search-filter-agent",
       name: "Search Filter Agent",
       isLead: false,

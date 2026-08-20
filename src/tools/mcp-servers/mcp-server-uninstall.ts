@@ -28,7 +28,7 @@ export const registerMcpServerUninstallTool = (server: McpServer) => {
       const targetAgentId = args.agentId ?? requestInfo.agentId;
 
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",

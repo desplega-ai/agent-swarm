@@ -30,24 +30,24 @@ describe("Task swarmVersion tracking", () => {
     }
   });
 
-  test("createTaskExtended stamps pkg.version on new tasks", () => {
-    const agent = createAgent({
+  test("createTaskExtended stamps pkg.version on new tasks", async () => {
+    const agent = await createAgent({
       id: "swarm-version-agent-1",
       name: "Swarm Version Agent",
       isLead: false,
       status: "idle",
     });
 
-    const task = createTaskExtended("extended task", { agentId: agent.id });
+    const task = await createTaskExtended("extended task", { agentId: agent.id });
 
     expect(task.swarmVersion).toBe(pkg.version);
 
-    const reloaded = getTaskById(task.id);
+    const reloaded = await getTaskById(task.id);
     expect(reloaded?.swarmVersion).toBe(pkg.version);
   });
 
-  test("createTask stamps pkg.version on new tasks", () => {
-    const agent = createAgent({
+  test("createTask stamps pkg.version on new tasks", async () => {
+    const agent = await createAgent({
       id: "swarm-version-agent-2",
       name: "Swarm Version Agent 2",
       isLead: false,
@@ -58,7 +58,7 @@ describe("Task swarmVersion tracking", () => {
 
     expect(task.swarmVersion).toBe(pkg.version);
 
-    const reloaded = getTaskById(task.id);
+    const reloaded = await getTaskById(task.id);
     expect(reloaded?.swarmVersion).toBe(pkg.version);
   });
 

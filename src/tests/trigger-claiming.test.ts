@@ -43,7 +43,7 @@ afterAll(() => {
 
 describe("Trigger Claiming - Inbox Messages", () => {
   test("claimInboxMessages marks messages as processing atomically", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "lead-agent",
       isLead: true,
       status: "idle",
@@ -81,7 +81,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("concurrent claims do not return duplicate messages", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "concurrent-agent",
       isLead: true,
       status: "idle",
@@ -112,7 +112,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("claimInboxMessages respects limit parameter", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "limit-agent",
       isLead: true,
       status: "idle",
@@ -135,7 +135,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("markInboxMessageResponded accepts processing status", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "respond-agent",
       isLead: true,
       status: "idle",
@@ -157,7 +157,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("markInboxMessageDelegated accepts processing status", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "delegate-agent",
       isLead: true,
       status: "idle",
@@ -167,7 +167,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
     const _msg = await createInboxMessage(agent.id, "Test message");
 
     // Create a task to delegate to
-    const task = createTaskExtended("Delegated task", { agentId: agent.id });
+    const task = await createTaskExtended("Delegated task", { agentId: agent.id });
 
     // Claim it (sets to processing)
     const claimed = await claimInboxMessages(agent.id, 1);
@@ -182,7 +182,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("releaseStaleProcessingInbox releases old processing messages", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "stale-agent",
       isLead: true,
       status: "idle",
@@ -216,7 +216,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("claimInboxMessages returns empty array when no messages", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "empty-agent",
       isLead: true,
       status: "idle",
@@ -228,7 +228,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("claimed messages maintain order (oldest first)", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "order-agent",
       isLead: true,
       status: "idle",
@@ -250,7 +250,7 @@ describe("Trigger Claiming - Inbox Messages", () => {
   });
 
   test("only unread messages are claimable", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "filter-agent",
       isLead: true,
       status: "idle",
@@ -274,8 +274,8 @@ describe("Trigger Claiming - Inbox Messages", () => {
 });
 
 describe("Trigger Claiming - Offered Tasks", () => {
-  test("claimOfferedTask marks task as reviewing atomically", () => {
-    const agent = createAgent({
+  test("claimOfferedTask marks task as reviewing atomically", async () => {
+    const agent = await createAgent({
       name: "claim-agent",
       isLead: false,
       status: "idle",
@@ -283,25 +283,25 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create and offer a task
-    const task = createTaskExtended("Test task", { offeredTo: agent.id });
+    const task = await createTaskExtended("Test task", { offeredTo: agent.id });
 
     expect(task.status).toBe("offered");
     expect(task.offeredTo).toBe(agent.id);
 
     // Claim it
-    const claimed = claimOfferedTask(task.id, agent.id);
+    const claimed = await claimOfferedTask(task.id, agent.id);
 
     expect(claimed).not.toBeNull();
     expect(claimed?.status).toBe("reviewing");
     expect(claimed?.offeredTo).toBe(agent.id);
 
     // Verify in database
-    const dbTask = getTaskById(task.id);
+    const dbTask = await getTaskById(task.id);
     expect(dbTask?.status).toBe("reviewing");
   });
 
-  test("concurrent claims do not return duplicate offered tasks", () => {
-    const agent = createAgent({
+  test("concurrent claims do not return duplicate offered tasks", async () => {
+    const agent = await createAgent({
       name: "concurrent-offer-agent",
       isLead: false,
       status: "idle",
@@ -309,12 +309,12 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create and offer a task
-    const task = createTaskExtended("Concurrent task", { offeredTo: agent.id });
+    const task = await createTaskExtended("Concurrent task", { offeredTo: agent.id });
 
     // Simulate concurrent polls
-    const claim1 = claimOfferedTask(task.id, agent.id);
-    const claim2 = claimOfferedTask(task.id, agent.id);
-    const claim3 = claimOfferedTask(task.id, agent.id);
+    const claim1 = await claimOfferedTask(task.id, agent.id);
+    const claim2 = await claimOfferedTask(task.id, agent.id);
+    const claim3 = await claimOfferedTask(task.id, agent.id);
 
     // First claim should succeed
     expect(claim1).not.toBeNull();
@@ -325,8 +325,8 @@ describe("Trigger Claiming - Offered Tasks", () => {
     expect(claim3).toBeNull();
   });
 
-  test("claimOfferedTask returns null for non-offered task", () => {
-    const agent = createAgent({
+  test("claimOfferedTask returns null for non-offered task", async () => {
+    const agent = await createAgent({
       name: "non-offered-agent",
       isLead: false,
       status: "idle",
@@ -334,22 +334,22 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create a pending task (not offered)
-    const task = createTaskExtended("Pending task", { agentId: agent.id });
+    const task = await createTaskExtended("Pending task", { agentId: agent.id });
 
     // Try to claim - should fail
-    const claimed = claimOfferedTask(task.id, agent.id);
+    const claimed = await claimOfferedTask(task.id, agent.id);
     expect(claimed).toBeNull();
   });
 
-  test("claimOfferedTask returns null for wrong agent", () => {
-    const agent1 = createAgent({
+  test("claimOfferedTask returns null for wrong agent", async () => {
+    const agent1 = await createAgent({
       name: "agent1",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const agent2 = createAgent({
+    const agent2 = await createAgent({
       name: "agent2",
       isLead: false,
       status: "idle",
@@ -357,15 +357,15 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Offer task to agent1
-    const task = createTaskExtended("Task for agent1", { offeredTo: agent1.id });
+    const task = await createTaskExtended("Task for agent1", { offeredTo: agent1.id });
 
     // Agent2 tries to claim - should fail
-    const claimed = claimOfferedTask(task.id, agent2.id);
+    const claimed = await claimOfferedTask(task.id, agent2.id);
     expect(claimed).toBeNull();
   });
 
-  test("acceptTask works with reviewing status", () => {
-    const agent = createAgent({
+  test("acceptTask works with reviewing status", async () => {
+    const agent = await createAgent({
       name: "accept-agent",
       isLead: false,
       status: "idle",
@@ -373,21 +373,21 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create, offer, and claim task
-    const task = createTaskExtended("Task to accept", { offeredTo: agent.id });
-    const claimed = claimOfferedTask(task.id, agent.id);
+    const task = await createTaskExtended("Task to accept", { offeredTo: agent.id });
+    const claimed = await claimOfferedTask(task.id, agent.id);
 
     expect(claimed?.status).toBe("reviewing");
 
     // Accept it
-    const accepted = acceptTask(task.id, agent.id);
+    const accepted = await acceptTask(task.id, agent.id);
 
     expect(accepted).not.toBeNull();
     expect(accepted?.status).toBe("pending");
     expect(accepted?.agentId).toBe(agent.id);
   });
 
-  test("rejectTask works with reviewing status", () => {
-    const agent = createAgent({
+  test("rejectTask works with reviewing status", async () => {
+    const agent = await createAgent({
       name: "reject-agent",
       isLead: false,
       status: "idle",
@@ -395,13 +395,13 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create, offer, and claim task
-    const task = createTaskExtended("Task to reject", { offeredTo: agent.id });
-    const claimed = claimOfferedTask(task.id, agent.id);
+    const task = await createTaskExtended("Task to reject", { offeredTo: agent.id });
+    const claimed = await claimOfferedTask(task.id, agent.id);
 
     expect(claimed?.status).toBe("reviewing");
 
     // Reject it
-    const rejected = rejectTask(task.id, agent.id, "Not interested");
+    const rejected = await rejectTask(task.id, agent.id, "Not interested");
 
     expect(rejected).not.toBeNull();
     expect(rejected?.status).toBe("unassigned");
@@ -410,7 +410,7 @@ describe("Trigger Claiming - Offered Tasks", () => {
   });
 
   test("releaseStaleReviewingTasks releases old reviewing tasks", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "stale-review-agent",
       isLead: false,
       status: "idle",
@@ -418,8 +418,8 @@ describe("Trigger Claiming - Offered Tasks", () => {
     });
 
     // Create, offer, and claim task
-    const task = createTaskExtended("Stale review task", { offeredTo: agent.id });
-    const claimed = claimOfferedTask(task.id, agent.id);
+    const task = await createTaskExtended("Stale review task", { offeredTo: agent.id });
+    const claimed = await claimOfferedTask(task.id, agent.id);
 
     expect(claimed?.status).toBe("reviewing");
 
@@ -433,11 +433,11 @@ describe("Trigger Claiming - Offered Tasks", () => {
     expect(released).toBeGreaterThanOrEqual(1);
 
     // Task should be back to offered
-    const dbTask = getTaskById(task.id);
+    const dbTask = await getTaskById(task.id);
     expect(dbTask?.status).toBe("offered");
 
     // Should be claimable again
-    const reclaimed = claimOfferedTask(task.id, agent.id);
+    const reclaimed = await claimOfferedTask(task.id, agent.id);
     expect(reclaimed).not.toBeNull();
     expect(reclaimed?.id).toBe(task.id);
   });
@@ -445,7 +445,7 @@ describe("Trigger Claiming - Offered Tasks", () => {
 
 describe("Trigger Claiming - Mentions", () => {
   test("claimMentions marks channels as processing atomically", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "mention-agent",
       isLead: true,
       status: "idle",
@@ -471,7 +471,7 @@ describe("Trigger Claiming - Mentions", () => {
   });
 
   test("concurrent claims do not return duplicate mentions", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "concurrent-mention-agent",
       isLead: true,
       status: "idle",
@@ -498,7 +498,7 @@ describe("Trigger Claiming - Mentions", () => {
   });
 
   test("releaseMentionProcessing allows reclaiming", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "release-agent",
       isLead: true,
       status: "idle",
@@ -527,7 +527,7 @@ describe("Trigger Claiming - Mentions", () => {
   });
 
   test("releaseStaleMentionProcessing releases old processing channels", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "stale-mention-agent",
       isLead: true,
       status: "idle",
@@ -555,8 +555,8 @@ describe("Trigger Claiming - Mentions", () => {
     expect(reclaimed[0].channelId).toBe(channel.id);
   });
 
-  test("claimMentions returns empty array when no mentions", () => {
-    const agent = createAgent({
+  test("claimMentions returns empty array when no mentions", async () => {
+    const agent = await createAgent({
       name: "no-mention-agent",
       isLead: true,
       status: "idle",
@@ -568,7 +568,7 @@ describe("Trigger Claiming - Mentions", () => {
   });
 
   test("claimMentions only claims channels with unread mentions", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "read-mention-agent",
       isLead: true,
       status: "idle",
@@ -590,7 +590,7 @@ describe("Trigger Claiming - Mentions", () => {
   });
 
   test("releasing processing allows subsequent polling to claim", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "repolling-agent",
       isLead: true,
       status: "idle",

@@ -79,7 +79,7 @@ describe("store-progress handler — attachments insert path", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Handler Attachments Worker",
       description: "Agent for handler-level attachment tests",
       role: "worker",
@@ -108,12 +108,12 @@ describe("store-progress handler — attachments insert path", () => {
   }
 
   test("inserts attachment row on an in-progress task (baseline)", async () => {
-    const task = createTaskExtended("handler in-progress baseline", {
+    const task = await createTaskExtended("handler in-progress baseline", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
+    await startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -133,13 +133,13 @@ describe("store-progress handler — attachments insert path", () => {
   });
 
   test("inserts attachment row on an ALREADY-COMPLETED task (PR #542 regression)", async () => {
-    const task = createTaskExtended("handler post-completion attachment", {
+    const task = await createTaskExtended("handler post-completion attachment", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
-    const completed = completeTask(task.id, "done");
+    await startTask(task.id);
+    const completed = await completeTask(task.id, "done");
     expect(completed?.status).toBe("completed");
 
     // Lead's smoke shape: just a minimal URL attachment, no status field, no
@@ -162,12 +162,12 @@ describe("store-progress handler — attachments insert path", () => {
   });
 
   test("agent-fs attachment with optional orgId + driveId round-trips through the handler", async () => {
-    const task = createTaskExtended("handler agent-fs with org/drive", {
+    const task = await createTaskExtended("handler agent-fs with org/drive", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
+    await startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -197,12 +197,12 @@ describe("store-progress handler — attachments insert path", () => {
   });
 
   test("agent-fs attachment WITHOUT orgId / driveId still inserts (legacy shape)", async () => {
-    const task = createTaskExtended("handler agent-fs without org/drive", {
+    const task = await createTaskExtended("handler agent-fs without org/drive", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
+    await startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(
@@ -247,12 +247,12 @@ describe("store-progress handler — attachments insert path", () => {
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs auto-resolve global", {
+      const task = await createTaskExtended("handler agent-fs auto-resolve global", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -302,12 +302,12 @@ describe("store-progress handler — attachments insert path", () => {
         value: "agent-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs auto-resolve agent-scope", {
+      const task = await createTaskExtended("handler agent-fs auto-resolve agent-scope", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -334,12 +334,12 @@ describe("store-progress handler — attachments insert path", () => {
     test("missing config + missing row IDs leaves null IDs (no throw, renderer falls back)", async () => {
       clearSwarmConfig();
 
-      const task = createTaskExtended("handler agent-fs no config no ids", {
+      const task = await createTaskExtended("handler agent-fs no config no ids", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -376,12 +376,12 @@ describe("store-progress handler — attachments insert path", () => {
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs per-row wins", {
+      const task = await createTaskExtended("handler agent-fs per-row wins", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -420,12 +420,12 @@ describe("store-progress handler — attachments insert path", () => {
         value: "global-drive",
       });
 
-      const task = createTaskExtended("handler agent-fs partial fill", {
+      const task = await createTaskExtended("handler agent-fs partial fill", {
         agentId,
         source: "mcp",
         priority: 50,
       });
-      startTask(task.id);
+      await startTask(task.id);
 
       const tool = buildServer();
       const result = (await tool.handler(
@@ -457,12 +457,12 @@ describe("store-progress handler — attachments insert path", () => {
     // The no-op short-circuit must still fire for the status write (no
     // duplicate completion / follow-up), but attachments are append-only and
     // dedup-safe so they land.
-    const task = createTaskExtended("handler retry completion with attachments", {
+    const task = await createTaskExtended("handler retry completion with attachments", {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
+    await startTask(task.id);
     await completeTask(task.id, "first");
 
     const tool = buildServer();
@@ -489,12 +489,12 @@ describe("store-progress handler — attachments insert path", () => {
 
   test("successful completion returns a bounded confirmation for an oversized task", async () => {
     const oversizedTaskText = "H".repeat(58_661);
-    const task = createTaskExtended(oversizedTaskText, {
+    const task = await createTaskExtended(oversizedTaskText, {
       agentId,
       source: "mcp",
       priority: 50,
     });
-    startTask(task.id);
+    await startTask(task.id);
 
     const tool = buildServer();
     const result = (await tool.handler(

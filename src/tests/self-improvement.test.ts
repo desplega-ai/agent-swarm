@@ -38,9 +38,9 @@ describe("Self-Improvement Mechanisms", () => {
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
 
-    createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
-    createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
+    await createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -60,7 +60,7 @@ describe("Self-Improvement Mechanisms", () => {
 
   describe("store-progress memory indexing", () => {
     test("completed task creates agent-scoped memory with output", async () => {
-      const task = createTaskExtended("Test task for completion", {
+      const task = await createTaskExtended("Test task for completion", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -89,7 +89,7 @@ describe("Self-Improvement Mechanisms", () => {
     });
 
     test("completed task with undefined output uses fallback", async () => {
-      const task = createTaskExtended("Task without output", {
+      const task = await createTaskExtended("Task without output", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -106,7 +106,7 @@ describe("Self-Improvement Mechanisms", () => {
     });
 
     test("failed task creates memory with failure reason", async () => {
-      const task = createTaskExtended("Task that will fail", {
+      const task = await createTaskExtended("Task that will fail", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -149,8 +149,8 @@ describe("Self-Improvement Mechanisms", () => {
       // In store-progress, this would return early without creating memory
     });
 
-    test("manual task completions persist memory by default", () => {
-      const task = createTaskExtended("Manual implementation task", {
+    test("manual task completions persist memory by default", async () => {
+      const task = await createTaskExtended("Manual implementation task", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -161,8 +161,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(true);
     });
 
-    test("scheduled task completions skip memory by default", () => {
-      const task = createTaskExtended("Run heartbeat checklist", {
+    test("scheduled task completions skip memory by default", async () => {
+      const task = await createTaskExtended("Run heartbeat checklist", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -174,8 +174,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("heartbeat checklist completions skip memory without schedule tags", () => {
-      const task = createTaskExtended("Run heartbeat checklist", {
+    test("heartbeat checklist completions skip memory without schedule tags", async () => {
+      const task = await createTaskExtended("Run heartbeat checklist", {
         agentId: workerId,
         source: "mcp",
         priority: 60,
@@ -188,8 +188,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("boot triage completions skip memory by default", () => {
-      const task = createTaskExtended("Triage reboot-interrupted work", {
+    test("boot triage completions skip memory by default", async () => {
+      const task = await createTaskExtended("Triage reboot-interrupted work", {
         agentId: workerId,
         source: "mcp",
         priority: 80,
@@ -201,15 +201,15 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("monitor and digest completions skip memory by default", () => {
-      const monitorTask = createTaskExtended("Check Claude Code changelog", {
+    test("monitor and digest completions skip memory by default", async () => {
+      const monitorTask = await createTaskExtended("Check Claude Code changelog", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
         taskType: "monitoring",
         tags: ["health", "schedule:claude-code-changelog-monitor"],
       });
-      const digestTask = createTaskExtended("Compile daily blocker digest", {
+      const digestTask = await createTaskExtended("Compile daily blocker digest", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -222,8 +222,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(digestTask)).toBe(false);
     });
 
-    test("scheduled task completions can opt in to memory persistence", () => {
-      const task = createTaskExtended("Daily digest found reusable incident pattern", {
+    test("scheduled task completions can opt in to memory persistence", async () => {
+      const task = await createTaskExtended("Daily digest found reusable incident pattern", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -240,7 +240,7 @@ describe("Self-Improvement Mechanisms", () => {
 
   describe("swarm memory auto-promotion", () => {
     test("research task type promotes to swarm scope", async () => {
-      const task = createTaskExtended("Research best practices for testing", {
+      const task = await createTaskExtended("Research best practices for testing", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -271,8 +271,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(swarmMemory.source).toBe("task_completion");
     });
 
-    test("knowledge-tagged task promotes to swarm scope", () => {
-      const task = createTaskExtended("Document API conventions", {
+    test("knowledge-tagged task promotes to swarm scope", async () => {
+      const task = await createTaskExtended("Document API conventions", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -287,8 +287,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("shared-tagged task promotes to swarm scope", () => {
-      const task = createTaskExtended("Build shared utility", {
+    test("shared-tagged task promotes to swarm scope", async () => {
+      const task = await createTaskExtended("Build shared utility", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -303,8 +303,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("regular task does NOT promote to swarm scope", () => {
-      const task = createTaskExtended("Fix a typo", {
+    test("regular task does NOT promote to swarm scope", async () => {
+      const task = await createTaskExtended("Fix a typo", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -320,8 +320,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(false);
     });
 
-    test("failed task does NOT promote to swarm scope", () => {
-      const task = createTaskExtended("Research something", {
+    test("failed task does NOT promote to swarm scope", async () => {
+      const task = await createTaskExtended("Research something", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -345,8 +345,8 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("inject-learning tool logic", () => {
-    test("lead agent can inject learning into worker memory (swarm-scoped)", () => {
-      const callerAgent = getAgentById(leadId);
+    test("lead agent can inject learning into worker memory (swarm-scoped)", async () => {
+      const callerAgent = await getAgentById(leadId);
       expect(callerAgent).not.toBeNull();
       expect(callerAgent!.isLead).toBe(true);
 
@@ -368,8 +368,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(memory.content).toContain(learning);
     });
 
-    test("non-lead agent is rejected", () => {
-      const callerAgent = getAgentById(workerId);
+    test("non-lead agent is rejected", async () => {
+      const callerAgent = await getAgentById(workerId);
       expect(callerAgent).not.toBeNull();
       expect(callerAgent!.isLead).toBe(false);
 

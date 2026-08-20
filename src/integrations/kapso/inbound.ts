@@ -152,7 +152,7 @@ export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<K
     return { kind: "workflow", workflowId: mapping.workflowId };
   }
 
-  const task = createTaskWithSiblingAwareness(buildTaskDescription(payload), {
+  const task = await createTaskWithSiblingAwareness(buildTaskDescription(payload), {
     agentId: mapping.agentId ?? null,
     source: "system",
     taskType: "kapso-inbound",

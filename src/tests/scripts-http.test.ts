@@ -62,8 +62,8 @@ beforeAll(async () => {
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
 
-  const worker = createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
-  const lead = createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
+  const worker = await createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
+  const lead = await createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
   workerId = worker.id;
   leadId = lead.id;
 });

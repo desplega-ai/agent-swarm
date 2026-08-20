@@ -30,9 +30,9 @@ describe("update-profile agentId authorization", () => {
     closeDb();
     initDb(TEST_DB_PATH);
 
-    createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
-    createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
+    await createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -51,13 +51,13 @@ describe("update-profile agentId authorization", () => {
   // ==========================================================================
 
   describe("lead agent can update another agent's profile", () => {
-    test("lead updates worker description", () => {
-      const callingAgent = getAgentById(leadId);
+    test("lead updates worker description", async () => {
+      const callingAgent = await getAgentById(leadId);
       expect(callingAgent).not.toBeNull();
       expect(callingAgent!.isLead).toBe(true);
 
       // Lead updating another agent — this is the happy path
-      const updated = updateAgentProfile(
+      const updated = await updateAgentProfile(
         workerId,
         { description: "Updated by lead" },
         { changeSource: "lead_coaching", changedByAgentId: leadId },
@@ -66,8 +66,8 @@ describe("update-profile agentId authorization", () => {
       expect(updated!.description).toBe("Updated by lead");
     });
 
-    test("lead updates worker soulMd with lead_coaching changeSource", () => {
-      const updated = updateAgentProfile(
+    test("lead updates worker soulMd with lead_coaching changeSource", async () => {
+      const updated = await updateAgentProfile(
         workerId,
         { soulMd: "# Soul updated by lead" },
         { changeSource: "lead_coaching", changedByAgentId: leadId },
@@ -76,14 +76,14 @@ describe("update-profile agentId authorization", () => {
       expect(updated!.soulMd).toBe("# Soul updated by lead");
 
       // Verify the context version records lead_coaching as changeSource
-      const version = getLatestContextVersion(workerId, "soulMd");
+      const version = await getLatestContextVersion(workerId, "soulMd");
       expect(version).not.toBeNull();
       expect(version!.changeSource).toBe("lead_coaching");
       expect(version!.changedByAgentId).toBe(leadId);
     });
 
     test("lead updates worker name", async () => {
-      const updated = updateAgentName(workerId, "Renamed Worker");
+      const updated = await updateAgentName(workerId, "Renamed Worker");
       expect(updated).not.toBeNull();
       expect(updated!.name).toBe("Renamed Worker");
 
@@ -93,8 +93,8 @@ describe("update-profile agentId authorization", () => {
   });
 
   describe("non-lead is rejected when providing agentId", () => {
-    test("non-lead agent cannot update another agent's profile", () => {
-      const callingAgent = getAgentById(workerId);
+    test("non-lead agent cannot update another agent's profile", async () => {
+      const callingAgent = await getAgentById(workerId);
       expect(callingAgent).not.toBeNull();
       expect(callingAgent!.isLead).toBe(false);
 
@@ -108,8 +108,8 @@ describe("update-profile agentId authorization", () => {
       expect(canUpdate).toBe(false);
     });
 
-    test("non-lead agent cannot update lead's profile", () => {
-      const callingAgent = getAgentById(workerId);
+    test("non-lead agent cannot update lead's profile", async () => {
+      const callingAgent = await getAgentById(workerId);
       expect(callingAgent!.isLead).toBe(false);
 
       const isUpdatingSelf = leadId === workerId; // false
@@ -121,7 +121,7 @@ describe("update-profile agentId authorization", () => {
   });
 
   describe("self-update via explicit agentId works without lead check", () => {
-    test("agent providing own agentId is treated as self-update", () => {
+    test("agent providing own agentId is treated as self-update", async () => {
       // Simulate: agentId param = caller's own ID
       const requestAgentId = workerId;
       const paramAgentId = workerId;
@@ -129,7 +129,7 @@ describe("update-profile agentId authorization", () => {
       expect(isUpdatingSelf).toBe(true);
 
       // Self-update should succeed regardless of isLead status
-      const updated = updateAgentProfile(
+      const updated = await updateAgentProfile(
         workerId,
         { description: "Self-updated via explicit agentId" },
         { changeSource: "self_edit", changedByAgentId: workerId },
@@ -138,13 +138,13 @@ describe("update-profile agentId authorization", () => {
       expect(updated!.description).toBe("Self-updated via explicit agentId");
     });
 
-    test("self-update with omitted agentId also works", () => {
+    test("self-update with omitted agentId also works", async () => {
       // When agentId is undefined, isUpdatingSelf = true
       const agentId = undefined;
       const isUpdatingSelf = !agentId || agentId === workerId;
       expect(isUpdatingSelf).toBe(true);
 
-      const updated = updateAgentProfile(
+      const updated = await updateAgentProfile(
         workerId,
         { role: "updated-role" },
         { changeSource: "self_edit", changedByAgentId: workerId },
@@ -155,8 +155,8 @@ describe("update-profile agentId authorization", () => {
   });
 
   describe("invalid agentId returns appropriate error", () => {
-    test("updateAgentProfile returns null for non-existent target agent", () => {
-      const result = updateAgentProfile(
+    test("updateAgentProfile returns null for non-existent target agent", async () => {
+      const result = await updateAgentProfile(
         nonExistentId,
         { description: "Should fail" },
         { changeSource: "lead_coaching", changedByAgentId: leadId },
@@ -164,13 +164,13 @@ describe("update-profile agentId authorization", () => {
       expect(result).toBeNull();
     });
 
-    test("updateAgentName returns null for non-existent target agent", () => {
-      const result = updateAgentName(nonExistentId, "Ghost Agent");
+    test("updateAgentName returns null for non-existent target agent", async () => {
+      const result = await updateAgentName(nonExistentId, "Ghost Agent");
       expect(result).toBeNull();
     });
 
-    test("getAgentById returns null for non-existent agent", () => {
-      const agent = getAgentById(nonExistentId);
+    test("getAgentById returns null for non-existent agent", async () => {
+      const agent = await getAgentById(nonExistentId);
       expect(agent).toBeNull();
     });
   });
@@ -183,7 +183,7 @@ describe("update-profile agentId authorization", () => {
         { changeSource: "lead_coaching", changedByAgentId: leadId },
       );
 
-      const version = getLatestContextVersion(otherWorkerId, "identityMd");
+      const version = await getLatestContextVersion(otherWorkerId, "identityMd");
       expect(version).not.toBeNull();
       expect(version!.changeSource).toBe("lead_coaching");
       expect(version!.changedByAgentId).toBe(leadId);
@@ -196,7 +196,7 @@ describe("update-profile agentId authorization", () => {
         { changeSource: "self_edit", changedByAgentId: workerId },
       );
 
-      const version = getLatestContextVersion(workerId, "claudeMd");
+      const version = await getLatestContextVersion(workerId, "claudeMd");
       expect(version).not.toBeNull();
       expect(version!.changeSource).toBe("self_edit");
       expect(version!.changedByAgentId).toBe(workerId);
@@ -209,7 +209,7 @@ describe("update-profile agentId authorization", () => {
         { changeSource: "lead_coaching", changedByAgentId: leadId },
       );
 
-      const version = getLatestContextVersion(workerId, "toolsMd");
+      const version = await getLatestContextVersion(workerId, "toolsMd");
       expect(version).not.toBeNull();
       expect(version!.changeSource).toBe("lead_coaching");
       expect(version!.changedByAgentId).toBe(leadId);
@@ -222,7 +222,7 @@ describe("update-profile agentId authorization", () => {
         { changeSource: "self_edit", changedByAgentId: otherWorkerId },
       );
 
-      const version = getLatestContextVersion(otherWorkerId, "setupScript");
+      const version = await getLatestContextVersion(otherWorkerId, "setupScript");
       expect(version).not.toBeNull();
       expect(version!.changeSource).toBe("self_edit");
       expect(version!.changedByAgentId).toBe(otherWorkerId);
@@ -234,13 +234,13 @@ describe("update-profile agentId authorization", () => {
   // ==========================================================================
 
   describe("target agent existence validation", () => {
-    test("getAgentById can validate target exists before update", () => {
+    test("getAgentById can validate target exists before update", async () => {
       // The tool should validate the target agent exists before attempting updates
-      const targetAgent = getAgentById(nonExistentId);
+      const targetAgent = await getAgentById(nonExistentId);
       expect(targetAgent).toBeNull();
 
       // Valid target should be found
-      const validTarget = getAgentById(workerId);
+      const validTarget = await getAgentById(workerId);
       expect(validTarget).not.toBeNull();
       expect(validTarget!.id).toBe(workerId);
     });

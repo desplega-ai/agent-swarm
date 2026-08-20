@@ -166,7 +166,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     const taskId = (result as { correlationId?: string }).correlationId;
     expect(taskId).toBeDefined();
 
-    const task = getTaskById(taskId!);
+    const task = await getTaskById(taskId!);
     expect(task).toBeDefined();
     expect(task!.dir).toBe("/workspace/repos/agent-swarm");
     expect(task!.vcsRepo).toBe("desplega-ai/agent-swarm");
@@ -192,7 +192,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     const taskId = (result as { correlationId?: string }).correlationId;
     expect(taskId).toBeDefined();
 
-    const task = getTaskById(taskId!);
+    const task = await getTaskById(taskId!);
     expect(task).toBeDefined();
     expect(task!.dir).toBeUndefined();
     expect(task!.vcsRepo).toBeUndefined();

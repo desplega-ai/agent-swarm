@@ -607,7 +607,7 @@ export async function handleMemory(
     const memoryAgentId = agentId ?? (scope === "agent" ? myAgentId : undefined);
 
     if (source === "session_summary" && sourceTaskId) {
-      const sourceTask = getTaskById(sourceTaskId);
+      const sourceTask = await getTaskById(sourceTaskId);
       if (sourceTask && !shouldPersistAutomaticTaskMemory(sourceTask, persistMemory)) {
         indexMemory.respond(res, 202, {
           queued: false,

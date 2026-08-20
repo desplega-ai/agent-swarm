@@ -46,7 +46,7 @@ async function seedCredStatus(
   harnessProvider: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode",
   partial: Partial<AgentCredStatus> = {},
 ): Promise<void> {
-  setAgentHarnessProvider(agentId, harnessProvider);
+  await setAgentHarnessProvider(agentId, harnessProvider);
   const now = Date.now();
   await updateAgentCredStatus(agentId, {
     ready: true,
@@ -212,7 +212,7 @@ describe("setup milestones", () => {
   });
 
   test("harness becomes `configured` when a worker reports ready creds (no live test yet)", async () => {
-    const a = createAgent({ name: "w-cfg", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({ name: "w-cfg", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
 
     const payload = buildStatusPayload();
@@ -220,7 +220,7 @@ describe("setup milestones", () => {
   });
 
   test("harness flips to `verified` when a worker's recent live test passed", async () => {
-    const a = createAgent({ name: "w-vfd", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({ name: "w-vfd", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", {
       ready: true,
       satisfiedBy: "env",
@@ -238,7 +238,12 @@ describe("setup milestones", () => {
   });
 
   test("harness stays `unverified` when worker reports missing credentials", async () => {
-    const a = createAgent({ name: "w-miss", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({
+      name: "w-miss",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
     await seedCredStatus(a.id, "claude", {
       ready: false,
       missing: ["ANTHROPIC_API_KEY"],
@@ -254,8 +259,18 @@ describe("setup milestones", () => {
   // ─── Multi-provider fleet rollup ─────────────────────────────────────────
   describe("harness — multi-provider fleet aggregate", () => {
     test("`verified` when every provider in the fleet has a fresh passing live test", async () => {
-      const a = createAgent({ name: "claude-w", isLead: false, status: "idle", capabilities: [] });
-      const b = createAgent({ name: "codex-w", isLead: false, status: "idle", capabilities: [] });
+      const a = await createAgent({
+        name: "claude-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const b = await createAgent({
+        name: "codex-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
       const fresh = { ok: true, error: null, latency_ms: 12, testedAt: Date.now() };
       await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: fresh });
       await seedCredStatus(b.id, "codex", { ready: true, satisfiedBy: "file", liveTest: fresh });
@@ -269,8 +284,18 @@ describe("setup milestones", () => {
     });
 
     test("`configured` when one provider is verified and another is presence-only", async () => {
-      const a = createAgent({ name: "claude-w", isLead: false, status: "idle", capabilities: [] });
-      const b = createAgent({ name: "codex-w", isLead: false, status: "idle", capabilities: [] });
+      const a = await createAgent({
+        name: "claude-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const b = await createAgent({
+        name: "codex-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
       await seedCredStatus(a.id, "claude", {
         ready: true,
         satisfiedBy: "env",
@@ -285,8 +310,18 @@ describe("setup milestones", () => {
     });
 
     test("`unverified` when any provider in the fleet reports blocked credentials", async () => {
-      const a = createAgent({ name: "claude-w", isLead: false, status: "idle", capabilities: [] });
-      const b = createAgent({ name: "pi-w", isLead: false, status: "idle", capabilities: [] });
+      const a = await createAgent({
+        name: "claude-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
+      const b = await createAgent({
+        name: "pi-w",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
       await seedCredStatus(a.id, "claude", {
         ready: true,
         satisfiedBy: "env",
@@ -305,7 +340,12 @@ describe("setup milestones", () => {
     });
 
     test("`provider` populated only on single-provider fleets", async () => {
-      const a = createAgent({ name: "lone", isLead: false, status: "idle", capabilities: [] });
+      const a = await createAgent({
+        name: "lone",
+        isLead: false,
+        status: "idle",
+        capabilities: [],
+      });
       await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
       expect(getMilestone(buildStatusPayload(), "harness").provider).toBe("claude");
     });
@@ -399,7 +439,7 @@ describe("setup milestones", () => {
   test("workers: configured when agents exist; verified when lead+worker recently active", async () => {
     expect(getMilestone(buildStatusPayload(), "workers").state).toBe("unverified");
 
-    const lead = createAgent({
+    const lead = await createAgent({
       name: "lead-1",
       isLead: true,
       status: "idle",
@@ -407,7 +447,7 @@ describe("setup milestones", () => {
     });
     expect(getMilestone(buildStatusPayload(), "workers").state).toBe("configured");
 
-    const worker = createAgent({
+    const worker = await createAgent({
       name: "worker-1",
       isLead: false,
       status: "idle",
@@ -444,9 +484,19 @@ describe("getLiveAgentCounts", () => {
   });
 
   test("counts agents with recent activity, excludes offline", async () => {
-    const lead = createAgent({ name: "lead-a", isLead: true, status: "idle", capabilities: [] });
-    const w1 = createAgent({ name: "worker-a", isLead: false, status: "busy", capabilities: [] });
-    const w2 = createAgent({
+    const lead = await createAgent({
+      name: "lead-a",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const w1 = await createAgent({
+      name: "worker-a",
+      isLead: false,
+      status: "busy",
+      capabilities: [],
+    });
+    const w2 = await createAgent({
       name: "worker-b",
       isLead: false,
       status: "offline",
@@ -459,7 +509,12 @@ describe("getLiveAgentCounts", () => {
   });
 
   test("excludes agents with stale lastActivityAt", async () => {
-    const w1 = createAgent({ name: "stale-w", isLead: false, status: "idle", capabilities: [] });
+    const w1 = await createAgent({
+      name: "stale-w",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
     // Backdate to 1h ago (well outside the 5min window).
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     getDb().prepare(`UPDATE agents SET lastActivityAt = ? WHERE id = ?`).run(past, w1.id);
@@ -477,8 +532,13 @@ describe("getInstanceActivity", () => {
   });
 
   test("counts agents online + tasks created in 24h", async () => {
-    const lead = createAgent({ name: "lead-c", isLead: true, status: "idle", capabilities: [] });
-    const worker = createAgent({
+    const lead = await createAgent({
+      name: "lead-c",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const worker = await createAgent({
       name: "worker-c",
       isLead: false,
       status: "idle",
@@ -736,8 +796,13 @@ describe("computeHealth (Phase 2)", () => {
   });
 
   test("`degraded` when harness is `configured` (worker reported ready, no live test) and workers verified", async () => {
-    const lead = createAgent({ name: "lead-h", isLead: true, status: "idle", capabilities: [] });
-    const worker = createAgent({
+    const lead = await createAgent({
+      name: "lead-h",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    const worker = await createAgent({
       name: "worker-h",
       isLead: false,
       status: "idle",
@@ -759,7 +824,12 @@ describe("computeHealth (Phase 2)", () => {
     // Workers in `configured` state means agents exist but haven't posted a
     // heartbeat in the last 5 minutes. This is surfaced on /agents and the
     // dashboard canvas — it should NOT degrade the header health dot.
-    const lead = createAgent({ name: "lead-d", isLead: true, status: "idle", capabilities: [] });
+    const lead = await createAgent({
+      name: "lead-d",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
     await seedCredStatus(lead.id, "claude", {
       ready: true,
       satisfiedBy: "env",
@@ -824,7 +894,7 @@ describe("computeHealth (Phase 2)", () => {
 describe("worker-reported live test drives harness.state", () => {
   test("a passing recent live test flips harness to `verified`", async () => {
     process.env.HARNESS_PROVIDER = "claude";
-    const a = createAgent({ name: "w-lt", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({ name: "w-lt", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", {
       ready: true,
       liveTest: { ok: true, error: null, latency_ms: 80, testedAt: Date.now() },
@@ -835,7 +905,7 @@ describe("worker-reported live test drives harness.state", () => {
   test("a stale live test (older than SWARM_VERIFY_TTL_MS) drops to `configured`", async () => {
     process.env.HARNESS_PROVIDER = "claude";
     process.env.SWARM_VERIFY_TTL_MS = "1000"; // 1s — anything older is stale
-    const a = createAgent({ name: "w-stl", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({ name: "w-stl", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", {
       ready: true,
       liveTest: {
@@ -850,7 +920,12 @@ describe("worker-reported live test drives harness.state", () => {
 
   test("a failed live test still leaves harness `configured` if presence is ready", async () => {
     process.env.HARNESS_PROVIDER = "claude";
-    const a = createAgent({ name: "w-fail", isLead: false, status: "idle", capabilities: [] });
+    const a = await createAgent({
+      name: "w-fail",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
     await seedCredStatus(a.id, "claude", {
       ready: true,
       liveTest: {

@@ -42,33 +42,33 @@ afterAll(() => {
 });
 
 describe("Model Control - Task Creation", () => {
-  test("should store model when creating a task with model='sonnet'", () => {
-    const task = createTaskExtended("Test task with sonnet", { model: "sonnet" });
+  test("should store model when creating a task with model='sonnet'", async () => {
+    const task = await createTaskExtended("Test task with sonnet", { model: "sonnet" });
     expect(task.model).toBe("sonnet");
 
-    const retrieved = getTaskById(task.id);
+    const retrieved = await getTaskById(task.id);
     expect(retrieved?.model).toBe("sonnet");
   });
 
-  test("should store model when creating a task with model='haiku'", () => {
-    const task = createTaskExtended("Test task with haiku", { model: "haiku" });
+  test("should store model when creating a task with model='haiku'", async () => {
+    const task = await createTaskExtended("Test task with haiku", { model: "haiku" });
     expect(task.model).toBe("haiku");
   });
 
-  test("should store model when creating a task with model='opus'", () => {
-    const task = createTaskExtended("Test task with opus", { model: "opus" });
+  test("should store model when creating a task with model='opus'", async () => {
+    const task = await createTaskExtended("Test task with opus", { model: "opus" });
     expect(task.model).toBe("opus");
   });
 
-  test("should default model to undefined when not specified", () => {
-    const task = createTaskExtended("Test task without model");
+  test("should default model to undefined when not specified", async () => {
+    const task = await createTaskExtended("Test task without model");
     expect(task.model).toBeUndefined();
   });
 
-  test("should preserve model alongside other task options", () => {
-    const agent = createAgent({ name: "model-test-agent", isLead: false, status: "idle" });
+  test("should preserve model alongside other task options", async () => {
+    const agent = await createAgent({ name: "model-test-agent", isLead: false, status: "idle" });
 
-    const task = createTaskExtended("Task with model and options", {
+    const task = await createTaskExtended("Task with model and options", {
       model: "haiku",
       agentId: agent.id,
       priority: 80,
@@ -83,10 +83,10 @@ describe("Model Control - Task Creation", () => {
     expect(task.tags).toContain("model-test");
   });
 
-  test("should store model on offered tasks", () => {
-    const agent = createAgent({ name: "offer-model-agent", isLead: false, status: "idle" });
+  test("should store model on offered tasks", async () => {
+    const agent = await createAgent({ name: "offer-model-agent", isLead: false, status: "idle" });
 
-    const task = createTaskExtended("Offered task with model", {
+    const task = await createTaskExtended("Offered task with model", {
       model: "sonnet",
       offeredTo: agent.id,
     });
@@ -95,25 +95,25 @@ describe("Model Control - Task Creation", () => {
     expect(task.status).toBe("offered");
   });
 
-  test("should store modelTier when creating a task with portable tier", () => {
-    const task = createTaskExtended("Test task with tier", { modelTier: "smart" });
+  test("should store modelTier when creating a task with portable tier", async () => {
+    const task = await createTaskExtended("Test task with tier", { modelTier: "smart" });
     expect(task.model).toBeUndefined();
     expect(task.modelTier).toBe("smart");
 
-    const retrieved = getTaskById(task.id);
+    const retrieved = await getTaskById(task.id);
     expect(retrieved?.modelTier).toBe("smart");
   });
 
-  test("should store reasoning effort when creating a task", () => {
-    const task = createTaskExtended("Test task with effort", { effort: "high" });
+  test("should store reasoning effort when creating a task", async () => {
+    const task = await createTaskExtended("Test task with effort", { effort: "high" });
     expect(task.effort).toBe("high");
 
-    const retrieved = getTaskById(task.id);
+    const retrieved = await getTaskById(task.id);
     expect(retrieved?.effort).toBe("high");
   });
 
-  test("should preserve freeform concrete model strings", () => {
-    const task = createTaskExtended("Test task with freeform model", {
+  test("should preserve freeform concrete model strings", async () => {
+    const task = await createTaskExtended("Test task with freeform model", {
       model: "openrouter/anthropic/claude-sonnet-4.6",
     });
 
@@ -258,7 +258,7 @@ describe("Model Control - Schedule to Task Propagation", () => {
       .get("Propagated model task (manual)") as { id: string } | null;
 
     expect(row).not.toBeNull();
-    const task = getTaskById(row!.id);
+    const task = await getTaskById(row!.id);
     expect(task?.model).toBe("haiku");
   });
 
@@ -278,7 +278,7 @@ describe("Model Control - Schedule to Task Propagation", () => {
       .get("Propagated no-model task") as { id: string } | null;
 
     expect(row).not.toBeNull();
-    const task = getTaskById(row!.id);
+    const task = await getTaskById(row!.id);
     expect(task?.model).toBeUndefined();
   });
 
@@ -299,7 +299,7 @@ describe("Model Control - Schedule to Task Propagation", () => {
       .get("Propagated model tier task (manual)") as { id: string } | null;
 
     expect(row).not.toBeNull();
-    const task = getTaskById(row!.id);
+    const task = await getTaskById(row!.id);
     expect(task?.model).toBeUndefined();
     expect(task?.modelTier).toBe("smart");
   });
@@ -320,7 +320,7 @@ describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
   });
 
   test("agent-scoped MODEL_OVERRIDE should override global", async () => {
-    const agent = createAgent({ name: "config-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "config-agent", isLead: false, status: "idle" });
 
     await upsertSwarmConfig({
       scope: "global",
@@ -342,7 +342,7 @@ describe("Model Control - Config MODEL_OVERRIDE Resolution", () => {
   });
 
   test("should fallback to global when no agent-scoped config exists", async () => {
-    const agent = createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "fallback-agent", isLead: false, status: "idle" });
 
     await upsertSwarmConfig({
       scope: "global",
@@ -385,7 +385,11 @@ function resolveReasoningEffortOverride(
 
 describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
   test("agent REASONING_EFFORT_OVERRIDE resolves into ProviderSessionConfig.reasoningEffort", async () => {
-    const agent = createAgent({ name: "reasoning-effort-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({
+      name: "reasoning-effort-agent",
+      isLead: false,
+      status: "idle",
+    });
 
     await upsertSwarmConfig({
       scope: "agent",
@@ -404,7 +408,11 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
   });
 
   test("modelTier and REASONING_EFFORT_OVERRIDE resolve independently on the same agent", async () => {
-    const agent = createAgent({ name: "reasoning-tier-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({
+      name: "reasoning-tier-agent",
+      isLead: false,
+      status: "idle",
+    });
 
     // Agent-scoped MODEL_OVERRIDE set explicitly (rather than relying on
     // whatever global MODEL_OVERRIDE earlier tests left behind) so this test
@@ -446,8 +454,8 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
   });
 
   test("task effort overrides the agent REASONING_EFFORT_OVERRIDE fallback", async () => {
-    const agent = createAgent({ name: "task-effort-agent", isLead: false, status: "idle" });
-    const task = createTaskExtended("Task effort beats agent default", {
+    const agent = await createAgent({ name: "task-effort-agent", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Task effort beats agent default", {
       agentId: agent.id,
       effort: "low",
     });
@@ -464,7 +472,11 @@ describe("Model Control - Config REASONING_EFFORT_OVERRIDE Resolution", () => {
   });
 
   test("no REASONING_EFFORT_OVERRIDE anywhere resolves to undefined", async () => {
-    const agent = createAgent({ name: "reasoning-unset-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({
+      name: "reasoning-unset-agent",
+      isLead: false,
+      status: "idle",
+    });
 
     const configs = await getResolvedConfig(agent.id);
     expect(configs.find((c) => c.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();

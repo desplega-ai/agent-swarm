@@ -211,7 +211,7 @@ export async function handleStats(
   }
 
   if (getStats.match(req.method, pathSegments)) {
-    const agents = getAllAgents();
+    const agents = await getAllAgents();
     const taskStats = await getTaskStats();
 
     const stats = {

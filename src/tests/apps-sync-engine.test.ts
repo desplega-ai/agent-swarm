@@ -255,8 +255,8 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   initDb(TEST_DB_PATH);
-  createAgent({ id: OWNER_AGENT_ID, name: "apps-sync-owner", isLead: false, status: "idle" });
-  createAgent({ id: LEAD_AGENT_ID, name: "apps-sync-lead", isLead: true, status: "idle" });
+  await createAgent({ id: OWNER_AGENT_ID, name: "apps-sync-owner", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_AGENT_ID, name: "apps-sync-lead", isLead: true, status: "idle" });
   syncTool = registeredTool(registerAppSyncTool, "app-sync");
   scriptDeleteTool = registeredTool(registerScriptDeleteTool, "script-delete");
   server = createTestServer();
@@ -718,14 +718,14 @@ describe("swarm-tasks source", () => {
 
   test("projects tasks flatly, truncates the prompt and honours the default heartbeat filter", async () => {
     const longPrompt = "x".repeat(1500);
-    const task = createTaskExtended(longPrompt, {
+    const task = await createTaskExtended(longPrompt, {
       agentId: OWNER_AGENT_ID,
       tags: ["alpha"],
       priority: 70,
       vcsProvider: "github",
       vcsAuthor: "octocat",
     });
-    createTaskExtended("heartbeat noise", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
+    await createTaskExtended("heartbeat noise", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
     const appId = createSyncApp(taskDefinition());
 
     const pass = (await runAppSync({ appId })).passes[0]!;
@@ -745,9 +745,9 @@ describe("swarm-tasks source", () => {
   });
 
   test("assetKey prefix-scopes the window and includeHeartbeat widens it", async () => {
-    createTaskExtended("app owned", { agentId: OWNER_AGENT_ID, key: "shared/apps/demo/one" });
-    createTaskExtended("elsewhere", { agentId: OWNER_AGENT_ID, key: "shared/other/two" });
-    createTaskExtended("beat", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
+    await createTaskExtended("app owned", { agentId: OWNER_AGENT_ID, key: "shared/apps/demo/one" });
+    await createTaskExtended("elsewhere", { agentId: OWNER_AGENT_ID, key: "shared/other/two" });
+    await createTaskExtended("beat", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
 
     const scoped = createSyncApp(taskDefinition({ assetKey: "shared/apps/demo" }), "Scoped");
     expect((await runAppSync({ appId: scoped })).passes[0]?.pulled).toBe(1);
@@ -758,7 +758,7 @@ describe("swarm-tasks source", () => {
 
   test("a full page marks the pull incomplete and skips the sweep", async () => {
     for (let index = 0; index < 3; index += 1) {
-      createTaskExtended(`task ${index}`, { agentId: OWNER_AGENT_ID });
+      await createTaskExtended(`task ${index}`, { agentId: OWNER_AGENT_ID });
     }
     const appId = createSyncApp(taskDefinition({ limit: 2 }));
 
@@ -769,11 +769,11 @@ describe("swarm-tasks source", () => {
 
   test("status, tags and agentId filters narrow the window", async () => {
     const other = crypto.randomUUID();
-    createAgent({ id: other, name: "apps-sync-other", isLead: false, status: "idle" });
-    createTaskExtended("mine tagged", { agentId: OWNER_AGENT_ID, tags: ["alpha", "beta"] });
-    createTaskExtended("mine untagged", { agentId: OWNER_AGENT_ID });
-    createTaskExtended("theirs tagged", { agentId: other, tags: ["alpha"] });
-    createTaskExtended("backlog", { tags: ["alpha"], status: "backlog" });
+    await createAgent({ id: other, name: "apps-sync-other", isLead: false, status: "idle" });
+    await createTaskExtended("mine tagged", { agentId: OWNER_AGENT_ID, tags: ["alpha", "beta"] });
+    await createTaskExtended("mine untagged", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("theirs tagged", { agentId: other, tags: ["alpha"] });
+    await createTaskExtended("backlog", { tags: ["alpha"], status: "backlog" });
 
     const byAgent = createSyncApp(taskDefinition({ agentId: OWNER_AGENT_ID }), "By agent");
     expect((await runAppSync({ appId: byAgent })).passes[0]?.pulled).toBe(2);
@@ -792,15 +792,15 @@ describe("swarm-tasks source", () => {
 
   test("a user-invoked sync is scoped to the requester and never sweeps stale", async () => {
     const userId = createUser({ name: "Apps Sync Requester" }).id;
-    createTaskExtended("mine: fix the login flow", {
+    await createTaskExtended("mine: fix the login flow", {
       agentId: OWNER_AGENT_ID,
       requestedByUserId: userId,
     });
-    createTaskExtended("theirs: rotate the billing keys", {
+    await createTaskExtended("theirs: rotate the billing keys", {
       agentId: OWNER_AGENT_ID,
       requestedByUserId: createUser({ name: "Apps Sync Other" }).id,
     });
-    createTaskExtended("pool: unattributed chore", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("pool: unattributed chore", { agentId: OWNER_AGENT_ID });
     const appId = createSyncApp(taskDefinition());
 
     const scoped = (await runAppSync({ appId, invokedBy: `user:${userId}` })).passes[0]!;
@@ -819,7 +819,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("malformed scoping config fails the pass instead of widening it", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
 
     const badAgent = createSyncApp(taskDefinition({ agentId: 123 }), "Bad agentId");
     const agentResult = await runAppSync({ appId: badAgent });
@@ -845,7 +845,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("an unsupported config key is reported as a warning", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
     const appId = createSyncApp(taskDefinition({ nonsense: "value" }));
 
     const pass = (await runAppSync({ appId })).passes[0]!;
@@ -854,7 +854,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("limit rails: over the cap and below the floor each warn", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
 
     const over = createSyncApp(taskDefinition({ limit: 500 }), "Over cap");
     const overPass = (await runAppSync({ appId: over })).passes[0]!;
@@ -868,7 +868,7 @@ describe("swarm-tasks source", () => {
   });
 
   test("projects every documented task field onto its bound column", async () => {
-    const task = createTaskExtended("full shape", {
+    const task = await createTaskExtended("full shape", {
       agentId: OWNER_AGENT_ID,
       source: "slack",
       tags: ["alpha", "beta"],
@@ -933,7 +933,7 @@ describe("swarm-tasks source", () => {
       // The task text never leaves the DB layer, so nothing upstream of the
       // engine can scrub it: the cents transform fails and quotes the raw
       // value into a warning the engine itself composes.
-      createTaskExtended(`leaked ${secret}`, { agentId: OWNER_AGENT_ID });
+      await createTaskExtended(`leaked ${secret}`, { agentId: OWNER_AGENT_ID });
       const appId = createSyncApp(
         appWith({
           task: {
@@ -987,7 +987,7 @@ describe("swarm-tasks source", () => {
 describe("pair expansion", () => {
   test("fans out to every declared pair and reports unresolvable requests", async () => {
     getDb().run("DELETE FROM agent_tasks");
-    createTaskExtended("pool task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("pool task", { agentId: OWNER_AGENT_ID });
     const script = await fixtureScript("fanout", [ghRecord(1)]);
     const appId = createSyncApp(
       appWith({
@@ -1298,7 +1298,7 @@ describe("concurrency", () => {
   });
 
   test("single-flight is keyed per source, not per model", async () => {
-    createTaskExtended("pool work", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("pool work", { agentId: OWNER_AGENT_ID });
     const script = await fixtureScript("perSource", []);
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 400)); return ${JSON.stringify(
@@ -1610,7 +1610,7 @@ describe("secret hygiene and sync status", () => {
       // 990 filler chars put the secret across the 1000-char cap: truncating
       // first would strand an unrecognizable 10-char prefix in the row.
       getDb().run("DELETE FROM agent_tasks");
-      createTaskExtended("x".repeat(990) + secret, { agentId: OWNER_AGENT_ID });
+      await createTaskExtended("x".repeat(990) + secret, { agentId: OWNER_AGENT_ID });
       const appId = createSyncApp(
         appWith({
           task: {

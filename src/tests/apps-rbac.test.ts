@@ -148,8 +148,8 @@ beforeAll(async () => {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   }
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-rbac-worker", isLead: false, status: "idle" });
-  createAgent({ id: LEAD_ID, name: "apps-rbac-lead", isLead: true, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-rbac-worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "apps-rbac-lead", isLead: true, status: "idle" });
   const user = createUser({ name: "Apps RBAC User" });
   userId = user.id;
   userToken = mintToken(user.id, "apps-rbac", OPERATOR_ACTOR).plaintext;
@@ -322,7 +322,7 @@ describe("app viewer identity", () => {
       body: JSON.stringify({ input: { note: "user viewer" } }),
     });
     expect(action.status).toBe(200);
-    expect(getTaskById(action.body.taskId)?.requestedByUserId).toBe(userId);
+    expect((await getTaskById(action.body.taskId))?.requestedByUserId).toBe(userId);
 
     const operatorAction = await request<{ taskId: string }>(
       `/api/apps/${appId}/actions/triage`,
@@ -330,7 +330,7 @@ describe("app viewer identity", () => {
       { method: "POST", body: JSON.stringify({ input: { note: "operator viewer" } }) },
     );
     expect(operatorAction.status).toBe(200);
-    expect(getTaskById(operatorAction.body.taskId)?.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(operatorAction.body.taskId))?.requestedByUserId).toBeUndefined();
 
     const agentAction = await request<{ taskId: string }>(
       `/api/apps/${appId}/actions/triage`,
@@ -338,7 +338,7 @@ describe("app viewer identity", () => {
       { method: "POST", body: JSON.stringify({ input: { note: "agent viewer" } }) },
     );
     expect(agentAction.status).toBe(200);
-    expect(getTaskById(agentAction.body.taskId)?.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(agentAction.body.taskId))?.requestedByUserId).toBeUndefined();
   });
 });
 
@@ -377,7 +377,12 @@ describe("user writers and the script ownership gate", () => {
 
   test("a web user cannot wire agent-scoped or catalog scripts; stored paths stay editable", async () => {
     const ownerId = crypto.randomUUID();
-    createAgent({ id: ownerId, name: "apps-rbac-script-owner", isLead: false, status: "idle" });
+    await createAgent({
+      id: ownerId,
+      name: "apps-rbac-script-owner",
+      isLead: false,
+      status: "idle",
+    });
     const foreignId = await saveScript("agent", ownerId);
     const globalId = await saveScript("global", null);
     type Issues = { issues?: Array<{ path: string; message: string }> };

@@ -66,9 +66,9 @@ beforeAll(async () => {
   server = createTestServer(API_KEY);
   port = await listen(server);
 
-  const a = createAgent({ name: "kv-test-a", isLead: false, status: "idle" });
-  const b = createAgent({ name: "kv-test-b", isLead: false, status: "idle" });
-  const lead = createAgent({ name: "kv-test-lead", isLead: true, status: "idle" });
+  const a = await createAgent({ name: "kv-test-a", isLead: false, status: "idle" });
+  const b = await createAgent({ name: "kv-test-b", isLead: false, status: "idle" });
+  const lead = await createAgent({ name: "kv-test-lead", isLead: true, status: "idle" });
   agentId = a.id;
   otherAgentId = b.id;
   leadAgentId = lead.id;
@@ -77,7 +77,7 @@ beforeAll(async () => {
     channelId: "CKVTEST",
     threadTs: "1700000000.123456",
   });
-  const slackTask = createTaskExtended("kv test task", {
+  const slackTask = await createTaskExtended("kv test task", {
     agentId,
     source: "mcp",
     slackChannelId: "CKVTEST",

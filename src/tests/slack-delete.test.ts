@@ -47,8 +47,8 @@ describe("slack-delete", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    leadAgentId = createAgent({ name: "Lead", isLead: true, status: "idle" }).id;
-    nonLeadAgentId = createAgent({ name: "Worker", isLead: false, status: "idle" }).id;
+    leadAgentId = (await createAgent({ name: "Lead", isLead: true, status: "idle" })).id;
+    nonLeadAgentId = (await createAgent({ name: "Worker", isLead: false, status: "idle" })).id;
   });
 
   beforeEach(() => {

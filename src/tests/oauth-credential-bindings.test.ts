@@ -109,7 +109,7 @@ beforeAll(async () => {
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "OAuth Credential Lead", isLead: true, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "OAuth Credential Lead", isLead: true, status: "idle" });
 });
 
 beforeEach(() => {

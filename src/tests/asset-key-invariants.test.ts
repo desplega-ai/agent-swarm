@@ -28,9 +28,9 @@ let userId: string;
 let appId: string;
 let scriptId: string;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "namespace-worker", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "namespace-worker", isLead: false, status: "idle" })).id;
   userId = createUser({ name: "Namespace User", email: "namespace@example.com" }).id;
   appId = createApp({
     name: "Default app",
@@ -54,9 +54,9 @@ afterAll(() => {
 });
 
 describe("cross-entity asset namespace invariants", () => {
-  test("all primary entities receive deterministic resource-specific shared keys", () => {
-    const taskA = createTaskExtended("first", { agentId });
-    const taskB = createTaskExtended("second", { agentId });
+  test("all primary entities receive deterministic resource-specific shared keys", async () => {
+    const taskA = await createTaskExtended("first", { agentId });
+    const taskB = await createTaskExtended("second", { agentId });
     const workflow = createWorkflow({ name: "default-workflow", definition: { nodes: [] } });
     const schedule = createScheduledTask({
       name: "default-schedule",
@@ -102,10 +102,10 @@ describe("cross-entity asset namespace invariants", () => {
     }
   });
 
-  test("children inherit a parent namespace unless explicitly overridden", () => {
-    const parent = createTaskExtended("parent", { agentId, key: "shared/projects/" });
-    const child = createTaskExtended("child", { parentTaskId: parent.id });
-    const override = createTaskExtended("override", {
+  test("children inherit a parent namespace unless explicitly overridden", async () => {
+    const parent = await createTaskExtended("parent", { agentId, key: "shared/projects/" });
+    const child = await createTaskExtended("child", { parentTaskId: parent.id });
+    const override = await createTaskExtended("override", {
       parentTaskId: parent.id,
       key: "shared/other/",
     });
@@ -124,9 +124,9 @@ describe("cross-entity asset namespace invariants", () => {
     expect(createStandaloneScheduleTask(schedule).key).toBe("shared/automation/");
   });
 
-  test("agent-fs mappings are transactional metadata and task moves do not change provider paths", () => {
-    const task = createTaskExtended("mapped task", { agentId, key: "shared/reports/" });
-    const attachment = insertTaskAttachment({
+  test("agent-fs mappings are transactional metadata and task moves do not change provider paths", async () => {
+    const task = await createTaskExtended("mapped task", { agentId, key: "shared/reports/" });
+    const attachment = await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "report.md",
@@ -137,7 +137,7 @@ describe("cross-entity asset namespace invariants", () => {
       orgId: "org-1",
       driveId: "drive-1",
     });
-    const before = getAssetKeyMappingByProvider({
+    const before = await getAssetKeyMappingByProvider({
       providerId: "agent-fs",
       providerOrgId: "org-1",
       providerDriveId: "drive-1",
@@ -146,20 +146,27 @@ describe("cross-entity asset namespace invariants", () => {
     expect(before?.key).toBe("shared/reports/");
     expect(before?.sourceEntityId).toBe(attachment.id);
     expect(
-      upsertAssetKeyMapping({
-        providerId: "agent-fs",
-        providerOrgId: "org-1",
-        providerDriveId: "drive-1",
-        providerKey: "thoughts/reports/report.md",
-        key: "shared/reports/",
-      }).sourceEntityType,
+      (
+        await upsertAssetKeyMapping({
+          providerId: "agent-fs",
+          providerOrgId: "org-1",
+          providerDriveId: "drive-1",
+          providerKey: "thoughts/reports/report.md",
+          key: "shared/reports/",
+        })
+      ).sourceEntityType,
     ).toBe("task-attachment");
 
     expect(
-      moveAssetKey({ entityType: "task", id: task.id, key: "shared/archive/", changedBy: userId }),
+      await moveAssetKey({
+        entityType: "task",
+        id: task.id,
+        key: "shared/archive/",
+        changedBy: userId,
+      }),
     ).toBe(true);
-    expect(getTaskById(task.id)?.key).toBe("shared/archive/");
-    const after = getAssetKeyMappingByProvider({
+    expect((await getTaskById(task.id))?.key).toBe("shared/archive/");
+    const after = await getAssetKeyMappingByProvider({
       providerId: "agent-fs",
       providerOrgId: "org-1",
       providerDriveId: "drive-1",
@@ -176,14 +183,15 @@ describe("cross-entity asset namespace invariants", () => {
         .map((row) => row.entity_type),
     );
     expect(movedTypes).toEqual(new Set(["task", "file"]));
-    expect(() =>
-      moveAssetKey({ entityType: "file", id: before!.id, key: "shared/detached/" }),
+    expect(
+      async () =>
+        await moveAssetKey({ entityType: "file", id: before!.id, key: "shared/detached/" }),
     ).toThrow("move with their parent task");
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
   });
 
-  test("standalone provider mappings default to an fs resource key and remain idempotent", () => {
-    const created = upsertAssetKeyMapping({
+  test("standalone provider mappings default to an fs resource key and remain idempotent", async () => {
+    const created = await upsertAssetKeyMapping({
       providerId: "agent-fs",
       providerOrgId: "org-default",
       providerDriveId: "drive-default",
@@ -191,7 +199,7 @@ describe("cross-entity asset namespace invariants", () => {
     });
     expect(created.key).toBe(`shared/fs:agent-fs:${created.id}/`);
 
-    const repeated = upsertAssetKeyMapping({
+    const repeated = await upsertAssetKeyMapping({
       providerId: "agent-fs",
       providerOrgId: "org-default",
       providerDriveId: "drive-default",
@@ -229,12 +237,17 @@ describe("cross-entity asset namespace invariants", () => {
     expect(JSON.stringify(summaries)).not.toContain("<p>ok</p>");
   });
 
-  test("app and script moves update keys and write typed history rows", () => {
+  test("app and script moves update keys and write typed history rows", async () => {
     expect(
-      moveAssetKey({ entityType: "app", id: appId, key: "shared/products/", changedBy: userId }),
+      await moveAssetKey({
+        entityType: "app",
+        id: appId,
+        key: "shared/products/",
+        changedBy: userId,
+      }),
     ).toBe(true);
     expect(
-      moveAssetKey({
+      await moveAssetKey({
         entityType: "script",
         id: scriptId,
         key: "shared/automation/",
@@ -264,9 +277,15 @@ describe("cross-entity asset namespace invariants", () => {
     ]);
   });
 
-  test("prefix filters treat SQL wildcard characters as literal key content", () => {
-    const literal = createTaskExtended("literal wildcard", { agentId, key: "shared/percent%/" });
-    const neighbor = createTaskExtended("wildcard neighbor", { agentId, key: "shared/percentx/" });
+  test("prefix filters treat SQL wildcard characters as literal key content", async () => {
+    const literal = await createTaskExtended("literal wildcard", {
+      agentId,
+      key: "shared/percent%/",
+    });
+    const neighbor = await createTaskExtended("wildcard neighbor", {
+      agentId,
+      key: "shared/percentx/",
+    });
     const matches = listAssetSummaries({
       keyPrefix: "shared/percent%/",
       types: ["task"],
@@ -276,7 +295,7 @@ describe("cross-entity asset namespace invariants", () => {
   });
 
   test("provider drift remains readable, blocks moves, and can be repaired idempotently", async () => {
-    const mapping = getAssetKeyMappingByProvider({
+    const mapping = await getAssetKeyMappingByProvider({
       providerId: "agent-fs",
       providerOrgId: "org-1",
       providerDriveId: "drive-1",
@@ -289,8 +308,9 @@ describe("cross-entity asset namespace invariants", () => {
     ]);
     expect(auditAssetKeys(getDb()).warningCount).toBeGreaterThan(0);
     const anyTask = listAssetSummaries({ types: ["task"], limit: 1 })[0]!;
-    expect(() =>
-      moveAssetKey({ entityType: "task", id: anyTask.id, key: "shared/blocked/" }),
+    expect(
+      async () =>
+        await moveAssetKey({ entityType: "task", id: anyTask.id, key: "shared/blocked/" }),
     ).toThrow("blocked until");
 
     await upsertAssetKeyMapping({
@@ -306,8 +326,8 @@ describe("cross-entity asset namespace invariants", () => {
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
   });
 
-  test("personal namespace users are audited and missing users are repairable warnings", () => {
-    const task = createTaskExtended("personal", {
+  test("personal namespace users are audited and missing users are repairable warnings", async () => {
+    const task = await createTaskExtended("personal", {
       agentId,
       key: `personal/${userId}/drafts/`,
     });

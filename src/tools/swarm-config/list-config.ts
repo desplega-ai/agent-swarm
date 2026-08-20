@@ -65,7 +65,7 @@ export const registerListConfigTool = (server: McpServer) => {
         let effectiveIncludeSecrets = includeSecrets ?? false;
         let secretsNote = "";
         if (includeSecrets) {
-          const agent = getAgentById(requestInfo.agentId);
+          const agent = await getAgentById(requestInfo.agentId);
           const decision = can({
             principal: {
               kind: "agent",

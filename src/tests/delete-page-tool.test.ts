@@ -65,13 +65,15 @@ describe("delete-page MCP tool", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    ownerId = createAgent({ name: "delete-page-owner", isLead: false, status: "idle" }).id;
-    otherAgentId = createAgent({
-      name: "delete-page-other",
-      isLead: false,
-      status: "idle",
-    }).id;
-    leadId = createAgent({ name: "delete-page-lead", isLead: true, status: "idle" }).id;
+    ownerId = (await createAgent({ name: "delete-page-owner", isLead: false, status: "idle" })).id;
+    otherAgentId = (
+      await createAgent({
+        name: "delete-page-other",
+        isLead: false,
+        status: "idle",
+      })
+    ).id;
+    leadId = (await createAgent({ name: "delete-page-lead", isLead: true, status: "idle" })).id;
   });
 
   afterAll(async () => {

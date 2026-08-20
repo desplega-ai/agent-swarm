@@ -31,7 +31,7 @@ export const registerSkillDeleteTool = (server: McpServer) => {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

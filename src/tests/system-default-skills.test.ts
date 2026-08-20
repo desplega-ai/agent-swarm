@@ -85,7 +85,7 @@ describe("system-default skills", () => {
   });
 
   test("existing agents see system-default skills through the self-healing view", async () => {
-    const existingAgent = createAgent({
+    const existingAgent = await createAgent({
       name: "Existing Default Skill Worker",
       description: "Created after seeded defaults",
       role: "worker",
@@ -110,7 +110,7 @@ describe("system-default skills", () => {
   });
 
   test("existing agents see swarm-scope skills without explicit install rows", async () => {
-    const existingAgent = createAgent({
+    const existingAgent = await createAgent({
       name: "Existing Swarm Skill Worker",
       description: "Created before a swarm-scope skill",
       role: "worker",
@@ -146,8 +146,8 @@ describe("system-default skills", () => {
     expect(skills.find((skill) => skill.id === swarmSkill.id)?.isActive).toBe(true);
   });
 
-  test("new agents get concrete agent_skills rows for system defaults", () => {
-    const beforeAgent = createAgent({
+  test("new agents get concrete agent_skills rows for system defaults", async () => {
+    const beforeAgent = await createAgent({
       name: "Concrete Install Worker",
       description: "Created with defaults present",
       role: "worker",
@@ -170,7 +170,7 @@ describe("system-default skills", () => {
   });
 
   test("system-default skills remain visible even if an install row is toggled inactive", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Inactive Default Worker",
       description: "Tests self-healing union",
       role: "worker",

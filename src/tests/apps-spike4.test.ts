@@ -130,7 +130,7 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-spike4-worker", isLead: false, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-spike4-worker", isLead: false, status: "idle" });
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();

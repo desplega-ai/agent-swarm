@@ -68,9 +68,9 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const a = createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
-  const b = createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
-  const l = createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
+  const a = await createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
+  const b = await createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
+  const l = await createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
   agentA = a.id;
   agentB = b.id;
   lead = l.id;

@@ -76,8 +76,8 @@ beforeAll(async () => {
   }
   closeDb();
   initDb(TEST_DB_PATH);
-  createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+  await createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {

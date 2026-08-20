@@ -34,7 +34,7 @@ describe("Scheduled Tasks Integration", () => {
     initDb(TEST_DB_PATH);
 
     // Create a test agent
-    testAgent = createAgent({
+    testAgent = await createAgent({
       name: "Test Schedule Agent",
       isLead: false,
       status: "idle",
@@ -333,7 +333,7 @@ describe("Scheduled Tasks Integration", () => {
       const createdTask = getDb()
         .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
         .get(schedule.taskTemplate) as { id: string };
-      const task = getTaskById(createdTask.id);
+      const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId).toBe(requester.id);
     });
 
@@ -351,7 +351,7 @@ describe("Scheduled Tasks Integration", () => {
       const createdTask = getDb()
         .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
         .get(schedule.taskTemplate) as { id: string };
-      const task = getTaskById(createdTask.id);
+      const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId ?? null).toBeNull();
     });
 
@@ -373,7 +373,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should create task with target agent when specified", async () => {
-      const targetAgent = createAgent({
+      const targetAgent = await createAgent({
         name: "Target Agent",
         isLead: false,
         status: "idle",

@@ -448,7 +448,7 @@ describe("agent-fs provisioning seeder", () => {
       key: "AGENT_FS_DEFAULT_DRIVE_ID",
       value: "shared-drive",
     });
-    const worker = createAgent({
+    const worker = await createAgent({
       name: "Credential Worker",
       description: "Worker with custom agent-fs email",
       role: "worker",

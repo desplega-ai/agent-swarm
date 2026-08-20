@@ -81,8 +81,8 @@ beforeAll(async () => {
   // The mock provider runs on localhost; MCP token exchange SSRF-guards loopback.
   process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "true";
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
-  createAgent({ id: NON_LEAD_ID, name: "worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
+  await createAgent({ id: NON_LEAD_ID, name: "worker", isLead: false, status: "idle" });
 
   providerServer = Bun.serve({
     port: 0,

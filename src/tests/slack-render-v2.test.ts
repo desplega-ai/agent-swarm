@@ -250,10 +250,10 @@ afterAll(async () => {
 
 describe("Slack renderer v2", () => {
   test("settles the accepted-message reaction after streaming a terminal outcome", async () => {
-    const lead = createAgent({ name: "Reaction Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Reaction Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REACTION");
     const triggerTs = `${slackAddressSequence}.2`;
-    const ask = createTaskExtended("terminal reaction ask", {
+    const ask = await createTaskExtended("terminal reaction ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -261,7 +261,7 @@ describe("Slack renderer v2", () => {
       slackTriggerMessageTs: triggerTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "Done");
     calls.length = 0;
@@ -287,16 +287,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("does not backfill historical Slack tasks when v2 is first enabled", async () => {
-    const lead = createAgent({ name: "Upgrade Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Upgrade Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_UPGRADE_HISTORY");
-    const ask = createTaskExtended("historical ask", {
+    const ask = await createTaskExtended("historical ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await completeTask(ask.id, "This historical result must not be replayed.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?`, [
       "2025-01-01T00:00:00.000Z",
@@ -323,16 +323,16 @@ describe("Slack renderer v2", () => {
     delete testGlobals.__testMigrationTemplate;
     try {
       initDb(TEST_DB_PATH);
-      const lead = createAgent({ name: "Restart Lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "Restart Lead", isLead: true, status: "idle" });
       const { channelId, threadTs } = uniqueSlackAddress("C_RESTART_HISTORY");
-      const ask = createTaskExtended("old ask before restart", {
+      const ask = await createTaskExtended("old ask before restart", {
         agentId: lead.id,
         source: "slack",
         slackChannelId: channelId,
         slackThreadTs: threadTs,
         contextKey: slackContextKey({ channelId, threadTs }),
       });
-      startTask(ask.id);
+      await startTask(ask.id);
       getDb().run(`UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?`, [
         "2025-02-01T00:00:00.000Z",
         "2025-02-01T00:01:00.000Z",
@@ -359,17 +359,17 @@ describe("Slack renderer v2", () => {
   });
 
   test("keeps an accidental old tree active only for post-activation asks", async () => {
-    const lead = createAgent({ name: "Existing Tree Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Existing Tree Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_EXISTING_TREE");
     const contextKey = slackContextKey({ channelId, threadTs });
-    const oldAsk = createTaskExtended("old ask with an accidental tree", {
+    const oldAsk = await createTaskExtended("old ask with an accidental tree", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    startTask(oldAsk.id);
+    await startTask(oldAsk.id);
     const tree = await ensureSlackThreadTree([oldAsk.id]);
     await completeTask(oldAsk.id, "Old outcome must remain suppressed.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ? WHERE id = ?`, [
@@ -379,14 +379,14 @@ describe("Slack renderer v2", () => {
     getDb().run(`UPDATE slack_render_v2_state SET activated_at = ? WHERE id = 1`, [
       "2026-01-01T00:00:00.000Z",
     ]);
-    const newAsk = createTaskExtended("new ask in the existing thread", {
+    const newAsk = await createTaskExtended("new ask in the existing thread", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    startTask(newAsk.id);
+    await startTask(newAsk.id);
     await completeTask(newAsk.id, "Only this new outcome should be rendered.");
     calls.length = 0;
     _resetSlackRenderV2ForTests();
@@ -400,17 +400,21 @@ describe("Slack renderer v2", () => {
   });
 
   test("does not verify an old missing outcome when new active work awakens its tree", async () => {
-    const lead = createAgent({ name: "Active Existing Tree Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({
+      name: "Active Existing Tree Lead",
+      isLead: true,
+      status: "idle",
+    });
     const { channelId, threadTs } = uniqueSlackAddress("C_ACTIVE_EXISTING_TREE");
     const contextKey = slackContextKey({ channelId, threadTs });
-    const oldAsk = createTaskExtended("old terminal ask without an outcome", {
+    const oldAsk = await createTaskExtended("old terminal ask without an outcome", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    startTask(oldAsk.id);
+    await startTask(oldAsk.id);
     const tree = await ensureSlackThreadTree([oldAsk.id]);
     await completeTask(oldAsk.id, "This old outcome must not trigger tree verification.");
     getDb().run(`UPDATE agent_tasks SET createdAt = ? WHERE id = ?`, [
@@ -420,14 +424,14 @@ describe("Slack renderer v2", () => {
     getDb().run(`UPDATE slack_render_v2_state SET activated_at = ? WHERE id = 1`, [
       "2026-01-01T00:00:00.000Z",
     ]);
-    const activeAsk = createTaskExtended("new active ask in the old thread", {
+    const activeAsk = await createTaskExtended("new active ask in the old thread", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    startTask(activeAsk.id);
+    await startTask(activeAsk.id);
     calls.length = 0;
     _resetSlackRenderV2ForTests();
 
@@ -440,17 +444,17 @@ describe("Slack renderer v2", () => {
   });
 
   test("stops an in-flight discovery pass after v2 is disabled", async () => {
-    const lead = createAgent({ name: "Kill Switch Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Kill Switch Lead", isLead: true, status: "idle" });
     for (const label of ["first", "second"]) {
       const { channelId, threadTs } = uniqueSlackAddress(`C_KILL_${label}`);
-      const ask = createTaskExtended(`${label} ask`, {
+      const ask = await createTaskExtended(`${label} ask`, {
         agentId: lead.id,
         source: "slack",
         slackChannelId: channelId,
         slackThreadTs: threadTs,
         contextKey: slackContextKey({ channelId, threadTs }),
       });
-      startTask(ask.id);
+      await startTask(ask.id);
     }
     disableRenderAfterMethod = "chat.postMessage";
 
@@ -481,11 +485,11 @@ describe("Slack renderer v2", () => {
   });
 
   test("persists the tree timestamp before permalink resolution and reuses it on retry", async () => {
-    const lead = createAgent({ name: "Permalink Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Permalink Lead", isLead: true, status: "idle" });
     const channelId = "C_TREE_PERMALINK";
     const threadTs = "150.1";
     const contextKey = slackContextKey({ channelId, threadTs });
-    const ask = createTaskExtended("permalink recovery", {
+    const ask = await createTaskExtended("permalink recovery", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -515,17 +519,17 @@ describe("Slack renderer v2", () => {
   });
 
   test("reconciles a tree accepted before its timestamp bind without reposting", async () => {
-    const lead = createAgent({ name: "Tree Crash Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Tree Crash Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_BIND_CRASH");
     const contextKey = slackContextKey({ channelId, threadTs });
-    const ask = createTaskExtended("survive tree bind crash", {
+    const ask = await createTaskExtended("survive tree bind crash", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     getDb().run(`CREATE TRIGGER fail_tree_timestamp_bind
       BEFORE UPDATE OF ts ON slack_messages
       WHEN OLD.kind = 'tree' AND OLD.ts LIKE 'pending:%'
@@ -561,16 +565,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("reuses the physical thread tree when a later task has a different context key", async () => {
-    const lead = createAgent({ name: "Thread Identity Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Thread Identity Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_THREAD_IDENTITY");
-    const first = createTaskExtended("first context", {
+    const first = await createTaskExtended("first context", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: `custom:first:${channelId}`,
     });
-    const second = createTaskExtended("second context", {
+    const second = await createTaskExtended("second context", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -596,11 +600,11 @@ describe("Slack renderer v2", () => {
     expect(formatV2Duration(start, new Date("2026-07-31T20:12:00.000Z"))).toBe("12m");
   });
 
-  test("renders the frozen context tree without permalink backlinks", () => {
-    const lead = createAgent({ name: "Lead", isLead: true, status: "idle" });
-    const researcher = createAgent({ name: "Researcher", isLead: false, status: "idle" });
+  test("renders the frozen context tree without permalink backlinks", async () => {
+    const lead = await createAgent({ name: "Lead", isLead: true, status: "idle" });
+    const researcher = await createAgent({ name: "Researcher", isLead: false, status: "idle" });
     const contextKey = slackContextKey({ channelId: "C_TREE_SHAPE", threadTs: "100.1" });
-    const ask = createTaskExtended("format tests", {
+    const ask = await createTaskExtended("format tests", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: "C_TREE_SHAPE",
@@ -608,19 +612,19 @@ describe("Slack renderer v2", () => {
       slackTriggerMessageTs: "100.2",
       contextKey,
     });
-    const child = createTaskExtended("research exact Slack API behavior", {
+    const child = await createTaskExtended("research exact Slack API behavior", {
       agentId: researcher.id,
       source: "mcp",
       parentTaskId: ask.id,
       followUpConfig: { disabled: true },
     });
-    const grandchild = createTaskExtended("verify payload", {
+    const grandchild = await createTaskExtended("verify payload", {
       agentId: researcher.id,
       source: "mcp",
       parentTaskId: child.id,
       followUpConfig: { disabled: true },
     });
-    const secondAsk = createTaskExtended("this PR", {
+    const secondAsk = await createTaskExtended("this PR", {
       agentId: lead.id,
       source: "slack",
       parentTaskId: grandchild.id,
@@ -629,9 +633,9 @@ describe("Slack renderer v2", () => {
       slackTriggerMessageTs: "100.3",
       contextKey,
     });
-    expect(getTaskById(ask.id)?.slackTriggerMessageTs).toBe("100.2");
-    expect(getTaskById(child.id)?.slackTriggerMessageTs).toBeUndefined();
-    expect(getTaskById(grandchild.id)?.slackTriggerMessageTs).toBeUndefined();
+    expect((await getTaskById(ask.id))?.slackTriggerMessageTs).toBe("100.2");
+    expect((await getTaskById(child.id))?.slackTriggerMessageTs).toBeUndefined();
+    expect((await getTaskById(grandchild.id))?.slackTriggerMessageTs).toBeUndefined();
     const fixedStart = new Date("2026-07-31T20:00:00.000Z").toISOString();
     const now = new Date("2026-07-31T20:08:05.000Z");
     const finishedAt = new Date("2026-07-31T20:04:00.000Z").toISOString();
@@ -683,15 +687,15 @@ describe("Slack renderer v2", () => {
   });
 
   test("does not resolve or render direct-trigger permalink backlinks", async () => {
-    const lead = createAgent({ name: "Trigger Lead", isLead: true, status: "idle" });
-    const worker = createAgent({ name: "Trigger Worker", isLead: false, status: "idle" });
+    const lead = await createAgent({ name: "Trigger Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "Trigger Worker", isLead: false, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TRIGGER_LINKS");
     const contextKey = slackContextKey({ channelId, threadTs });
     const firstTs = `${slackAddressSequence}.2`;
     const secondTs = `${slackAddressSequence}.3`;
     seedRemoteSlackMessage(channelId, threadTs, firstTs, "first human ask");
     seedRemoteSlackMessage(channelId, threadTs, secondTs, "second human ask");
-    const first = createTaskExtended("first human ask", {
+    const first = await createTaskExtended("first human ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -699,13 +703,13 @@ describe("Slack renderer v2", () => {
       slackTriggerMessageTs: firstTs,
       contextKey,
     });
-    const child = createTaskExtended("delegated work", {
+    const child = await createTaskExtended("delegated work", {
       agentId: worker.id,
       source: "mcp",
       parentTaskId: first.id,
       followUpConfig: { disabled: true },
     });
-    const second = createTaskExtended("second human ask", {
+    const second = await createTaskExtended("second human ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -732,16 +736,18 @@ describe("Slack renderer v2", () => {
   });
 
   test("collapses older tasks before a persistent tree exceeds Slack's section limit", async () => {
-    const lead = createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_OVERFLOW");
-    const tasks = Array.from({ length: 80 }, (_, index) =>
-      createTaskExtended(`overflow task ${index} ${"x".repeat(60)}`, {
-        agentId: lead.id,
-        source: "slack",
-        slackChannelId: channelId,
-        slackThreadTs: threadTs,
-        contextKey: slackContextKey({ channelId, threadTs }),
-      }),
+    const tasks = Array.from(
+      { length: 80 },
+      async (_, index) =>
+        await createTaskExtended(`overflow task ${index} ${"x".repeat(60)}`, {
+          agentId: lead.id,
+          source: "slack",
+          slackChannelId: channelId,
+          slackThreadTs: threadTs,
+          contextKey: slackContextKey({ channelId, threadTs }),
+        }),
     );
 
     await ensureSlackThreadTree([tasks.at(-1)!.id]);
@@ -763,22 +769,22 @@ describe("Slack renderer v2", () => {
   });
 
   test("caps a pathological tree line and keeps the newest task in valid sections", async () => {
-    const lead = createAgent({ name: "Pathological Lead", isLead: true, status: "idle" });
-    const worker = createAgent({
+    const lead = await createAgent({ name: "Pathological Lead", isLead: true, status: "idle" });
+    const worker = await createAgent({
       name: `Worker ${"x".repeat(5_000)}`,
       isLead: false,
       status: "idle",
     });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_LONG_LINE");
     const contextKey = slackContextKey({ channelId, threadTs });
-    const ask = createTaskExtended("pathological tree line", {
+    const ask = await createTaskExtended("pathological tree line", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey,
     });
-    const child = createTaskExtended("render the long worker label", {
+    const child = await createTaskExtended("render the long worker label", {
       agentId: worker.id,
       source: "mcp",
       parentTaskId: ask.id,
@@ -801,16 +807,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("discovers an ask that completed before the first poll and emits one tree and card", async () => {
-    const lead = createAgent({ name: "Fast Terminal Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Fast Terminal Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_FAST_TERMINAL");
-    const ask = createTaskExtended("finish before renderer poll", {
+    const ask = await createTaskExtended("finish before renderer poll", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await completeTask(ask.id, "Finished before the renderer observed the in-progress state.");
 
     await processSlackRenderV2();
@@ -823,16 +829,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("reconciles a started outcome before its timestamp bind without a duplicate stream", async () => {
-    const lead = createAgent({ name: "Outcome Crash Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Outcome Crash Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_BIND_CRASH");
-    const ask = createTaskExtended("survive outcome bind crash", {
+    const ask = await createTaskExtended("survive outcome bind crash", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "Recover this outcome through its deterministic task link.");
     getDb().run(`CREATE TRIGGER fail_outcome_timestamp_bind
@@ -871,11 +877,11 @@ describe("Slack renderer v2", () => {
   });
 
   test("reuses one persisted tree and streams one immutable outcome before linking it", async () => {
-    const lead = createAgent({ name: "Lead v2", isLead: true, status: "idle" });
-    const worker = createAgent({ name: "Researcher v2", isLead: false, status: "idle" });
+    const lead = await createAgent({ name: "Lead v2", isLead: true, status: "idle" });
+    const worker = await createAgent({ name: "Researcher v2", isLead: false, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_V2");
     const contextKey = slackContextKey({ channelId, threadTs });
-    const ask = createTaskExtended("ship Slack renderer", {
+    const ask = await createTaskExtended("ship Slack renderer", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -883,21 +889,21 @@ describe("Slack renderer v2", () => {
       slackUserId: "U_REQUESTER",
       contextKey,
     });
-    const child = createTaskExtended("research implementation", {
+    const child = await createTaskExtended("research implementation", {
       agentId: worker.id,
       source: "mcp",
       parentTaskId: ask.id,
       followUpConfig: { disabled: true },
     });
-    startTask(ask.id);
-    startTask(child.id);
+    await startTask(ask.id);
+    await startTask(child.id);
 
     const firstTree = await ensureSlackThreadTree([ask.id, child.id]);
     expect(firstTree?.kind).toBe("tree");
     expect(getSlackTreeMessage(contextKey)?.ts).toBe(firstTree?.ts);
     expect(calls.filter((call) => call.method === "chat.postMessage")).toHaveLength(1);
 
-    const secondAsk = createTaskExtended("follow-up ask", {
+    const secondAsk = await createTaskExtended("follow-up ask", {
       agentId: lead.id,
       source: "slack",
       parentTaskId: ask.id,
@@ -966,7 +972,7 @@ describe("Slack renderer v2", () => {
       (call) => call.method === "chat.stopStream" && call.payload.channel === channelId,
     )!;
     expect(Object.keys(stopped.payload).sort()).toEqual(["blocks", "channel", "ts"]);
-    const completedAsk = getTaskById(ask.id)!;
+    const completedAsk = (await getTaskById(ask.id))!;
     const duration = formatV2Duration(
       new Date(completedAsk.createdAt),
       new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
@@ -1006,9 +1012,9 @@ describe("Slack renderer v2", () => {
   });
 
   test("preserves complete native Markdown beyond the Block Kit text ceiling", async () => {
-    const lead = createAgent({ name: "Markdown Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Markdown Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_MARKDOWN");
-    const ask = createTaskExtended("preserve native Markdown", {
+    const ask = await createTaskExtended("preserve native Markdown", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -1031,7 +1037,7 @@ describe("Slack renderer v2", () => {
     ].join("\n");
     expect(output.length).toBeGreaterThan(3_000);
     expect(output.length).toBeLessThan(12_000);
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, output);
     calls.length = 0;
@@ -1054,9 +1060,9 @@ describe("Slack renderer v2", () => {
   });
 
   test("truncates oversized Markdown before a code fence and links the full task", async () => {
-    const lead = createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Overflow Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_OUTCOME_OVERFLOW");
-    const ask = createTaskExtended("truncate oversized Markdown safely", {
+    const ask = await createTaskExtended("truncate oversized Markdown safely", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
@@ -1081,7 +1087,7 @@ describe("Slack renderer v2", () => {
       oversizedFence,
     ].join("\n");
     expect(output.length).toBeGreaterThan(12_000);
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, output);
     calls.length = 0;
@@ -1103,17 +1109,17 @@ describe("Slack renderer v2", () => {
   });
 
   test("streams the complete failed outcome with its reason", async () => {
-    const lead = createAgent({ name: "Failure Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Failure Lead", isLead: true, status: "idle" });
     const channelId = "C_RENDER_FAILURE";
     const threadTs = "400.1";
-    const ask = createTaskExtended("failing ask", {
+    const ask = await createTaskExtended("failing ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
     await Bun.sleep(2);
     const reason = `expected test failure ${"detail ".repeat(200)}`;
@@ -1139,16 +1145,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("renders cancellation distinctly and carries the complete reason", async () => {
-    const lead = createAgent({ name: "Cancellation Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Cancellation Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_CANCELLED");
-    const ask = createTaskExtended("cancelled ask", {
+    const ask = await createTaskExtended("cancelled ask", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
     await cancelTask(ask.id, `requester changed direction ${"context ".repeat(200)}`);
     calls.length = 0;
@@ -1172,16 +1178,20 @@ describe("Slack renderer v2", () => {
   });
 
   test("serializes concurrent tree writers and leaves the newest terminal state visible", async () => {
-    const lead = createAgent({ name: "Concurrent Writer Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({
+      name: "Concurrent Writer Lead",
+      isLead: true,
+      status: "idle",
+    });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WRITER_RACE");
-    const ask = createTaskExtended("serialize tree writers", {
+    const ask = await createTaskExtended("serialize tree writers", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
     _resetSlackRenderV2ForTests();
     calls.length = 0;
@@ -1206,16 +1216,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("replaces a deleted tree exactly once after message_not_found", async () => {
-    const lead = createAgent({ name: "Deleted Tree Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Deleted Tree Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_DELETED");
-    const ask = createTaskExtended("replace deleted tree", {
+    const ask = await createTaskExtended("replace deleted tree", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     const original = await ensureSlackThreadTree([ask.id]);
     _resetSlackRenderV2ForTests();
     await completeTask(ask.id, "Create an outcome, then replace the deleted tree.");
@@ -1241,9 +1251,9 @@ describe("Slack renderer v2", () => {
   });
 
   test("advances the tree watermark for an identical snapshot without a Slack update", async () => {
-    const worker = createAgent({ name: "Watermark Worker", isLead: false, status: "idle" });
+    const worker = await createAgent({ name: "Watermark Worker", isLead: false, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WATERMARK_NOOP");
-    const task = createTaskExtended("settle identical tree state", {
+    const task = await createTaskExtended("settle identical tree state", {
       agentId: worker.id,
       source: "mcp",
       slackChannelId: channelId,
@@ -1251,7 +1261,7 @@ describe("Slack renderer v2", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
       followUpConfig: { disabled: true },
     });
-    startTask(task.id);
+    await startTask(task.id);
     await failTask(task.id, "stable terminal snapshot");
     const tree = await ensureSlackThreadTree([task.id]);
     await Bun.sleep(2);
@@ -1269,9 +1279,13 @@ describe("Slack renderer v2", () => {
   });
 
   test("does not advance the tree watermark when Slack update fails", async () => {
-    const worker = createAgent({ name: "Retry Watermark Worker", isLead: false, status: "idle" });
+    const worker = await createAgent({
+      name: "Retry Watermark Worker",
+      isLead: false,
+      status: "idle",
+    });
     const { channelId, threadTs } = uniqueSlackAddress("C_TREE_WATERMARK_RETRY");
-    const task = createTaskExtended("retry failed tree update", {
+    const task = await createTaskExtended("retry failed tree update", {
       agentId: worker.id,
       source: "mcp",
       slackChannelId: channelId,
@@ -1279,7 +1293,7 @@ describe("Slack renderer v2", () => {
       contextKey: slackContextKey({ channelId, threadTs }),
       followUpConfig: { disabled: true },
     });
-    startTask(task.id);
+    await startTask(task.id);
     const tree = await ensureSlackThreadTree([task.id]);
     _resetSlackRenderV2ForTests();
     await failTask(task.id, "state that must be retried");
@@ -1297,29 +1311,29 @@ describe("Slack renderer v2", () => {
   });
 
   test("resumes an unfinished outcome by physical thread across context keys", async () => {
-    const lead = createAgent({ name: "Recovery Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Recovery Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_RECOVERY");
-    const firstAsk = createTaskExtended("establish the physical thread tree", {
+    const firstAsk = await createTaskExtended("establish the physical thread tree", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: `custom:first:${channelId}`,
     });
-    startTask(firstAsk.id);
+    await startTask(firstAsk.id);
     const tree = await ensureSlackThreadTree([firstAsk.id]);
     await failTask(firstAsk.id, "test setup");
     _resetSlackRenderV2ForTests();
     await processSlackRenderV2();
 
-    const ask = createTaskExtended("recover streamed outcome", {
+    const ask = await createTaskExtended("recover streamed outcome", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: `custom:later:${channelId}`,
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     expect((await ensureSlackThreadTree([ask.id]))?.id).toBe(tree?.id);
     await completeTask(ask.id, "Recovered the outcome stream after a temporary interruption.");
     calls.length = 0;
@@ -1348,16 +1362,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("collapses the outcome card to a minimal form when the agent already replied", async () => {
-    const lead = createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REPLY_SENT");
-    const ask = createTaskExtended("ask with an inline reply", {
+    const ask = await createTaskExtended("ask with an inline reply", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await markTaskSlackReplySent(ask.id);
     await completeTask(ask.id, "PRIVATE OUTPUT ALREADY POSTED VIA SLACK-REPLY, MUST NOT REPEAT");
@@ -1374,7 +1388,7 @@ describe("Slack renderer v2", () => {
     });
     expect(started?.payload.markdown_text).not.toContain("PRIVATE OUTPUT");
     const stopped = calls.find((call) => call.method === "chat.stopStream")!;
-    const completedAsk = getTaskById(ask.id)!;
+    const completedAsk = (await getTaskById(ask.id))!;
     const duration = formatV2Duration(
       new Date(completedAsk.createdAt),
       new Date(completedAsk.finishedAt ?? completedAsk.lastUpdatedAt),
@@ -1389,16 +1403,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("keeps the full outcome body when the agent has not replied inline", async () => {
-    const lead = createAgent({ name: "No Reply Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "No Reply Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_NO_REPLY");
-    const ask = createTaskExtended("ask without an inline reply", {
+    const ask = await createTaskExtended("ask without an inline reply", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "This output must reach Slack since no slack-reply was sent.");
     calls.length = 0;
@@ -1413,20 +1427,20 @@ describe("Slack renderer v2", () => {
   });
 
   test("re-reads slackReplySent inside streamOutcomeCard to avoid a stale caller snapshot", async () => {
-    const lead = createAgent({ name: "Stale Snapshot Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Stale Snapshot Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_STALE_SNAPSHOT");
-    const ask = createTaskExtended("ask observed before its reply landed", {
+    const ask = await createTaskExtended("ask observed before its reply landed", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     const tree = await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT LEAK IF THE REPLY LANDS LATER");
     // Simulate a stale snapshot: the caller fetched this task before slack-reply committed.
-    const staleSnapshot = { ...getTaskById(ask.id)!, slackReplySent: false };
+    const staleSnapshot = { ...(await getTaskById(ask.id))!, slackReplySent: false };
     await markTaskSlackReplySent(ask.id);
     calls.length = 0;
 
@@ -1439,16 +1453,16 @@ describe("Slack renderer v2", () => {
   });
 
   test("refreshes a stream started with stale content before finalizing it", async () => {
-    const lead = createAgent({ name: "Refresh Lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "Refresh Lead", isLead: true, status: "idle" });
     const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_REFRESH_STALE");
-    const ask = createTaskExtended("ask whose reply lands mid-stream", {
+    const ask = await createTaskExtended("ask whose reply lands mid-stream", {
       agentId: lead.id,
       source: "slack",
       slackChannelId: channelId,
       slackThreadTs: threadTs,
       contextKey: slackContextKey({ channelId, threadTs }),
     });
-    startTask(ask.id);
+    await startTask(ask.id);
     await ensureSlackThreadTree([ask.id]);
     await completeTask(ask.id, "PRIVATE OUTPUT THAT MUST NOT SURVIVE A LATE SLACK-REPLY");
     calls.length = 0;

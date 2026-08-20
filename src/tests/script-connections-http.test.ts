@@ -126,12 +126,15 @@ function inlineOpenApiSpec(): string {
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  leadAgentId = createAgent({ name: "connections-http-lead", isLead: true, status: "idle" }).id;
-  workerAgentId = createAgent({
-    name: "connections-http-worker",
-    isLead: false,
-    status: "idle",
-  }).id;
+  leadAgentId = (await createAgent({ name: "connections-http-lead", isLead: true, status: "idle" }))
+    .id;
+  workerAgentId = (
+    await createAgent({
+      name: "connections-http-worker",
+      isLead: false,
+      status: "idle",
+    })
+  ).id;
 });
 
 afterAll(async () => {

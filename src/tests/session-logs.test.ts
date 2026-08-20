@@ -70,7 +70,7 @@ async function handleRequest(
     pathSegments[3] === "session-logs"
   ) {
     const taskId = pathSegments[2];
-    const task = getTaskById(taskId);
+    const task = await getTaskById(taskId);
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -148,7 +148,7 @@ describe("Session Logs API", () => {
   describe("Database Functions", () => {
     test("should create and retrieve session logs by taskId", async () => {
       // Create a task first
-      const task = createTaskExtended("Test task for session logs");
+      const task = await createTaskExtended("Test task for session logs");
 
       // Create session logs for the task
       await createSessionLogs({
@@ -190,7 +190,7 @@ describe("Session Logs API", () => {
     });
 
     test("should order logs by iteration and lineNumber", async () => {
-      const task = createTaskExtended("Task for ordering test");
+      const task = await createTaskExtended("Task for ordering test");
 
       // Create logs for multiple iterations
       await createSessionLogs({
@@ -311,7 +311,7 @@ describe("Session Logs API", () => {
     });
 
     test("should store logs with taskId", async () => {
-      const task = createTaskExtended("API test task");
+      const task = await createTaskExtended("API test task");
 
       const response = await fetch(`${baseUrl}/api/session-logs`, {
         method: "POST",
@@ -344,7 +344,7 @@ describe("Session Logs API", () => {
     });
 
     test("should return empty logs array for task with no logs", async () => {
-      const task = createTaskExtended("Task without logs");
+      const task = await createTaskExtended("Task without logs");
 
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}/session-logs`);
 
@@ -354,7 +354,7 @@ describe("Session Logs API", () => {
     });
 
     test("should return session logs for a task", async () => {
-      const task = createTaskExtended("Task with logs for GET test");
+      const task = await createTaskExtended("Task with logs for GET test");
 
       // Create some logs
       await createSessionLogs({

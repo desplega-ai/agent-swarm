@@ -52,7 +52,7 @@ describe("normal REST API user-bound token auth", () => {
   beforeAll(async () => {
     cleanupDb();
     initDb(TEST_DB_PATH);
-    createAgent({ name: "Lead", isLead: true, status: "idle" });
+    await createAgent({ name: "Lead", isLead: true, status: "idle" });
     server = createTestServer();
     port = await listen(server);
   });
@@ -113,8 +113,8 @@ describe("normal REST API user-bound token auth", () => {
   test("global API key caller cannot spoof requestedByUserId via body — falls back to owned task context", async () => {
     const legitRequester = createUser({ name: "Legit Requester" });
     const attacker = createUser({ name: "Attacker" });
-    const agent = createAgent({ name: "spoof-test-agent", isLead: false, status: "idle" });
-    const ownedTask = createTaskExtended("owned task for spoof test", {
+    const agent = await createAgent({ name: "spoof-test-agent", isLead: false, status: "idle" });
+    const ownedTask = await createTaskExtended("owned task for spoof test", {
       agentId: agent.id,
       requestedByUserId: legitRequester.id,
     });
@@ -219,12 +219,12 @@ describe("normal REST API user-bound token auth", () => {
     test("owned task context still takes precedence over body even when flag is on", async () => {
       const legitRequester = createUser({ name: "Legit Requester (flag on)" });
       const attacker = createUser({ name: "Attacker (flag on)" });
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "spoof-test-agent-flag-on",
         isLead: false,
         status: "idle",
       });
-      const ownedTask = createTaskExtended("owned task for spoof test, flag on", {
+      const ownedTask = await createTaskExtended("owned task for spoof test, flag on", {
         agentId: agent.id,
         requestedByUserId: legitRequester.id,
       });

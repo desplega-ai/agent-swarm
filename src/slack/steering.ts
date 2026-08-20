@@ -54,7 +54,7 @@ export async function requestSlackThreadSteering(
     createdByUserId: args.requestedByUserId,
   });
   for (const messageTs of args.messageTimestamps ?? []) {
-    createLogEntry({
+    await createLogEntry({
       eventType: "task_steering",
       taskId: task.id,
       newValue: "slack_reaction",

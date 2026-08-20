@@ -34,8 +34,8 @@ describe("getMostRecentTaskInThread", () => {
     expect(result).toBeNull();
   });
 
-  test("returns a task regardless of source (slack, system, etc.)", () => {
-    const agent = createAgent({
+  test("returns a task regardless of source (slack, system, etc.)", async () => {
+    const agent = await createAgent({
       name: "source-test-agent",
       isLead: false,
       status: "idle",
@@ -43,14 +43,14 @@ describe("getMostRecentTaskInThread", () => {
     });
 
     // Create tasks with different sources
-    const slackTask = createTaskExtended("slack source task", {
+    const slackTask = await createTaskExtended("slack source task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_SOURCE",
       slackThreadTs: "1000.0001",
     });
 
-    const systemTask = createTaskExtended("system source task", {
+    const systemTask = await createTaskExtended("system source task", {
       agentId: agent.id,
       source: "system",
       slackChannelId: "C_SOURCE",
@@ -63,22 +63,22 @@ describe("getMostRecentTaskInThread", () => {
     expect([slackTask.id, systemTask.id]).toContain(result!.id);
   });
 
-  test("returns a task regardless of status (completed, pending, etc.)", () => {
-    const agent = createAgent({
+  test("returns a task regardless of status (completed, pending, etc.)", async () => {
+    const agent = await createAgent({
       name: "status-test-agent",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const task1 = createTaskExtended("completed task", {
+    const task1 = await createTaskExtended("completed task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_STATUS",
       slackThreadTs: "2000.0001",
     });
 
-    const task2 = createTaskExtended("in progress task", {
+    const task2 = await createTaskExtended("in progress task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_STATUS",
@@ -91,8 +91,8 @@ describe("getMostRecentTaskInThread", () => {
     expect([task1.id, task2.id]).toContain(result!.id);
   });
 
-  test("returns task with source=null (worker tasks via send-task)", () => {
-    const agent = createAgent({
+  test("returns task with source=null (worker tasks via send-task)", async () => {
+    const agent = await createAgent({
       name: "null-source-agent",
       isLead: false,
       status: "idle",
@@ -100,7 +100,7 @@ describe("getMostRecentTaskInThread", () => {
     });
 
     // Worker tasks created via send-task default to source=null — simulate with no source
-    const workerTask = createTaskExtended("worker task", {
+    const workerTask = await createTaskExtended("worker task", {
       agentId: agent.id,
       slackChannelId: "C_WORKER",
       slackThreadTs: "3000.0001",
@@ -116,9 +116,14 @@ describe("routeMessage — thread follow-up with offline agent", () => {
   let leadAgent: ReturnType<typeof createAgent>;
   let workerAgent: ReturnType<typeof createAgent>;
 
-  beforeAll(() => {
-    leadAgent = createAgent({ name: "route-lead", isLead: true, status: "idle", capabilities: [] });
-    workerAgent = createAgent({
+  beforeAll(async () => {
+    leadAgent = await createAgent({
+      name: "route-lead",
+      isLead: true,
+      status: "idle",
+      capabilities: [],
+    });
+    workerAgent = await createAgent({
       name: "route-worker",
       isLead: false,
       status: "offline",
@@ -126,7 +131,7 @@ describe("routeMessage — thread follow-up with offline agent", () => {
     });
 
     // Create a task in the thread so getAgentWorkingOnThread finds the offline worker
-    createTaskExtended("original task", {
+    await createTaskExtended("original task", {
       agentId: workerAgent.id,
       source: "slack",
       slackChannelId: "C_ROUTE",
@@ -158,15 +163,15 @@ describe("routeMessage — thread follow-up with offline agent", () => {
     expect(matches[0].matchedText).toBe("thread follow-up (lead fallback)");
   });
 
-  test("still routes to working agent when agent is online (no regression)", () => {
-    const onlineWorker = createAgent({
+  test("still routes to working agent when agent is online (no regression)", async () => {
+    const onlineWorker = await createAgent({
       name: "route-online-worker",
       isLead: false,
       status: "busy",
       capabilities: [],
     });
 
-    createTaskExtended("online task", {
+    await createTaskExtended("online task", {
       agentId: onlineWorker.id,
       source: "slack",
       slackChannelId: "C_ROUTE_ONLINE",
@@ -190,15 +195,15 @@ describe("follow-up task creation includes parentTaskId", () => {
     expect(result).toBeNull();
   });
 
-  test("parentTaskId links to most recent task even if that task is completed", () => {
-    const agent = createAgent({
+  test("parentTaskId links to most recent task even if that task is completed", async () => {
+    const agent = await createAgent({
       name: "parent-test-agent",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    const firstTask = createTaskExtended("first task", {
+    const firstTask = await createTaskExtended("first task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_PARENT",
@@ -211,7 +216,7 @@ describe("follow-up task creation includes parentTaskId", () => {
     expect(result!.id).toBe(firstTask.id);
 
     // Create a follow-up with parentTaskId
-    const followUp = createTaskExtended("follow up task", {
+    const followUp = await createTaskExtended("follow up task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_PARENT",
@@ -224,15 +229,15 @@ describe("follow-up task creation includes parentTaskId", () => {
 });
 
 describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTasks", () => {
-  test("includes tasks with source='slack' and slackChannelId set", () => {
-    const agent = createAgent({
+  test("includes tasks with source='slack' and slackChannelId set", async () => {
+    const agent = await createAgent({
       name: "watcher-slack-agent",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    createTaskExtended("slack completed task", {
+    await createTaskExtended("slack completed task", {
       agentId: agent.id,
       source: "slack",
       slackChannelId: "C_WATCHER",
@@ -247,8 +252,8 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
     expect(Array.isArray(inProgress)).toBe(true);
   });
 
-  test("includes tasks with source=null (worker tasks) that have slackChannelId set", () => {
-    const agent = createAgent({
+  test("includes tasks with source=null (worker tasks) that have slackChannelId set", async () => {
+    const agent = await createAgent({
       name: "watcher-null-agent",
       isLead: false,
       status: "idle",
@@ -256,7 +261,7 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
     });
 
     // Worker task with no source but has Slack metadata (inherited via parentTaskId)
-    const _workerTask = createTaskExtended("worker completed", {
+    const _workerTask = await createTaskExtended("worker completed", {
       agentId: agent.id,
       slackChannelId: "C_WATCHER_NULL",
       slackThreadTs: "7100.0001",
@@ -271,15 +276,15 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
     expect(Array.isArray(allInProgress)).toBe(true);
   });
 
-  test("excludes tasks without slackChannelId (non-Slack tasks)", () => {
-    const agent = createAgent({
+  test("excludes tasks without slackChannelId (non-Slack tasks)", async () => {
+    const agent = await createAgent({
       name: "watcher-no-slack-agent",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
 
-    createTaskExtended("non-slack task", {
+    await createTaskExtended("non-slack task", {
       agentId: agent.id,
       source: "mcp",
     });

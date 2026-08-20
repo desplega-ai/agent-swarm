@@ -20,10 +20,10 @@ describe("computeAgentSkillsSignature", () => {
   let skill1Id: string;
   let skill2Id: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     initDb(TEST_DB_PATH);
 
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Signature Test Worker",
       description: "Test agent",
       role: "worker",
@@ -34,7 +34,7 @@ describe("computeAgentSkillsSignature", () => {
     });
     agentId = agent.id;
 
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: "Signature Test Other",
       description: "Independent agent",
       role: "worker",

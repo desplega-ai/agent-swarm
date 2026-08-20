@@ -72,8 +72,11 @@ let testTask: { id: string };
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "context-route-test", isLead: false, status: "idle" });
-  testTask = createTaskExtended("phase-10 ingestion", { agentId: testAgent.id, source: "mcp" });
+  testAgent = await createAgent({ name: "context-route-test", isLead: false, status: "idle" });
+  testTask = await createTaskExtended("phase-10 ingestion", {
+    agentId: testAgent.id,
+    source: "mcp",
+  });
   server = createTestServer(API_KEY);
   port = await listen(server);
 });

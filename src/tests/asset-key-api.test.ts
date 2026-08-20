@@ -71,14 +71,17 @@ async function api(
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "asset-api-worker", isLead: false, status: "idle" }).id;
-  secondAgentId = createAgent({ name: "asset-api-worker-2", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "asset-api-worker", isLead: false, status: "idle" })).id;
+  secondAgentId = (await createAgent({ name: "asset-api-worker-2", isLead: false, status: "idle" }))
+    .id;
   userId = createUser({ name: "Asset API User", email: "asset-api@example.com" }).id;
   secondUserId = createUser({ name: "Other Asset User", email: "asset-api-2@example.com" }).id;
-  sourceTaskId = createTaskExtended("trusted source", {
-    agentId,
-    requestedByUserId: userId,
-  }).id;
+  sourceTaskId = (
+    await createTaskExtended("trusted source", {
+      agentId,
+      requestedByUserId: userId,
+    })
+  ).id;
 
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, resolve));

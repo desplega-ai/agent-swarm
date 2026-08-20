@@ -288,12 +288,12 @@ const agentTaskRoute = route({
   },
 });
 
-function requireAgent(res: ServerResponse, agentId: string | undefined) {
+async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
     jsonError(res, "X-Agent-ID required for script runs API", 400);
     return null;
   }
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) {
     jsonError(res, "Agent not found", 404);
     return null;
@@ -356,7 +356,7 @@ export async function handleScriptRuns(
   if (createScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await createScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     const lint = lintWorkflowLabels(parsed.body.source);
@@ -596,28 +596,31 @@ export async function handleScriptRuns(
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
     let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
-      task = createTaskExtended(parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey, {
-        agentId: parsed.body.agentId,
-        tags: parsed.body.tags,
-        priority: parsed.body.priority,
-        offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
-        taskType: "script-run-step",
-        source: "mcp",
-        dir: parsed.body.dir,
-        vcsRepo: parsed.body.vcsRepo,
-        model: parsed.body.model,
-        parentTaskId: parsed.body.parentTaskId,
-        requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
-        outputSchema: parsed.body.outputSchema,
-        contextKey,
-      });
+      task = await createTaskExtended(
+        parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
+        {
+          agentId: parsed.body.agentId,
+          tags: parsed.body.tags,
+          priority: parsed.body.priority,
+          offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
+          taskType: "script-run-step",
+          source: "mcp",
+          dir: parsed.body.dir,
+          vcsRepo: parsed.body.vcsRepo,
+          model: parsed.body.model,
+          parentTaskId: parsed.body.parentTaskId,
+          requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+          outputSchema: parsed.body.outputSchema,
+          contextKey,
+        },
+      );
     }
 
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       // Once replay lookup/dispatch selects the step, stay pinned to its ID.
       // A later same-context task must never change which work this poll resolves.
-      const latest = getTaskById(task.id) ?? task;
+      const latest = (await getTaskById(task.id)) ?? task;
       if (latest.status === "completed") {
         agentTaskRoute.respond(res, 200, { taskId: latest.id, taskOutput: latest.output ?? null });
         return true;

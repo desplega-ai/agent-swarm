@@ -70,7 +70,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
         // Swarm/global scope requires lead
         const scope = args.scope ?? "agent";
         if (scope === "swarm" || scope === "global") {
-          const agent = getAgentById(requestInfo.agentId);
+          const agent = await getAgentById(requestInfo.agentId);
           const decision = can({
             principal: {
               kind: "agent",

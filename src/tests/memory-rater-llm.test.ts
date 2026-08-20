@@ -630,7 +630,7 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     // ordering happens to leave `db` null here.
     closeDb();
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
 
     const insertTask = getDb().prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)

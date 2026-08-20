@@ -27,8 +27,8 @@ describe("Context Snapshots", () => {
     }
 
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Test Worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Test task for context snapshots", {
+    await createAgent({ id: agentId, name: "Test Worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Test task for context snapshots", {
       agentId,
       source: "mcp",
     });
@@ -89,7 +89,7 @@ describe("Context Snapshots", () => {
 
   test("completion snapshot with contextUsedTokens uses provided value", async () => {
     // Create a second task for an isolated test
-    const task2 = createTaskExtended("Test task 2", { agentId, source: "mcp" });
+    const task2 = await createTaskExtended("Test task 2", { agentId, source: "mcp" });
 
     await createContextSnapshot({
       taskId: task2.id,

@@ -81,8 +81,8 @@ beforeAll(async () => {
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 
-  createAgent({ id: LEAD_ID, name: "Audit Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Audit Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Audit Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Audit Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {

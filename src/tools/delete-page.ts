@@ -44,7 +44,7 @@ export const registerDeletePageTool = (server: McpServer) => {
         });
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
       }

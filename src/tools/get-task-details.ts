@@ -175,7 +175,7 @@ export async function getTaskDetailsHandler(
   ctx: ToolCtx,
   { taskId }: GetTaskDetailsArgs,
 ): Promise<SwarmToolResult> {
-  const task = getTaskById(taskId);
+  const task = await getTaskById(taskId);
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
 
   if (!task) {

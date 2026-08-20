@@ -25,7 +25,7 @@ beforeAll(async () => {
     await unlink(TEST_DB_PATH);
   } catch {}
   initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "Events Test Agent", isLead: false, status: "idle" });
+  testAgent = await createAgent({ name: "Events Test Agent", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {

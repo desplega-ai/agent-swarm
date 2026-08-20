@@ -78,7 +78,12 @@ describe("GET /api/memory/usefulness", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: AGENT_ID, name: "Usefulness Test Agent", isLead: false, status: "idle" });
+    await createAgent({
+      id: AGENT_ID,
+      name: "Usefulness Test Agent",
+      isLead: false,
+      status: "idle",
+    });
     const insertTask = getDb().prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,

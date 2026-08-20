@@ -36,7 +36,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       // Permission check: own memories or lead can delete swarm-scoped
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

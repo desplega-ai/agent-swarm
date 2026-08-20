@@ -271,7 +271,7 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
  * The handler dispatch in `handleKv` calls this AFTER the explicit-path
  * variants have already been ruled out; we never look at URL params here.
  */
-function resolveNamespaceFromHeaders(req: IncomingMessage): string | null {
+async function resolveNamespaceFromHeaders(req: IncomingMessage): Promise<string | null> {
   const pageId = singleHeader(req, "x-page-id");
   if (pageId) {
     try {
@@ -283,7 +283,7 @@ function resolveNamespaceFromHeaders(req: IncomingMessage): string | null {
 
   const sourceTaskId = singleHeader(req, "x-source-task-id");
   if (sourceTaskId) {
-    const task = getTaskById(sourceTaskId);
+    const task = await getTaskById(sourceTaskId);
     if (task?.contextKey) return task.contextKey;
     // Fall through to agent-id default if the task lookup didn't yield a
     // contextKey — the task may be a synthetic / parentless workflow node.
@@ -314,12 +314,12 @@ interface AuthCtx {
   isLead: boolean;
 }
 
-function buildAuthCtx(req: IncomingMessage): AuthCtx {
+async function buildAuthCtx(req: IncomingMessage): Promise<AuthCtx> {
   const callerAgentId = singleHeader(req, "x-agent-id");
   const pageId = singleHeader(req, "x-page-id");
   let isLead = false;
   if (callerAgentId) {
-    const agent = getAgentById(callerAgentId);
+    const agent = await getAgentById(callerAgentId);
     isLead = agent?.isLead === true;
   }
   return { callerAgentId, hasPageHeader: pageId !== undefined && pageId !== "", isLead };
@@ -504,7 +504,7 @@ export async function handleKv(
   if (getKvHeader.match(req.method, pathSegments)) {
     const parsed = await getKvHeader.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ns = resolveNamespaceForRead(req);
+    const ns = await resolveNamespaceForRead(req);
     if (!ns) {
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
@@ -517,7 +517,7 @@ export async function handleKv(
     if (enforceContentLengthCap(req, res, MAX_KV_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await putKvHeader.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ns = resolveNamespaceForWrite(req);
+    const ns = await resolveNamespaceForWrite(req);
     if (!ns) {
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
@@ -529,7 +529,7 @@ export async function handleKv(
   if (deleteKvHeader.match(req.method, pathSegments)) {
     const parsed = await deleteKvHeader.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ns = resolveNamespaceForWrite(req);
+    const ns = await resolveNamespaceForWrite(req);
     if (!ns) {
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
@@ -541,7 +541,7 @@ export async function handleKv(
   if (listKvHeader.match(req.method, pathSegments)) {
     const parsed = await listKvHeader.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ns = resolveNamespaceForRead(req);
+    const ns = await resolveNamespaceForRead(req);
     if (!ns) {
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
@@ -557,8 +557,8 @@ export async function handleKv(
  * readable by design; `sendGet`/`sendList` separately enforce private
  * ownership for the internal `mcp:overflow:<agentId>` namespace family.
  */
-function resolveNamespaceForRead(req: IncomingMessage): string | null {
-  return resolveNamespaceFromHeaders(req);
+async function resolveNamespaceForRead(req: IncomingMessage): Promise<string | null> {
+  return await resolveNamespaceFromHeaders(req);
 }
 
 /**
@@ -566,8 +566,8 @@ function resolveNamespaceForRead(req: IncomingMessage): string | null {
  * page-proxy header path is what gives `task:page:*` writes their privilege
  * (see `authorizeWrite`).
  */
-function resolveNamespaceForWrite(req: IncomingMessage): string | null {
-  return resolveNamespaceFromHeaders(req);
+async function resolveNamespaceForWrite(req: IncomingMessage): Promise<string | null> {
+  return await resolveNamespaceFromHeaders(req);
 }
 
 async function handleIncr(
@@ -594,7 +594,7 @@ async function handleIncr(
   } else {
     const parsed = await incrKvHeader.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const ns = resolveNamespaceForWrite(req);
+    const ns = await resolveNamespaceForWrite(req);
     if (!ns) {
       jsonError(res, "namespace is required (pass X-Source-Task-Id or X-Agent-ID)", 400);
       return true;
@@ -606,7 +606,7 @@ async function handleIncr(
     body = parsed.body;
   }
 
-  const authErr = authorizeWrite(namespace, buildAuthCtx(req));
+  const authErr = authorizeWrite(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
@@ -635,7 +635,7 @@ async function sendGet(
   key: string,
   respond: GetKvRespond,
 ): Promise<boolean> {
-  const authErr = authorizeRead(namespace, buildAuthCtx(req));
+  const authErr = authorizeRead(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
@@ -657,7 +657,7 @@ async function sendPut(
   body: z.infer<typeof kvSetBodySchema>,
   respond: PutKvRespond,
 ): Promise<boolean> {
-  const authErr = authorizeWrite(namespace, buildAuthCtx(req));
+  const authErr = authorizeWrite(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
@@ -694,7 +694,7 @@ async function sendDelete(
   namespace: string,
   key: string,
 ): Promise<boolean> {
-  const authErr = authorizeWrite(namespace, buildAuthCtx(req));
+  const authErr = authorizeWrite(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;
@@ -716,7 +716,7 @@ async function sendList(
   query: z.infer<typeof kvListQuerySchema>,
   respond: ListKvRespond,
 ): Promise<boolean> {
-  const authErr = authorizeRead(namespace, buildAuthCtx(req));
+  const authErr = authorizeRead(namespace, await buildAuthCtx(req));
   if (authErr) {
     jsonError(res, authErr.message, authErr.status);
     return true;

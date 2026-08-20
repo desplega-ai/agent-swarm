@@ -55,7 +55,7 @@ function eventsFor(userId: string): Array<{
     .all(userId);
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   // Best-effort cleanup of any lingering test DB from a previous crashed run.
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -63,8 +63,8 @@ beforeAll(() => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  leadAgent = createAgent({ name: "TestLead", isLead: true, status: "idle" });
-  workerAgent = createAgent({ name: "TestWorker", isLead: false, status: "idle" });
+  leadAgent = await createAgent({ name: "TestLead", isLead: true, status: "idle" });
+  workerAgent = await createAgent({ name: "TestWorker", isLead: false, status: "idle" });
 });
 
 afterAll(() => {
@@ -273,15 +273,15 @@ describe("deleteUser", () => {
     await linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
     expect(findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
 
-    const task = createTaskExtended("test task with user", {
+    const task = await createTaskExtended("test task with user", {
       agentId: workerAgent.id,
       source: "slack",
       requestedByUserId: user.id,
     });
-    expect(getTaskById(task.id)!.requestedByUserId).toBe(user.id);
+    expect((await getTaskById(task.id))!.requestedByUserId).toBe(user.id);
 
     await deleteUser(user.id);
-    expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(task.id))!.requestedByUserId).toBeUndefined();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
     expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
   });
@@ -522,29 +522,29 @@ describe("recordIdentityEvent", () => {
 describe("requestedByUserId in tasks", () => {
   test("createTaskExtended stores requestedByUserId", async () => {
     const user = await createUser({ name: "Requester" });
-    const task = createTaskExtended("task with requester", {
+    const task = await createTaskExtended("task with requester", {
       agentId: workerAgent.id,
       source: "slack",
       requestedByUserId: user.id,
     });
-    const fetched = getTaskById(task.id);
+    const fetched = await getTaskById(task.id);
     expect(fetched!.requestedByUserId).toBe(user.id);
     await deleteUser(user.id);
   });
 
   test("requestedByUserId inherits from parent task", async () => {
     const user = await createUser({ name: "ParentRequester" });
-    const parent = createTaskExtended("parent task", {
+    const parent = await createTaskExtended("parent task", {
       agentId: leadAgent.id,
       source: "slack",
       requestedByUserId: user.id,
     });
-    const child = createTaskExtended("child task", {
+    const child = await createTaskExtended("child task", {
       agentId: workerAgent.id,
       source: "mcp",
       parentTaskId: parent.id,
     });
-    const fetchedChild = getTaskById(child.id);
+    const fetchedChild = await getTaskById(child.id);
     expect(fetchedChild!.requestedByUserId).toBe(user.id);
     await deleteUser(user.id);
   });
@@ -552,27 +552,27 @@ describe("requestedByUserId in tasks", () => {
   test("explicit requestedByUserId overrides parent inheritance", async () => {
     const user1 = await createUser({ name: "User1" });
     const user2 = await createUser({ name: "User2" });
-    const parent = createTaskExtended("parent", {
+    const parent = await createTaskExtended("parent", {
       agentId: leadAgent.id,
       source: "slack",
       requestedByUserId: user1.id,
     });
-    const child = createTaskExtended("child", {
+    const child = await createTaskExtended("child", {
       agentId: workerAgent.id,
       source: "mcp",
       parentTaskId: parent.id,
       requestedByUserId: user2.id,
     });
-    expect(getTaskById(child.id)!.requestedByUserId).toBe(user2.id);
+    expect((await getTaskById(child.id))!.requestedByUserId).toBe(user2.id);
     await deleteUser(user1.id);
     await deleteUser(user2.id);
   });
 
-  test("task without requestedByUserId has undefined", () => {
-    const task = createTaskExtended("no user task", {
+  test("task without requestedByUserId has undefined", async () => {
+    const task = await createTaskExtended("no user task", {
       agentId: workerAgent.id,
       source: "mcp",
     });
-    expect(getTaskById(task.id)!.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(task.id))!.requestedByUserId).toBeUndefined();
   });
 });

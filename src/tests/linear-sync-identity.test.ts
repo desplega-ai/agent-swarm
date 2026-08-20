@@ -71,7 +71,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // Linear sync needs a lead agent to be present (it uses findLeadAgent()).
   const { createAgent } = await import("../be/db");
-  createAgent({ name: "TestLead", isLead: true, status: "idle" });
+  await createAgent({ name: "TestLead", isLead: true, status: "idle" });
 });
 
 afterAll(async () => {
@@ -126,7 +126,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(u.id);
 
     // No new user / no new external-id row was inserted.
@@ -156,7 +156,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeTruthy();
 
     const linked = findUserByExternalId("linear", linearUserId);
@@ -192,7 +192,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
 
     const meta = await getKv(UNMAPPED_NAMESPACE, `${linearUserId}:meta`);
@@ -239,7 +239,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
 
     // Crucially: no users row, no unmapped entry. The swarm doesn't hear itself.
@@ -273,7 +273,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
     expect(usersCount()).toBe(before.users);
     expect(externalIdsCount()).toBe(before.ext);
@@ -288,7 +288,10 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
   // falls through to the follow-up branch where identity extraction runs.
   async function seedCompletedTask(issueId: string, identifier: string): Promise<void> {
     const { createTaskExtended } = await import("../be/db");
-    const t = createTaskExtended("Seeded prior", { source: "linear", taskType: "linear-issue" });
+    const t = await createTaskExtended("Seeded prior", {
+      source: "linear",
+      taskType: "linear-issue",
+    });
     getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(t.id);
     const { createTrackerSync } = await import("../be/db-queries/tracker");
     createTrackerSync({
@@ -328,7 +331,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(u.id);
   });
 
@@ -357,7 +360,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(linked!.id);
   });
 

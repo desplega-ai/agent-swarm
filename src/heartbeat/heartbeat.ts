@@ -244,7 +244,7 @@ export function setBeforeHeartbeatSupersedeForTests(
  */
 export async function preflightGate(): Promise<boolean> {
   const stats = await getTaskStats();
-  const agents = getAllAgents();
+  const agents = await getAllAgents();
 
   const hasInProgressTasks = stats.in_progress > 0;
   const hasUnassignedTasks = stats.unassigned > 0;
@@ -293,7 +293,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   await detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
-  checkWorkerHealth(findings);
+  await checkWorkerHealth(findings);
 
   // 3. Auto-assign pool tasks to idle workers
   await autoAssignPoolTasks(findings);
@@ -426,8 +426,8 @@ async function remediateCrashedWorkerTask(
       console.log(
         `[Heartbeat] Workflow-step task ${task.id.slice(0, 8)} failed — engine will handle retry (${opts.shortLabel})`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
     }
     return;
   }
@@ -446,8 +446,8 @@ async function remediateCrashedWorkerTask(
           skipAutoResume ? "skipRetry taskType" : "resume already exists"
         })`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
     }
     return;
   }
@@ -465,8 +465,8 @@ async function remediateCrashedWorkerTask(
       console.warn(
         `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${RESUME_BUDGET_EXHAUSTED_REASON} (${opts.shortLabel})`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
     }
     return;
   }
@@ -493,7 +493,7 @@ async function remediateCrashedWorkerTask(
     );
   }
 
-  const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+  const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
     await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
@@ -540,8 +540,8 @@ async function remediateCrashedWorkerTask(
 
   if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
 
-  const remaining = getActiveTaskCount(task.agentId);
-  if (remaining === 0) updateAgentStatus(task.agentId, "idle");
+  const remaining = await getActiveTaskCount(task.agentId);
+  if (remaining === 0) await updateAgentStatus(task.agentId, "idle");
 }
 
 /**
@@ -625,8 +625,8 @@ export async function runRebootSweep(): Promise<void> {
       if (!failed) continue;
 
       // Fix agent status
-      if (getActiveTaskCount(task.agentId) === 0) {
-        updateAgentStatus(task.agentId, "idle");
+      if ((await getActiveTaskCount(task.agentId)) === 0) {
+        await updateAgentStatus(task.agentId, "idle");
       }
 
       // Don't retry system-generated heartbeat tasks
@@ -658,9 +658,9 @@ export async function runRebootSweep(): Promise<void> {
           // the pool-fallback leg (agent gone/offline/at-capacity) — so that
           // leg is still role/capability-gated instead of role-blind.
           let preferredAgentId: string | undefined;
-          const candidate = getPinCandidateAgent(task.agentId);
+          const candidate = await getPinCandidateAgent(task.agentId);
           if (candidate) {
-            const activeCount = getActiveTaskCount(candidate.id);
+            const activeCount = await getActiveTaskCount(candidate.id);
             const hasCap = activeCount < (candidate.maxTasks ?? 1);
             if (hasCap) {
               preferredAgentId = candidate.id;
@@ -674,14 +674,14 @@ export async function runRebootSweep(): Promise<void> {
           const tags = ["reboot-retry", "auto-generated"];
           if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
 
-          const retryTask = createTaskExtended(task.task, {
+          const retryTask = await createTaskExtended(task.task, {
             parentTaskId: task.id,
             agentId: preferredAgentId,
             tags,
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
-            routingAffinity: buildRoutingAffinityFromAgent(task.agentId) ?? undefined,
+            routingAffinity: (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined,
           });
           retryTaskId = retryTask.id;
           console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
@@ -711,21 +711,21 @@ export function getRebootAffectedTasks() {
  * - busy with 0 active tasks → fix to idle
  * - idle with active tasks → fix to busy
  */
-function checkWorkerHealth(findings: HeartbeatFindings): void {
-  const agents = getAllAgents().filter((a) => a.status !== "offline");
+async function checkWorkerHealth(findings: HeartbeatFindings): Promise<void> {
+  const agents = (await getAllAgents()).filter((a) => a.status !== "offline");
 
   for (const agent of agents) {
-    const activeCount = getActiveTaskCount(agent.id);
+    const activeCount = await getActiveTaskCount(agent.id);
 
     if (agent.status === "busy" && activeCount === 0) {
-      updateAgentStatus(agent.id, "idle");
+      await updateAgentStatus(agent.id, "idle");
       findings.workerHealthFixes.push({
         agentId: agent.id,
         oldStatus: "busy",
         newStatus: "idle",
       });
     } else if (agent.status === "idle" && activeCount > 0) {
-      updateAgentStatus(agent.id, "busy");
+      await updateAgentStatus(agent.id, "busy");
       findings.workerHealthFixes.push({
         agentId: agent.id,
         oldStatus: "idle",
@@ -763,7 +763,7 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
     // re-querying per worker via shouldBlockPolling().
-    const idleWorkers = getIdleWorkersWithCapacity().filter(
+    const idleWorkers = (await getIdleWorkersWithCapacity()).filter(
       (w) => (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS,
     );
     if (idleWorkers.length === 0) return;
@@ -797,7 +797,7 @@ async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
         );
         if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
 
-        const assigned = assignUnassignedTaskPending(task.id, worker.id);
+        const assigned = await assignUnassignedTaskPending(task.id, worker.id);
         if (assigned) {
           findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
           reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
@@ -837,7 +837,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
   // can't poll it (which would strand the work). The budget-exhaustion path below
   // is independent of the Lead and still runs. `getLeadAgent` already prefers a
   // non-offline lead, so this also guards the createRerouteDecisionTask assignment.
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   const hasLead = lead != null && lead.status !== "offline";
 
   for (const resume of stale) {
@@ -863,7 +863,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
 
     if (!hasLead) continue; // No lead → leave the pin pending; nothing to escalate to.
 
-    const original = getTaskById(resume.parentTaskId);
+    const original = await getTaskById(resume.parentTaskId);
     if (!original) continue; // Parent gone — nothing to escalate against.
 
     // Escalate atomically: terminalize the pin + repoint the tracker link
@@ -887,7 +887,7 @@ async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<
         );
         if (!terminalized) return null; // reclaimed in the gap — no writes made
         repointTrackerSyncBySwarmId(resume.id, original.id);
-        const decision = createRerouteDecisionTask({
+        const decision = await createRerouteDecisionTask({
           original,
           staleResume: resume,
           reason: "crash_recovery",
@@ -943,13 +943,13 @@ async function escalateStarvedPoolTasks(findings: HeartbeatFindings): Promise<vo
   // Lead-owned targets never actually claim pool work (getIdleWorkersWithCapacity
   // already excludes them), so exclude them here too — otherwise a Lead whose
   // role happens to match would falsely suppress escalation forever.
-  const registeredAgents = getAllAgents().filter((a) => !a.isLead);
+  const registeredAgents = (await getAllAgents()).filter((a) => !a.isLead);
 
   for (const task of candidates) {
     const hasEligibleAgent = registeredAgents.some((agent) => isAgentEligibleForTask(agent, task));
     if (hasEligibleAgent) continue; // Someone (any status) matches — keep queued.
 
-    const decision = createPoolStarvationDecisionTask({ original: task });
+    const decision = await createPoolStarvationDecisionTask({ original: task });
     if (decision.kind === "created") {
       findings.escalatedReroutes.push({
         originalTaskId: task.id,
@@ -1043,8 +1043,8 @@ export function isEffectivelyEmpty(content: string): boolean {
 export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): Promise<string> {
   const stats = await getTaskStats();
   const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
-  const agents = getAllAgents();
-  const idleWorkers = getIdleWorkersWithCapacity();
+  const agents = await getAllAgents();
+  const idleWorkers = await getIdleWorkersWithCapacity();
   const poolTasks = getUnassignedPoolTasks(10);
   const recentCompleted = await getRecentCompletedCount(24);
   const recentFailedCount = await getRecentFailedCount(24);
@@ -1205,7 +1205,7 @@ export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): 
  * Check HEARTBEAT.md content and create a checklist task for the lead if needed.
  */
 export async function checkHeartbeatChecklist(): Promise<void> {
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   if (!lead) return;
 
   const heartbeatMd = lead.heartbeatMd;
@@ -1233,7 +1233,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (result.skipped) return;
 
-  createTaskExtended(result.text, {
+  await createTaskExtended(result.text, {
     agentId: lead.id,
     taskType: "heartbeat-checklist",
     tags: ["checklist", "auto-generated"],
@@ -1393,7 +1393,7 @@ export function stopHeartbeat(): void {
  * Uses the same HEARTBEAT.md content but with reboot-specific context prepended.
  */
 export async function createBootTriageTask(): Promise<void> {
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   if (!lead) return;
 
   const heartbeatMd = lead.heartbeatMd ?? "";
@@ -1420,7 +1420,7 @@ export async function createBootTriageTask(): Promise<void> {
 
   if (result.skipped) return;
 
-  createTaskExtended(result.text, {
+  await createTaskExtended(result.text, {
     agentId: lead.id,
     taskType: "boot-triage",
     tags: ["boot", "triage", "auto-generated"],

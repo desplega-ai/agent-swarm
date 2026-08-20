@@ -235,7 +235,7 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   const apiUrl = await resolveApiUrl();
   if (!apiUrl) return { enabled: false, created: false, agentId };
 
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) throw new Error(`Agent not found: ${agentId}`);
 
   const existing = (

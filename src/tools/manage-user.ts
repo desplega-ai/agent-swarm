@@ -108,7 +108,7 @@ export const registerManageUserTool = (server: McpServer) => {
       }),
     },
     async (input, requestInfo) => {
-      const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+      const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
       const decision = can({
         principal: {
           kind: "agent",

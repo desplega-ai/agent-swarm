@@ -54,7 +54,7 @@ beforeAll(async () => {
     }
   });
   port = await listen(server);
-  const a = createAgent({ name: "kv-ns-test", isLead: false, status: "idle" });
+  const a = await createAgent({ name: "kv-ns-test", isLead: false, status: "idle" });
   agentId = a.id;
 });
 
@@ -91,7 +91,7 @@ function authedPut(
 describe("kv namespace resolution — header precedence", () => {
   test("X-Source-Task-Id with Slack contextKey wins", async () => {
     const ns = slackContextKey({ channelId: "CABC", threadTs: "1700000000.000001" });
-    const task = createTaskExtended("slack-test", {
+    const task = await createTaskExtended("slack-test", {
       agentId,
       source: "mcp",
       slackChannelId: "CABC",
@@ -110,7 +110,7 @@ describe("kv namespace resolution — header precedence", () => {
 
   test("X-Source-Task-Id with Linear contextKey wins", async () => {
     const ns = linearContextKey({ issueIdentifier: "DES-99" });
-    const task = createTaskExtended("linear-test", {
+    const task = await createTaskExtended("linear-test", {
       agentId,
       source: "mcp",
       contextKey: ns,
@@ -131,7 +131,7 @@ describe("kv namespace resolution — header precedence", () => {
       kind: "pr",
       number: 999,
     });
-    const task = createTaskExtended("gh-test", {
+    const task = await createTaskExtended("gh-test", {
       agentId,
       source: "mcp",
       contextKey: ns,

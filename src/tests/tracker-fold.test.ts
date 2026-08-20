@@ -147,7 +147,7 @@ beforeAll(async () => {
   delete process.env.JIRA_DISABLE;
 
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
 
   providerServer = Bun.serve({
     port: 0,

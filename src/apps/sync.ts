@@ -270,7 +270,7 @@ async function pullFromScript(args: {
   const { source } = args;
   const script = await getScriptById(source.scriptId);
   if (!script) throw new SyncPassError(`script "${source.scriptId}" not found`);
-  const agentId = resolveSyncRunAs(script);
+  const agentId = await resolveSyncRunAs(script);
 
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.

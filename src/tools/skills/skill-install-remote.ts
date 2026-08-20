@@ -38,7 +38,7 @@ export const registerSkillInstallRemoteTool = (server: McpServer) => {
       }
 
       // Only leads can install global/swarm remote skills
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

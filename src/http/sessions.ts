@@ -176,15 +176,17 @@ export async function handleSessions(
   if (getSession.match(req.method, pathSegments)) {
     const parsed = await getSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const root = getTaskById(parsed.params.rootTaskId);
+    const root = await getTaskById(parsed.params.rootTaskId);
     if (!root) {
       jsonError(res, "Root task not found", 404);
       return true;
     }
     const chain = await getRootTaskChain(parsed.params.rootTaskId);
     getSession.respond(res, 200, {
-      root: { ...root, ...getTaskSteeringFields(root) },
-      chain: chain.map((task) => ({ ...task, ...getTaskSteeringFields(task) })),
+      root: { ...root, ...(await getTaskSteeringFields(root)) },
+      chain: await Promise.all(
+        chain.map(async (task) => ({ ...task, ...(await getTaskSteeringFields(task)) })),
+      ),
     });
     return true;
   }

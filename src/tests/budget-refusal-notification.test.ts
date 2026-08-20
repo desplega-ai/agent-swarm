@@ -154,12 +154,17 @@ async function waitForBusEmit(): Promise<void> {
 
 describe("Phase 5 — budget refusal lead notification + dedup", () => {
   test("first refusal creates exactly one lead-owned follow-up task with Slack context", async () => {
-    const lead = createAgent({ name: "lead-1", isLead: true, status: "idle", maxTasks: 5 });
-    const worker = createAgent({ name: "worker-1", isLead: false, status: "idle", maxTasks: 1 });
+    const lead = await createAgent({ name: "lead-1", isLead: true, status: "idle", maxTasks: 5 });
+    const worker = await createAgent({
+      name: "worker-1",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
-    const parentTask = createTaskExtended("over-budget task", {
+    const parentTask = await createTaskExtended("over-budget task", {
       agentId: worker.id,
       slackChannelId: "C_TEST_1",
       slackThreadTs: "1700000000.000001",
@@ -190,12 +195,17 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
   });
 
   test("second same-day refusal creates ZERO additional follow-ups (dedup honored)", async () => {
-    createAgent({ name: "lead-2", isLead: true, status: "idle", maxTasks: 5 });
-    const worker = createAgent({ name: "worker-2", isLead: false, status: "idle", maxTasks: 1 });
+    await createAgent({ name: "lead-2", isLead: true, status: "idle", maxTasks: 5 });
+    const worker = await createAgent({
+      name: "worker-2",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
 
-    const parentTask = createTaskExtended("dedup target", { agentId: worker.id });
+    const parentTask = await createTaskExtended("dedup target", { agentId: worker.id });
 
     const r1 = await callPoll(worker.id);
     if ("error" in r1.body) throw new Error("unexpected error response");
@@ -210,12 +220,17 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
   });
 
   test("dedup row's follow_up_task_id is written back to the new follow-up's id", async () => {
-    createAgent({ name: "lead-3", isLead: true, status: "idle", maxTasks: 5 });
-    const worker = createAgent({ name: "worker-3", isLead: false, status: "idle", maxTasks: 1 });
+    await createAgent({ name: "lead-3", isLead: true, status: "idle", maxTasks: 5 });
+    const worker = await createAgent({
+      name: "worker-3",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
-    const parentTask = createTaskExtended("audit-trail task", { agentId: worker.id });
+    const parentTask = await createTaskExtended("audit-trail task", { agentId: worker.id });
 
     await callPoll(worker.id);
 
@@ -229,12 +244,17 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
   });
 
   test("refusal on a NEW UTC day creates a new follow-up (PK rolls over)", async () => {
-    createAgent({ name: "lead-4", isLead: true, status: "idle", maxTasks: 5 });
-    const worker = createAgent({ name: "worker-4", isLead: false, status: "idle", maxTasks: 1 });
+    await createAgent({ name: "lead-4", isLead: true, status: "idle", maxTasks: 5 });
+    const worker = await createAgent({
+      name: "worker-4",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
-    const parentTask = createTaskExtended("rollover task", { agentId: worker.id });
+    const parentTask = await createTaskExtended("rollover task", { agentId: worker.id });
 
     // First refusal — first follow-up.
     await callPoll(worker.id);
@@ -263,12 +283,17 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
   });
 
   test("workflow event bus receives task.budget_refused on every refusal (not just first)", async () => {
-    createAgent({ name: "lead-5", isLead: true, status: "idle", maxTasks: 5 });
-    const worker = createAgent({ name: "worker-5", isLead: false, status: "idle", maxTasks: 1 });
+    await createAgent({ name: "lead-5", isLead: true, status: "idle", maxTasks: 5 });
+    const worker = await createAgent({
+      name: "worker-5",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
-    const parentTask = createTaskExtended("event-bus task", { agentId: worker.id });
+    const parentTask = await createTaskExtended("event-bus task", { agentId: worker.id });
 
     const events: Array<{ taskId: string; agentId: string; cause: string }> = [];
     const handler = (data: unknown) => {
@@ -297,7 +322,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
 
   test("no follow-up created when there's no lead agent (refusal still emits + dedup row stays)", async () => {
     // Workers only — no lead.
-    const worker = createAgent({
+    const worker = await createAgent({
       name: "worker-no-lead",
       isLead: false,
       status: "idle",
@@ -306,7 +331,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
-    const parentTask = createTaskExtended("no-lead task", { agentId: worker.id });
+    const parentTask = await createTaskExtended("no-lead task", { agentId: worker.id });
 
     const { body } = await callPoll(worker.id);
     if ("error" in body) throw new Error("unexpected error response");

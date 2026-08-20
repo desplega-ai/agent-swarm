@@ -114,9 +114,9 @@ describe("reassociateSessionLogs", () => {
 });
 
 describe("pool task claim flow", () => {
-  test("active session stores runnerSessionId", () => {
+  test("active session stores runnerSessionId", async () => {
     const agentId = crypto.randomUUID();
-    createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
 
     const session = insertActiveSession({
       agentId,
@@ -137,10 +137,10 @@ describe("pool task claim flow", () => {
     const agentId = crypto.randomUUID();
     const runnerSessionId = "runner-sess-e2e";
     const effectiveTaskId = crypto.randomUUID();
-    createAgent({ id: agentId, name: "E2E Pool Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "E2E Pool Agent", isLead: false, status: "idle" });
 
     // 1. Create an unassigned task (pool task)
-    const task = createTaskExtended("Test pool task", {
+    const task = await createTaskExtended("Test pool task", {
       source: "api",
     });
     expect(task.agentId).toBeNull();

@@ -48,7 +48,7 @@ export const registerSkillUpdateTool = (server: McpServer) => {
         }
 
         // Only owner or lead can update
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const updateDecision = can({
           principal: {
             kind: "agent",

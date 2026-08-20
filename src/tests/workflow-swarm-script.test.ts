@@ -113,7 +113,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
   agentId = agent.id;
 
   const eventBus = new InProcessEventBus();

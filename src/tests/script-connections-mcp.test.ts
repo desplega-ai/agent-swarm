@@ -288,7 +288,7 @@ describe("script MCP connections", () => {
   test("upsert-mcp generates descriptors/types and resolves header config while listing tools", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const tool = scriptConnectionsTool();
 
@@ -355,7 +355,7 @@ describe("script MCP connections", () => {
     try {
       fake.addExtraTool("foo-bar", "Hyphenated");
       fake.addExtraTool("foo_bar", "Underscored");
-      const lead = createAgent({ name: "mcp-collision-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "mcp-collision-lead", isLead: true, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
 
       const connection = await upsertScriptConnection({
@@ -377,8 +377,8 @@ describe("script MCP connections", () => {
   test("agent-scoped registration resolves discovery auth with the target agent's scoped config", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-scope-lead", isLead: true, status: "idle" });
-      const owner = createAgent({ name: "mcp-scope-owner", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "mcp-scope-lead", isLead: true, status: "idle" });
+      const owner = await createAgent({ name: "mcp-scope-owner", isLead: false, status: "idle" });
       // Secret visible ONLY in the owner agent's scope — not to the lead caller.
       await upsertSwarmConfig({
         scope: "agent",
@@ -415,7 +415,11 @@ describe("script MCP connections", () => {
   test("refresh uses caller agent context for global MCP discovery auth", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-refresh-context-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({
+        name: "mcp-refresh-context-lead",
+        isLead: true,
+        status: "idle",
+      });
       await upsertSwarmConfig({
         scope: "agent",
         scopeId: lead.id,
@@ -457,8 +461,8 @@ describe("script MCP connections", () => {
   test("proxy route lets a worker invoke a global MCP connection and forwards resolved secret headers", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "mcp-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
+      const worker = await createAgent({ name: "mcp-worker", isLead: false, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const connection = await upsertScriptConnection({
         slug: "proxyExternal",
@@ -506,8 +510,12 @@ describe("script MCP connections", () => {
   test("proxy route lets synthetic schedule/workflow principals invoke global MCP connections only", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-synthetic-lead", isLead: true, status: "idle" });
-      const owner = createAgent({ name: "mcp-synthetic-owner", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "mcp-synthetic-lead", isLead: true, status: "idle" });
+      const owner = await createAgent({
+        name: "mcp-synthetic-owner",
+        isLead: false,
+        status: "idle",
+      });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const globalConnection = await upsertScriptConnection({
         slug: "syntheticGlobal",
@@ -561,8 +569,8 @@ describe("script MCP connections", () => {
   test("proxy route allows repo-scoped MCP connections after descriptor-time gating", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-repo-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "mcp-repo-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "mcp-repo-lead", isLead: true, status: "idle" });
+      const worker = await createAgent({ name: "mcp-repo-worker", isLead: false, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const connection = await upsertScriptConnection({
         slug: "repoExternal",
@@ -593,9 +601,9 @@ describe("script MCP connections", () => {
   test("proxy route rejects disabled connections and agent scope mismatches", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
-      const worker = createAgent({ name: "mcp-worker", isLead: false, status: "idle" });
-      const owner = createAgent({ name: "mcp-owner", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
+      const worker = await createAgent({ name: "mcp-worker", isLead: false, status: "idle" });
+      const owner = await createAgent({ name: "mcp-owner", isLead: false, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const globalConnection = await upsertScriptConnection({
         slug: "disabledExternal",
@@ -665,7 +673,7 @@ describe("script MCP connections", () => {
   test("refresh re-runs MCP tool discovery and picks up new tools", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-refresh-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "mcp-refresh-lead", isLead: true, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const connection = await upsertScriptConnection({
         slug: "refreshable",
@@ -695,7 +703,7 @@ describe("script MCP connections", () => {
   test("tool-list fetch failures are recorded as generation_error on the connection row", async () => {
     const fake = startFakeMcpServer({ failList: true });
     try {
-      const lead = createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({ name: "mcp-lead", isLead: true, status: "idle" });
       const mcpServer = await seedExternalMcpServer(fake.url);
 
       const connection = await upsertScriptConnection({
@@ -717,7 +725,11 @@ describe("script MCP connections", () => {
   test("tools/list JSON-RPC error envelopes are recorded as generation_error", async () => {
     const fake = startFakeMcpServer({ jsonRpcListError: true });
     try {
-      const lead = createAgent({ name: "mcp-jsonrpc-error-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({
+        name: "mcp-jsonrpc-error-lead",
+        isLead: true,
+        status: "idle",
+      });
       const mcpServer = await seedExternalMcpServer(fake.url);
 
       const connection = await upsertScriptConnection({
@@ -737,7 +749,7 @@ describe("script MCP connections", () => {
   });
 
   test("SSE MCP servers fail early with a clear unsupported transport error", async () => {
-    const lead = createAgent({ name: "mcp-sse-lead", isLead: true, status: "idle" });
+    const lead = await createAgent({ name: "mcp-sse-lead", isLead: true, status: "idle" });
     const mcpServer = createMcpServer({
       name: `sse-${crypto.randomUUID()}`,
       transport: "sse",
@@ -773,7 +785,11 @@ describe("script MCP connections", () => {
   test("deleteMcpServer deletes dependent MCP script connections before deleting the server", async () => {
     const fake = startFakeMcpServer();
     try {
-      const lead = createAgent({ name: "mcp-delete-cascade-lead", isLead: true, status: "idle" });
+      const lead = await createAgent({
+        name: "mcp-delete-cascade-lead",
+        isLead: true,
+        status: "idle",
+      });
       const mcpServer = await seedExternalMcpServer(fake.url);
       const connection = await upsertScriptConnection({
         slug: "deleteCascadeExternal",

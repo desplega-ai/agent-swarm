@@ -94,12 +94,12 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const creator = createAgent({
+  const creator = await createAgent({
     name: "update-schedule-mcp-creator",
     isLead: false,
     status: "idle",
   });
-  const otherAgent = createAgent({
+  const otherAgent = await createAgent({
     name: "update-schedule-mcp-other",
     isLead: false,
     status: "idle",

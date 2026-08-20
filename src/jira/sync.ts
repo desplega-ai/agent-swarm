@@ -197,8 +197,8 @@ export function _setBotAccountIdForTesting(id: string | null): void {
 
 // ─── Lead-agent picker (mirrors Linear) ────────────────────────────────────
 
-function findLeadAgent(): Agent | null {
-  const agents = getAllAgents();
+async function findLeadAgent(): Promise<Agent | null> {
+  const agents = await getAllAgents();
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
   return agents.find((a) => a.isLead) ?? null;
@@ -327,7 +327,7 @@ export async function handleIssueEvent(event: Record<string, unknown>): Promise<
   }
 
   // Pre-existing — branch on prior task state.
-  const priorTask = claim.sync.swarmId ? getTaskById(claim.sync.swarmId) : null;
+  const priorTask = claim.sync.swarmId ? await getTaskById(claim.sync.swarmId) : null;
   if (priorTask && !isTerminalTaskStatus(priorTask.status)) {
     // In-progress: do not duplicate. Match Linear's behavior of acknowledging
     // and continuing with the existing task.
@@ -495,7 +495,7 @@ async function routeCommentOnExistingSync(input: {
   requestedByUserId: string | undefined;
   syncRow: { id: string; swarmId: string };
 }): Promise<void> {
-  const priorTask = input.syncRow.swarmId ? getTaskById(input.syncRow.swarmId) : null;
+  const priorTask = input.syncRow.swarmId ? await getTaskById(input.syncRow.swarmId) : null;
   if (priorTask && !isTerminalTaskStatus(priorTask.status)) {
     // In-progress: log and ignore (mirrors Linear's prompted-on-active path).
     console.log(
@@ -529,7 +529,7 @@ export async function handleIssueDeleteEvent(event: Record<string, unknown>): Pr
   const sync = await getTrackerSyncByExternalId("jira", "task", issue.id);
   if (!sync) return;
 
-  const task = sync.swarmId ? getTaskById(sync.swarmId) : null;
+  const task = sync.swarmId ? await getTaskById(sync.swarmId) : null;
   if (task && !isTerminalTaskStatus(task.status)) {
     await cancelTask(sync.swarmId, "Jira issue deleted");
     console.log(
@@ -552,7 +552,7 @@ async function createInitialJiraTask(input: {
   followupTrigger?: string;
   followupMessage?: string;
 }): Promise<void> {
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const descriptionSection = input.descriptionText
     ? `\nDescription:\n${input.descriptionText}\n`
     : "";
@@ -580,7 +580,7 @@ async function createInitialJiraTask(input: {
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",
@@ -606,7 +606,7 @@ async function createCommentMentionTask(input: {
   issueUrl: string;
   syncRowId: string;
 }): Promise<void> {
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const descriptionSection = input.descriptionText
     ? `\nDescription:\n${input.descriptionText}\n`
     : "";
@@ -625,7 +625,7 @@ async function createCommentMentionTask(input: {
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "jira",
     taskType: "jira-issue",

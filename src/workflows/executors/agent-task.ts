@@ -93,7 +93,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     }
 
     // 3. Create the task (config is already deep-interpolated by the engine)
-    const { description: taskDescription, options: taskOptions } = withSiblingAwareness(
+    const { description: taskDescription, options: taskOptions } = await withSiblingAwareness(
       config.template,
       {
         key: effectiveKey,
@@ -115,7 +115,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
     );
-    const task = db.createTaskExtended(taskDescription, taskOptions);
+    const task = await db.createTaskExtended(taskDescription, taskOptions);
 
     // 4. Return async result — engine will pause the workflow
     return {

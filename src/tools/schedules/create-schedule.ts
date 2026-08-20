@@ -224,7 +224,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
 
       // Validate targetAgentId if provided
       if (targetAgentId) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
         }

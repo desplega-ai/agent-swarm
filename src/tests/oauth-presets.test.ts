@@ -74,7 +74,7 @@ let leadAgentId: string;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  leadAgentId = createAgent({ name: "presets-lead", isLead: true, status: "idle" }).id;
+  leadAgentId = (await createAgent({ name: "presets-lead", isLead: true, status: "idle" })).id;
 });
 
 afterAll(async () => {

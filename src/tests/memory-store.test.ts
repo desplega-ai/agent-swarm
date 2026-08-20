@@ -36,8 +36,8 @@ describe("SqliteMemoryStore", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "Test Agent B", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "Test Agent B", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 
@@ -391,9 +391,9 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("getStats()", () => {
-    test("returns correct counts", () => {
+    test("returns correct counts", async () => {
       const statsAgent = "cccc0000-0000-4000-8000-000000000003";
-      createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
+      await createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
 
       store.store({
         agentId: statsAgent,
@@ -444,9 +444,9 @@ describe("SqliteMemoryStore", () => {
   describe("purgeExpired()", () => {
     const purgeAgent = "cccc0000-0000-4000-8000-000000000003";
 
-    beforeAll(() => {
+    beforeAll(async () => {
       try {
-        createAgent({ id: purgeAgent, name: "Purge Agent", isLead: false, status: "idle" });
+        await createAgent({ id: purgeAgent, name: "Purge Agent", isLead: false, status: "idle" });
       } catch {
         // agent may already exist from a prior run
       }

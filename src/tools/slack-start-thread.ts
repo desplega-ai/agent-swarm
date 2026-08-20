@@ -36,7 +36,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.");
       }
@@ -91,7 +91,7 @@ export const registerSlackStartThreadTool = (server: McpServer) => {
         }
 
         const sourceTask = requestInfo.sourceTaskId
-          ? getTaskById(requestInfo.sourceTaskId)
+          ? await getTaskById(requestInfo.sourceTaskId)
           : undefined;
         await recordSlackMessage({
           contextKey: sourceTask?.contextKey ?? `task:slack:${resolvedChannelId}:${ts}`,

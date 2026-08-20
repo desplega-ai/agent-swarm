@@ -47,8 +47,8 @@ function extractMentionContext(text: string): string {
   return text.replace(new RegExp(`@${GITLAB_BOT_NAME}\\b`, "gi"), "").trim();
 }
 
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   return (
     agents.find((a) => a.role === "lead" && a.status === "idle") ??
     agents.find((a) => a.role === "lead") ??
@@ -144,7 +144,7 @@ export async function handleMergeRequest(
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   switch (action) {
     case "open": {
@@ -172,7 +172,7 @@ export async function handleMergeRequest(
         return { created: false };
       }
 
-      const task = createTaskWithSiblingAwareness(result.text, {
+      const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -247,7 +247,7 @@ export async function handleIssue(
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   switch (action) {
     case "open": {
@@ -278,7 +278,7 @@ export async function handleIssue(
         return { created: false };
       }
 
-      const task = createTaskWithSiblingAwareness(result.text, {
+      const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -336,7 +336,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const context = extractMentionContext(note.note);
 
   // Determine the target entity (MR or issue)
@@ -380,7 +380,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     return { created: false };
   }
 
-  const task = createTaskWithSiblingAwareness(noteResult.text, {
+  const task = await createTaskWithSiblingAwareness(noteResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",
@@ -446,7 +446,7 @@ export async function handlePipeline(
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const pipelineResult = resolveTemplate("gitlab.pipeline.failed", {
     pipeline_id: pipeline.id,
     mr_iid: mrIid,
@@ -460,7 +460,7 @@ export async function handlePipeline(
     return { created: false };
   }
 
-  const task = createTaskWithSiblingAwareness(pipelineResult.text, {
+  const task = await createTaskWithSiblingAwareness(pipelineResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",

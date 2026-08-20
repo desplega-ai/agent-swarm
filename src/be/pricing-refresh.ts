@@ -95,9 +95,9 @@ async function prunePricingHistory(keepLatest = 2): Promise<number> {
   return result.changes;
 }
 
-function auditPricingRefresh(result: PricingRefreshResult): void {
+async function auditPricingRefresh(result: PricingRefreshResult): Promise<void> {
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.refresh",
       newValue: `${result.status}: inserted=${result.inserted}; unchanged=${result.unchanged}; pruned=${result.pruned}`,
       metadata: {
@@ -114,9 +114,9 @@ function auditPricingRefresh(result: PricingRefreshResult): void {
   }
 }
 
-function auditPricingRefreshFailure(err: unknown): void {
+async function auditPricingRefreshFailure(err: unknown): Promise<void> {
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.refresh.failed",
       newValue: scrubSecrets(err instanceof Error ? err.message : String(err)),
     });
@@ -142,7 +142,7 @@ export async function refreshPricingFromModelsDev(
       pruned: 0,
       etag: lastETag ?? undefined,
     };
-    auditPricingRefresh(result);
+    await auditPricingRefresh(result);
     logPricingRefresh("models.dev returned 304; pricing rows unchanged");
     return result;
   }
@@ -166,7 +166,7 @@ export async function refreshPricingFromModelsDev(
     pruned,
     etag: lastETag ?? undefined,
   };
-  auditPricingRefresh(result);
+  await auditPricingRefresh(result);
   logPricingRefresh(
     `refreshed ${rows.length} candidate row(s); inserted=${inserted}; unchanged=${unchanged}; pruned=${pruned}`,
   );
@@ -178,7 +178,7 @@ async function runPricingRefreshSafely(): Promise<void> {
     await refreshPricingFromModelsDev();
   } catch (err) {
     logPricingRefreshError("refresh failed", err);
-    auditPricingRefreshFailure(err);
+    await auditPricingRefreshFailure(err);
   }
 }
 

@@ -38,7 +38,7 @@ export async function resolveTaskAuditUserId(
   }
   if (!resolvedSourceTaskId) return null;
 
-  const task = getTaskById(resolvedSourceTaskId);
+  const task = await getTaskById(resolvedSourceTaskId);
   if (!task) return null;
   // Bind the header to the caller's own task — otherwise it is just a
   // client-chosen value and its requester cannot be trusted.

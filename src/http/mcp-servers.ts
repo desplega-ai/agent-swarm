@@ -239,10 +239,10 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
  * identity even when the request carries the shared API key, so that an agent
  * cannot use that key to bypass the route's declared RBAC permission.
  */
-function mcpServerPrincipal(req: IncomingMessage): RbacPrincipal {
+async function mcpServerPrincipal(req: IncomingMessage): Promise<RbacPrincipal> {
   const agentId = singleHeader(req, "x-agent-id");
   if (agentId) {
-    const agent = getAgentById(agentId);
+    const agent = await getAgentById(agentId);
     return { kind: "agent", agentId, isLead: agent?.isLead ?? false };
   }
 
@@ -252,13 +252,13 @@ function mcpServerPrincipal(req: IncomingMessage): RbacPrincipal {
   return { kind: "agent", agentId: "", isLead: false };
 }
 
-function ensureMcpServerPermission(
+async function ensureMcpServerPermission(
   req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<PermissionVerb, "mcp-server.create.swarm" | "mcp-server.update.any">,
   resource: RbacResource,
-): boolean {
-  const principal = mcpServerPrincipal(req);
+): Promise<boolean> {
+  const principal = await mcpServerPrincipal(req);
   // The shared API key without an agent identity is the HTTP admin context.
   // An X-Agent-ID always takes precedence above, so agents cannot use that key
   // to bypass the permission declared on this route.
@@ -467,7 +467,7 @@ export async function handleMcpServers(
     const parsed = await createMcpServerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    if (!ensureMcpServerPermission(req, res, "mcp-server.create.swarm", { kind: "none" })) {
+    if (!(await ensureMcpServerPermission(req, res, "mcp-server.create.swarm", { kind: "none" }))) {
       return true;
     }
 
@@ -516,10 +516,10 @@ export async function handleMcpServers(
       return true;
     }
     if (
-      !ensureMcpServerPermission(req, res, "mcp-server.update.any", {
+      !(await ensureMcpServerPermission(req, res, "mcp-server.update.any", {
         kind: "owned",
         ownerAgentId: existing.ownerAgentId,
-      })
+      }))
     ) {
       return true;
     }

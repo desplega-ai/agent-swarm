@@ -56,9 +56,9 @@ describe("memory-get MCP authorization", () => {
     }
 
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Memory Get Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "Memory Get Agent B", isLead: true, status: "idle" });
-    createAgent({ id: agentC, name: "Memory Get Agent C", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Memory Get Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "Memory Get Agent B", isLead: true, status: "idle" });
+    await createAgent({ id: agentC, name: "Memory Get Agent C", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {

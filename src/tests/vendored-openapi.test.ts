@@ -79,10 +79,11 @@ async function dispatch(
   return { status, body: JSON.parse(text) as unknown };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  leadAgentId = createAgent({ name: "vendored-openapi-lead", isLead: true, status: "idle" }).id;
+  leadAgentId = (await createAgent({ name: "vendored-openapi-lead", isLead: true, status: "idle" }))
+    .id;
 });
 
 afterEach(() => {

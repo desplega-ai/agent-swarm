@@ -43,14 +43,14 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
   }
 }
 
-export function createStandaloneScheduleTask(
+export async function createStandaloneScheduleTask(
   schedule: ScheduledTask,
   extraTags: string[] = [],
-): AgentTask {
+): Promise<AgentTask> {
   if (!schedule.taskTemplate) {
     throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
   }
-  return createTaskWithSiblingAwareness(schedule.taskTemplate, {
+  return await createTaskWithSiblingAwareness(schedule.taskTemplate, {
     key: schedule.key,
     creatorAgentId: schedule.createdByAgentId,
     taskType: schedule.taskType,

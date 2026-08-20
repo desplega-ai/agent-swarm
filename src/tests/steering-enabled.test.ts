@@ -71,25 +71,25 @@ async function removeTestDb(): Promise<void> {
   }
 }
 
-function createRunningTask(
+async function createRunningTask(
   label: string,
   provider: ProviderName = "pi",
   slackContext?: { channelId: string; threadTs: string },
 ) {
-  const agent = createAgent({
+  const agent = await createAgent({
     name: `${label} agent`,
     isLead: true,
     status: "busy",
     maxTasks: 10,
     harnessProvider: provider,
   });
-  const task = createTaskExtended(label, {
+  const task = await createTaskExtended(label, {
     agentId: agent.id,
     source: slackContext ? "slack" : "api",
     slackChannelId: slackContext?.channelId,
     slackThreadTs: slackContext?.threadTs,
   });
-  expect(startTask(task.id)?.status).toBe("in_progress");
+  expect((await startTask(task.id))?.status).toBe("in_progress");
   return { agent, task };
 }
 
@@ -158,7 +158,7 @@ describe("STEERING_ENABLED opt-in", () => {
 
   test("rejects new requests with 403 before looking up or creating rows", async () => {
     await withSteeringDisabled(async () => {
-      const { task } = createRunningTask("disabled request");
+      const { task } = await createRunningTask("disabled request");
       expect(getSteeringMessagesForTask(task.id)).toEqual([]);
       let thrown: unknown;
       try {
@@ -231,7 +231,7 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("keeps history reads and all worker drain callbacks available", async () => {
-    const { agent, task } = createRunningTask("disabled drain callbacks");
+    const { agent, task } = await createRunningTask("disabled drain callbacks");
     const delivered = createSteeringMessage({
       taskId: task.id,
       body: "deliver this",
@@ -323,7 +323,10 @@ describe("STEERING_ENABLED opt-in", () => {
     try {
       const channelId = `C_DISABLED_${crypto.randomUUID()}`;
       const threadTs = "1.0001";
-      const { task } = createRunningTask("disabled Slack steering", "pi", { channelId, threadTs });
+      const { task } = await createRunningTask("disabled Slack steering", "pi", {
+        channelId,
+        threadTs,
+      });
 
       await withSteeringDisabled(async () => {
         expect(

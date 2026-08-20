@@ -114,7 +114,7 @@ describe("retrieval → ImplicitCitationRater → posterior shift", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Citation Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Citation Test Agent", isLead: false, status: "idle" });
     const insertTask = getDb().prepare(
       `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,

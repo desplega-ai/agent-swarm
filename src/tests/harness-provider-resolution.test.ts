@@ -244,7 +244,7 @@ describe("validateConfigValue", () => {
 
 describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
   test("agent scope wins over global scope", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "scope-test-1",
       isLead: false,
       status: "idle",
@@ -265,7 +265,7 @@ describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
   });
 
   test("global scope applies when no agent-scoped row exists", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "scope-test-2",
       isLead: false,
       status: "idle",
@@ -321,7 +321,7 @@ describe("PUT /api/config rejects invalid HARNESS_PROVIDER", () => {
   });
 
   test("400 still rejects via PUT when scope=agent", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "scope-test-3",
       isLead: false,
       status: "idle",

@@ -73,8 +73,13 @@ describe("memory graph expansion", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Graph Test Agent", isLead: false, status: "idle" });
-    createAgent({ id: otherAgentId, name: "Other Graph Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Graph Test Agent", isLead: false, status: "idle" });
+    await createAgent({
+      id: otherAgentId,
+      name: "Other Graph Agent",
+      isLead: false,
+      status: "idle",
+    });
     const nowIso = new Date().toISOString();
     getDb()
       .prepare(

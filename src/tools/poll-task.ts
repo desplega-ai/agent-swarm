@@ -70,7 +70,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // touching the bookkeeping path below.
       const wasBudgetRefused: boolean = false;
 
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       if (!agent) {
         return toolErr(`Agent with ID "${agentId}" not found in the swarm.`, {
           data: {
@@ -83,7 +83,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       }
 
       // Check for offered tasks first - these need immediate attention
-      const offeredTasks = getOfferedTasksForAgent(agentId);
+      const offeredTasks = await getOfferedTasksForAgent(agentId);
       const availableCount = getUnassignedTasksCount();
 
       if (offeredTasks.length > 0) {
@@ -105,20 +105,20 @@ export const registerPollTaskTool = (server: McpServer) => {
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
         const startedTask = await getDbClient().transaction(async () => {
-          const agentNow = getAgentById(agentId)!;
+          const agentNow = (await getAgentById(agentId))!;
 
           if (agentNow.status !== "busy") {
-            updateAgentStatus(agentId, "idle");
+            await updateAgentStatus(agentId, "idle");
           }
 
-          const pendingTask = getPendingTaskForAgent(agentId);
+          const pendingTask = await getPendingTaskForAgent(agentId);
           if (!pendingTask) return null;
 
-          const maybeTask = startTask(pendingTask.id);
+          const maybeTask = await startTask(pendingTask.id);
 
           if (maybeTask) {
             // Update automatically in case the agent forgets xd
-            updateAgentStatus(agentId, "busy");
+            await updateAgentStatus(agentId, "busy");
           }
 
           return maybeTask;
@@ -126,7 +126,7 @@ export const registerPollTaskTool = (server: McpServer) => {
 
         if (startedTask) {
           // Reset empty poll count when task is assigned
-          resetEmptyPollCount(agentId);
+          await resetEmptyPollCount(agentId);
 
           const waitedFor = Math.round((Date.now() - now.getTime()) / 1000);
 
@@ -160,7 +160,7 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Refused ≠ empty (D-R3) — skip bookkeeping when a budget refusal
       // occurred during this poll window.
       const newCount = wasBudgetRefused
-        ? (getAgentById(agentId)?.emptyPollCount ?? 0)
+        ? ((await getAgentById(agentId))?.emptyPollCount ?? 0)
         : await incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
 

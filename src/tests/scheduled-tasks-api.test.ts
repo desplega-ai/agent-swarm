@@ -89,7 +89,7 @@ describe("Scheduled Tasks REST API", () => {
     initDb(TEST_DB_PATH);
 
     // Create a test agent for schedule creation
-    testAgent = createAgent({
+    testAgent = await createAgent({
       name: "Test Schedule API Agent",
       isLead: false,
       status: "idle",

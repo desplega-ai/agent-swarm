@@ -140,7 +140,7 @@ export function createAssistant(): Assistant {
 
           // Otherwise, create a follow-up task for the working agent
           const latestTask = await getMostRecentTaskInThread(channelId, threadTs);
-          const task = createTaskWithSiblingAwareness(renderedMessageText, {
+          const task = await createTaskWithSiblingAwareness(renderedMessageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
@@ -177,10 +177,10 @@ export function createAssistant(): Assistant {
             ? `\n\n[User is viewing channel <#${ctx.channel_id}>]`
             : "";
 
-        const lead = getLeadAgent();
+        const lead = await getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+          const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
@@ -199,7 +199,7 @@ export function createAssistant(): Assistant {
           return;
         }
 
-        const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+        const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,

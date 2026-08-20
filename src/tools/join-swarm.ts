@@ -84,7 +84,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
 
       try {
         const agent = await getDbClient().transaction(async () => {
-          const agents = getAllAgents();
+          const agents = await getAllAgents();
 
           const existingIdAgent = agents.find((agent) => agent.id === agentId);
 
@@ -107,7 +107,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
             );
           }
 
-          const agent = createAgent({
+          const agent = await createAgent({
             id: agentId,
             name,
             isLead: lead,

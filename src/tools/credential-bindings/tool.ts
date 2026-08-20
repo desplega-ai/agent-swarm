@@ -243,7 +243,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       // Gate EACH action behind the same verb its HTTP counterpart uses, so a
       // custom role granting only `credential-binding.manage` can't reach the
       // OAuth app/authorization powers this tool now exposes — powers the HTTP

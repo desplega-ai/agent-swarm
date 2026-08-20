@@ -62,9 +62,9 @@ afterEach(() => {
 // hit the PK collision on a second `createAgent`. Cleared in `beforeEach`.
 const ensuredAgentIds = new Set<string>();
 
-function ensureAgent(agentId: string): void {
+async function ensureAgent(agentId: string): void {
   if (ensuredAgentIds.has(agentId)) return;
-  createAgent({
+  await createAgent({
     id: agentId,
     name: `agent-${agentId}`,
     isLead: false,
@@ -84,12 +84,12 @@ function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd
 // Pinned to the same UTC day as `NOW` so spend rows fall inside the queried day window regardless of when CI runs.
 const DEFAULT_SPEND_CREATED_AT = "2026-04-28T12:00:00.000Z";
 
-function insertSpendForAgent(
+async function insertSpendForAgent(
   agentId: string,
   totalCostUsd: number,
   opts: { createdAt?: string } = {},
 ): string {
-  ensureAgent(agentId);
+  await ensureAgent(agentId);
   const cost = createSessionCost({
     sessionId: `sess-${crypto.randomUUID()}`,
     agentId,
@@ -112,18 +112,18 @@ describe("canClaim — budget admission predicate", () => {
     expect(result.allowed).toBe(true);
   });
 
-  test("global budget set, spend below ceiling ⇒ allowed", () => {
+  test("global budget set, spend below ceiling ⇒ allowed", async () => {
     insertBudget("global", "", 10.0);
-    insertSpendForAgent("agent-x", 3.5);
+    await insertSpendForAgent("agent-x", 3.5);
 
     const result = canClaim("agent-1", NOW);
     expect(result.allowed).toBe(true);
   });
 
-  test("global budget set, spend at ceiling ⇒ refused with cause='global'", () => {
+  test("global budget set, spend at ceiling ⇒ refused with cause='global'", async () => {
     insertBudget("global", "", 10.0);
-    insertSpendForAgent("agent-x", 7.0);
-    insertSpendForAgent("agent-y", 3.0); // exactly hits 10.0
+    await insertSpendForAgent("agent-x", 7.0);
+    await insertSpendForAgent("agent-y", 3.0); // exactly hits 10.0
 
     const result = canClaim("agent-z", NOW);
     expect(result.allowed).toBe(false);
@@ -136,9 +136,9 @@ describe("canClaim — budget admission predicate", () => {
     expect(result.agentBudget).toBeUndefined();
   });
 
-  test("agent budget set, agent spend at ceiling ⇒ refused with cause='agent'", () => {
+  test("agent budget set, agent spend at ceiling ⇒ refused with cause='agent'", async () => {
     insertBudget("agent", "agent-1", 5.0);
-    insertSpendForAgent("agent-1", 5.0);
+    await insertSpendForAgent("agent-1", 5.0);
 
     const result = canClaim("agent-1", NOW);
     expect(result.allowed).toBe(false);
@@ -150,10 +150,10 @@ describe("canClaim — budget admission predicate", () => {
     expect(result.globalBudget).toBeUndefined();
   });
 
-  test("both budgets set + both blown ⇒ refused with cause='global' (global is checked first)", () => {
+  test("both budgets set + both blown ⇒ refused with cause='global' (global is checked first)", async () => {
     insertBudget("global", "", 10.0);
     insertBudget("agent", "agent-1", 2.0);
-    insertSpendForAgent("agent-1", 10.0);
+    await insertSpendForAgent("agent-1", 10.0);
 
     const result = canClaim("agent-1", NOW);
     expect(result.allowed).toBe(false);
@@ -164,9 +164,9 @@ describe("canClaim — budget admission predicate", () => {
   test("spend on a different UTC day does NOT count toward today", async () => {
     insertBudget("agent", "agent-1", 5.0);
     // Backdated cost from yesterday — should not contribute to today's total.
-    insertSpendForAgent("agent-1", 50.0, { createdAt: "2026-04-27T23:59:59.999Z" });
+    await insertSpendForAgent("agent-1", 50.0, { createdAt: "2026-04-27T23:59:59.999Z" });
     // A small cost today that does not blow the budget.
-    insertSpendForAgent("agent-1", 1.0, { createdAt: "2026-04-28T01:00:00.000Z" });
+    await insertSpendForAgent("agent-1", 1.0, { createdAt: "2026-04-28T01:00:00.000Z" });
 
     const todaySpend = await getDailySpendForAgent("agent-1", TODAY);
     expect(todaySpend).toBe(1.0);
@@ -207,10 +207,10 @@ describe("canClaim — budget admission predicate", () => {
     expect(result.resetAt).toBe("2027-01-01T00:00:00.000Z");
   });
 
-  test("BUDGET_ADMISSION_DISABLED=true short-circuits to allowed regardless of budget rows", () => {
+  test("BUDGET_ADMISSION_DISABLED=true short-circuits to allowed regardless of budget rows", async () => {
     insertBudget("global", "", 0.0); // would refuse without the flag
     insertBudget("agent", "agent-1", 0.0);
-    insertSpendForAgent("agent-1", 100.0);
+    await insertSpendForAgent("agent-1", 100.0);
 
     process.env.BUDGET_ADMISSION_DISABLED = "true";
     const result = canClaim("agent-1", NOW);

@@ -83,7 +83,7 @@ export const registerContextDiffTool = (server: McpServer) => {
 
       // Access control: agents can diff their own context, lead can diff any
       if (version.agentId !== requestInfo.agentId) {
-        const callerAgent = getAgentById(requestInfo.agentId);
+        const callerAgent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",

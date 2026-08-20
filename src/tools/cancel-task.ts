@@ -57,7 +57,7 @@ export async function cancelTaskHandler(
             message: 'Agent ID not found. Set the "X-Agent-ID" header.',
           };
         }
-        const callerAgent = getAgentById(ownerAgentId);
+        const callerAgent = await getAgentById(ownerAgentId);
 
         if (!callerAgent) {
           return {
@@ -66,7 +66,7 @@ export async function cancelTaskHandler(
           };
         }
 
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
 
         if (!existingTask) {
           return {
@@ -104,7 +104,7 @@ export async function cancelTaskHandler(
 
         // Update agent status based on capacity
         if (cancelled.agentId) {
-          updateAgentStatusFromCapacity(cancelled.agentId);
+          await updateAgentStatusFromCapacity(cancelled.agentId);
         }
 
         return {
@@ -114,7 +114,7 @@ export async function cancelTaskHandler(
         };
       }
 
-      const existingTask = getTaskById(taskId);
+      const existingTask = await getTaskById(taskId);
 
       if (!existingTask) {
         return {
@@ -136,7 +136,7 @@ export async function cancelTaskHandler(
       }
 
       if (cancelled.agentId) {
-        updateAgentStatusFromCapacity(cancelled.agentId);
+        await updateAgentStatusFromCapacity(cancelled.agentId);
       }
 
       return {

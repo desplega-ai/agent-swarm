@@ -121,9 +121,14 @@ beforeAll(async () => {
     )
   `);
 
-  createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Charact Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
+  await createAgent({
+    id: OTHER_WORKER_ID,
+    name: "Charact Other Worker",
+    isLead: false,
+    status: "idle",
+  });
 
   server = new McpServer({ name: "test-rbac-charact-misc-tools", version: "1.0.0" });
   registerCancelTaskTool(server);
@@ -150,7 +155,7 @@ afterAll(async () => {
 describe("cancel-task lead-or-creator gate (characterization)", () => {
   // cancel-task.ts:74 — lead OR task creator (previously zero denial coverage)
   test("worker who is neither lead nor creator cannot cancel a task", async () => {
-    const task = createTaskExtended("charact cancel deny", {
+    const task = await createTaskExtended("charact cancel deny", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: LEAD_ID,
     });
@@ -162,11 +167,11 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
       "Only the lead or task creator can cancel tasks.",
     );
     // DB not mutated
-    expect(getTaskById(task.id)?.status).toBe("pending");
+    expect((await getTaskById(task.id))?.status).toBe("pending");
   });
 
   test("lead can cancel any task", async () => {
-    const task = createTaskExtended("charact cancel lead allow", {
+    const task = await createTaskExtended("charact cancel lead allow", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: OTHER_WORKER_ID,
     });
@@ -174,11 +179,11 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
     const result = await callTool("cancel-task", LEAD_ID, { taskId: task.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getTaskById(task.id)?.status).toBe("cancelled");
+    expect((await getTaskById(task.id))?.status).toBe("cancelled");
   });
 
   test("task creator (non-lead) can cancel their own task", async () => {
-    const task = createTaskExtended("charact cancel creator allow", {
+    const task = await createTaskExtended("charact cancel creator allow", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: WORKER_ID,
     });
@@ -186,7 +191,7 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
     const result = await callTool("cancel-task", WORKER_ID, { taskId: task.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getTaskById(task.id)?.status).toBe("cancelled");
+    expect((await getTaskById(task.id))?.status).toBe("cancelled");
   });
 });
 
@@ -242,7 +247,7 @@ describe("context-history / context-diff gates (characterization)", () => {
 
   // context-diff.ts:95 — diffing another agent's context requires lead
   test("worker cannot diff another agent's context version", async () => {
-    const version = createContextVersion({
+    const version = await createContextVersion({
       agentId: LEAD_ID,
       field: "soulMd",
       content: "# Lead soul v1",
@@ -260,7 +265,7 @@ describe("context-history / context-diff gates (characterization)", () => {
   });
 
   test("lead can diff another agent's context version", async () => {
-    const version = createContextVersion({
+    const version = await createContextVersion({
       agentId: WORKER_ID,
       field: "soulMd",
       content: "# Worker soul v1",

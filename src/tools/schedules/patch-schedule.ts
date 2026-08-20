@@ -156,7 +156,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
         return toolErr("Schedule not found.");
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.");
       }
@@ -182,7 +182,7 @@ export const registerPatchScheduleTool = (server: McpServer) => {
 
       // Validate targetAgentId if provided and not null
       if (targetAgentId) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
         }

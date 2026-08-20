@@ -1005,7 +1005,7 @@ describe("script connections", () => {
     const suffix = crypto.randomUUID().replace(/-/g, "");
     const slug = `agentHeaderVendor${suffix}`;
     const configKey = `AGENT_HEADER_VENDOR_KEY_${suffix}`;
-    const lead = createAgent({
+    const lead = await createAgent({
       name: `script-connections-lead-${crypto.randomUUID()}`,
       isLead: true,
       status: "idle",
@@ -1065,7 +1065,7 @@ describe("script connections", () => {
     try {
       const suffix = crypto.randomUUID().replace(/-/g, "");
       const slug = `toolUrlVendor${suffix}`;
-      const lead = createAgent({
+      const lead = await createAgent({
         name: `script-connections-tool-url-lead-${crypto.randomUUID()}`,
         isLead: true,
         status: "idle",
@@ -1117,7 +1117,7 @@ describe("script connections", () => {
     const suffix = crypto.randomUUID().replace(/-/g, "");
     const slug = `toolGraphql${suffix}`;
     const configKey = `TOOL_GRAPHQL_KEY_${suffix}`;
-    const lead = createAgent({
+    const lead = await createAgent({
       name: `script-connections-tool-graphql-lead-${crypto.randomUUID()}`,
       isLead: true,
       status: "idle",

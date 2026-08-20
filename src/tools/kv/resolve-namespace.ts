@@ -22,16 +22,16 @@ export interface ResolvedNamespace {
   source: "explicit" | "task" | "agent";
 }
 
-export function resolveNamespace(
+export async function resolveNamespace(
   explicit: string | undefined,
   info: RequestInfo,
-): ResolvedNamespace | { error: string } {
+): Promise<ResolvedNamespace | { error: string }> {
   if (explicit && explicit.length > 0) {
     return { namespace: explicit, source: "explicit" };
   }
 
   if (info.sourceTaskId) {
-    const task = getTaskById(info.sourceTaskId);
+    const task = await getTaskById(info.sourceTaskId);
     if (task?.contextKey) {
       return { namespace: task.contextKey, source: "task" };
     }

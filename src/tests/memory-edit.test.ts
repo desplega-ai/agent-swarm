@@ -67,7 +67,7 @@ describe("memory editing", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Edit Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Edit Test Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 

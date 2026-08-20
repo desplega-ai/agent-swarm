@@ -35,7 +35,7 @@ export const registerDeleteChannelTool = (server: McpServer) => {
       }
 
       // Check authorization: must be lead agent
-      const callingAgent = getAgentById(requestInfo.agentId);
+      const callingAgent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

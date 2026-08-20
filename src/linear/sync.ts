@@ -346,8 +346,8 @@ export async function _fetchIssueGatingInfo(issueId: string): Promise<LinearGate
  * Find the lead agent to receive Linear tasks.
  * Returns null if no lead is available (task will go to pool).
  */
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
   return agents.find((a) => a.isLead) ?? null;
@@ -505,7 +505,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   const sessionId = agentSession ? String(agentSession.id ?? "") : "";
 
   if (existing) {
-    const existingTask = getTaskById(existing.swarmId);
+    const existingTask = await getTaskById(existing.swarmId);
 
     // If the task is still active, post a user-visible response on the new
     // session explaining that a sibling is already in flight and the new
@@ -562,7 +562,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   const sessionSection = sessionUrl ? `\nSession: ${sessionUrl}` : "";
   const descriptionSection = issueDescription ? `\nDescription:\n${issueDescription}\n` : "";
@@ -580,7 +580,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
   }
 
   const contextKey = linearContextKey({ issueIdentifier });
-  const existingContextWork = findExistingLinearTrackerContextWork(contextKey);
+  const existingContextWork = await findExistingLinearTrackerContextWork(contextKey);
   if (existingContextWork) {
     console.log(
       `[Linear Sync] Issue ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
@@ -612,7 +612,7 @@ export async function handleAgentSessionEvent(event: Record<string, unknown>): P
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(templateResult.text, {
+  const task = await createTaskWithSiblingAwareness(templateResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",
@@ -712,7 +712,7 @@ export async function handleIssueUpdate(
 
   // Map status to swarm actions
   if (swarmStatus === "cancelled") {
-    const task = getTaskById(sync.swarmId);
+    const task = await getTaskById(sync.swarmId);
     if (task && !isTerminalTaskStatus(task.status)) {
       await cancelTask(sync.swarmId, `Linear issue cancelled`);
       console.log(
@@ -750,7 +750,7 @@ export async function handleIssueDelete(event: Record<string, unknown>): Promise
   const sync = await getTrackerSyncByExternalId("linear", "task", issueId);
   if (!sync) return;
 
-  const task = getTaskById(sync.swarmId);
+  const task = await getTaskById(sync.swarmId);
   if (task && !isTerminalTaskStatus(task.status)) {
     await cancelTask(sync.swarmId, "Linear issue deleted");
     console.log(`[Linear Sync] Cancelled task ${sync.swarmId} (Linear issue ${issueId} deleted)`);
@@ -791,7 +791,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   if (activitySignal === "stop") {
     const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
     if (existing) {
-      const existingTask = getTaskById(existing.swarmId);
+      const existingTask = await getTaskById(existing.swarmId);
       if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
         await cancelTask(existing.swarmId, "Stopped by user from Linear");
         console.log(`[Linear Sync] Cancelled task ${existing.swarmId} (stop signal from Linear)`);
@@ -814,7 +814,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   const existing = await getTrackerSyncByExternalId("linear", "task", issueId);
 
   if (existing) {
-    const existingTask = getTaskById(existing.swarmId);
+    const existingTask = await getTaskById(existing.swarmId);
 
     // If the task is still in progress, acknowledge but don't create a new one
     if (existingTask && !isTerminalTaskStatus(existingTask.status)) {
@@ -832,7 +832,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   }
 
   // Task is completed/failed/cancelled or doesn't exist — create a new follow-up task
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Extract actor identity from Linear webhook payload (Q21.A bug fix).
   // For `prompted` action, the human is at `event.agentActivity.user`.
@@ -865,7 +865,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
   }
 
   const contextKey = linearContextKey({ issueIdentifier });
-  const existingContextWork = findExistingLinearTrackerContextWork(contextKey);
+  const existingContextWork = await findExistingLinearTrackerContextWork(contextKey);
   if (existingContextWork) {
     console.log(
       `[Linear Sync] Prompted event for ${issueIdentifier} skipped — contextKey ${contextKey} already has ${existingContextWork.reason} task ${existingContextWork.task.id}`,
@@ -895,7 +895,7 @@ export async function handleAgentSessionPrompted(event: Record<string, unknown>)
     return;
   }
 
-  const task = createTaskWithSiblingAwareness(followupResult.text, {
+  const task = await createTaskWithSiblingAwareness(followupResult.text, {
     agentId: lead?.id ?? "",
     source: "linear",
     taskType: "linear-issue",

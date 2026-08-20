@@ -45,7 +45,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
 
-  const agent = createAgent({ name: "script-runs-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "script-runs-worker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -372,7 +372,7 @@ describe("/api/script-runs HTTP", () => {
     expect(firstBody.taskId).toBe((dispatched as { id: string }).id);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the completed step", {
+    const followUp = await createTaskExtended("review the completed step", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: dispatched?.id,
@@ -423,7 +423,7 @@ describe("/api/script-runs HTTP", () => {
     await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the plan", {
+    const followUp = await createTaskExtended("review the plan", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: step?.id,
@@ -458,7 +458,7 @@ describe("/api/script-runs HTTP", () => {
     await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the review", {
+    const followUp = await createTaskExtended("review the review", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: step?.id,

@@ -175,7 +175,7 @@ export async function handleBudgets(
     const before = await getBudget(parsed.params.scope, scopeId);
     const updated = await upsertBudget(parsed.params.scope, scopeId, parsed.body.dailyBudgetUsd);
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "budget.upserted",
       metadata: {
         scope: parsed.params.scope,
@@ -202,7 +202,7 @@ export async function handleBudgets(
       return true;
     }
 
-    createLogEntry({
+    await createLogEntry({
       eventType: "budget.deleted",
       metadata: {
         scope: parsed.params.scope,

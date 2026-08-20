@@ -90,8 +90,8 @@ let agentItems: Array<{ id: string; name: string }>;
 beforeAll(async () => {
   await removeDbFiles();
   initDb(TEST_DB_PATH);
-  agentItems = ["Ada", "Babbage", "Curie"].map((name) => {
-    const agent = createAgent({ name, status: "idle" });
+  agentItems = ["Ada", "Babbage", "Curie"].map(async (name) => {
+    const agent = await createAgent({ name, status: "idle" });
     return { id: agent.id, name };
   });
 });

@@ -96,7 +96,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const isLead = agent?.isLead ?? false;
 
       // Try vector search first

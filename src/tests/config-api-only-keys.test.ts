@@ -46,7 +46,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
 
-  const agent = createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
   agentId = agent.id;
 
   // The API-owned bootstrap key + a normal global secret a worker legitimately reads.

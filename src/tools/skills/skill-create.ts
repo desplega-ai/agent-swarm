@@ -39,7 +39,7 @@ export const registerSkillCreateTool = (server: McpServer) => {
 
         // If swarm scope requested, only leads can create directly
         if (args.scope === "swarm") {
-          const agent = getAgentById(requestInfo.agentId);
+          const agent = await getAgentById(requestInfo.agentId);
           const decision = can({
             principal: {
               kind: "agent",

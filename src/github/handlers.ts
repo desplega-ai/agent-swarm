@@ -147,8 +147,8 @@ function isDuplicate(eventKey: string): boolean {
  * Find the lead agent to receive GitHub tasks
  * Returns null if no lead is available (task will go to pool)
  */
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   // First try to find an online lead
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
@@ -234,7 +234,7 @@ export async function handlePullRequest(
     }
 
     // Same task creation flow as mention-based handling
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.assigned",
       {
@@ -255,7 +255,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -347,7 +347,7 @@ export async function handlePullRequest(
     }
 
     // Create review task
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.review_requested",
       {
@@ -368,7 +368,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -455,7 +455,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.labeled",
       {
@@ -476,7 +476,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -547,7 +547,7 @@ export async function handlePullRequest(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Build task description
   const context = extractMentionContext(pr.body) || pr.title;
@@ -571,7 +571,7 @@ export async function handlePullRequest(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -636,7 +636,7 @@ export async function handleIssue(
     }
 
     // Same task creation flow as mention-based handling
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.issue.assigned",
       {
@@ -655,7 +655,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -737,7 +737,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.issue.labeled",
       {
@@ -756,7 +756,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -811,7 +811,7 @@ export async function handleIssue(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Build task description
   const context = extractMentionContext(issue.body) || issue.title;
@@ -833,7 +833,7 @@ export async function handleIssue(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -902,7 +902,7 @@ export async function handleComment(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Determine context (issue or PR)
   const target = pull_request || issue;
@@ -944,7 +944,7 @@ export async function handleComment(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -1209,7 +1209,7 @@ export async function handlePullRequestReview(
   }
 
   // Find lead agent for new task
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Get review state info
   const { emoji, label } = getReviewStateInfo(review.state);
@@ -1258,7 +1258,7 @@ export async function handlePullRequestReview(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",

@@ -380,16 +380,16 @@ export async function handleAgentRegister(
     const agentId = myAgentId || crypto.randomUUID();
 
     const result = await getDbClient().transaction(async () => {
-      const existingAgent = getAgentById(agentId);
+      const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
-          updateAgentStatus(existingAgent.id, "idle");
+          await updateAgentStatus(existingAgent.id, "idle");
         }
         if (parsed.body.maxTasks !== undefined && parsed.body.maxTasks !== existingAgent.maxTasks) {
-          updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
+          await updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
-          updateAgentProvider(existingAgent.id, parsed.body.provider);
+          await updateAgentProvider(existingAgent.id, parsed.body.provider);
         }
         // Phase 1.5: worker-pushed harness_provider always wins on
         // re-registration. Env-driven, by design (per-agent live override
@@ -400,13 +400,13 @@ export async function handleAgentRegister(
           parsed.body.harness_provider &&
           parsed.body.harness_provider !== existingAgent.harnessProvider
         ) {
-          setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
+          await setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
         }
-        resetEmptyPollCount(existingAgent.id);
-        return { agent: getAgentById(agentId), created: false };
+        await resetEmptyPollCount(existingAgent.id);
+        return { agent: await getAgentById(agentId), created: false };
       }
 
-      const agent = createAgent({
+      const agent = await createAgent({
         id: agentId,
         name: parsed.body.name,
         isLead: parsed.body.isLead ?? false,
@@ -490,8 +490,10 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks ? await getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
-    const agentsWithCapacity = agents.map(agentWithCapacity);
+    const agents = includeTasks
+      ? await getAllAgentsWithTasks({ slim })
+      : await getAllAgents({ slim });
+    const agentsWithCapacity = await Promise.all(agents.map(agentWithCapacity));
     listAgents.respond(res, 200, { agents: agentsWithCapacity });
     return true;
   }
@@ -506,7 +508,7 @@ export async function handleAgentsRest(
         jsonError(res, "Agent not found", 404);
         return true;
       }
-      updateAgentNameRoute.respond(res, 200, agentWithCapacity(agent));
+      updateAgentNameRoute.respond(res, 200, await agentWithCapacity(agent));
     } catch (error) {
       jsonError(res, (error as Error).message, 409);
     }
@@ -516,7 +518,7 @@ export async function handleAgentsRest(
   if (getAgentSetupScript.match(req.method, pathSegments)) {
     const parsed = await getAgentSetupScript.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = getAgentById(parsed.params.id);
+    const agent = await getAgentById(parsed.params.id);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -655,7 +657,7 @@ export async function handleAgentsRest(
       }
     }
 
-    updateAgentProfileRoute.respond(res, 200, agentWithCapacity(agent));
+    updateAgentProfileRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
@@ -671,7 +673,7 @@ export async function handleAgentsRest(
   if (setAgentHarnessProviderRoute.match(req.method, pathSegments)) {
     const parsed = await setAgentHarnessProviderRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
+    const agent = await setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -686,7 +688,7 @@ export async function handleAgentsRest(
       value: parsed.body.harness_provider,
       description: "Set via PATCH /api/agents/{id}/harness-provider",
     });
-    setAgentHarnessProviderRoute.respond(res, 200, agentWithCapacity(agent));
+    setAgentHarnessProviderRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
@@ -730,7 +732,10 @@ export async function handleAgentsRest(
     }
 
     const agent = await getDbClient().transaction(async () => {
-      const updated = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
+      const updated = await setAgentHarnessProvider(
+        parsed.params.id,
+        harness_provider as ProviderName,
+      );
       if (!updated) return null;
 
       await upsertSwarmConfig({
@@ -781,7 +786,7 @@ export async function handleAgentsRest(
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    updateAgentRuntimeRoute.respond(res, 200, agentWithCapacity(agent));
+    updateAgentRuntimeRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
@@ -791,7 +796,7 @@ export async function handleAgentsRest(
     const parsed = await listCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const filter = parsed.query.status;
-    const agents = getAllAgents()
+    const agents = (await getAllAgents())
       .filter((a) => (filter ? a.status === filter : true))
       .map((a) => ({
         agentId: a.id,
@@ -815,7 +820,7 @@ export async function handleAgentsRest(
       queryParams,
     );
     if (!parsed) return true;
-    const existing = getAgentById(parsed.params.id);
+    const existing = await getAgentById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -866,14 +871,14 @@ export async function handleAgentsRest(
           latestModel: parsed.body.latest_model,
         })) ?? agent;
     }
-    updateAgentCredentialStatusRoute.respond(res, 200, agentWithCapacity(finalAgent));
+    updateAgentCredentialStatusRoute.respond(res, 200, await agentWithCapacity(finalAgent));
     return true;
   }
 
   if (getAgentCredentialStatusRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = getAgentById(parsed.params.id);
+    const agent = await getAgentById(parsed.params.id);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -897,14 +902,14 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     const agent = includeTasks
       ? await getAgentWithTasks(parsed.params.id)
-      : getAgentById(parsed.params.id);
+      : await getAgentById(parsed.params.id);
 
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    getAgent.respond(res, 200, agentWithCapacity(agent));
+    getAgent.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 

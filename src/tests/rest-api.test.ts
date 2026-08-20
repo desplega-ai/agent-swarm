@@ -43,7 +43,7 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
 
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
@@ -58,8 +58,8 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const tx = getDb().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return { error: true };
@@ -70,7 +70,7 @@ async function handleRequest(
         status = "busy";
       }
 
-      updateAgentStatus(agent.id, status);
+      await updateAgentStatus(agent.id, status);
       return { error: false };
     });
 
@@ -88,14 +88,14 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const tx = getDb().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
         return { error: true };
       }
 
-      updateAgentStatus(agent.id, "offline");
+      await updateAgentStatus(agent.id, "offline");
       return { error: false };
     });
 
@@ -115,7 +115,7 @@ async function handleRequest(
     pathSegments[2]
   ) {
     const agentId = pathSegments[2];
-    const agent = getAgentById(agentId);
+    const agent = await getAgentById(agentId);
 
     if (!agent) {
       return { status: 404, body: { error: "Agent not found" } };
@@ -280,7 +280,7 @@ describe("REST API Endpoints", () => {
 
     test("should return agent info for existing agent", async () => {
       const agentId = "test-agent-me";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Me",
         isLead: false,
@@ -337,7 +337,7 @@ describe("REST API Endpoints", () => {
 
     test("should update agent heartbeat for existing agent", async () => {
       const agentId = "test-agent-ping";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Ping",
         isLead: false,
@@ -354,13 +354,13 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status was updated to idle
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("idle");
     });
 
     test("should preserve busy status when pinging", async () => {
       const agentId = "test-agent-ping-busy";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Ping Busy",
         isLead: false,
@@ -377,7 +377,7 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status remains busy
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("busy");
     });
   });
@@ -412,7 +412,7 @@ describe("REST API Endpoints", () => {
 
     test("should mark agent as offline", async () => {
       const agentId = "test-agent-close";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Close",
         isLead: false,
@@ -429,7 +429,7 @@ describe("REST API Endpoints", () => {
       expect(response.status).toBe(204);
 
       // Verify agent status was updated to offline
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       expect(agent?.status).toBe("offline");
     });
   });
@@ -451,7 +451,7 @@ describe("REST API Endpoints", () => {
 
     test("should return agent details for existing agent", async () => {
       const agentId = "test-agent-get";
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Test Agent Get",
         isLead: true,
@@ -478,7 +478,7 @@ describe("REST API Endpoints", () => {
       const agentId = "test-agent-with-profile";
 
       // First create agent, then update its profile
-      createAgent({
+      await createAgent({
         id: agentId,
         name: "Agent with Profile",
         isLead: false,
@@ -526,7 +526,7 @@ describe("REST API Endpoints", () => {
     });
 
     test("should return task details for existing task", async () => {
-      const task = createTaskExtended("Test task for GET endpoint", {
+      const task = await createTaskExtended("Test task for GET endpoint", {
         creatorAgentId: "test-agent-get",
       });
 
@@ -546,7 +546,7 @@ describe("REST API Endpoints", () => {
     });
 
     test("should include attachments[] in the response", async () => {
-      const task = createTaskExtended("Task with attachments", {
+      const task = await createTaskExtended("Task with attachments", {
         creatorAgentId: "test-agent-attach",
       });
       await insertTaskAttachment({
@@ -579,7 +579,7 @@ describe("REST API Endpoints", () => {
     });
 
     test("should return an empty attachments[] when none are attached", async () => {
-      const task = createTaskExtended("Task without attachments", {
+      const task = await createTaskExtended("Task without attachments", {
         creatorAgentId: "test-agent-noattach",
       });
       const response = await fetch(`${baseUrl}/api/tasks/${task.id}`);
@@ -593,33 +593,33 @@ describe("REST API Endpoints", () => {
   describe("GET /api/stats", () => {
     test("should return dashboard statistics", async () => {
       // Create some test data
-      createAgent({
+      await createAgent({
         id: "stats-agent-1",
         name: "Stats Agent 1",
         isLead: false,
         status: "idle",
       });
 
-      createAgent({
+      await createAgent({
         id: "stats-agent-2",
         name: "Stats Agent 2",
         isLead: false,
         status: "busy",
       });
 
-      createAgent({
+      await createAgent({
         id: "stats-agent-3",
         name: "Stats Agent 3",
         isLead: false,
         status: "offline",
       });
 
-      createTaskExtended("Stats task 1", {
+      await createTaskExtended("Stats task 1", {
         creatorAgentId: "stats-agent-1",
         agentId: "stats-agent-1",
       });
 
-      createTaskExtended("Stats task 2", {
+      await createTaskExtended("Stats task 2", {
         creatorAgentId: "stats-agent-1",
       });
 

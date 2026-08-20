@@ -17,7 +17,7 @@ describe("syncSkillsToFilesystem", () => {
   beforeAll(async () => {
     initDb(TEST_DB_PATH);
 
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Skill Sync Test Worker",
       description: "Test agent for skill sync",
       role: "worker",
@@ -327,7 +327,7 @@ describe("syncSkillsToFilesystem", () => {
   });
 
   test("returns empty result for agent with no skills", async () => {
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: "Empty Agent",
       description: "Agent with no skills",
       role: "worker",

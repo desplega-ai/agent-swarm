@@ -45,7 +45,7 @@ export const registerAppDiffTool = (server: McpServer) => {
     },
     async ({ appId, from, to }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.manage",

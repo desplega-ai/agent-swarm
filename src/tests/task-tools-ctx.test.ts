@@ -43,7 +43,7 @@ describe("task tool ctx", () => {
     const data = result.data as { task: { id: string; requestedByUserId?: string } };
     expect(data.task.requestedByUserId).toBe(user.id);
 
-    const stored = getTaskById(data.task.id);
+    const stored = await getTaskById(data.task.id);
     expect(stored?.creatorAgentId).toBeUndefined();
     expect(stored?.requestedByUserId).toBe(user.id);
   });
@@ -52,10 +52,10 @@ describe("task tool ctx", () => {
     const userA = createUser({ name: "List User A" });
     const userB = createUser({ name: "List User B" });
 
-    const a1 = createTaskExtended("owned task one", { requestedByUserId: userA.id });
-    const a2 = createTaskExtended("owned task two", { requestedByUserId: userA.id });
-    const b1 = createTaskExtended("foreign task", { requestedByUserId: userB.id });
-    createTaskExtended("owner-only task");
+    const a1 = await createTaskExtended("owned task one", { requestedByUserId: userA.id });
+    const a2 = await createTaskExtended("owned task two", { requestedByUserId: userA.id });
+    const b1 = await createTaskExtended("foreign task", { requestedByUserId: userB.id });
+    await createTaskExtended("owner-only task");
 
     const result = await getTasksHandler(userCtx(userA), {
       includeFull: true,
@@ -77,7 +77,7 @@ describe("task tool ctx", () => {
   test("getTasksHandler renders compact escaped markdown without changing structured tasks", async () => {
     const user = createUser({ name: "Markdown List User" });
     const taskText = "triage | path\\one\nsecond line";
-    const task = createTaskExtended(taskText, { requestedByUserId: user.id });
+    const task = await createTaskExtended(taskText, { requestedByUserId: user.id });
 
     const result = await getTasksHandler(userCtx(user), {
       includeFull: true,
@@ -103,10 +103,10 @@ describe("task tool ctx", () => {
     expect((result.data as { tasks: unknown[] }).tasks).toEqual([]);
   });
 
-  test("assertOwnsTask gates user tasks and allows owned or owner ctx", () => {
+  test("assertOwnsTask gates user tasks and allows owned or owner ctx", async () => {
     const owner = createUser({ name: "Task Owner" });
     const foreignUser = createUser({ name: "Foreign User" });
-    const ownedTask = createTaskExtended("owned", { requestedByUserId: owner.id });
+    const ownedTask = await createTaskExtended("owned", { requestedByUserId: owner.id });
 
     expect(assertOwnsTask(userCtx(owner), ownedTask)).toBeNull();
     expect(

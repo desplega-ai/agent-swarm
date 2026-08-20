@@ -124,7 +124,12 @@ beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"])
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-user-config-agent", isLead: false, status: "idle" });
+  await createAgent({
+    id: AGENT_ID,
+    name: "apps-user-config-agent",
+    isLead: false,
+    status: "idle",
+  });
   const user1 = createUser({ name: "User config one" });
   const user2 = createUser({ name: "User config two" });
   user1Id = user1.id;
@@ -329,7 +334,7 @@ describe("userConfig HTTP storage", () => {
 
   test("agents acting on owned user-requested tasks use the requester scope", async () => {
     const requester = createUser({ name: "Delegated userConfig requester" });
-    const task = createTaskExtended("Edit requester app preferences", {
+    const task = await createTaskExtended("Edit requester app preferences", {
       agentId: AGENT_ID,
       requestedByUserId: requester.id,
     });

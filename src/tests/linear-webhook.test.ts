@@ -208,7 +208,7 @@ describe("handleAgentSessionEvent", () => {
     expect(sync!.lastSyncOrigin).toBe("external");
     expect(sync!.syncDirection).toBe("inbound");
 
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task).not.toBeNull();
     expect(task!.source).toBe("linear");
     expect(task!.taskType).toBe("linear-issue");
@@ -245,7 +245,7 @@ describe("handleAgentSessionEvent", () => {
 
   test("reuses active Linear contextKey task when AgentSession races before tracker_sync exists", async () => {
     const key = linearContextKey({ issueIdentifier: "ENG-125" });
-    const originalTask = createTaskExtended("Manual dispatch already running", {
+    const originalTask = await createTaskExtended("Manual dispatch already running", {
       source: "mcp",
       taskType: "feature",
       contextKey: key,
@@ -277,7 +277,7 @@ describe("handleAgentSessionEvent", () => {
 
   test("creates follow-up task when already-tracked issue has a completed task", async () => {
     // Create a task and tracker_sync, then mark the task as completed
-    const originalTask = createTaskExtended("Original linear task", {
+    const originalTask = await createTaskExtended("Original linear task", {
       source: "linear",
       taskType: "linear-issue",
     });
@@ -318,7 +318,7 @@ describe("handleAgentSessionEvent", () => {
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
     // New task should exist and use the reassigned template
-    const followupTask = getTaskById(sync!.swarmId);
+    const followupTask = await getTaskById(sync!.swarmId);
     expect(followupTask).not.toBeNull();
     expect(followupTask!.source).toBe("linear");
     expect(followupTask!.taskType).toBe("linear-issue");
@@ -327,7 +327,7 @@ describe("handleAgentSessionEvent", () => {
   });
 
   test("creates follow-up task when already-tracked issue has a failed task", async () => {
-    const originalTask = createTaskExtended("Failed linear task", {
+    const originalTask = await createTaskExtended("Failed linear task", {
       source: "linear",
       taskType: "linear-issue",
     });
@@ -365,7 +365,7 @@ describe("handleAgentSessionEvent", () => {
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
-    const followupTask = getTaskById(sync!.swarmId);
+    const followupTask = await getTaskById(sync!.swarmId);
     expect(followupTask).not.toBeNull();
     expect(followupTask!.source).toBe("linear");
   });
@@ -381,7 +381,7 @@ describe("handleAgentSessionEvent", () => {
 describe("handleIssueUpdate", () => {
   test("updates tracker_sync metadata on tracked issue status change", async () => {
     // Create a task + tracker_sync first
-    const task = createTaskExtended("Test issue update task", { source: "linear" });
+    const task = await createTaskExtended("Test issue update task", { source: "linear" });
     await createTrackerSync({
       provider: "linear",
       entityType: "task",
@@ -411,7 +411,7 @@ describe("handleIssueUpdate", () => {
   });
 
   test("cancels task when Linear issue is cancelled", async () => {
-    const task = createTaskExtended("Test cancel task", { source: "linear" });
+    const task = await createTaskExtended("Test cancel task", { source: "linear" });
     await createTrackerSync({
       provider: "linear",
       entityType: "task",
@@ -434,7 +434,7 @@ describe("handleIssueUpdate", () => {
 
     await handleIssueUpdate(event);
 
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("cancelled");
   });
@@ -455,7 +455,7 @@ describe("handleIssueUpdate", () => {
   });
 
   test("ignores update without updatedFrom field", async () => {
-    const task = createTaskExtended("Test no-updatedFrom task", { source: "linear" });
+    const task = await createTaskExtended("Test no-updatedFrom task", { source: "linear" });
     await createTrackerSync({
       provider: "linear",
       entityType: "task",
@@ -484,7 +484,7 @@ describe("handleIssueUpdate", () => {
 
 describe("handleIssueDelete", () => {
   test("cancels task when tracked issue is deleted", async () => {
-    const task = createTaskExtended("Test delete task", { source: "linear" });
+    const task = await createTaskExtended("Test delete task", { source: "linear" });
     await createTrackerSync({
       provider: "linear",
       entityType: "task",
@@ -502,7 +502,7 @@ describe("handleIssueDelete", () => {
 
     await handleIssueDelete(event);
 
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe("cancelled");
   });
@@ -519,7 +519,7 @@ describe("handleIssueDelete", () => {
   });
 
   test("ignores delete for already-completed task", async () => {
-    const task = createTaskExtended("Test completed delete task", {
+    const task = await createTaskExtended("Test completed delete task", {
       source: "linear",
     });
     // Manually complete the task to test guard
@@ -542,7 +542,7 @@ describe("handleIssueDelete", () => {
     });
 
     // Should still be completed, not cancelled
-    const updated = getTaskById(task.id);
+    const updated = await getTaskById(task.id);
     expect(updated!.status).toBe("completed");
   });
 });
@@ -841,7 +841,7 @@ describe("handleAgentSessionEvent — state gate", () => {
     const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
     expect(sync).not.toBeNull();
     expect(sync!.externalIdentifier).toBe("ENG-502");
-    const task = getTaskById(sync!.swarmId);
+    const task = await getTaskById(sync!.swarmId);
     expect(task).not.toBeNull();
     expect(task!.source).toBe("linear");
   });

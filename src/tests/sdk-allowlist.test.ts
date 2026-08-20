@@ -192,7 +192,7 @@ describe("mcp-bridge allowlist gate", () => {
     initDb(TEST_DB_PATH);
     prevApiKey = process.env.AGENT_SWARM_API_KEY;
     process.env.AGENT_SWARM_API_KEY = API_KEY;
-    createAgent({
+    await createAgent({
       id: "test-agent-bridge",
       name: "test-agent-bridge",
       isLead: false,

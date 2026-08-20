@@ -323,7 +323,7 @@ export async function handleApprovalRequests(
     // For standalone (non-workflow) requests, create a follow-up task
     // so the requesting agent is notified of the human's response
     if (!updated.workflowRunId && updated.sourceTaskId) {
-      const sourceTask = getTaskById(updated.sourceTaskId);
+      const sourceTask = await getTaskById(updated.sourceTaskId);
       if (sourceTask) {
         // Format responses for the template
         const formattedResponses = formatResponses(
@@ -338,7 +338,7 @@ export async function handleApprovalRequests(
           responses: formattedResponses,
         });
 
-        createTaskExtended(taskText, {
+        await createTaskExtended(taskText, {
           agentId: sourceTask.agentId,
           parentTaskId: updated.sourceTaskId,
           source: "system",

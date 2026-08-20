@@ -60,7 +60,11 @@ let testAgent: { id: string };
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "model-key-normalize-test", isLead: false, status: "idle" });
+  testAgent = await createAgent({
+    name: "model-key-normalize-test",
+    isLead: false,
+    status: "idle",
+  });
   server = createTestServer(API_KEY);
   port = await listen(server);
 });

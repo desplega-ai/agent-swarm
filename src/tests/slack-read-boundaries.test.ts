@@ -63,7 +63,7 @@ describe("slack-read response boundaries", () => {
     process.env.AGENT_SWARM_API_KEY = API_KEY;
     await removeDbFiles();
     initDb(TEST_DB_PATH);
-    createAgent({ id: AGENT_ID, name: "Boundary Lead", isLead: true, status: "idle" });
+    await createAgent({ id: AGENT_ID, name: "Boundary Lead", isLead: true, status: "idle" });
 
     const [{ handleMcpBridge: bridge }, { registerSlackReadTool }] = await Promise.all([
       import("../http/mcp-bridge"),

@@ -70,44 +70,44 @@ describe("Task Working Directory", () => {
   // DB round-trip (dir field persists through create/read)
   // ---------------------------------------------------------------------------
   describe("DB round-trip", () => {
-    test("task with dir is stored and retrieved correctly", () => {
-      const agent = createAgent({
+    test("task with dir is stored and retrieved correctly", async () => {
+      const agent = await createAgent({
         id: "dir-test-agent-1",
         name: "Dir Test Agent",
         isLead: false,
         status: "idle",
       });
 
-      const task = createTaskExtended("test task with dir", {
+      const task = await createTaskExtended("test task with dir", {
         agentId: agent.id,
         dir: "/workspace/repos/my-project",
       });
 
       expect(task.dir).toBe("/workspace/repos/my-project");
 
-      const retrieved = getTaskById(task.id);
+      const retrieved = await getTaskById(task.id);
       expect(retrieved).not.toBeNull();
       expect(retrieved!.dir).toBe("/workspace/repos/my-project");
     });
 
-    test("task without dir has null/undefined dir", () => {
-      const task = createTaskExtended("test task without dir", {
+    test("task without dir has null/undefined dir", async () => {
+      const task = await createTaskExtended("test task without dir", {
         agentId: "dir-test-agent-1",
       });
 
-      const retrieved = getTaskById(task.id);
+      const retrieved = await getTaskById(task.id);
       expect(retrieved).not.toBeNull();
       expect(retrieved!.dir).toBeFalsy();
     });
 
-    test("task with vcsRepo and dir stores both", () => {
-      const task = createTaskExtended("test task with both", {
+    test("task with vcsRepo and dir stores both", async () => {
+      const task = await createTaskExtended("test task with both", {
         agentId: "dir-test-agent-1",
         dir: "/workspace/repos/agent-swarm",
         vcsRepo: "desplega-ai/agent-swarm",
       });
 
-      const retrieved = getTaskById(task.id);
+      const retrieved = await getTaskById(task.id);
       expect(retrieved).not.toBeNull();
       expect(retrieved!.dir).toBe("/workspace/repos/agent-swarm");
       expect(retrieved!.vcsRepo).toBe("desplega-ai/agent-swarm");
@@ -120,8 +120,8 @@ describe("Task Working Directory", () => {
   describe("paused tasks with dir/vcsRepo", () => {
     const agentId = "dir-test-agent-pause";
 
-    beforeAll(() => {
-      createAgent({
+    beforeAll(async () => {
+      await createAgent({
         id: agentId,
         name: "Dir Pause Agent",
         isLead: false,
@@ -130,13 +130,13 @@ describe("Task Working Directory", () => {
     });
 
     test("getPausedTasksForAgent returns dir field", async () => {
-      const task = createTaskExtended("pausable task with dir", {
+      const task = await createTaskExtended("pausable task with dir", {
         agentId,
         dir: "/workspace/repos/my-project",
       });
 
       // Move to in_progress then pause
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
       const paused = await getPausedTasksForAgent(agentId);
@@ -146,12 +146,12 @@ describe("Task Working Directory", () => {
     });
 
     test("getPausedTasksForAgent returns vcsRepo field", async () => {
-      const task = createTaskExtended("pausable task with vcsRepo", {
+      const task = await createTaskExtended("pausable task with vcsRepo", {
         agentId,
         vcsRepo: "desplega-ai/agent-swarm",
       });
 
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
       const paused = await getPausedTasksForAgent(agentId);
@@ -161,13 +161,13 @@ describe("Task Working Directory", () => {
     });
 
     test("getPausedTasksForAgent returns both dir and vcsRepo", async () => {
-      const task = createTaskExtended("pausable task with both", {
+      const task = await createTaskExtended("pausable task with both", {
         agentId,
         dir: "/workspace/repos/agent-swarm",
         vcsRepo: "desplega-ai/agent-swarm",
       });
 
-      startTask(task.id);
+      await startTask(task.id);
       await pauseTask(task.id);
 
       const paused = await getPausedTasksForAgent(agentId);

@@ -270,7 +270,7 @@ export async function handleSessionData(
   if (getSessionLogsByTask.match(req.method, pathSegments)) {
     const parsed = await getSessionLogsByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.taskId);
+    const task = await getTaskById(parsed.params.taskId);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;

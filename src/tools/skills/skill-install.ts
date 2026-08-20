@@ -32,7 +32,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
 
       // If installing for another agent, must be lead
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",

@@ -89,7 +89,12 @@ describe("updateAgentProfile identity budget enforcement", () => {
         .catch(() => {});
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Identity Budget Agent", isLead: false, status: "idle" });
+    await createAgent({
+      id: agentId,
+      name: "Identity Budget Agent",
+      isLead: false,
+      status: "idle",
+    });
   });
 
   afterAll(async () => {
@@ -101,9 +106,9 @@ describe("updateAgentProfile identity budget enforcement", () => {
     }
   });
 
-  test("preserves in-budget behavior and leaves heartbeatMd ungated", () => {
+  test("preserves in-budget behavior and leaves heartbeatMd ungated", async () => {
     const heartbeat = "h".repeat(25_000);
-    const result = updateAgentProfile(agentId, {
+    const result = await updateAgentProfile(agentId, {
       soulMd: "s".repeat(SOUL_MD_MAX_CHARS),
       heartbeatMd: heartbeat,
     });
@@ -112,19 +117,21 @@ describe("updateAgentProfile identity budget enforcement", () => {
     expect(result?.heartbeatMd).toBe(heartbeat);
   });
 
-  test("allows an existing oversized value to shrink or change at equal length but rejects growth", () => {
+  test("allows an existing oversized value to shrink or change at equal length but rejects growth", async () => {
     const current = "c".repeat(BOOTSTRAP_MAX_CHARS + 10);
     getDb().prepare("UPDATE agents SET claudeMd = ? WHERE id = ?").run(current, agentId);
 
     const shrunk = "s".repeat(BOOTSTRAP_MAX_CHARS + 9);
-    expect(updateAgentProfile(agentId, { claudeMd: shrunk })?.claudeMd).toBe(shrunk);
+    expect((await updateAgentProfile(agentId, { claudeMd: shrunk }))?.claudeMd).toBe(shrunk);
 
     const equalLength = "e".repeat(shrunk.length);
-    expect(updateAgentProfile(agentId, { claudeMd: equalLength })?.claudeMd).toBe(equalLength);
-    expect(() => updateAgentProfile(agentId, { claudeMd: `${equalLength}g` })).toThrow(
+    expect((await updateAgentProfile(agentId, { claudeMd: equalLength }))?.claudeMd).toBe(
+      equalLength,
+    );
+    await expect(updateAgentProfile(agentId, { claudeMd: `${equalLength}g` })).rejects.toThrow(
       IdentityFieldBudgetError,
     );
-    expect(getAgentById(agentId)?.claudeMd).toBe(equalLength);
+    expect((await getAgentById(agentId))?.claudeMd).toBe(equalLength);
   });
 });
 

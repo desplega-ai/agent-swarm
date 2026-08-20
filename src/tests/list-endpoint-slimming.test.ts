@@ -47,7 +47,7 @@ describe("list-endpoint slimming", () => {
   });
 
   test("getAllAgents — slim omits identity markdown, full keeps it", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: "slim-agent-1",
       name: "Slim Agent",
       isLead: false,
@@ -63,7 +63,7 @@ describe("list-endpoint slimming", () => {
       avatar: { type: "lucide", icon: "rocket", color: "#8b5cf6" },
     });
 
-    const slim = getAllAgents({ slim: true }).find((a) => a.id === agent.id);
+    const slim = (await getAllAgents({ slim: true })).find((a) => a.id === agent.id);
     expect(slim).toBeDefined();
     expect(slim?.claudeMd).toBeUndefined();
     expect(slim?.soulMd).toBeUndefined();
@@ -79,14 +79,14 @@ describe("list-endpoint slimming", () => {
     // the detail page shows the custom one.
     expect(slim?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
 
-    const full = getAllAgents().find((a) => a.id === agent.id);
+    const full = (await getAllAgents()).find((a) => a.id === agent.id);
     expect(full?.claudeMd).toBe("C".repeat(500));
     expect(full?.setupScript).toBe("echo hi");
     expect(full?.avatar).toEqual({ type: "lucide", icon: "rocket", color: "#8b5cf6" });
   });
 
   test("updateAgentProfile — avatar set/reset round-trip", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       id: "avatar-agent-1",
       name: "Avatar Agent",
       isLead: false,
@@ -94,13 +94,13 @@ describe("list-endpoint slimming", () => {
     });
 
     // No avatar set yet — falls back to the deterministic derivation (null).
-    expect(getAgentById(agent.id)?.avatar).toBeNull();
+    expect((await getAgentById(agent.id))?.avatar).toBeNull();
 
     // Set a custom avatar.
     await updateAgentProfile(agent.id, {
       avatar: { type: "lucide", icon: "cat", color: "#ff00aa" },
     });
-    expect(getAgentById(agent.id)?.avatar).toEqual({
+    expect((await getAgentById(agent.id))?.avatar).toEqual({
       type: "lucide",
       icon: "cat",
       color: "#ff00aa",
@@ -111,7 +111,7 @@ describe("list-endpoint slimming", () => {
     // literal NULL back, so avatar needs its own explicit-set branch that
     // must also correctly no-op when the key is simply absent.
     await updateAgentProfile(agent.id, { role: "QA" });
-    expect(getAgentById(agent.id)?.avatar).toEqual({
+    expect((await getAgentById(agent.id))?.avatar).toEqual({
       type: "lucide",
       icon: "cat",
       color: "#ff00aa",
@@ -120,7 +120,7 @@ describe("list-endpoint slimming", () => {
     // Explicit `avatar: null` resets to the deterministic fallback — this is
     // the case COALESCE(?, avatar) can never express.
     await updateAgentProfile(agent.id, { avatar: null });
-    expect(getAgentById(agent.id)?.avatar).toBeNull();
+    expect((await getAgentById(agent.id))?.avatar).toBeNull();
   });
 
   test("listWorkflows — slim drops definition, adds nodeCount", async () => {
@@ -191,7 +191,7 @@ describe("list-endpoint slimming", () => {
 
   test("getAllTasks — slim truncates task text and drops heavy blobs", async () => {
     const longText = "Z".repeat(2000);
-    const task = createTaskExtended(longText, { agentId: "slim-agent-1" });
+    const task = await createTaskExtended(longText, { agentId: "slim-agent-1" });
     await createSessionCost({
       sessionId: "slim-cost-session-1",
       taskId: task.id,
@@ -227,9 +227,9 @@ describe("list-endpoint slimming", () => {
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
   });
 
-  test("listRecentSessions — slim root is a truncated task summary", () => {
+  test("listRecentSessions — slim root is a truncated task summary", async () => {
     const longText = "Q".repeat(2000);
-    createTaskExtended(longText, { agentId: "slim-agent-1" });
+    await createTaskExtended(longText, { agentId: "slim-agent-1" });
 
     const slim = listRecentSessions({ limit: 50, slim: true });
     const slimSession = slim.find((s) => s.root.task.startsWith("Q"));

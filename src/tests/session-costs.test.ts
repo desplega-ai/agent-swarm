@@ -190,7 +190,7 @@ describe("Session Costs API", () => {
     initDb(TEST_DB_PATH);
 
     // Create a test agent
-    testAgent = createAgent({
+    testAgent = await createAgent({
       name: "Test Cost Agent",
       isLead: false,
       status: "idle",
@@ -256,7 +256,7 @@ describe("Session Costs API", () => {
     });
 
     test("should create session cost with taskId", async () => {
-      const task = createTaskExtended("Test task for session cost");
+      const task = await createTaskExtended("Test task for session cost");
 
       const cost = await createSessionCost({
         sessionId: "db-test-session-2",
@@ -317,7 +317,7 @@ describe("Session Costs API", () => {
     });
 
     test("should order session costs by createdAt DESC", async () => {
-      const agent2 = createAgent({ name: "Cost Order Agent", isLead: false, status: "idle" });
+      const agent2 = await createAgent({ name: "Cost Order Agent", isLead: false, status: "idle" });
 
       // Create costs with slight delays to ensure different timestamps
       await createSessionCost({
@@ -421,7 +421,7 @@ describe("Session Costs API", () => {
     });
 
     test("should return 201 on successful POST with all fields", async () => {
-      const task = createTaskExtended("API test task for cost");
+      const task = await createTaskExtended("API test task for cost");
 
       const response = await fetch(`${baseUrl}/api/session-costs`, {
         method: "POST",
@@ -495,7 +495,11 @@ describe("Session Costs API", () => {
 
     test("should filter session costs by agentId", async () => {
       // Create a unique agent for this test
-      const uniqueAgent = createAgent({ name: "Filter Test Agent", isLead: false, status: "idle" });
+      const uniqueAgent = await createAgent({
+        name: "Filter Test Agent",
+        isLead: false,
+        status: "idle",
+      });
 
       // Create costs for this agent via API
       await fetch(`${baseUrl}/api/session-costs`, {
@@ -517,7 +521,7 @@ describe("Session Costs API", () => {
     });
 
     test("should filter session costs by taskId", async () => {
-      const task = createTaskExtended("Filter test task");
+      const task = await createTaskExtended("Filter test task");
 
       // Create cost for this task via API
       await fetch(`${baseUrl}/api/session-costs`, {
@@ -704,7 +708,7 @@ describe("Session Costs API", () => {
 
     test("should compute total tokens correctly in queries", async () => {
       // Create a session cost with known token values
-      const agent = createAgent({ name: "Token Query Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Token Query Agent", isLead: false, status: "idle" });
 
       await fetch(`${baseUrl}/api/session-costs`, {
         method: "POST",
@@ -776,7 +780,7 @@ describe("Session Costs API", () => {
 
   describe("Database: getSessionCostsFiltered", () => {
     test("should filter by date range", async () => {
-      const agent = createAgent({ name: "Filter DB Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Filter DB Agent", isLead: false, status: "idle" });
 
       await createSessionCost({
         sessionId: "filtered-db-1",
@@ -807,7 +811,11 @@ describe("Session Costs API", () => {
     });
 
     test("should respect limit parameter", async () => {
-      const agent = createAgent({ name: "Filter Limit Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({
+        name: "Filter Limit Agent",
+        isLead: false,
+        status: "idle",
+      });
 
       for (let i = 0; i < 5; i++) {
         await createSessionCost({
@@ -827,7 +835,7 @@ describe("Session Costs API", () => {
 
   describe("Database: getSessionCostSummary", () => {
     test("should return totals, daily, and byAgent", async () => {
-      const agent = createAgent({ name: "Summary DB Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Summary DB Agent", isLead: false, status: "idle" });
 
       await createSessionCost({
         sessionId: "summary-db-1",
@@ -887,10 +895,10 @@ describe("Session Costs API", () => {
     });
 
     test("byUser splits requester spend from unattributed spend", async () => {
-      const agent = createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
       const user = createUser({ name: "ByUser Requester" });
-      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
-      const autonomous = createTaskExtended("Heartbeat task");
+      const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = await createTaskExtended("Heartbeat task");
 
       await createSessionCost({
         sessionId: "by-user-attributed",
@@ -926,10 +934,10 @@ describe("Session Costs API", () => {
     });
 
     test("userId filter selects one requester, and `unattributed` selects the rest", async () => {
-      const agent = createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
       const user = createUser({ name: "UserFilter Requester" });
-      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
-      const autonomous = createTaskExtended("Autonomous task");
+      const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = await createTaskExtended("Autonomous task");
 
       await createSessionCost({
         sessionId: "user-filter-attributed",
@@ -984,7 +992,7 @@ describe("Session Costs API", () => {
 
   describe("GET /api/session-costs with date filtering", () => {
     test("should filter by startDate", async () => {
-      const agent = createAgent({ name: "Date Filter Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Date Filter Agent", isLead: false, status: "idle" });
 
       await createSessionCost({
         sessionId: "date-filter-1",

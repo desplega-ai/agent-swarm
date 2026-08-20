@@ -22,7 +22,7 @@ beforeAll(async () => {
   } catch {}
   initDb(TEST_DB_PATH);
 
-  createAgent({
+  await createAgent({
     id: "vcs-track-agent-001",
     name: "VcsTrackingTestAgent",
     status: "idle",
@@ -41,7 +41,7 @@ afterAll(async () => {
 
 describe("updateTaskVcs", () => {
   test("sets all VCS fields correctly", async () => {
-    const task = createTaskExtended("Test task for VCS update", {
+    const task = await createTaskExtended("Test task for VCS update", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -71,7 +71,7 @@ describe("updateTaskVcs", () => {
   });
 
   test("updates lastUpdatedAt", async () => {
-    const task = createTaskExtended("Test lastUpdatedAt", {
+    const task = await createTaskExtended("Test lastUpdatedAt", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -92,7 +92,7 @@ describe("updateTaskVcs", () => {
   });
 
   test("overwrites existing VCS fields (last PR wins)", async () => {
-    const task = createTaskExtended("Test overwrite VCS", {
+    const task = await createTaskExtended("Test overwrite VCS", {
       agentId: "vcs-track-agent-001",
       source: "github",
       vcsProvider: "github",
@@ -116,7 +116,7 @@ describe("updateTaskVcs", () => {
   });
 
   test("findTaskByVcs finds task after updateTaskVcs", async () => {
-    const task = createTaskExtended("Test findTaskByVcs linkage", {
+    const task = await createTaskExtended("Test findTaskByVcs linkage", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -143,9 +143,13 @@ describe("updateTaskVcs", () => {
     // meant webhooks for a terminated PR/MR still routed to the dead task.
     // Guard against any one of the four terminal statuses being missed.
     const TERMINAL_CASES = [
-      { name: "completed", number: 200, terminate: async (id: string) => completeTask(id, "done") },
-      { name: "failed", number: 201, terminate: async (id: string) => failTask(id, "boom") },
-      { name: "cancelled", number: 202, terminate: async (id: string) => cancelTask(id) },
+      {
+        name: "completed",
+        number: 200,
+        terminate: async (id: string) => await completeTask(id, "done"),
+      },
+      { name: "failed", number: 201, terminate: async (id: string) => await failTask(id, "boom") },
+      { name: "cancelled", number: 202, terminate: async (id: string) => await cancelTask(id) },
       {
         name: "superseded",
         number: 203,
@@ -154,7 +158,7 @@ describe("updateTaskVcs", () => {
       },
     ];
     for (const c of TERMINAL_CASES) {
-      const task = createTaskExtended(`Terminal=${c.name}`, {
+      const task = await createTaskExtended(`Terminal=${c.name}`, {
         agentId: "vcs-track-agent-001",
         source: "api",
       });
@@ -164,7 +168,7 @@ describe("updateTaskVcs", () => {
         vcsNumber: c.number,
         vcsUrl: `https://github.com/owner/terminal/pull/${c.number}`,
       });
-      startTask(task.id);
+      await startTask(task.id);
       await c.terminate(task.id);
 
       const found = await findTaskByVcs("owner/terminal", c.number);
@@ -173,7 +177,7 @@ describe("updateTaskVcs", () => {
   });
 
   test("idempotent: calling twice with same data both succeed", async () => {
-    const task = createTaskExtended("Test idempotency", {
+    const task = await createTaskExtended("Test idempotency", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });
@@ -195,7 +199,7 @@ describe("updateTaskVcs", () => {
   });
 
   test("supports gitlab provider", async () => {
-    const task = createTaskExtended("Test gitlab VCS", {
+    const task = await createTaskExtended("Test gitlab VCS", {
       agentId: "vcs-track-agent-001",
       source: "api",
     });

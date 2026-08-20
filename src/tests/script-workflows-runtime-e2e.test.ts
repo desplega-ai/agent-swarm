@@ -98,7 +98,11 @@ beforeAll(async () => {
   process.env.SCRIPT_WORKFLOW_RUNTIME_DIR = WORKFLOW_RUNTIME_DIR;
   refreshSecretScrubberCache();
 
-  const agent = createAgent({ name: "script-workflow-e2e-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({
+    name: "script-workflow-e2e-worker",
+    isLead: false,
+    status: "idle",
+  });
   agentId = agent.id;
   server = createServer((req, res) => {
     route(req, res).catch((err) => {

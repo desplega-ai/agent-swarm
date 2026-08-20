@@ -65,7 +65,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
       try {
         // Lead-only: provisioning a number rewires inbound routing for the
         // whole swarm, so restrict it to the lead agent.
-        const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+        const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
         const decision = can({
           principal: {
             kind: "agent",
@@ -83,7 +83,7 @@ export const registerRegisterKapsoNumberTool = (server: McpServer) => {
         }
 
         // Default the routing target to the lead when no agent/workflow is given.
-        const ownerAgentId = agentId ?? (workflowId ? undefined : getLeadAgent()?.id);
+        const ownerAgentId = agentId ?? (workflowId ? undefined : (await getLeadAgent())?.id);
 
         const config = await getKapsoConfig();
         const webhookUrl = nativeWebhookUrl();
@@ -164,7 +164,7 @@ export const registerUnregisterKapsoNumberTool = (server: McpServer) => {
     },
     async ({ phoneNumberId }, requestInfo) => {
       try {
-        const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+        const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
         const decision = can({
           principal: {
             kind: "agent",

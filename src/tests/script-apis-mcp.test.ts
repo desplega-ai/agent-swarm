@@ -150,8 +150,9 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
-  workerId = createAgent({ name: "script-apis-mcp-worker", isLead: false, status: "idle" }).id;
-  leadId = createAgent({ name: "script-apis-mcp-lead", isLead: true, status: "idle" }).id;
+  workerId = (await createAgent({ name: "script-apis-mcp-worker", isLead: false, status: "idle" }))
+    .id;
+  leadId = (await createAgent({ name: "script-apis-mcp-lead", isLead: true, status: "idle" })).id;
   process.env.MCP_BASE_URL = "http://script-apis-mcp.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;

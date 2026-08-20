@@ -115,7 +115,11 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "schedule-target-type-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({
+    name: "schedule-target-type-agent",
+    isLead: true,
+    status: "idle",
+  });
   agentId = agent.id;
 
   // Wire the module-private executorRegistry used by dispatchScheduleTarget's

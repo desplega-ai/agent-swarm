@@ -78,8 +78,8 @@ describe("skill mutation tools", () => {
     closeDb();
     initDb(TEST_DB_PATH);
 
-    createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
 
     server = new McpServer({ name: "test-skill-update-scope", version: "1.0.0" });
     registerSkillUpdateTool(server);

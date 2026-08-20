@@ -702,7 +702,7 @@ async function modelSourceIssues(
       issues.push({ path: `${path}.scriptId`, message: `script "${source.scriptId}" not found` });
       continue;
     }
-    const runAs = resolveSyncRunAs(script);
+    const runAs = await resolveSyncRunAs(script);
     const grandfatheredRef =
       grandfatheredScriptRefs.get(path) ===
       scriptRefKey(source.scriptId, source.args, source.connection);

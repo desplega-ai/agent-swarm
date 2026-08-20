@@ -57,7 +57,7 @@ describe("fetchTaskContextForPreamble", () => {
   });
 
   test("fetches task context fields", async () => {
-    seedTask({
+    await seedTask({
       id: "task-a",
       task: "Build the widget",
       output: "Widget built successfully",
@@ -82,7 +82,7 @@ describe("buildContextPreamble", () => {
   });
 
   test("includes parent task subject and output in preamble", async () => {
-    seedTask({
+    await seedTask({
       id: "parent-1",
       task: "Fix the auth bug in login flow",
       output: "Fixed by patching jwt validation in auth.ts:42",
@@ -99,7 +99,7 @@ describe("buildContextPreamble", () => {
   });
 
   test("includes attachment pointers in preamble", async () => {
-    seedTask({
+    await seedTask({
       id: "parent-2",
       task: "Generate a report",
       output: "Report generated",
@@ -126,7 +126,7 @@ describe("buildContextPreamble", () => {
   });
 
   test("shows 'no output recorded' when task has no output or progress", async () => {
-    seedTask({
+    await seedTask({
       id: "parent-no-output",
       task: "A task with no output yet",
       status: "in_progress",
@@ -137,13 +137,13 @@ describe("buildContextPreamble", () => {
   });
 
   test("walks ancestor chain and includes older ancestors as pointers", async () => {
-    seedTask({
+    await seedTask({
       id: "grandparent-1",
       task: "Initial research task",
       output: "Research complete",
       status: "completed",
     });
-    seedTask({
+    await seedTask({
       id: "child-of-grandparent",
       task: "Second task referencing research",
       output: "Second task done",
@@ -165,7 +165,7 @@ describe("buildContextPreamble", () => {
   test("enforces token budget — truncates oversized output", async () => {
     // Generate output that exceeds the budget
     const hugeOutput = "x".repeat(CONTEXT_PREAMBLE_MAX_CHARS + 5000);
-    seedTask({
+    await seedTask({
       id: "parent-big",
       task: "Task with very large output",
       output: hugeOutput,
@@ -181,7 +181,7 @@ describe("buildContextPreamble", () => {
   });
 
   test("preamble starts with context section and ends with separator", async () => {
-    seedTask({
+    await seedTask({
       id: "parent-structure",
       task: "A well-structured task",
       output: "Done",

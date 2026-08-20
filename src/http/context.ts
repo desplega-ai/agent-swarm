@@ -103,7 +103,7 @@ export async function handleContext(
     const parsed = await postContext.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -132,7 +132,7 @@ export async function handleContext(
     const parsed = await getContext.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;

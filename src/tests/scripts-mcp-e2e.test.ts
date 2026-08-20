@@ -182,7 +182,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
-  workerId = createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" }).id;
+  workerId = (await createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" })).id;
   process.env.MCP_BASE_URL = "http://scripts-mcp-e2e.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;

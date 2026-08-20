@@ -55,7 +55,7 @@ beforeAll(async () => {
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   initDb(TEST_DB_PATH);
-  createAgent({
+  await createAgent({
     id: "lead-cancel-config-test",
     name: "CancelConfigTestLead",
     status: "idle",
@@ -83,8 +83,8 @@ beforeEach(async () => {
 
 // ── Helpers ──
 
-function seedTask(vcsNumber: number, kind: "pr" | "issue"): string {
-  const task = createTaskExtended("test task", {
+async function seedTask(vcsNumber: number, kind: "pr" | "issue"): string {
+  const task = await createTaskExtended("test task", {
     agentId: "lead-cancel-config-test",
     source: "github",
     vcsProvider: "github",
@@ -99,16 +99,16 @@ async function setConfigFlag(key: string, value: string) {
   await upsertSwarmConfig({ scope: "global", key, value });
 }
 
-function getTaskStatus(taskId: string): string | undefined {
-  return getTaskById(taskId)?.status;
+async function getTaskStatus(taskId: string): string | undefined {
+  return (await getTaskById(taskId))?.status;
 }
 
 // ── github.cancelOnUnassign — PR unassigned ──
 
 describe("PR unassigned — github.cancelOnUnassign", () => {
   test("default (no config row): unassign cancels the task", async () => {
-    const taskId = seedTask(BASE_PR.number, "pr");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_PR.number, "pr");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: PullRequestEvent = {
       action: "unassigned",
@@ -120,13 +120,13 @@ describe("PR unassigned — github.cancelOnUnassign", () => {
     const result = await handlePullRequest(event);
 
     expect(result.created).toBe(false);
-    expect(getTaskStatus(taskId)).toBe("failed");
+    expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
   test("config = 'false': unassign leaves task untouched", async () => {
     await setConfigFlag("github.cancelOnUnassign", "false");
-    const taskId = seedTask(BASE_PR.number, "pr");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_PR.number, "pr");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: PullRequestEvent = {
       action: "unassigned",
@@ -139,7 +139,7 @@ describe("PR unassigned — github.cancelOnUnassign", () => {
 
     expect(result.created).toBe(false);
     // Task must NOT have been failed — still pending.
-    expect(getTaskStatus(taskId)).toBe("pending");
+    expect(await getTaskStatus(taskId)).toBe("pending");
   });
 });
 
@@ -147,8 +147,8 @@ describe("PR unassigned — github.cancelOnUnassign", () => {
 
 describe("issue unassigned — github.cancelOnUnassign", () => {
   test("default (no config row): unassign cancels the task", async () => {
-    const taskId = seedTask(BASE_ISSUE.number, "issue");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_ISSUE.number, "issue");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: IssueEvent = {
       action: "unassigned",
@@ -160,13 +160,13 @@ describe("issue unassigned — github.cancelOnUnassign", () => {
     const result = await handleIssue(event);
 
     expect(result.created).toBe(false);
-    expect(getTaskStatus(taskId)).toBe("failed");
+    expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
   test("config = 'false': unassign leaves task untouched", async () => {
     await setConfigFlag("github.cancelOnUnassign", "false");
-    const taskId = seedTask(BASE_ISSUE.number, "issue");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_ISSUE.number, "issue");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: IssueEvent = {
       action: "unassigned",
@@ -178,7 +178,7 @@ describe("issue unassigned — github.cancelOnUnassign", () => {
     const result = await handleIssue(event);
 
     expect(result.created).toBe(false);
-    expect(getTaskStatus(taskId)).toBe("pending");
+    expect(await getTaskStatus(taskId)).toBe("pending");
   });
 });
 
@@ -186,8 +186,8 @@ describe("issue unassigned — github.cancelOnUnassign", () => {
 
 describe("PR review_request_removed — github.cancelOnReviewRequestRemoved", () => {
   test("default (no config row): review removal cancels the task", async () => {
-    const taskId = seedTask(BASE_PR.number, "pr");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_PR.number, "pr");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: PullRequestEvent = {
       action: "review_request_removed",
@@ -199,13 +199,13 @@ describe("PR review_request_removed — github.cancelOnReviewRequestRemoved", ()
     const result = await handlePullRequest(event);
 
     expect(result.created).toBe(false);
-    expect(getTaskStatus(taskId)).toBe("failed");
+    expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
   test("config = 'false': review removal leaves task untouched", async () => {
     await setConfigFlag("github.cancelOnReviewRequestRemoved", "false");
-    const taskId = seedTask(BASE_PR.number, "pr");
-    expect(getTaskStatus(taskId)).toBe("pending");
+    const taskId = await seedTask(BASE_PR.number, "pr");
+    expect(await getTaskStatus(taskId)).toBe("pending");
 
     const event: PullRequestEvent = {
       action: "review_request_removed",
@@ -217,7 +217,7 @@ describe("PR review_request_removed — github.cancelOnReviewRequestRemoved", ()
     const result = await handlePullRequest(event);
 
     expect(result.created).toBe(false);
-    expect(getTaskStatus(taskId)).toBe("pending");
+    expect(await getTaskStatus(taskId)).toBe("pending");
   });
 });
 
@@ -227,7 +227,7 @@ describe("flag independence", () => {
   test("cancelOnUnassign=false does NOT affect review_request_removed (still cancels)", async () => {
     // Only disable the unassign flag; leave review-request flag absent (default = cancel).
     await setConfigFlag("github.cancelOnUnassign", "false");
-    const taskId = seedTask(BASE_PR.number, "pr");
+    const taskId = await seedTask(BASE_PR.number, "pr");
 
     const event: PullRequestEvent = {
       action: "review_request_removed",
@@ -239,13 +239,13 @@ describe("flag independence", () => {
     await handlePullRequest(event);
 
     // review_request_removed STILL cancels because its own flag is absent (default true).
-    expect(getTaskStatus(taskId)).toBe("failed");
+    expect(await getTaskStatus(taskId)).toBe("failed");
   });
 
   test("cancelOnReviewRequestRemoved=false does NOT affect unassign (still cancels)", async () => {
     // Only disable the review-request flag; leave unassign flag absent (default = cancel).
     await setConfigFlag("github.cancelOnReviewRequestRemoved", "false");
-    const taskId = seedTask(BASE_PR.number, "pr");
+    const taskId = await seedTask(BASE_PR.number, "pr");
 
     const event: PullRequestEvent = {
       action: "unassigned",
@@ -257,6 +257,6 @@ describe("flag independence", () => {
     await handlePullRequest(event);
 
     // unassigned STILL cancels because its own flag is absent (default true).
-    expect(getTaskStatus(taskId)).toBe("failed");
+    expect(await getTaskStatus(taskId)).toBe("failed");
   });
 });

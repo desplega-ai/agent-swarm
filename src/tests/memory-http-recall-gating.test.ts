@@ -143,7 +143,12 @@ beforeAll(async () => {
   }
 
   initDb(TEST_DB_PATH);
-  createAgent({ id: agentId, name: "HTTP Memory Gating Agent", isLead: false, status: "idle" });
+  await createAgent({
+    id: agentId,
+    name: "HTTP Memory Gating Agent",
+    isLead: false,
+    status: "idle",
+  });
   const nowIso = new Date().toISOString();
   getDb()
     .prepare(

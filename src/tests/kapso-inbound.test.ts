@@ -77,7 +77,7 @@ async function waitFor(predicate: () => boolean): Promise<void> {
 
 const KAPSO_PATH = ["api", "integrations", "kapso", "webhook"];
 
-beforeAll(() => {
+beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       require("node:fs").unlinkSync(`${TEST_DB_PATH}${suffix}`);
@@ -87,7 +87,7 @@ beforeAll(() => {
   process.env.KAPSO_WEBHOOK_HMAC_SECRET = HMAC_SECRET;
   process.env.KAPSO_API_KEY = "kapso-test-api-key";
   process.env.KAPSO_API_BASE_URL = "https://kapso.test";
-  const agent = createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "KapsoWorker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -117,7 +117,7 @@ describe("routeKapsoInbound", () => {
     const routing = await routeKapsoInbound(makePayload({ phoneNumberId: "pn-task" }));
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task).not.toBeNull();
     expect(task!.taskType).toBe("kapso-inbound");
     expect(task!.agentId).toBe(agentId);
@@ -144,7 +144,7 @@ describe("routeKapsoInbound", () => {
 
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBe(user.id);
     expect(await getKv("integration:unmapped:kapso", "34679077778:meta")).toBeNull();
     // The resolved canonical name renders in the task text — never the raw
@@ -172,7 +172,7 @@ describe("routeKapsoInbound", () => {
 
     expect(routing.kind).toBe("task");
     if (routing.kind !== "task") throw new Error("expected task");
-    const task = getTaskById(routing.taskId);
+    const task = await getTaskById(routing.taskId);
     expect(task!.requestedByUserId).toBeUndefined();
     // Unresolved -> explicit UNKNOWN sentinel, never the raw contact_name.
     expect(task!.task).toContain("kapso:34679077779 (unknown user)");

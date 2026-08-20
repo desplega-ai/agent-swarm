@@ -41,20 +41,20 @@ function structured(result: { structuredContent?: unknown }) {
   };
 }
 
-function runningClaudeTask(creatorAgentId?: string, requestedByUserId?: string) {
-  const worker = createAgent({
+async function runningClaudeTask(creatorAgentId?: string, requestedByUserId?: string) {
+  const worker = await createAgent({
     name: "Claude steering worker",
     isLead: false,
     status: "busy",
     maxTasks: 10,
     harnessProvider: "claude",
   });
-  const task = createTaskExtended("steer this task", {
+  const task = await createTaskExtended("steer this task", {
     agentId: worker.id,
     creatorAgentId,
     requestedByUserId,
   });
-  expect(startTask(task.id)?.status).toBe("in_progress");
+  expect((await startTask(task.id))?.status).toBe("in_progress");
   return task;
 }
 
@@ -108,20 +108,25 @@ beforeEach(() => {
 
 describe("steer-task MCP tool", () => {
   test("defaults mode to queue and permits a lead or task creator but not an unrelated agent", async () => {
-    const lead = createAgent({ name: "Steering lead", isLead: true, status: "busy", maxTasks: 10 });
-    const creator = createAgent({
+    const lead = await createAgent({
+      name: "Steering lead",
+      isLead: true,
+      status: "busy",
+      maxTasks: 10,
+    });
+    const creator = await createAgent({
       name: "Task creator",
       isLead: false,
       status: "busy",
       maxTasks: 10,
     });
-    const unrelated = createAgent({
+    const unrelated = await createAgent({
       name: "Unrelated worker",
       isLead: false,
       status: "busy",
       maxTasks: 10,
     });
-    const task = runningClaudeTask(creator.id);
+    const task = await runningClaudeTask(creator.id);
 
     const leadResult = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
@@ -164,8 +169,13 @@ describe("steer-task MCP tool", () => {
   });
 
   test("reports degraded output by default and returns an error when fail is requested", async () => {
-    const lead = createAgent({ name: "Degrade lead", isLead: true, status: "busy", maxTasks: 10 });
-    const task = runningClaudeTask();
+    const lead = await createAgent({
+      name: "Degrade lead",
+      isLead: true,
+      status: "busy",
+      maxTasks: 10,
+    });
+    const task = await runningClaudeTask();
 
     const degraded = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
@@ -206,7 +216,7 @@ describe("steer-task MCP tool", () => {
 
   test("user surface admits the creator and denies a user without the steering grant", async () => {
     const owner = createUser({ name: "Steering owner" });
-    const task = runningClaudeTask(undefined, owner.id);
+    const task = await runningClaudeTask(undefined, owner.id);
     const handler = userToolHandler(createUserServer(owner));
 
     const allowed = (await handler(

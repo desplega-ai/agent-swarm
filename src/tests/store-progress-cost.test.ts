@@ -38,7 +38,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     initDb(TEST_DB_PATH);
 
     // Create test agent
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Test Worker",
       description: "Test agent for cost tracking",
       role: "worker",
@@ -50,7 +50,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     agentId = agent.id;
 
     // Create test task
-    const task = createTaskExtended("Test task for cost tracking", {
+    const task = await createTaskExtended("Test task for cost tracking", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -117,9 +117,9 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(costs.some((c) => c.id === cost.id)).toBe(true);
   });
 
-  test("should create session cost with isError=true when task fails", () => {
+  test("should create session cost with isError=true when task fails", async () => {
     // Create another task for this test
-    const failTask2 = createTaskExtended("Test task for failure cost tracking", {
+    const failTask2 = await createTaskExtended("Test task for failure cost tracking", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -154,9 +154,9 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.model).toBe("sonnet");
   });
 
-  test("should use default values when optional cost fields are missing", () => {
+  test("should use default values when optional cost fields are missing", async () => {
     // Create another task for this test
-    const minimalTask = createTaskExtended("Test task with minimal cost data", {
+    const minimalTask = await createTaskExtended("Test task with minimal cost data", {
       agentId,
       source: "mcp",
       priority: 50,
@@ -195,14 +195,14 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
 
   test("should not create session cost when costData is not provided", async () => {
     // Create a task without cost data
-    const noCostTask = createTaskExtended("Test task without cost data", {
+    const noCostTask = await createTaskExtended("Test task without cost data", {
       agentId,
       source: "mcp",
       priority: 50,
     });
 
     // Just update progress without cost data (existing behavior)
-    updateTaskProgress(noCostTask.id, "Working on it...");
+    await updateTaskProgress(noCostTask.id, "Working on it...");
 
     // Complete the task without cost data
     await completeTask(noCostTask.id, "Done!");

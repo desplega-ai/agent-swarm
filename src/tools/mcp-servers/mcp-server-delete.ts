@@ -28,7 +28,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",

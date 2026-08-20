@@ -107,13 +107,13 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
   const nodes: TreeNode[] = [];
 
   for (const rootTaskId of tree.rootTaskIds) {
-    const task = getTaskById(rootTaskId);
+    const task = await getTaskById(rootTaskId);
     if (!task) {
       console.log(`[Slack] Tree root task ${rootTaskId.slice(0, 8)} not found, skipping`);
       continue;
     }
 
-    const agent = task.agentId ? getAgentById(task.agentId) : null;
+    const agent = task.agentId ? await getAgentById(task.agentId) : null;
     const agentName = agent?.name ?? "Unknown";
 
     // Compute duration for completed/failed tasks
@@ -143,7 +143,7 @@ export async function buildTreeNodes(tree: TreeMessageState): Promise<TreeNode[]
           );
         }
 
-        const childAgent = child.agentId ? getAgentById(child.agentId) : null;
+        const childAgent = child.agentId ? await getAgentById(child.agentId) : null;
         const childAgentName = childAgent?.name ?? "Unknown";
 
         let childDuration: string | undefined;
@@ -266,7 +266,9 @@ async function cleanupCompletedTree(
   }
 
   await finalizeTerminalSlackReactions(
-    allTaskIds.map((taskId) => getTaskById(taskId)).filter((task): task is AgentTask => !!task),
+    (await Promise.all(allTaskIds.map((taskId) => getTaskById(taskId)))).filter(
+      (task): task is AgentTask => !!task,
+    ),
   );
 
   // Add all to notifiedCompletions so flat processing doesn't re-process
@@ -318,7 +320,7 @@ export async function processTreeMessages(): Promise<void> {
     // tasks notified first, so the completion loop below never posted them.
     let outputDeliverySucceeded = true;
     for (const node of nodes.flatMap((root) => [root, ...root.children])) {
-      const task = getTaskById(node.taskId);
+      const task = await getTaskById(node.taskId);
       if (!task || !shouldPostInlineCompletionOutput(task)) continue;
 
       const sent = await sendInlineTaskOutput(task);
@@ -450,7 +452,7 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
   const app = getSlackApp();
   if (!app || !task.slackChannelId || !task.slackThreadTs || !task.agentId) return undefined;
 
-  const agent = getAgentById(task.agentId);
+  const agent = await getAgentById(task.agentId);
   if (!agent) return undefined;
 
   // Build an initial tree with this single task
@@ -589,7 +591,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
               );
               break;
             }
-            const ancestor = getTaskById(ancestorId);
+            const ancestor = await getTaskById(ancestorId);
             ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }
@@ -741,7 +743,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
               );
               break;
             }
-            const ancestor = getTaskById(ancestorId);
+            const ancestor = await getTaskById(ancestorId);
             ancestorId = ancestor?.parentTaskId ?? undefined;
           }
         }

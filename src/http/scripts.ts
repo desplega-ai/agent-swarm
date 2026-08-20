@@ -549,12 +549,12 @@ async function appScriptReferenceIssues(scriptId: string): Promise<AppValidation
   return issues;
 }
 
-function requireAgent(res: ServerResponse, agentId: string | undefined) {
+async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
     jsonError(res, "X-Agent-ID required for scripts API", 400);
     return null;
   }
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) {
     jsonError(res, "Agent not found", 404);
     return null;
@@ -622,7 +622,7 @@ export async function handleScripts(
   if (upsertRoute.match(req.method, pathSegments)) {
     const parsed = await upsertRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     // Global-scope writes require lead — the 403 this route has always
@@ -697,7 +697,7 @@ export async function handleScripts(
   if (runRoute.match(req.method, pathSegments)) {
     const parsed = await runRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     let source = parsed.body.source;
@@ -849,7 +849,7 @@ export async function handleScripts(
   if (searchRoute.match(req.method, pathSegments)) {
     const parsed = await searchRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     const matches = await searchScripts({
@@ -950,7 +950,7 @@ export async function handleScripts(
   if (typesRoute.match(req.method, pathSegments)) {
     const parsed = await typesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     const script = await resolveScript(parsed.params.name, agent.id, parsed.query.scope);
@@ -980,7 +980,7 @@ export async function handleScripts(
   if (deleteRoute.match(req.method, pathSegments)) {
     const parsed = await deleteRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     // Global-scope deletes require lead — the 403 this route has always
