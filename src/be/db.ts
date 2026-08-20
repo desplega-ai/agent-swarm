@@ -137,7 +137,7 @@ import {
   IdentityFieldBudgetError,
 } from "../utils/identity-field-budget";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
-import { scrubSecrets } from "../utils/secret-scrubber";
+import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -8765,6 +8765,10 @@ export function upsertSwarmConfig(data: {
     } catch (e) {
       console.error(`Failed to write env file ${config.envPath}:`, e);
     }
+  }
+
+  if (config.isSecret) {
+    registerVolatileSecret(config.value, `config:${config.key}`);
   }
 
   return config;

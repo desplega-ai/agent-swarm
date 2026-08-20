@@ -19,6 +19,7 @@ import {
   isPendingSlackMessage,
   markTaskSlackReplySent,
   startTask,
+  upsertSwarmConfig,
 } from "../be/db";
 import { getTaskLink, MAX_SECTION_LENGTH } from "../slack/blocks";
 import {
@@ -33,6 +34,7 @@ import {
 } from "../slack/render-v2";
 import { getAgentDisplayName, getAgentEmoji } from "../slack/responses";
 import { slackContextKey } from "../tasks/context-key";
+import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 const TEST_DB_PATH = "./test-slack-render-v2.sqlite";
 const calls: Array<{ method: string; payload: Record<string, unknown> }> = [];
@@ -224,6 +226,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  clearVolatileSecretsForTesting();
   closeDb();
   await removeDbFiles();
   initDb(TEST_DB_PATH);
@@ -1410,6 +1413,46 @@ describe("Slack renderer v2", () => {
     expect(started?.payload.markdown_text).toBe(
       "✅\n\nThis output must reach Slack since no slack-reply was sent.",
     );
+  });
+
+  test("redacts a runtime-rotated config secret from persisted output and its Slack outcome", async () => {
+    const lead = createAgent({ name: "Rotating Secret Lead", isLead: true, status: "idle" });
+    const { channelId, threadTs } = uniqueSlackAddress("C_RENDER_ROTATED_SECRET");
+    const ask = createTaskExtended("rotate a secret before completing", {
+      agentId: lead.id,
+      source: "slack",
+      slackChannelId: channelId,
+      slackThreadTs: threadTs,
+      contextKey: slackContextKey({ channelId, threadTs }),
+    });
+    const secret = `rotated-directory-token-${crypto.randomUUID()}`;
+    const redacted = "[REDACTED:config:AUTOINFRA_DIRECTORY_ACCESS_VALUE]";
+
+    upsertSwarmConfig({
+      scope: "global",
+      key: "AUTOINFRA_DIRECTORY_ACCESS_VALUE",
+      value: secret,
+      isSecret: true,
+    });
+    startTask(ask.id);
+    await ensureSlackThreadTree([ask.id]);
+    completeTask(ask.id, `Artifact: https://example.test/downloads/${secret}/result.json`);
+
+    const persistedOutput = getTaskById(ask.id)?.output;
+    expect(persistedOutput).toBe(
+      `Artifact: https://example.test/downloads/${redacted}/result.json`,
+    );
+    expect(persistedOutput).not.toContain(secret);
+
+    calls.length = 0;
+    _resetSlackRenderV2ForTests();
+    await processSlackRenderV2();
+
+    const started = calls.find((call) => call.method === "chat.startStream");
+    expect(started?.payload.markdown_text).toBe(
+      `✅\n\nArtifact: https://example.test/downloads/${redacted}/result.json`,
+    );
+    expect(started?.payload.markdown_text).not.toContain(secret);
   });
 
   test("re-reads slackReplySent inside streamOutcomeCard to avoid a stale caller snapshot", async () => {
