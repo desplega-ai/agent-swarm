@@ -1282,6 +1282,10 @@ describe("Slack renderer v2", () => {
     startTask(task.id);
     const tree = await ensureSlackThreadTree([task.id]);
     _resetSlackRenderV2ForTests();
+    // The stale-tree query compares `task.lastUpdatedAt > tree.updated_at` at
+    // millisecond resolution; failing the task in the same millisecond the tree
+    // was rendered makes the renderer see nothing to do (flaked ~1 in 3 runs).
+    await Bun.sleep(2);
     failTask(task.id, "state that must be retried");
     updateFailuresRemaining = 1;
     calls.length = 0;

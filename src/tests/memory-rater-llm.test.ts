@@ -35,6 +35,7 @@ import {
 import { getRegisteredRaters, SERVER_RATERS } from "../be/memory/raters/registry";
 import type { RatingEvent } from "../be/memory/raters/types";
 import { MockLlmRaterClient } from "./mocks/mock-llm-rater-client";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Pure unit tests — schema, mapping, prompt. No DB / network required.
@@ -516,9 +517,9 @@ describe("LlmRater.rate(ctx) — per-memory path with MockLlmRaterClient", () =>
 // 4. Negative path — MEMORY_RATERS unset → no rate call.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TEST_PORT = 19119;
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-rater-llm-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const API_KEY = "test-key";
 
 let serverProc: Subprocess;
@@ -531,20 +532,6 @@ const testTemplateGlobals = globalThis as typeof globalThis & {
   __testMigrationTemplate?: Uint8Array;
   __savedRaterLlmTemplate?: Uint8Array;
 };
-
-async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {
-      // not ready
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
 
 function makeMemory(name: string): { id: string } {
   return store.store({
@@ -592,6 +579,9 @@ function getRatings(taskId: string) {
 
 describe("HTTP integration: hook-piggyback dry-run", () => {
   beforeAll(async () => {
+    TEST_PORT = await getFreePort();
+    BASE = `http://localhost:${TEST_PORT}`;
+
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
         await unlink(TEST_DB_PATH + suffix);
@@ -641,7 +631,7 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     insertTask.run(taskB, agentA, "rater llm task B", now, now);
 
     store = new SqliteMemoryStore();
-  }, 20000);
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     closeDb();

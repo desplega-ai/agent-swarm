@@ -34,9 +34,9 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
-const TEST_PORT = 13030;
 
 // ─── Test Server ─────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ function createTestServer(): Server {
 
 // ─── Helpers ────────────────────────────────────────────────
 
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const headers = {
   "Content-Type": "application/json",
   "X-Agent-ID": crypto.randomUUID(),
@@ -118,9 +118,8 @@ describe("Workflow HTTP API v2", () => {
     initWorkflows();
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

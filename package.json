@@ -54,7 +54,7 @@
   "config": {
     "name": "agent-swarm"
   },
-  "packageManager": "bun@1.3.11",
+  "packageManager": "bun@1.4.0",
   "workspaces": [
     "apps/ui",
     "apps/templates-ui",
@@ -95,6 +95,7 @@
     "check:openapi-response-coverage": "bun scripts/check-openapi-response-coverage.ts",
     "check:script-types": "bash scripts/check-script-types-freshness.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
+    "check:bun-version": "bun scripts/check-bun-version.ts",
     "lint:structure": "konsistent check",
     "prepare-release": "bun scripts/prepare-release.ts",
     "refresh:vendored-openapi": "bun scripts/refresh-vendored-openapi.ts",
@@ -118,8 +119,8 @@
     "lint": "biome check src apps/evals",
     "lint:fix": "biome check --write src apps/evals",
     "format": "biome format --write src",
-    "build:binary": "bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --target=bun-linux-x64 --outfile ./dist/agent-swarm",
-    "build:binary:arm64": "bun build ./src/cli.tsx --compile --compile-exec-argv='--expose-gc' --target=bun-linux-arm64 --outfile ./dist/agent-swarm",
+    "build:binary": "bun build ./src/cli.tsx --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --target=bun-linux-x64 --outfile ./dist/agent-swarm",
+    "build:binary:arm64": "bun build ./src/cli.tsx --compile --bytecode --format=esm --compile-exec-argv='--expose-gc' --target=bun-linux-arm64 --outfile ./dist/agent-swarm",
     "docker:build:api": "docker build -f Dockerfile -t agent-swarm-api:latest .",
     "docker:build:worker": "docker build -f Dockerfile.worker -t agent-swarm-worker:latest .",
     "docker:build:worker:slim": "docker build -f Dockerfile.worker --target worker-slim -t agent-swarm-worker:slim .",
@@ -160,7 +161,7 @@
     "typescript": "^5"
   },
   "engines": {
-    "bun": ">=1.0.26"
+    "bun": ">=1.3.12"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.41",

@@ -10,9 +10,9 @@ import {
   updateTaskClaudeSessionId,
 } from "../be/db";
 import { SessionErrorTracker, trackErrorFromJson } from "../utils/error-tracker";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-attach.sqlite";
-const TEST_PORT = 13022;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -117,7 +117,7 @@ function createTestServer(): Server {
 
 describe("Session Attachment", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     try {
@@ -149,9 +149,8 @@ describe("Session Attachment", () => {
     });
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

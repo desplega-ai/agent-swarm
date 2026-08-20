@@ -20,10 +20,10 @@ import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { handlePagesPublic } from "../http/pages-public";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-launch-password-rejection.sqlite";
-const TEST_PORT = 13050;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -51,7 +51,8 @@ describe("POST /api/pages/:id/launch — password mode rejection (step-4)", () =
     }
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));
+    const port = await listenOnFreePort(server);
+    BASE = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

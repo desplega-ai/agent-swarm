@@ -12,9 +12,9 @@ import {
   loadGlobalConfigsIntoEnv,
   scheduleIntegrationsReload,
 } from "../http/core";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-reload-config.sqlite";
-const TEST_PORT = 13023;
 const INTEGRATION_DISABLE_KEYS = [
   "AGENTMAIL_DISABLE",
   "GITHUB_DISABLE",
@@ -108,7 +108,7 @@ function createTestServer(): Server {
 
 describe("reload-config", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   // Track env keys we set so we can clean them up
   const envKeysToClean: string[] = [];
@@ -117,9 +117,8 @@ describe("reload-config", () => {
     initDb(TEST_DB_PATH);
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

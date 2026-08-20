@@ -4,6 +4,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { closeDb, deleteSwarmConfig, getSwarmConfigs, initDb, upsertSwarmConfig } from "../be/db";
 import { type ClaudeManagedTestClient, createIntegrationsHandler } from "../http/integrations";
 import { getPathSegments } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 // ---------------------------------------------------------------------------
 // Tests for POST /api/integrations/claude-managed/test
@@ -17,7 +18,6 @@ import { getPathSegments } from "../http/utils";
 // ---------------------------------------------------------------------------
 
 const TEST_DB_PATH = "./test-integrations-http.sqlite";
-const TEST_PORT = 13089;
 
 interface FakeClientLog {
   retrieveCalls: string[];
@@ -59,7 +59,7 @@ function clearManagedConfigRows() {
 
 describe("POST /api/integrations/claude-managed/test", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
   const log: FakeClientLog = { retrieveCalls: [] };
   const savedEnv = {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
@@ -82,9 +82,8 @@ describe("POST /api/integrations/claude-managed/test", () => {
         res.end("not found");
       }
     });
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

@@ -44,10 +44,11 @@ import { runServerRaters } from "../be/memory/raters/run-server-raters";
 import { applyRating } from "../be/memory/raters/store";
 import { rerank } from "../be/memory/reranker";
 import type { MemoryCandidate } from "../be/memory/types";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = 19131;
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-rater-e2e-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const API_KEY = "test-key";
 
 let serverProc: Subprocess;
@@ -86,20 +87,6 @@ async function api(
   return { status: res.status, body };
 }
 
-async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {
-      // not ready
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
-
 function readPosterior(id: string): { alpha: number; beta: number } {
   const row = getDb()
     .prepare<{ alpha: number; beta: number }, [string]>(
@@ -134,6 +121,9 @@ function countEdges(memoryId: string): number {
 }
 
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
+
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
@@ -182,7 +172,7 @@ beforeAll(async () => {
   insertTask.run(taskId, agentId, "e2e task", now, now);
 
   store = new SqliteMemoryStore();
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   closeDb();

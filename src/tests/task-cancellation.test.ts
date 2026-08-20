@@ -14,9 +14,9 @@ import {
   startTask,
   updateAgentStatusFromCapacity,
 } from "../be/db";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-task-cancellation.sqlite";
-const TEST_PORT = 13016;
 
 // Helper to parse query params
 function parseQueryParams(url: string): URLSearchParams {
@@ -100,7 +100,7 @@ function createTestServer(): Server {
 
 describe("Task Cancellation", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     // Clean up any existing test database
@@ -115,11 +115,8 @@ describe("Task Cancellation", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

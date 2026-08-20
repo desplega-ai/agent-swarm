@@ -11,6 +11,7 @@ import { fingerprintApiKey } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-user-token-routes.sqlite";
 const API_KEY = "test-user-token-key";
@@ -24,20 +25,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  const port = 15174;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -63,7 +50,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server, "127.0.0.1");
 });
 
 afterAll(async () => {

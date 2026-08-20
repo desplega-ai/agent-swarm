@@ -71,12 +71,13 @@ jobs:
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
           # bunfig.toml (linker/test config), turbo.json, member manifests (root frozen
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
-          # load-bearing for this job since the workspace migration.
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$)')
+          # load-bearing for this job since the workspace migration. The Dockerfiles
+          # feed the Bun version-pin check (check:bun-version).
+          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|test-timings\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
@@ -139,7 +140,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -314,6 +315,11 @@ jobs:
       - name: Check OpenAPI response-schema coverage
         run: bun scripts/check-openapi-response-coverage.ts
 
+      # Dockerfile `FROM oven/bun:<tag>` pins must equal package.json packageManager
+      # (the version setup-bun installs in every job above).
+      - name: Check Bun version pins
+        run: bun run check:bun-version
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
@@ -391,14 +397,14 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
+    name: Run Tests (${{ matrix.shard }}/2)
     needs: detect-changes
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -407,7 +413,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -416,12 +422,16 @@ jobs:
         id: tests
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job). Each shard gets its own runner because these
-        # tests start servers, subprocesses, and SQLite workers.
+        # the lint-and-typecheck job). --parallel=4 runs each test file in its own
+        # worker process (implies --isolate), 4 at a time per runner; the committed
+        # test-timings.json balances files across the 2 shards by duration. Refresh
+        # it with `bun test --parallel=4 --update-timings --timings=test-timings.json`.
+        # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
+        # bunfig.toml no longer sets a global retry.
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --shard=${{ matrix.shard }}/4
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 --timings=test-timings.json
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
@@ -459,7 +469,7 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
@@ -476,7 +486,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -504,7 +514,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -539,7 +549,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -558,7 +568,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Rebuild OpenAPI spec and check for drift
@@ -599,7 +609,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Check vendored OpenAPI determinism
@@ -736,7 +746,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       # ui is now a Bun workspace member; the root install hoists its deps. Run the
       # ui-scoped scripts from the apps/ui/ directory against that shared node_modules.
@@ -836,7 +846,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile

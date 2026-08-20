@@ -19,9 +19,9 @@ import { registerDeleteConfigTool } from "../tools/swarm-config/delete-config";
 import { registerListConfigTool } from "../tools/swarm-config/list-config";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
 import { setRequestAuth } from "../utils/request-auth-context";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-swarm-config-reserved-keys.sqlite";
-const TEST_PORT = 13047;
 
 const EXPECTED_MESSAGE = (key: string) =>
   `Key '${key}' is reserved and cannot be stored in swarm_config. ` +
@@ -95,7 +95,7 @@ function createTestServer(): Server {
 
 describe("swarm-config reserved keys guard", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
   const mcpServer = new MockMcpServer();
 
   beforeAll(async () => {
@@ -120,9 +120,8 @@ describe("swarm-config reserved keys guard", () => {
     registerListConfigTool(mcpServer as unknown as Parameters<typeof registerListConfigTool>[0]);
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

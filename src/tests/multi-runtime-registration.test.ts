@@ -45,10 +45,10 @@ import { registerPollTaskTool } from "../tools/poll-task";
 import { registerSetConfigTool } from "../tools/swarm-config/set-config";
 import { registerTaskActionTool } from "../tools/task-action";
 import { setRequestAuth } from "../utils/request-auth-context";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-multi-runtime-registration.sqlite";
-const TEST_PORT = 13113 + (process.pid % 1000);
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const API_KEY = "test-multi-runtime-key";
 
 const LEAD_ID = "44444444-4444-4444-4444-444444444444";
@@ -279,9 +279,8 @@ beforeAll(async () => {
   registerPollTaskTool(mcpServer as unknown as Parameters<typeof registerPollTaskTool>[0]);
   registerTaskActionTool(mcpServer as unknown as Parameters<typeof registerTaskActionTool>[0]);
   server = createTestServer();
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://localhost:${port}`;
 });
 
 afterAll(async () => {

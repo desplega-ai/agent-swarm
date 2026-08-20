@@ -17,9 +17,9 @@ import {
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { ScheduledTask, ScheduledTaskSummary } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-schedule-http-triage-tools.sqlite";
-const TEST_PORT = 13031;
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -36,7 +36,7 @@ function createTestServer(): Server {
   });
 }
 
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const headers = {
   "Content-Type": "application/json",
   "X-Agent-ID": crypto.randomUUID(),
@@ -51,9 +51,8 @@ describe("Schedule HTTP triage tooling", () => {
     }
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

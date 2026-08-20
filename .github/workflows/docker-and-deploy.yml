@@ -45,7 +45,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Check chart version sync
         run: bun run sync-chart-version --check
@@ -746,7 +746,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -843,7 +843,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -877,6 +877,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # Third-party license inventory for the shipped (production) dependency
+      # set, attached to every release. `bun pm licenses` is Bun 1.4+. The
+      # inventory is informational: it must never block the release itself, so
+      # both steps are continue-on-error and the asset is attached only if it exists.
+      - name: Install dependencies (license inventory)
+        continue-on-error: true
+        run: bun install --frozen-lockfile
+
+      - name: Generate third-party license inventory
+        continue-on-error: true
+        run: bun pm licenses --prod --json > /tmp/third-party-licenses.json
 
       - name: Create GitHub Release
         env:
@@ -928,4 +945,5 @@ jobs:
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            $( [ -s /tmp/third-party-licenses.json ] && echo "/tmp/third-party-licenses.json#third-party-licenses.json" )

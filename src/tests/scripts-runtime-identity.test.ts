@@ -25,10 +25,10 @@ import { runScript } from "../scripts-runtime/loader";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { proxyScriptsApi } from "../tools/script-common";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-runtime-identity.sqlite";
-const TEST_PORT = 14113 + (process.pid % 1000);
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const API_KEY = "scripts-runtime-identity-key-1234567890";
 
 const savedEnv = { ...process.env };
@@ -97,9 +97,8 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer();
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://localhost:${port}`;
 });
 
 afterAll(async () => {

@@ -9,9 +9,9 @@ import {
   initDb,
   updateAgentActivity,
 } from "../be/db";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-agent-activity.sqlite";
-const TEST_PORT = 13025;
 
 // Minimal HTTP handler for activity endpoint
 function handleRequest(req: { method: string; url: string }): { status: number; body: unknown } {
@@ -58,7 +58,7 @@ function createTestServer(): Server {
 
 describe("Agent Activity Tracking (lastActivityAt)", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     try {
@@ -70,12 +70,9 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
     initDb(TEST_DB_PATH);
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {

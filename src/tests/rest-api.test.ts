@@ -12,9 +12,9 @@ import {
   insertTaskAttachment,
   updateAgentStatus,
 } from "../be/db";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rest-api.sqlite";
-const TEST_PORT = 13015;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -203,7 +203,7 @@ function createTestServer(): Server {
 
 describe("REST API Endpoints", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     // Clean up any existing test database
@@ -218,12 +218,9 @@ describe("REST API Endpoints", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {

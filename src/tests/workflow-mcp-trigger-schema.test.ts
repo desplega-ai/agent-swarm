@@ -32,9 +32,10 @@ import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-mcp-trigger-schema.sqlite";
-const TEST_PORT = 13031;
+let TEST_PORT = 0;
 
 // ─── Test Harness ────────────────────────────────────────────
 //
@@ -174,9 +175,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     initWorkflows();
     tools = buildServerWithTools();
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    TEST_PORT = await listenOnFreePort(server);
   });
 
   afterAll(async () => {

@@ -5,9 +5,10 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { closeDb, createAgent, createMcpServer, initDb, installMcpServer } from "../be/db";
 import { setMcpServerAuthMethod, upsertMcpOAuthToken } from "../be/db-queries/mcp-oauth";
 import { handleMcpServers } from "../http/mcp-servers";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-mcp-oauth-resolve-secrets.sqlite";
-const TEST_PORT = 13041;
+let TEST_PORT = 0;
 
 process.env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(32, 11).toString("base64");
 
@@ -28,9 +29,7 @@ beforeAll(async () => {
       res.end(JSON.stringify({ error: "not found" }));
     }
   });
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+  TEST_PORT = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

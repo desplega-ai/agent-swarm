@@ -27,12 +27,11 @@ import { buildRatingsFromLlm } from "../be/memory/raters/llm";
 import { applyRating } from "../be/memory/raters/store";
 import { REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "../be/memory/raters/types";
 import { registerMemoryRateTool } from "../tools/memory-rate";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = Number(
-  process.env.MEMORY_EDGES_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
-);
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-edges-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const API_KEY = "test-key";
 
 let serverProc: Subprocess;
@@ -69,20 +68,6 @@ async function api(
     body = text;
   }
   return { status: res.status, body };
-}
-
-async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {
-      // not ready
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
 function makeMemory(
@@ -131,6 +116,8 @@ function readEdges(
 }
 
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
@@ -180,7 +167,7 @@ beforeAll(async () => {
   insertTask.run(taskA, agentA, "task A", now, now);
 
   store = new SqliteMemoryStore();
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   closeDb();

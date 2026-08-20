@@ -4,6 +4,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import { closeDb, createAgent, initDb } from "../be/db";
 import { handleAgentsRest } from "../http/agents";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 /**
  * Phase 4 of the worker credential safe-loop plan
@@ -20,7 +21,6 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
  */
 
 const TEST_DB_PATH = "./test-credential-status-api.sqlite";
-const TEST_PORT = 13041 + (process.pid % 1000);
 
 function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
@@ -38,7 +38,7 @@ function createTestServer(): Server {
 
 describe("Phase 4 — credential-status HTTP endpoints", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
   const readyAgentName = "api-ready";
   const blockedAgentName = "api-blocked";
   let readyAgentId = "";
@@ -70,7 +70,8 @@ describe("Phase 4 — credential-status HTTP endpoints", () => {
     }).id;
 
     server = createTestServer();
-    await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

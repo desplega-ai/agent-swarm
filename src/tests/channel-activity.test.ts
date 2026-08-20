@@ -40,6 +40,7 @@ import {
   upsertChannelActivityCursor,
 } from "../be/db";
 import { fetchChannelActivity } from "../slack/channel-activity";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = `./test-channel-activity-${process.pid}.sqlite`;
 
@@ -109,7 +110,7 @@ describe("Channel Activity Cursors — DB functions", () => {
 
 describe("Channel Activity — cursor commit endpoint", () => {
   let server: Server;
-  const TEST_PORT = 13099;
+  let TEST_PORT = 0;
 
   beforeAll(async () => {
     server = createHttpServer(async (req, res) => {
@@ -152,9 +153,7 @@ describe("Channel Activity — cursor commit endpoint", () => {
       res.end("Not Found");
     });
 
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    TEST_PORT = await listenOnFreePort(server);
   });
 
   afterAll(() => {

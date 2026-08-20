@@ -26,6 +26,7 @@ import {
   createResumeFollowUp,
   GRACEFUL_SHUTDOWN_PIN_TAG,
 } from "../tasks/worker-follow-up";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-task-supersede-resume.sqlite";
 
@@ -595,7 +596,7 @@ describe("Task Supersede + Resume", () => {
         "Include validation, virus scan, S3 upload, and a notification.";
       mockSessionLogs = [];
 
-      server = createServer((req, res) => {
+      const srv = createServer((req, res) => {
         res.setHeader("Content-Type", "application/json");
         const url = req.url ?? "";
         if (url === `/api/tasks/${testTaskId}`) {
@@ -617,8 +618,8 @@ describe("Task Supersede + Resume", () => {
         res.writeHead(404);
         res.end(JSON.stringify({ error: "not found" }));
       });
-      const port = 13099;
-      await new Promise<void>((r) => server?.listen(port, () => r()));
+      server = srv;
+      const port = await listenOnFreePort(srv);
       baseUrl = `http://localhost:${port}`;
     });
 
@@ -765,8 +766,7 @@ describe("Task Supersede + Resume", () => {
         }
         res.writeHead(404).end(JSON.stringify({ error: "not found" }));
       });
-      const port = 13100;
-      await new Promise<void>((r) => chainServer.listen(port, () => r()));
+      const port = await listenOnFreePort(chainServer);
 
       try {
         // resume2's parentTaskId = resume1.id → walk should reach original.

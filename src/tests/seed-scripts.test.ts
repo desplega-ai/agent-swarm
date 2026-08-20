@@ -166,7 +166,7 @@ describe("seed-scripts catalog", () => {
       expect(row?.isScratch).toBe(false);
       expect(row?.typeChecked).toBe(true);
     }
-  });
+  }, 30_000); // typechecks every seed script with tsc; slow under --parallel load
 
   test("re-seeding is idempotent — pristine, unchanged scripts are skipped", async () => {
     const result = await runSeeder(scriptsSeeder, { quiet: true });

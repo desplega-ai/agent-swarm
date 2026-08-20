@@ -31,7 +31,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -198,6 +198,10 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # Dockerfile `FROM oven/bun:<tag>` pins must equal package.json packageManager.
+      - name: Check Bun version pins
+        run: bun run check:bun-version
+
       # Main must report the same series used as PR baselines.
       # See agent-fs docs/ci-timings.md; reporting is best-effort and never blocks CI.
       - name: Report check timings to ci-timings
@@ -275,12 +279,12 @@ jobs:
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
+    name: Run Tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -289,7 +293,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -297,14 +301,15 @@ jobs:
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (separate bun package with its own deps + CI test step). Sharded 4-way to
-        # match merge-gate.yml's partitioning so ci-timings PR-vs-main wall-clock
-        # comparisons are apples-to-apples (each shard gets its own runner because
-        # these tests start servers, subprocesses, and SQLite workers).
+        # (separate bun package with its own deps + CI test step). 2 shards x
+        # --parallel=4 to match merge-gate.yml's partitioning so ci-timings
+        # PR-vs-main wall-clock comparisons are apples-to-apples. --parallel runs
+        # each test file in its own worker process (implies --isolate); the
+        # committed test-timings.json balances files across shards by duration.
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --timeout 10000 --shard=${{ matrix.shard }}/4
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 --timings=test-timings.json
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
@@ -342,6 +347,6 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"

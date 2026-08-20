@@ -6,9 +6,11 @@ Rules and traps when editing `Dockerfile` (API) or `Dockerfile.worker` — espec
 
 | Image | Uncompressed | Built from |
 |---|---:|---|
-| `agent-swarm-worker` (full, `:latest`) | ~4.2 GB | `Dockerfile.worker` target `worker-full` (default) |
-| `agent-swarm-worker` (`:slim`) | ~1.9 GB | `Dockerfile.worker` target `worker-slim` |
-| `agent-swarm` (API) | ~380 MB | `Dockerfile` |
+| `agent-swarm-worker` (full, `:latest`) | ~4.3 GB | `Dockerfile.worker` target `worker-full` (default) |
+| `agent-swarm-worker` (`:slim`) | ~2.1 GB | `Dockerfile.worker` target `worker-slim` |
+| `agent-swarm` (API) | ~350 MB | `Dockerfile` |
+
+Worker sizes include the bytecode-compiled `agent-swarm` binary (~245 MB, +140 MB over the plain build; see rule 4c). Measured 2026-08-21 on arm64 with Bun 1.4.0.
 
 Compressed ghcr pull size ≈ 35–45 % of uncompressed.
 
@@ -138,6 +140,14 @@ EOF
 ### 4. Don't install Bun (or any toolchain) twice
 
 The worker historically installed Bun once globally (`USER root`) and once for `worker` — ~200 MB duplicated. If you need a tool under both UIDs, install once to `/usr/local/bin` and rely on `PATH`. If a tool insists on living under `$HOME`, install it once and `chown` it to the right user in the **same** RUN.
+
+### 4b. Every Bun pin equals `package.json` `packageManager`
+
+Four pins: the builder `FROM oven/bun:<tag>` in `Dockerfile` and in `Dockerfile.worker`, the runtime `curl https://bun.sh/install | bash -s "bun-v<tag>"` in `worker-base`, and `FROM oven/bun:<tag>` in `apps/evals/Dockerfile`. `bun run check:bun-version` (merge gate) fails when any of them differs from `packageManager`. The `Dockerfile` runtime stage also copies `/usr/local/bin/bun` out of the builder, so the scripts-runtime sandbox children run the builder's Bun; keeping the pins equal is what makes "tested in CI on X, runs in prod on X" true.
+
+### 4c. The worker binary is bytecode-compiled; the API binary is not
+
+`Dockerfile.worker` builds `agent-swarm` with `bun build --compile --bytecode --format=esm` (Bun 1.4 lifted the CJS-only restriction for bytecode). Measured on Bun 1.4.0: `agent-swarm help` 388 ms -> 81 ms, binary 103 MB -> ~245 MB, build 0.3 s -> 0.9 s. The worker binary runs on every container start and on every hook invocation (`src/hooks/hook.ts` goes through the same binary), so the startup win repeats per session; +140 MB on a 2.1-4.3 GB image is 3-7 %. The API binary (`Dockerfile`) stays plain: ~300 ms saved once per boot is not worth +75 MB on a 380 MB image. If you flip that decision, update this section and the size baseline above.
 
 ### 5. Cleanup goes in the SAME `RUN` as the install
 

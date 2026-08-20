@@ -20,6 +20,7 @@ import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { handleMcpUser } from "../http/mcp-user";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-mcp-user-route.sqlite";
 const API_KEY = "test-mcp-user-key";
@@ -33,20 +34,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  const port = 15173;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(): Server {
@@ -75,7 +62,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer();
-  port = await listen(server);
+  port = await listenOnFreePort(server, "127.0.0.1");
 });
 
 afterAll(async () => {
