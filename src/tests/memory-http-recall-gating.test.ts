@@ -151,10 +151,18 @@ beforeAll(async () => {
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
     )
     .run(sourceTaskId, agentId, "HTTP memory recall gating task", nowIso, nowIso);
+  getDb()
+    .prepare(
+      `INSERT INTO agent_memory
+       (id, agentId, scope, name, content, source, createdAt, accessedAt)
+       VALUES (?, ?, 'agent', ?, ?, 'manual', ?, ?)`,
+    )
+    .run(memoryId, agentId, memory.name, memory.content, nowIso, nowIso);
 });
 
 beforeEach(() => {
   getDb().run("DELETE FROM memory_retrieval");
+  getDb().prepare("UPDATE agent_memory SET accessCount = 0 WHERE id = ?").run(memoryId);
 });
 
 afterAll(async () => {
@@ -185,6 +193,47 @@ describe("memory HTTP recall capture gating", () => {
     expect(response.body.results).toHaveLength(1);
     expect(response.body.results[0].id).toBe(memoryId);
     expect(countRetrievals()).toBe(0);
+    expect(
+      getDb()
+        .prepare<{ accessCount: number }, [string]>(
+          "SELECT accessCount FROM agent_memory WHERE id = ?",
+        )
+        .get(memoryId)?.accessCount,
+    ).toBe(0);
+  });
+
+  test("POST /api/memory/search counts agent recall as memory consumption", async () => {
+    const response = await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: "agent recall", intent: "pre-task memory recall", limit: 5 },
+      { "x-agent-id": agentId },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.results[0].accessCount).toBe(1);
+    expect(
+      getDb()
+        .prepare<{ accessCount: number }, [string]>(
+          "SELECT accessCount FROM agent_memory WHERE id = ?",
+        )
+        .get(memoryId)?.accessCount,
+    ).toBe(1);
+    expect(countRetrievals()).toBe(0);
+  });
+
+  test("prompt recall counts only memories that pass the injection threshold", async () => {
+    const response = await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: "prompt recall", intent: "pre-task memory recall", limit: 5 },
+      { "x-agent-id": agentId, "x-memory-consumption": "prompt" },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.results[0].accessCount).toBe(1);
   });
 
   test("GET /api/memory/:id accepts UI calls without intent and does not record retrievals", async () => {

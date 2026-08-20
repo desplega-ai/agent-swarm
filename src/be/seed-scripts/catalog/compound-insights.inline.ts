@@ -451,10 +451,24 @@ export default async function compoundInsights(args: any, ctx: any) {
   // SQL-light counts plus JS-side embedding similarity where available; prod
   // SQLite does not expose a scalar cosine_similarity() function.
   if (includeMemoryHealth) {
+    const accessTrackingRows = rowsToObjects(
+      await ctx.swarm.db_query({
+        sql: "SELECT startedAt FROM memory_access_tracking WHERE id = 1",
+      }),
+    );
+    const accessTrackingStartedAt = accessTrackingRows[0]?.startedAt ?? null;
+    const trackedPredicate = accessTrackingStartedAt
+      ? `createdAt >= '${accessTrackingStartedAt}'`
+      : "1 = 1";
+    const preexistingPredicate = accessTrackingStartedAt
+      ? `createdAt < '${accessTrackingStartedAt}'`
+      : "0 = 1";
     const memRows = rowsToObjects(
       await ctx.swarm.db_query({
         sql: `SELECT scope, source, count(*) as cnt,
-                     sum(case when accessCount = 0 then 1 else 0 end) as zeroAccess,
+                     sum(case when ${trackedPredicate} then 1 else 0 end) as tracked,
+                     sum(case when accessCount = 0 AND ${trackedPredicate} then 1 else 0 end) as zeroAccess,
+                     sum(case when accessCount = 0 AND ${preexistingPredicate} then 1 else 0 end) as zeroAccessUntracked,
                      sum(case when sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL then 1 else 0 end) as referenced
               FROM agent_memory GROUP BY scope, source`,
       }),
@@ -464,18 +478,25 @@ export default async function compoundInsights(args: any, ctx: any) {
     for (const r of memRows) {
       bySource[r.source] ??= {
         total: 0,
+        tracked: 0,
         percentOfStore: 0,
         zeroAccess: 0,
+        zeroAccessUntracked: 0,
         zeroAccessPercent: 0,
         referenced: 0,
       };
       bySource[r.source].total += asNumber(r.cnt);
+      bySource[r.source].tracked += asNumber(r.tracked);
       bySource[r.source].zeroAccess += asNumber(r.zeroAccess);
+      bySource[r.source].zeroAccessUntracked += asNumber(r.zeroAccessUntracked);
       bySource[r.source].referenced += asNumber(r.referenced);
     }
     for (const source of Object.keys(bySource)) {
       bySource[source].percentOfStore = percent(bySource[source].total, totalMem);
-      bySource[source].zeroAccessPercent = percent(bySource[source].zeroAccess, bySource[source].total);
+      bySource[source].zeroAccessPercent = percent(
+        bySource[source].zeroAccess,
+        bySource[source].tracked,
+      );
     }
 
     const autoSnapshotSources = ["session_summary", "task_completion"];
@@ -507,6 +528,7 @@ export default async function compoundInsights(args: any, ctx: any) {
         sql: `SELECT source, count(*) as count
               FROM agent_memory
               WHERE accessCount = 0
+                AND createdAt >= ${accessTrackingStartedAt ? `'${accessTrackingStartedAt}'` : "datetime('now')"}
                 AND (sourceTaskId IS NOT NULL OR sourcePath IS NOT NULL)
                 AND createdAt < datetime('now','-${days} days')
               GROUP BY source ORDER BY count DESC`,
@@ -547,6 +569,17 @@ export default async function compoundInsights(args: any, ctx: any) {
       }, {}),
       bySource,
       pollution: {
+        accessTracking: {
+          startedAt: accessTrackingStartedAt,
+          preexistingMemoriesUntracked: memRows.reduce(
+            (sum: number, r: any) => sum + asNumber(r.cnt) - asNumber(r.tracked),
+            0,
+          ),
+          preexistingZeroAccessBySource: memRows.reduce((m: any, r: any) => {
+            m[r.source] = asNumber(r.zeroAccessUntracked);
+            return m;
+          }, {}),
+        },
         autoSnapshotSources,
         autoSnapshotTotal,
         autoSnapshotPercent: percent(autoSnapshotTotal, totalMem),

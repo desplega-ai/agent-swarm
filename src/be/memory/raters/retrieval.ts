@@ -32,6 +32,29 @@ export type RetrievalExtras = {
   eventType?: "search" | "get";
 };
 
+/**
+ * Count memories returned by an agent recall search as consumed.
+ *
+ * `agent_memory.accessCount` historically only changed in `MemoryStore.get`,
+ * which made search results and prompt-injected memories look unread. Keep
+ * this separate from `recordRetrievals`: search results without a task still
+ * need to be measurable, while the retrieval audit table intentionally needs
+ * a task scope.
+ */
+export function recordMemoryAccesses(memoryIds: string[]): void {
+  const ids = [...new Set(memoryIds)].filter(Boolean);
+  if (ids.length === 0) return;
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  const update = db.prepare(
+    "UPDATE agent_memory SET accessedAt = ?, accessCount = accessCount + 1 WHERE id = ?",
+  );
+  db.transaction(() => {
+    for (const id of ids) update.run(now, id);
+  })();
+}
+
 export function recordRetrievals(
   taskId: string | undefined,
   agentId: string,

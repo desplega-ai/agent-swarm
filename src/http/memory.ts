@@ -9,7 +9,7 @@ import { listEdgesForAgent } from "../be/memory/edges-store";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { refreshLinks, storeLinks } from "../be/memory/link-resolver";
 import { getLinksForMemory, type MemoryLinksResult } from "../be/memory/links-store";
-import { recordRetrievals } from "../be/memory/raters/retrieval";
+import { recordMemoryAccesses, recordRetrievals } from "../be/memory/raters/retrieval";
 import { applyRating, ExplicitSelfDuplicateError } from "../be/memory/raters/store";
 import {
   type RatingEvent,
@@ -77,6 +77,7 @@ const MemorySearchResultItemSchema = z.object({
   source: AgentMemorySourceSchema,
   scope: AgentMemoryScopeSchema,
   tags: z.array(z.string()),
+  accessCount: z.number(),
 });
 
 const searchMemory = route({
@@ -781,6 +782,10 @@ export async function handleMemory(
         : sourceTaskIdHeader;
       const contextKeyHeader = req.headers["x-context-key"];
       const contextKey = Array.isArray(contextKeyHeader) ? contextKeyHeader[0] : contextKeyHeader;
+      const consumptionHeader = req.headers["x-memory-consumption"];
+      const consumptionMode = Array.isArray(consumptionHeader)
+        ? consumptionHeader[0]
+        : consumptionHeader;
       if (sourceTaskId && intent) {
         try {
           recordRetrievals(
@@ -799,6 +804,19 @@ export async function handleMemory(
         }
       }
 
+      // Agent recall searches are memory consumption even when the caller
+      // does not follow up with memory-get. UI browse/search calls omit intent
+      // and therefore remain side-effect free.
+      if (intent) {
+        try {
+          const consumed =
+            consumptionMode === "prompt" ? ranked.filter((r) => r.similarity > 0.4) : ranked;
+          recordMemoryAccesses(consumed.map((r) => r.id));
+        } catch (err) {
+          console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+        }
+      }
+
       searchMemory.respond(res, 200, {
         results: ranked.map((r) => ({
           id: r.id,
@@ -811,6 +829,9 @@ export async function handleMemory(
           source: r.source,
           scope: r.scope,
           tags: r.tags,
+          accessCount:
+            (r.accessCount ?? 0) +
+            (intent && (consumptionMode !== "prompt" || r.similarity > 0.4) ? 1 : 0),
         })),
       });
     } catch (err) {

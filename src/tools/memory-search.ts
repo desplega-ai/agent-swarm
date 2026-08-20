@@ -4,7 +4,7 @@ import { getAgentById } from "@/be/db";
 import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
 import { CANDIDATE_SET_MULTIPLIER } from "@/be/memory/constants";
 import { expandCandidatesWithGraph } from "@/be/memory/graph-expansion";
-import { recordRetrievals } from "@/be/memory/raters/retrieval";
+import { recordMemoryAccesses, recordRetrievals } from "@/be/memory/raters/retrieval";
 import { rerank } from "@/be/memory/reranker";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import type { AgentMemorySource } from "@/types";
@@ -26,6 +26,7 @@ type MemorySearchResult = {
   retrievalSource?: string;
   tags?: string[];
   createdAt: string;
+  accessCount?: number;
   rateHint?: string;
 };
 
@@ -57,6 +58,7 @@ export const memorySearchOutputSchema = swarmToolOutputSchema({
         retrievalSource: z.enum(["vec", "fts", "hybrid", "fallback", "graph"]).optional(),
         tags: z.array(z.string()).optional(),
         createdAt: z.string().optional(),
+        accessCount: z.number().int().optional(),
         rateHint: z.string().optional(),
       }),
     )
@@ -70,7 +72,9 @@ export const registerMemorySearchTool = (server: McpServer) => {
       title: "Search memories",
       description:
         "Search your accumulated memories using natural language. Returns summaries with IDs — use memory-get to retrieve full content.",
-      annotations: { readOnlyHint: true },
+      // Search updates access telemetry for every result returned to an agent.
+      // It has no user-visible mutation, but is not strictly read-only.
+      annotations: { readOnlyHint: false },
 
       inputSchema: z.object({
         query: z.string().min(1).describe("Natural language search query."),
@@ -144,6 +148,15 @@ export const registerMemorySearchTool = (server: McpServer) => {
           }
         }
 
+        // Search results are visible to the agent even when it does not call
+        // memory-get. Count them so prompt recall and explicit memory-search
+        // consumption are reflected in the same access metric.
+        try {
+          recordMemoryAccesses(ranked.map((r) => r.id));
+        } catch (err) {
+          console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+        }
+
         const inTaskContext = !!requestInfo.sourceTaskId;
         const mapped = ranked.map((r) => ({
           id: r.id,
@@ -155,6 +168,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
           retrievalSource: r.retrievalSource,
           tags: r.tags,
           createdAt: r.createdAt,
+          accessCount: (r.accessCount ?? 0) + 1,
           ...(inTaskContext && NUDGE_ELIGIBLE_SOURCES.has(r.source as AgentMemorySource)
             ? { rateHint: rateHintFor(r.id) }
             : {}),
@@ -176,6 +190,12 @@ export const registerMemorySearchTool = (server: McpServer) => {
         source,
       });
 
+      try {
+        recordMemoryAccesses(recent.map((r) => r.id));
+      } catch (err) {
+        console.error("[memory-search] recordMemoryAccesses failed:", (err as Error).message);
+      }
+
       const mapped = recent.map((r) => ({
         id: r.id,
         name: r.name,
@@ -184,6 +204,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         scope: r.scope,
         tags: r.tags,
         createdAt: r.createdAt,
+        accessCount: (r.accessCount ?? 0) + 1,
       }));
 
       return toolOk(

@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDb, initDb, isSqliteVecAvailable } from "../be/db";
 import { serializeEmbedding } from "../be/embedding";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { recordMemoryAccesses } from "../be/memory/raters/retrieval";
 
 const TEST_DB_PATH = "./test-memory-store.sqlite";
 
@@ -159,6 +160,20 @@ describe("SqliteMemoryStore", () => {
 
       const peeked = store.peek(created.id);
       expect(peeked!.accessCount).toBe(0);
+    });
+
+    test("recordMemoryAccesses increments search-result reads once per memory", () => {
+      const created = store.store({
+        agentId: agentA,
+        scope: "agent",
+        name: "search access test",
+        content: "content",
+        source: "manual",
+      });
+
+      recordMemoryAccesses([created.id, created.id]);
+
+      expect(store.peek(created.id)!.accessCount).toBe(1);
     });
 
     test("get returns null for non-existent ID", () => {
