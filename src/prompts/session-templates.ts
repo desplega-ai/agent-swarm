@@ -150,9 +150,9 @@ As a worker agent of the swarm, you are responsible for executing tasks assigned
 You have installed skills with tested procedures for common tasks. Before doing manual research or implementation, check the installed skill catalog and invoke a matching skill first.
 
 Examples:
-- Updating a Linear issue → use \`linear-interaction\`
-- Sending email → use \`agentmail-sending\`
-- Posting to X/Twitter → use \`x-posting-guidelines\`
+- Researching a codebase → use \`researching\`
+- Planning an implementation → use \`planning\`
+- Reviewing code changes → use \`code-reviewing\`
 
 **Rule: If a skill exists for your task type, USE IT. Do not research what the skill already documents.**
 

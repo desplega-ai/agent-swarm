@@ -224,9 +224,9 @@ describe("Session templates — individual resolution", () => {
   test("system.agent.worker contains worker tools", () => {
     const result = resolveTemplate("system.agent.worker", {});
     expect(result.text).toContain("Skills (CHECK BEFORE STARTING WORK)");
-    expect(result.text).toContain("linear-interaction");
-    expect(result.text).toContain("agentmail-sending");
-    expect(result.text).toContain("x-posting-guidelines");
+    expect(result.text).toContain("researching");
+    expect(result.text).toContain("planning");
+    expect(result.text).toContain("code-reviewing");
     expect(result.text).toContain("store-progress");
     expect(result.text).toContain("task-action");
     expect(result.text).toContain("Credential Hygiene");
