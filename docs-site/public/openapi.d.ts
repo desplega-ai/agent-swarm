@@ -6984,6 +6984,7 @@ export interface paths {
                                 /** @enum {string} */
                                 scope: "agent" | "swarm";
                                 tags: string[];
+                                accessCount: number;
                             }[];
                         };
                     };
