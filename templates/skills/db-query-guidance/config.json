@@ -1,0 +1,14 @@
+{
+  "kind": "skill",
+  "name": "db-query-guidance",
+  "displayName": "DB Query Guidance",
+  "slug": "db-query-guidance",
+  "title": "DB Query Guidance",
+  "description": "Safety notes and operator config knobs for the swarm's `db-query` tool/route (SQLite). Use when a query keeps timing out, gets rejected with a concurrency error, or targets session_logs, agent_log, events, or task_context_snapshots — those four tables are too large to read whole.",
+  "version": "1.0.0",
+  "category": "skills",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "systemDefault": true,
+  "tags": ["database", "sqlite", "db-query", "operations"]
+}

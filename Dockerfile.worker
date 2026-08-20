@@ -216,7 +216,7 @@ COPY --from=prek /prek /usr/local/bin/prek
 ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below) — bump the ARG to update both in lockstep.
-ARG AGENT_FS_VERSION=0.12.2
+ARG AGENT_FS_VERSION=0.13.0
 RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/agent-fs@v${AGENT_FS_VERSION} --skill agent-fs -g -a claude-code -y \
     && test -e /home/worker/.claude/skills/agent-fs/SKILL.md \
     && rm -rf /home/worker/.npm

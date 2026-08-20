@@ -22,6 +22,7 @@ type MetricRunResponse = {
     result: {
       columns: string[];
       rows: Record<string, unknown>[];
+      truncated?: boolean;
     };
   }>;
   result: {
@@ -378,5 +379,48 @@ describe("Metrics HTTP API", () => {
       });
       expect(res.status).toBe(400);
     }
+  });
+
+  // Test D (Fix 1, db-query bounded-execution proposal §8): `truncated` still
+  // reaches the metrics response. Metric queries stay on the synchronous
+  // executeReadOnlyQuery path in this change (proposal §5.1's closing note),
+  // so this passes today via runMetricWidget's `total > rows.length` check —
+  // it must keep passing once db-query's other two call sites move to the
+  // bounded path.
+  test("D: a widget whose query returns more rows than maxRows reports truncated: true", async () => {
+    const created = await fetch(`${BASE}/api/metrics/definitions`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        slug: "truncated-widget",
+        title: "Truncated Widget",
+        definition: {
+          version: 1,
+          widgets: [
+            {
+              id: "many-rows",
+              title: "Many rows",
+              query: {
+                sql: `WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 50) SELECT x FROM cnt`,
+                maxRows: 10,
+              },
+              viz: { type: "table" },
+            },
+          ],
+        },
+      }),
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    const run = await fetch(`${BASE}/api/metrics/definitions/${id}/run`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ variables: {} }),
+    });
+    expect(run.status).toBe(200);
+    const runBody = (await run.json()) as MetricRunResponse;
+    expect(runBody.widgets[0]?.result.rows.length).toBe(10);
+    expect(runBody.widgets[0]?.result.truncated).toBe(true);
   });
 });

@@ -140,6 +140,7 @@ declare module "swarm-sdk" {
       hideCompleted?: boolean;
       consecutiveErrorsMin?: number;
       lastRunStatus?: "failed" | "succeeded";
+      includeFull?: boolean;
     }): Promise<unknown>;
     // --- scripts ---
     script_search(args: { query?: string; scope?: ScriptScope; limit?: number }): Promise<unknown>;

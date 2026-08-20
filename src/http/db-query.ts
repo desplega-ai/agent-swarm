@@ -1,15 +1,30 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
-import { getDb } from "../be/db";
+import { executeReadOnlyQueryBounded } from "./db-query-bounded";
+import {
+  assertSingleStatement,
+  DbQueryConcurrencyCapError,
+  type DbQueryResult,
+  DbQueryTimeoutError,
+  executeReadOnlyQuery,
+  getDbQueryHttpBudgetMs,
+  getDbQueryHttpMaxRows,
+  isDbQueryBoundedEnabled,
+  stripTrailingSemicolon,
+  warnDbQueryBoundedDisabledOnce,
+} from "./db-query-shared";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
-export interface DbQueryResult {
-  columns: string[];
-  rows: unknown[][];
-  elapsed: number;
-  total: number;
-}
+export type { DbQueryResult } from "./db-query-shared";
+export {
+  assertSingleStatement,
+  executeReadOnlyQuery,
+  getDbQueryHttpBudgetMs,
+  getDbQueryHttpMaxRows,
+  getDbQueryMcpBudgetMs,
+  isDbQueryBoundedEnabled,
+} from "./db-query-shared";
 
 export const DbQueryInputShape = {
   sql: z.string().min(1).max(10_000).optional(),
@@ -29,17 +44,6 @@ export function resolveDbQuerySql(input: Pick<DbQueryInput, "sql" | "query">): s
   return input.sql ?? input.query ?? "";
 }
 
-function stripTrailingSemicolon(sql: string): string {
-  return sql.trim().replace(/;\s*$/, "").trim();
-}
-
-function assertSingleStatement(sql: string): void {
-  const stripped = stripTrailingSemicolon(sql);
-  if (stripped.includes(";")) {
-    throw new Error("Only one SQL statement is allowed");
-  }
-}
-
 export function assertSelectOnlyQuery(sql: string): void {
   assertSingleStatement(sql);
   const normalized = stripTrailingSemicolon(sql).toLowerCase();
@@ -49,34 +53,23 @@ export function assertSelectOnlyQuery(sql: string): void {
 }
 
 /**
- * Execute a read-only SQL query against the swarm database.
- * Detects write statements via bun:sqlite's columnNames (empty for INSERT/UPDATE/DELETE/DROP).
+ * Gate in front of the bounded executor (Fix 1). `DB_QUERY_BOUNDED_ENABLED`
+ * (default on) picks the path: enabled runs the bounded child-process
+ * executor unchanged; disabled restores the pre-fix synchronous path with no
+ * wall-clock budget and logs a one-time warning, so turning off the
+ * protection can't happen silently.
  */
-export function executeReadOnlyQuery(
+export async function executeReadOnlyQueryGated(
   sql: string,
   params: unknown[] = [],
+  budgetMs: number,
   maxRows?: number,
-): DbQueryResult {
-  assertSingleStatement(sql);
-  const stmt = getDb().prepare(sql);
-
-  // bun:sqlite: columnNames is empty for write statements, populated for SELECT/PRAGMA/EXPLAIN
-  if (stmt.columnNames.length === 0) {
-    throw new Error("Only read-only queries are allowed");
+): Promise<DbQueryResult> {
+  if (isDbQueryBoundedEnabled()) {
+    return executeReadOnlyQueryBounded(sql, params, budgetMs, maxRows);
   }
-
-  const columns = stmt.columnNames as string[];
-  const start = performance.now();
-  const rows = (params.length > 0 ? stmt.all(...(params as [string])) : stmt.all()) as Record<
-    string,
-    unknown
-  >[];
-  const elapsed = Math.round(performance.now() - start);
-
-  const capped = maxRows ? rows.slice(0, maxRows) : rows;
-  const rowArrays = capped.map((row) => columns.map((col) => row[col]));
-
-  return { columns, rows: rowArrays, elapsed, total: rows.length };
+  warnDbQueryBoundedDisabledOnce();
+  return executeReadOnlyQuery(sql, params, maxRows);
 }
 
 const dbQueryRoute = route({
@@ -97,6 +90,8 @@ const dbQueryRoute = route({
       }),
     },
     400: { description: "Invalid or disallowed SQL" },
+    408: { description: "Query exceeded its wall-clock budget and was terminated" },
+    429: { description: "Too many concurrent bounded db-query executions; retry shortly" },
   },
   auth: { apiKey: true },
 });
@@ -115,9 +110,26 @@ export async function handleDbQuery(
   if (!parsed) return true;
 
   try {
-    const result = executeReadOnlyQuery(resolveDbQuerySql(parsed.body), parsed.body.params);
+    const result = await executeReadOnlyQueryGated(
+      resolveDbQuerySql(parsed.body),
+      parsed.body.params,
+      getDbQueryHttpBudgetMs(),
+      getDbQueryHttpMaxRows(),
+    );
     json(res, result);
   } catch (err: unknown) {
+    if (err instanceof DbQueryConcurrencyCapError) {
+      // Machine-readable code + Retry-After so a caller can back off instead
+      // of treating this like a malformed request (the pre-existing generic
+      // 400 every other error path here returns).
+      res.setHeader("Retry-After", "1");
+      json(res, { error: "db_query_concurrency_cap", message: err.message }, 429);
+      return true;
+    }
+    if (err instanceof DbQueryTimeoutError) {
+      json(res, { error: "db_query_timeout", message: err.message }, 408);
+      return true;
+    }
     const message = err instanceof Error ? err.message : String(err);
     jsonError(res, message);
   }

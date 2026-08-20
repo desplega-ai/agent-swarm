@@ -98,6 +98,53 @@ describe("script SDK allowlist", () => {
     }
   });
 
+  test("schedule_list maps includeFull to the full HTTP field and keeps the default slim", async () => {
+    const requestUrls: URL[] = [];
+    const httpServer = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const url = new URL(req.url);
+        requestUrls.push(url);
+        const full = url.searchParams.get("fields") === "full";
+        return Response.json({
+          schedules: [
+            full
+              ? { id: "schedule-1", taskTemplate: "full template" }
+              : { id: "schedule-1", taskTemplatePreview: "full..." },
+          ],
+          count: 1,
+        });
+      },
+    });
+    const config = new SwarmConfig({
+      system: {
+        apiKey: { value: "sdk-test-key", isSecret: true },
+        agentId: { value: "sdk-test-agent", isSecret: false },
+        mcpBaseUrl: { value: `http://127.0.0.1:${httpServer.port}`, isSecret: false },
+      },
+      user: {},
+    });
+    const sdk = createSwarmSdk(config);
+
+    try {
+      const full = await sdk.schedule_list({ includeFull: true });
+      expect(
+        (full as { data: { schedules: Array<{ taskTemplate?: string }> } }).data.schedules[0]
+          ?.taskTemplate,
+      ).toBe("full template");
+      expect(requestUrls[0]?.searchParams.get("fields")).toBe("full");
+
+      const slim = await sdk.schedule_list();
+      expect(
+        (slim as { data: { schedules: Array<{ taskTemplatePreview?: string }> } }).data.schedules[0]
+          ?.taskTemplatePreview,
+      ).toBe("full...");
+      expect(requestUrls[1]?.searchParams.has("fields")).toBe(false);
+    } finally {
+      httpServer.stop(true);
+    }
+  });
+
   test("bundled swarm-sdk.d.ts exposes only allowlisted methods", async () => {
     const types = await Bun.file("src/scripts-runtime/types/swarm-sdk.d.ts").text();
     for (const name of SDK_ALLOWLIST) {
