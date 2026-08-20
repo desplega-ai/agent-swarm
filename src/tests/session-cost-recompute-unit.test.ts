@@ -9,12 +9,12 @@ import type { PricingProvider, PricingTokenClass } from "../types";
 type RateBook = Partial<Record<string, number>>;
 
 function lookupFrom(book: RateBook) {
-  return (
+  return async (
     provider: PricingProvider,
     model: string,
     tokenClass: PricingTokenClass,
     _at: number,
-  ): number | null => book[`${provider}:${model}:${tokenClass}`] ?? null;
+  ): Promise<number | null> => book[`${provider}:${model}:${tokenClass}`] ?? null;
 }
 
 const CLAUDE_OPUS: RateBook = {
@@ -36,8 +36,8 @@ const BASE = {
 } as const;
 
 describe("recomputeSessionCost — pure branch behavior", () => {
-  test("0/0 split with a non-zero aggregate falls back to legacy 5m pricing, not $0", () => {
-    const result = recomputeSessionCost(
+  test("0/0 split with a non-zero aggregate falls back to legacy 5m pricing, not $0", async () => {
+    const result = await recomputeSessionCost(
       {
         ...BASE,
         provider: "claude",
@@ -51,10 +51,10 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.totalCostUsd).toBe((1_000 * 6.25) / 1_000_000);
   });
 
-  test("aggregate larger than the split is billed proportionally, not truncated to the split", () => {
+  test("aggregate larger than the split is billed proportionally, not truncated to the split", async () => {
     // 100 of 1000 writes attributed 5m-only → the whole aggregate prices at
     // the 5m rate via the ratio; nothing is dropped.
-    const result = recomputeSessionCost(
+    const result = await recomputeSessionCost(
       {
         ...BASE,
         provider: "claude",
@@ -67,9 +67,9 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.totalCostUsd).toBe((1_000 * 6.25) / 1_000_000);
   });
 
-  test("1h tokens without a cache_write_1h rate unprice the whole row", () => {
+  test("1h tokens without a cache_write_1h rate unprice the whole row", async () => {
     const { "claude:claude-opus-5:cache_write_1h": _omit, ...withoutOneHour } = CLAUDE_OPUS;
-    const result = recomputeSessionCost(
+    const result = await recomputeSessionCost(
       {
         ...BASE,
         provider: "claude",
@@ -83,14 +83,14 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.totalCostUsd).toBe(42);
   });
 
-  test("anthropic-style input is billed as-is; openai-style subtracts cache reads", () => {
-    const anthropic = recomputeSessionCost(
+  test("anthropic-style input is billed as-is; openai-style subtracts cache reads", async () => {
+    const anthropic = await recomputeSessionCost(
       { ...BASE, provider: "claude", inputTokens: 1_000, cacheReadTokens: 500_000 },
       lookupFrom(CLAUDE_OPUS),
     );
     expect(anthropic.totalCostUsd).toBe((1_000 * 5 + 500_000 * 0.5) / 1_000_000);
 
-    const openai = recomputeSessionCost(
+    const openai = await recomputeSessionCost(
       { ...BASE, model: "m", provider: "codex", inputTokens: 1_000, cacheReadTokens: 400 },
       lookupFrom({ "codex:m:input": 2, "codex:m:output": 10, "codex:m:cached_input": 0.2 }),
     );
@@ -98,7 +98,7 @@ describe("recomputeSessionCost — pure branch behavior", () => {
 
     // Opencode reports input disjoint from cache reads (prod-verified:
     // input < cacheRead on every cached message) — no subtraction.
-    const opencode = recomputeSessionCost(
+    const opencode = await recomputeSessionCost(
       { ...BASE, model: "m", provider: "opencode", inputTokens: 1_000, cacheReadTokens: 400_000 },
       lookupFrom({
         "opencode:m:input": 2,
@@ -109,8 +109,8 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(opencode.totalCostUsd).toBe((1_000 * 2 + 400_000 * 0.2) / 1_000_000);
   });
 
-  test("empty models[] behaves like no breakdown and stores no modelBreakdown", () => {
-    const result = recomputeSessionCost(
+  test("empty models[] behaves like no breakdown and stores no modelBreakdown", async () => {
+    const result = await recomputeSessionCost(
       { ...BASE, provider: "claude", inputTokens: 100, models: [] },
       lookupFrom(CLAUDE_OPUS),
     );
@@ -118,8 +118,8 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.modelBreakdown).toBeUndefined();
   });
 
-  test("missing runtime_hour rate unprices a claude-managed row with duration", () => {
-    const result = recomputeSessionCost(
+  test("missing runtime_hour rate unprices a claude-managed row with duration", async () => {
+    const result = await recomputeSessionCost(
       {
         ...BASE,
         model: "claude-opus-5",
@@ -136,11 +136,11 @@ describe("recomputeSessionCost — pure branch behavior", () => {
     expect(result.totalCostUsd).toBe(42);
   });
 
-  test("no provider keeps the harness number and the posted breakdown", () => {
+  test("no provider keeps the harness number and the posted breakdown", async () => {
     const models = [
       { model: "a", inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheWriteTokens: 4 },
     ];
-    const result = recomputeSessionCost({ ...BASE, models }, lookupFrom({}));
+    const result = await recomputeSessionCost({ ...BASE, models }, lookupFrom({}));
     expect(result.costSource).toBe("harness");
     expect(result.totalCostUsd).toBe(42);
     expect(result.modelBreakdown).toEqual(models);

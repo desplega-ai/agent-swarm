@@ -11,6 +11,7 @@ import {
   createWorkflow,
   getAssetKeyMappingByProvider,
   getDb,
+  getDbClient,
   getTaskById,
   initDb,
   insertTaskAttachment,
@@ -31,22 +32,26 @@ let scriptId: string;
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
   agentId = (await createAgent({ name: "namespace-worker", isLead: false, status: "idle" })).id;
-  userId = createUser({ name: "Namespace User", email: "namespace@example.com" }).id;
-  appId = createApp({
-    name: "Default app",
-    definition: { models: {}, pages: {}, defaultPage: "main" } as never,
-  }).id;
-  scriptId = insertScript({
-    name: "default-script",
-    scope: "agent",
-    scopeId: agentId,
-    source: "export default async function () { return { ok: true }; }",
-    description: "Asset namespace test script",
-    intent: "Verify script asset keys",
-    signatureJson: "{}",
-    agentId,
-    embeddingMode: "skip",
-  }).id;
+  userId = (await createUser({ name: "Namespace User", email: "namespace@example.com" })).id;
+  appId = (
+    await createApp({
+      name: "Default app",
+      definition: { models: {}, pages: {}, defaultPage: "main" } as never,
+    })
+  ).id;
+  scriptId = (
+    await insertScript({
+      name: "default-script",
+      scope: "agent",
+      scopeId: agentId,
+      source: "export default async function () { return { ok: true }; }",
+      description: "Asset namespace test script",
+      intent: "Verify script asset keys",
+      signatureJson: "{}",
+      agentId,
+      embeddingMode: "skip",
+    })
+  ).id;
 });
 
 afterAll(() => {
@@ -57,13 +62,13 @@ describe("cross-entity asset namespace invariants", () => {
   test("all primary entities receive deterministic resource-specific shared keys", async () => {
     const taskA = await createTaskExtended("first", { agentId });
     const taskB = await createTaskExtended("second", { agentId });
-    const workflow = createWorkflow({ name: "default-workflow", definition: { nodes: [] } });
-    const schedule = createScheduledTask({
+    const workflow = await createWorkflow({ name: "default-workflow", definition: { nodes: [] } });
+    const schedule = await createScheduledTask({
       name: "default-schedule",
       intervalMs: 60_000,
       taskTemplate: "scheduled work",
     });
-    const page = createPage({
+    const page = await createPage({
       agentId,
       slug: "default-page",
       title: "Default page",
@@ -79,26 +84,30 @@ describe("cross-entity asset namespace invariants", () => {
       `shared/page:${page.id}/`,
     ]);
     expect(
-      getDb()
-        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
-        .get(appId)?.key,
+      (
+        await getDbClient().get<{ key: string }>('SELECT "key" AS key FROM apps WHERE id = ?', [
+          appId,
+        ])
+      )?.key,
     ).toBe(`shared/app:${appId}/`);
     expect(
-      getDb()
-        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
-        .get(scriptId)?.key,
+      (
+        await getDbClient().get<{ key: string }>('SELECT "key" AS key FROM scripts WHERE id = ?', [
+          scriptId,
+        ])
+      )?.key,
     ).toBe(`shared/script:${scriptId}/`);
     expect(auditAssetKeys(getDb()).fatalCount).toBe(0);
   });
 
-  test("app and script triggers reject malformed keys", () => {
+  test("app and script triggers reject malformed keys", async () => {
     for (const [table, id] of [
       ["apps", appId],
       ["scripts", scriptId],
     ] as const) {
-      expect(() =>
-        getDb().run(`UPDATE ${table} SET "key" = ? WHERE id = ?`, ["Shared/invalid", id]),
-      ).toThrow("invalid asset namespace key");
+      await expect(
+        getDbClient().run(`UPDATE ${table} SET "key" = ? WHERE id = ?`, ["Shared/invalid", id]),
+      ).rejects.toThrow("invalid asset namespace key");
     }
   });
 
@@ -113,15 +122,15 @@ describe("cross-entity asset namespace invariants", () => {
     expect(override.key).toBe("shared/other/");
   });
 
-  test("schedule dispatch inherits its schedule namespace", () => {
-    const schedule = createScheduledTask({
+  test("schedule dispatch inherits its schedule namespace", async () => {
+    const schedule = await createScheduledTask({
       name: "namespaced-schedule",
       key: "shared/automation/",
       intervalMs: 60_000,
       taskTemplate: "scheduled work",
       targetAgentId: agentId,
     });
-    expect(createStandaloneScheduleTask(schedule).key).toBe("shared/automation/");
+    expect((await createStandaloneScheduleTask(schedule)).key).toBe("shared/automation/");
   });
 
   test("agent-fs mappings are transactional metadata and task moves do not change provider paths", async () => {
@@ -175,18 +184,17 @@ describe("cross-entity asset namespace invariants", () => {
     expect(after?.key).toBe("shared/archive/");
     expect(after?.providerKey).toBe(before?.providerKey);
     const movedTypes = new Set(
-      getDb()
-        .prepare<{ entity_type: string }, [string, string]>(
+      (
+        await getDbClient().query<{ entity_type: string }>(
           "SELECT entity_type FROM asset_key_history WHERE entity_id IN (?, ?)",
+          [task.id, before!.id],
         )
-        .all(task.id, before!.id)
-        .map((row) => row.entity_type),
+      ).map((row) => row.entity_type),
     );
     expect(movedTypes).toEqual(new Set(["task", "file"]));
-    expect(
-      async () =>
-        await moveAssetKey({ entityType: "file", id: before!.id, key: "shared/detached/" }),
-    ).toThrow("move with their parent task");
+    await expect(
+      moveAssetKey({ entityType: "file", id: before!.id, key: "shared/detached/" }),
+    ).rejects.toThrow("move with their parent task");
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
   });
 
@@ -209,8 +217,8 @@ describe("cross-entity asset namespace invariants", () => {
     expect(repeated.key).toBe(created.key);
   });
 
-  test("aggregate summaries stay lightweight and include files by logical key", () => {
-    const summaries = listAssetSummaries({ keyPrefix: "shared/", limit: 1000 });
+  test("aggregate summaries stay lightweight and include files by logical key", async () => {
+    const summaries = await listAssetSummaries({ keyPrefix: "shared/", limit: 1000 });
     expect(summaries.some((asset) => asset.entityType === "task")).toBe(true);
     expect(summaries.some((asset) => asset.entityType === "workflow")).toBe(true);
     expect(summaries.some((asset) => asset.entityType === "schedule")).toBe(true);
@@ -220,9 +228,8 @@ describe("cross-entity asset namespace invariants", () => {
       true,
     );
     expect(summaries.some((asset) => asset.entityType === "file")).toBe(true);
-    const expectedChecked = getDb()
-      .prepare<{ count: number }, []>(
-        `SELECT
+    const expectedChecked = (await getDbClient().get<{ count: number }>(
+      `SELECT
            (SELECT COUNT(*) FROM agent_tasks) +
            (SELECT COUNT(*) FROM workflows) +
            (SELECT COUNT(*) FROM scheduled_tasks) +
@@ -230,8 +237,7 @@ describe("cross-entity asset namespace invariants", () => {
            (SELECT COUNT(*) FROM apps) +
            (SELECT COUNT(*) FROM scripts) +
            (SELECT COUNT(*) FROM asset_key_mappings) AS count`,
-      )
-      .get()!.count;
+    ))!.count;
     expect(auditAssetKeys(getDb()).checked).toBe(expectedChecked);
     expect(JSON.stringify(summaries)).not.toContain("scheduled work");
     expect(JSON.stringify(summaries)).not.toContain("<p>ok</p>");
@@ -256,21 +262,20 @@ describe("cross-entity asset namespace invariants", () => {
     ).toBe(true);
 
     expect(
-      getDb()
-        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM apps WHERE id = ?')
-        .get(appId),
+      await getDbClient().get<{ key: string }>('SELECT "key" AS key FROM apps WHERE id = ?', [
+        appId,
+      ]),
     ).toEqual({ key: "shared/products/" });
     expect(
-      getDb()
-        .prepare<{ key: string }, [string]>('SELECT "key" AS key FROM scripts WHERE id = ?')
-        .get(scriptId),
+      await getDbClient().get<{ key: string }>('SELECT "key" AS key FROM scripts WHERE id = ?', [
+        scriptId,
+      ]),
     ).toEqual({ key: "shared/automation/" });
     expect(
-      getDb()
-        .prepare<{ entity_type: string; new_key: string }, [string, string]>(
-          "SELECT entity_type, new_key FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
-        )
-        .all(appId, scriptId),
+      await getDbClient().query<{ entity_type: string; new_key: string }>(
+        "SELECT entity_type, new_key FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
+        [appId, scriptId],
+      ),
     ).toEqual([
       { entity_type: "app", new_key: "shared/products/" },
       { entity_type: "script", new_key: "shared/automation/" },
@@ -286,7 +291,7 @@ describe("cross-entity asset namespace invariants", () => {
       agentId,
       key: "shared/percentx/",
     });
-    const matches = listAssetSummaries({
+    const matches = await listAssetSummaries({
       keyPrefix: "shared/percent%/",
       types: ["task"],
     });
@@ -302,16 +307,15 @@ describe("cross-entity asset namespace invariants", () => {
       providerKey: "thoughts/reports/report.md",
     });
     expect(mapping).not.toBeNull();
-    getDb().run('UPDATE asset_key_mappings SET "key" = ? WHERE id = ?', [
+    await getDbClient().run('UPDATE asset_key_mappings SET "key" = ? WHERE id = ?', [
       "shared/drift/",
       mapping!.id,
     ]);
     expect(auditAssetKeys(getDb()).warningCount).toBeGreaterThan(0);
-    const anyTask = listAssetSummaries({ types: ["task"], limit: 1 })[0]!;
-    expect(
-      async () =>
-        await moveAssetKey({ entityType: "task", id: anyTask.id, key: "shared/blocked/" }),
-    ).toThrow("blocked until");
+    const anyTask = (await listAssetSummaries({ types: ["task"], limit: 1 }))[0]!;
+    await expect(
+      moveAssetKey({ entityType: "task", id: anyTask.id, key: "shared/blocked/" }),
+    ).rejects.toThrow("blocked until");
 
     await upsertAssetKeyMapping({
       providerId: mapping!.providerId,
@@ -333,13 +337,16 @@ describe("cross-entity asset namespace invariants", () => {
     });
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
 
-    getDb().run("PRAGMA foreign_keys = OFF");
-    getDb().run("DELETE FROM users WHERE id = ?", [userId]);
-    getDb().run("PRAGMA foreign_keys = ON");
+    await getDbClient().run("PRAGMA foreign_keys = OFF");
+    await getDbClient().run("DELETE FROM users WHERE id = ?", [userId]);
+    await getDbClient().run("PRAGMA foreign_keys = ON");
     const warning = auditAssetKeys(getDb());
     expect(warning.issues.some((issue) => issue.code === "unknown-personal-user")).toBe(true);
 
-    getDb().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', ["shared/repaired/", task.id]);
+    await getDbClient().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', [
+      "shared/repaired/",
+      task.id,
+    ]);
     expect(auditAssetKeys(getDb()).warningCount).toBe(0);
   });
 });

@@ -8,6 +8,7 @@ import {
   createScriptRun,
   createTaskExtended,
   getAgentById,
+  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
@@ -515,17 +516,23 @@ export async function handleScriptRuns(
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    await upsertScriptRunJournalStep({
-      runId: run.id,
-      stepKey: parsed.body.stepKey,
-      stepType: parsed.body.stepType,
-      config: parsed.body.config ?? {},
-      status: parsed.body.status,
-      result: parsed.body.result,
-      error: parsed.body.error,
-      durationMs: parsed.body.durationMs,
+    // The journal write and the cap re-read must be atomic: concurrent
+    // ctx.step.agentTask journal posts for the same run would otherwise all
+    // land before any of them counts, and every one of them would see (and be
+    // refused by) the post-write total.
+    const limit = await getDbClient().transaction(async () => {
+      await upsertScriptRunJournalStep({
+        runId: run.id,
+        stepKey: parsed.body.stepKey,
+        stepType: parsed.body.stepType,
+        config: parsed.body.config ?? {},
+        status: parsed.body.status,
+        result: parsed.body.result,
+        error: parsed.body.error,
+        durationMs: parsed.body.durationMs,
+      });
+      return assertRunWithinLimits(run.id);
     });
-    const limit = await assertRunWithinLimits(run.id);
     if (!limit.ok) {
       json(res, { error: "script_run_limit", message: limit.error }, 429);
       return true;

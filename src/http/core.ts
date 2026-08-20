@@ -19,7 +19,7 @@ import { initLinear, resetLinear } from "../linear";
 import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
-import { setRequestAuth } from "../utils/request-auth-context";
+import { beginRequestAuthScope, setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
@@ -279,6 +279,11 @@ export async function handleCore(
   myAgentId: string | undefined,
   apiKey: string,
 ): Promise<boolean> {
+  // Install the ambient auth slot synchronously — before this function's first
+  // await — so the (asynchronously resolved) auth reaches everything the
+  // request pipeline does afterwards, including audit columns in the DB layer.
+  beginRequestAuthScope();
+
   // Handle preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -467,7 +472,7 @@ export async function handleCore(
     }
 
     // No taskId - return all recently cancelled tasks for this agent
-    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ cancelled: cancelledTasks }));
     return true;

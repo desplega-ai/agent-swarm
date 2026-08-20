@@ -189,7 +189,7 @@ describe("/api/fs REST", () => {
     expect(attachment.kind).toBe("shared-fs");
     expect(attachment.intent).toBe("input");
 
-    const rows = getTaskAttachments(taskId);
+    const rows = await getTaskAttachments(taskId);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(attachment.id);
 
@@ -205,7 +205,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("operator API key can upload and delete without X-Agent-ID for dashboard use", async () => {
@@ -221,7 +221,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("download resolves the row's stored key, not a reconstructed tasks/<id>/<name>", async () => {
@@ -297,7 +297,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
     // The decoy file was never resolved, so it must still exist.
     expect(await Bun.file(decoy).text()).toBe("unrelated decoy — must survive");
   });
@@ -318,7 +318,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("deleting a provider-backed row whose blob is already gone still clears the pointer", async () => {
@@ -338,7 +338,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("provider-aware renderers keep local-fs on swarm URLs and agent-fs on live URLs", async () => {

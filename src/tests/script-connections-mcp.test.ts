@@ -8,7 +8,7 @@ import {
   createAgent,
   createMcpServer,
   deleteMcpServer,
-  getDb,
+  getDbClient,
   getMcpServerById,
   initDb,
   upsertSwarmConfig,
@@ -275,13 +275,13 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.run("DELETE FROM script_connections");
-  db.run("DELETE FROM agent_mcp_servers");
-  db.run("DELETE FROM mcp_servers");
-  db.run("DELETE FROM swarm_config");
-  db.run("DELETE FROM agents");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM script_connections");
+  await client.run("DELETE FROM agent_mcp_servers");
+  await client.run("DELETE FROM mcp_servers");
+  await client.run("DELETE FROM swarm_config");
+  await client.run("DELETE FROM agents");
 });
 
 describe("script MCP connections", () => {
@@ -323,17 +323,16 @@ describe("script MCP connections", () => {
         }),
       );
 
-      const row = getDb()
-        .prepare<{ generated_types: string | null }, [string]>(
-          "SELECT generated_types FROM script_connections WHERE id = ?",
-        )
-        .get(connection!.id);
+      const row = await getDbClient().get<{ generated_types: string | null }>(
+        "SELECT generated_types FROM script_connections WHERE id = ?",
+        [connection!.id],
+      );
       expect(row?.generated_types).toContain("export interface ExternalMcp");
       expect(row?.generated_types).toContain("echoTool(args:");
       expect(fake.requests.some((request) => request.secretHeader === SECRET_VALUE)).toBe(true);
       expect(fake.requests.some((request) => request.staticHeader === "static-ok")).toBe(true);
 
-      const typecheck = typecheckScript(
+      const typecheck = await typecheckScript(
         `
           import type { ScriptMain } from "swarm-sdk";
           const main: ScriptMain = async (_args, ctx) => {
@@ -387,7 +386,7 @@ describe("script MCP connections", () => {
         value: "owner-only-secret",
         isSecret: true,
       });
-      const mcpServer = createMcpServer({
+      const mcpServer = await createMcpServer({
         name: `external-owner-${crypto.randomUUID()}`,
         transport: "http",
         scope: "global",
@@ -427,7 +426,7 @@ describe("script MCP connections", () => {
         value: "caller-only-secret",
         isSecret: true,
       });
-      const mcpServer = createMcpServer({
+      const mcpServer = await createMcpServer({
         name: `external-caller-${crypto.randomUUID()}`,
         transport: "http",
         scope: "global",
@@ -750,7 +749,7 @@ describe("script MCP connections", () => {
 
   test("SSE MCP servers fail early with a clear unsupported transport error", async () => {
     const lead = await createAgent({ name: "mcp-sse-lead", isLead: true, status: "idle" });
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: `sse-${crypto.randomUUID()}`,
       transport: "sse",
       scope: "global",
@@ -799,11 +798,11 @@ describe("script MCP connections", () => {
         agentId: lead.id,
       });
 
-      const result = deleteMcpServer(mcpServer.id);
+      const result = await deleteMcpServer(mcpServer.id);
 
       expect(result).toEqual({ deleted: true, deletedScriptConnectionCount: 1 });
-      expect(getMcpServerById(mcpServer.id)).toBeNull();
-      expect(getScriptConnectionById(connection.id)).toBeNull();
+      expect(await getMcpServerById(mcpServer.id)).toBeNull();
+      expect(await getScriptConnectionById(connection.id)).toBeNull();
     } finally {
       fake.stop();
     }

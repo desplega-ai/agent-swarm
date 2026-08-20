@@ -741,7 +741,7 @@ describe("registered tool output schemas", () => {
       }
     }
     initDb(TEST_DB_PATH);
-    const server = createServer({ fullSurface: true });
+    const server = await createServer({ fullSurface: true });
     tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
       ._registeredTools;
   });

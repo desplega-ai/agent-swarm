@@ -53,7 +53,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("just a follow-up comment", "BOT123", false, {
+    const matches = await routeMessage("just a follow-up comment", "BOT123", false, {
       channelId,
       threadTs,
     });
@@ -73,7 +73,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("<@BOT123> please check this", "BOT123", true, {
+    const matches = await routeMessage("<@BOT123> please check this", "BOT123", true, {
       channelId,
       threadTs,
     });
@@ -95,7 +95,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage(`swarm#${workerAgent.id} do this`, "BOT123", false, {
+    const matches = await routeMessage(`swarm#${workerAgent.id} do this`, "BOT123", false, {
       channelId,
       threadTs,
     });
@@ -124,7 +124,7 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("<@BOT123> follow up", "BOT123", true, {
+    const matches = await routeMessage("<@BOT123> follow up", "BOT123", true, {
       channelId,
       threadTs,
     });
@@ -134,11 +134,11 @@ describe("SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION=true", () => {
     expect(matches[0].matchedText).toBe("thread follow-up (lead fallback)");
   });
 
-  test("non-mention in thread with offline worker returns no matches", () => {
+  test("non-mention in thread with offline worker returns no matches", async () => {
     const channelId = "C_REQ_MENTION_4"; // same thread as above
     const threadTs = "4000.0001";
 
-    const matches = routeMessage("just chatting", "BOT123", false, {
+    const matches = await routeMessage("just chatting", "BOT123", false, {
       channelId,
       threadTs,
     });

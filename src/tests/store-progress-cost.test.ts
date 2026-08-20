@@ -67,7 +67,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     }
   });
 
-  test("should create session cost when costData is provided with store-progress", () => {
+  test("should create session cost when costData is provided with store-progress", async () => {
     // Simulate what store-progress does when costData is provided
     const costData = {
       totalCostUsd: 0.05,
@@ -82,7 +82,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
 
     // Create session cost (this is what store-progress does internally)
     const sessionId = `mcp-${taskId}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId,
       agentId,
@@ -112,7 +112,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     expect(cost.isError).toBe(false);
 
     // Verify cost can be retrieved by taskId
-    const costs = getSessionCostsByTaskId(taskId);
+    const costs = await getSessionCostsByTaskId(taskId);
     expect(costs.length).toBeGreaterThan(0);
     expect(costs.some((c) => c.id === cost.id)).toBe(true);
   });
@@ -135,7 +135,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     };
 
     const sessionId = `mcp-${failTask2.id}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId: failTask2.id,
       agentId,
@@ -168,7 +168,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     };
 
     const sessionId = `mcp-${minimalTask.id}-${Date.now()}`;
-    const cost = createSessionCost({
+    const cost = await createSessionCost({
       sessionId,
       taskId: minimalTask.id,
       agentId,
@@ -208,7 +208,7 @@ describe("createSessionCost direct API (was: store-progress with cost data)", ()
     await completeTask(noCostTask.id, "Done!");
 
     // No session costs should be created for this task
-    const costs = getSessionCostsByTaskId(noCostTask.id);
+    const costs = await getSessionCostsByTaskId(noCostTask.id);
     expect(costs.length).toBe(0);
   });
 });

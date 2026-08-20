@@ -95,7 +95,7 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("and also the weather", BOT_ID, false, {
+    const matches = await routeMessage("and also the weather", BOT_ID, false, {
       channelId,
       threadTs,
     });
@@ -115,7 +115,7 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage("<@UDEVIN01> wdyt?", BOT_ID, false, {
+    const matches = await routeMessage("<@UDEVIN01> wdyt?", BOT_ID, false, {
       channelId,
       threadTs,
     });
@@ -134,17 +134,22 @@ describe("routeMessage — thread follow-up skips messages aimed at other users"
       slackUserId: "U_HUMAN",
     });
 
-    const matches = routeMessage(`<@${BOT_ID}> and <@UDEVIN01> please coordinate`, BOT_ID, true, {
-      channelId,
-      threadTs,
-    });
+    const matches = await routeMessage(
+      `<@${BOT_ID}> and <@UDEVIN01> please coordinate`,
+      BOT_ID,
+      true,
+      {
+        channelId,
+        threadTs,
+      },
+    );
 
     expect(matches).toHaveLength(1);
     expect(matches[0].agent.id).toBe(workerAgent.id);
   });
 
-  test("no thread activity + only another bot mentioned → no match", () => {
-    const matches = routeMessage("<@UDEVIN01> hi", BOT_ID, false, {
+  test("no thread activity + only another bot mentioned → no match", async () => {
+    const matches = await routeMessage("<@UDEVIN01> hi", BOT_ID, false, {
       channelId: "C_BF_400",
       threadTs: "1400.0001",
     });

@@ -5,7 +5,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getInProgressTasksByContextKey,
   initDb,
 } from "../be/db";
@@ -108,10 +108,11 @@ describe("contextKey persistence + lookup", () => {
     });
 
     expect(second.id).toBe(first.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
-    expect(count.count).toBe(1);
+    const count = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    );
+    expect(count?.count).toBe(1);
   });
 
   test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", async () => {
@@ -139,9 +140,10 @@ describe("contextKey persistence + lookup", () => {
     });
 
     expect(second.id).toBe(first.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
-    expect(count.count).toBe(1);
+    const count = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    );
+    expect(count?.count).toBe(1);
   });
 });

@@ -5,7 +5,7 @@ import {
   createAgent,
   createTaskExtended,
   getActiveSessionForTask,
-  getDb,
+  getDbClient,
   getIdleWorkersWithCapacity,
   getOrphanedInProgressTasksForAgent,
   getPendingTaskForAgent,
@@ -57,10 +57,10 @@ describe("Heartbeat Triage", () => {
   });
 
   // Clean up tasks between tests to avoid interference
-  beforeEach(() => {
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
-    getDb().run("DELETE FROM active_sessions");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM agent_tasks");
+    await getDbClient().run("DELETE FROM agents");
+    await getDbClient().run("DELETE FROM active_sessions");
   });
 
   // ==========================================================================
@@ -76,7 +76,7 @@ describe("Heartbeat Triage", () => {
       const agent = await createAgent({ name: "idle-worker", isLead: false, status: "idle" });
       await createTaskExtended("Completed task", { agentId: agent.id });
       // Manually mark as completed
-      getDb().run(
+      await getDbClient().run(
         "UPDATE agent_tasks SET status = 'completed', finishedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE agentId = ?",
         [agent.id],
       );
@@ -124,9 +124,12 @@ describe("Heartbeat Triage", () => {
 
       // Manually set lastUpdatedAt to 45 minutes ago
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
-      const stalled = getStalledInProgressTasks(30);
+      const stalled = await getStalledInProgressTasks(30);
       expect(stalled.length).toBe(1);
       expect(stalled[0]!.id).toBe(task.id);
     });
@@ -136,7 +139,7 @@ describe("Heartbeat Triage", () => {
       const task = await createTaskExtended("Active task", { agentId: agent.id });
       await startTask(task.id);
 
-      const stalled = getStalledInProgressTasks(30);
+      const stalled = await getStalledInProgressTasks(30);
       expect(stalled.length).toBe(0);
     });
   });
@@ -171,12 +174,15 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const oldTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
-      const orphaned = getOrphanedInProgressTasksForAgent(agent.id, 60);
+      const orphaned = await getOrphanedInProgressTasksForAgent(agent.id, 60);
       expect(orphaned.map((t) => t.id)).toContain(task.id);
 
-      const reset = resetOrphanedInProgressTasksForAgent(agent.id, 60);
+      const reset = await resetOrphanedInProgressTasksForAgent(agent.id, 60);
       expect(reset.map((t) => t.id)).toContain(task.id);
 
       const updated = await getTaskById(task.id);
@@ -199,7 +205,7 @@ describe("Heartbeat Triage", () => {
       await startTask(fresh.id);
 
       const oldTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
         oldTime,
         withActiveSession.id,
         withProviderSession.id,
@@ -211,7 +217,7 @@ describe("Heartbeat Triage", () => {
       });
       await updateTaskClaudeSessionId(withProviderSession.id, "claude-live-session");
 
-      const reset = resetOrphanedInProgressTasksForAgent(agent.id, 60);
+      const reset = await resetOrphanedInProgressTasksForAgent(agent.id, 60);
       expect(reset.length).toBe(0);
 
       expect((await getTaskById(withActiveSession.id))?.status).toBe("in_progress");
@@ -249,7 +255,7 @@ describe("Heartbeat Triage", () => {
       await createTaskExtended("High priority", { priority: 80 });
       await createTaskExtended("Medium priority", { priority: 50 });
 
-      const tasks = getUnassignedPoolTasks(10);
+      const tasks = await getUnassignedPoolTasks(10);
       expect(tasks.length).toBe(3);
       expect(tasks[0]!.priority).toBe(80);
       expect(tasks[1]!.priority).toBe(50);
@@ -261,7 +267,7 @@ describe("Heartbeat Triage", () => {
       await createTaskExtended("Task 2");
       await createTaskExtended("Task 3");
 
-      const tasks = getUnassignedPoolTasks(2);
+      const tasks = await getUnassignedPoolTasks(2);
       expect(tasks.length).toBe(2);
     });
   });
@@ -278,7 +284,10 @@ describe("Heartbeat Triage", () => {
 
       // Make task stale (10 min — past the 5 min no-session threshold)
       const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
       const findings = await codeLevelTriage();
 
@@ -309,8 +318,11 @@ describe("Heartbeat Triage", () => {
       });
       // Make both task and session heartbeat stale (20 min — past the 15 min threshold)
       const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
-      getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
+      await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
         oldTime,
         task.id,
       ]);
@@ -330,7 +342,7 @@ describe("Heartbeat Triage", () => {
       expect(updated?.status).toBe("superseded");
       expect(updated?.failureReason).toBeFalsy();
 
-      const session = getActiveSessionForTask(task.id);
+      const session = await getActiveSessionForTask(task.id);
       expect(session).toBeNull();
     });
 
@@ -348,7 +360,10 @@ describe("Heartbeat Triage", () => {
 
       // Make task stale (45 min — past the 30 min threshold) but keep session fresh
       const oldTime = new Date(Date.now() - 45 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
       // Session lastHeartbeatAt stays current (just created)
 
       const findings = await codeLevelTriage();
@@ -419,12 +434,13 @@ describe("Heartbeat Triage", () => {
       expect(findings.autoAssigned.length).toBe(1);
       expect(findings.autoAssigned[0]!.agentId).toBe(worker.id);
 
-      const assigned = getDb()
-        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'pending'")
-        .get(worker.id) as { count: number };
-      const remaining = getDb()
-        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'")
-        .get() as { count: number };
+      const assigned = (await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status = 'pending'",
+        [worker.id],
+      )) as { count: number };
+      const remaining = (await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE status = 'unassigned'",
+      )) as { count: number };
 
       expect(assigned.count).toBe(1);
       expect(remaining.count).toBe(1);
@@ -480,7 +496,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
       await codeLevelTriage();
 
@@ -488,7 +507,10 @@ describe("Heartbeat Triage", () => {
       // crash_recovery resume is now PINNED back to this agent as `pending`
       // (DES-523 same-agent pin). `pending` does not count toward in_progress
       // capacity, so getActiveTaskCount drops to 0 and the agent flips to idle.
-      const agents = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+      const agents = (await getDbClient().get<{ status: string }>(
+        "SELECT status FROM agents WHERE id = ?",
+        [agent.id],
+      )) as {
         status: string;
       };
       expect(agents.status).toBe("idle");
@@ -514,9 +536,10 @@ describe("Heartbeat Triage", () => {
       await runHeartbeatSweep();
 
       // Verify task was auto-assigned
-      const tasks = getDb()
-        .query("SELECT * FROM agent_tasks WHERE status = 'pending' AND agentId = ?")
-        .all(worker.id) as Array<{ id: string }>;
+      const tasks = (await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE status = 'pending' AND agentId = ?",
+        [worker.id],
+      )) as Array<{ id: string }>;
       expect(tasks.length).toBe(1);
     });
 
@@ -526,7 +549,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        oldTime,
+        task.id,
+      ]);
 
       await runHeartbeatSweep();
 
@@ -538,7 +564,7 @@ describe("Heartbeat Triage", () => {
     test("cleans stale sessions even when preflight gate bails", async () => {
       const worker = await createAgent({ name: "worker", isLead: false, status: "offline" });
       const staleTime = new Date(Date.now() - 40 * 60 * 1000).toISOString();
-      getDb().run(
+      await getDbClient().run(
         `INSERT INTO active_sessions (id, agentId, triggerType, startedAt, lastHeartbeatAt)
          VALUES (?, ?, 'manual', ?, ?)`,
         ["test-stale-session", worker.id, staleTime, staleTime],
@@ -546,9 +572,10 @@ describe("Heartbeat Triage", () => {
 
       await runHeartbeatSweep();
 
-      const remaining = getDb()
-        .query("SELECT COUNT(*) as count FROM active_sessions WHERE id = ?")
-        .get("test-stale-session") as { count: number };
+      const remaining = (await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM active_sessions WHERE id = ?",
+        ["test-stale-session"],
+      )) as { count: number };
       expect(remaining.count).toBe(0);
     });
   });
@@ -572,7 +599,10 @@ describe("Heartbeat Triage", () => {
 
       // Backdate so getStalledInProgressTasks(0) picks it up (avoids same-ms timing issue)
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
@@ -601,9 +631,10 @@ describe("Heartbeat Triage", () => {
       expect(retryTask!.routingAffinity?.sourceAgentId).toBe(agent.id);
 
       // Verify retry has correct tags
-      const retryRow = getDb()
-        .query("SELECT tags FROM agent_tasks WHERE id = ?")
-        .get(affected[0]!.retryTaskId!) as { tags: string };
+      const retryRow = (await getDbClient().get<{ tags: string }>(
+        "SELECT tags FROM agent_tasks WHERE id = ?",
+        [affected[0]!.retryTaskId!],
+      )) as { tags: string };
       const tags = JSON.parse(retryRow.tags);
       expect(tags).toContain("reboot-retry");
       expect(tags).toContain("auto-generated");
@@ -632,7 +663,10 @@ describe("Heartbeat Triage", () => {
       });
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
@@ -646,9 +680,10 @@ describe("Heartbeat Triage", () => {
       expect(retryTask!.agentId).toBeNull();
       expect(retryTask!.routingAffinity?.sourceAgentId).toBe(agent.id);
 
-      const retryRow = getDb()
-        .query("SELECT tags FROM agent_tasks WHERE id = ?")
-        .get(affected[0]!.retryTaskId!) as { tags: string };
+      const retryRow = (await getDbClient().get<{ tags: string }>(
+        "SELECT tags FROM agent_tasks WHERE id = ?",
+        [affected[0]!.retryTaskId!],
+      )) as { tags: string };
       const tags = JSON.parse(retryRow.tags);
       expect(tags).not.toContain("reboot-retry-pin");
     });
@@ -659,7 +694,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       // Create an active session — worker is still alive
       await insertActiveSession({
@@ -675,9 +713,10 @@ describe("Heartbeat Triage", () => {
       expect(updated?.status).toBe("in_progress");
 
       // No retry tasks should exist for this task
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(0);
     });
 
@@ -687,7 +726,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       // Pre-create a retry task (simulating a previous reboot sweep)
       await createTaskExtended("Retry of interrupted task", { parentTaskId: task.id });
@@ -695,9 +737,10 @@ describe("Heartbeat Triage", () => {
       await runRebootSweep();
 
       // Should only have the one pre-existing retry, not a second
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(1);
     });
 
@@ -710,7 +753,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
@@ -719,9 +765,10 @@ describe("Heartbeat Triage", () => {
       expect(updated?.status).toBe("failed");
 
       // But no retry should be created
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(0);
 
       // Affected list should show null retryTaskId
@@ -739,16 +786,20 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
       const updated = await getTaskById(task.id);
       expect(updated?.status).toBe("failed");
 
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(0);
     });
 
@@ -761,16 +812,20 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
       const updated = await getTaskById(task.id);
       expect(updated?.status).toBe("failed");
 
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(0);
     });
 
@@ -780,11 +835,17 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
-      const agentRow = getDb().query("SELECT status FROM agents WHERE id = ?").get(agent.id) as {
+      const agentRow = (await getDbClient().get<{ status: string }>(
+        "SELECT status FROM agents WHERE id = ?",
+        [agent.id],
+      )) as {
         status: string;
       };
       expect(agentRow.status).toBe("idle");
@@ -796,15 +857,19 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       // Run two sweeps concurrently
       await Promise.all([await runRebootSweep(), await runRebootSweep()]);
 
       // Only one retry should be created
-      const retries = getDb()
-        .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-        .all(task.id);
+      const retries = await getDbClient().query(
+        "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+        [task.id],
+      );
       expect(retries.length).toBe(1);
     });
 
@@ -818,7 +883,10 @@ describe("Heartbeat Triage", () => {
       await startTask(task.id);
 
       const past = new Date(Date.now() - 1000).toISOString();
-      getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
 
       await runRebootSweep();
 
@@ -870,7 +938,10 @@ describe("Heartbeat Triage", () => {
         await startTask(task.id);
 
         const past = new Date(bootTime - 60_000).toISOString();
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          task.id,
+        ]);
 
         // Session with pre-boot heartbeat (stale)
         await insertActiveSession({
@@ -879,7 +950,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const preBootHb = new Date(bootTime - 30_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           preBootHb,
           task.id,
         ]);
@@ -891,7 +962,7 @@ describe("Heartbeat Triage", () => {
         expect(updated?.failureReason).toContain("reboot sweep");
 
         // Stale session should be cleaned up
-        expect(getActiveSessionForTask(task.id)).toBeNull();
+        expect(await getActiveSessionForTask(task.id)).toBeNull();
 
         const affected = getRebootAffectedTasks();
         expect(affected.length).toBe(1);
@@ -912,7 +983,10 @@ describe("Heartbeat Triage", () => {
         await startTask(task.id);
 
         const past = new Date(bootTime - 60_000).toISOString();
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          task.id,
+        ]);
 
         // Session with post-boot heartbeat (fresh)
         await insertActiveSession({
@@ -921,7 +995,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const postBootHb = new Date(bootTime + 5_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           postBootHb,
           task.id,
         ]);
@@ -933,9 +1007,10 @@ describe("Heartbeat Triage", () => {
         expect(updated?.status).toBe("in_progress");
 
         // No retries created
-        const retries = getDb()
-          .query("SELECT * FROM agent_tasks WHERE parentTaskId = ?")
-          .all(task.id);
+        const retries = await getDbClient().query(
+          "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+          [task.id],
+        );
         expect(retries.length).toBe(0);
       } finally {
         gs.__runId = original;
@@ -959,8 +1034,14 @@ describe("Heartbeat Triage", () => {
         await startTask(liveTask.id);
 
         const past = new Date(bootTime - 60_000).toISOString();
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, staleTask.id]);
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, liveTask.id]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          staleTask.id,
+        ]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          liveTask.id,
+        ]);
 
         // Stale task: session heartbeated before boot
         await insertActiveSession({
@@ -969,7 +1050,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const preBootHb = new Date(bootTime - 30_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           preBootHb,
           staleTask.id,
         ]);
@@ -981,7 +1062,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const postBootHb = new Date(bootTime + 5_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           postBootHb,
           liveTask.id,
         ]);
@@ -1015,7 +1096,10 @@ describe("Heartbeat Triage", () => {
         await startTask(task.id);
 
         const past = new Date(Date.now() - 60_000).toISOString();
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          task.id,
+        ]);
 
         // Session exists but heartbeated long ago — should still be skipped in legacy mode
         await insertActiveSession({
@@ -1024,7 +1108,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const oldHb = new Date(Date.now() - 3_600_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           oldHb,
           task.id,
         ]);
@@ -1055,7 +1139,10 @@ describe("Heartbeat Triage", () => {
         await startTask(task.id);
 
         const past = new Date(Date.now() - 60_000).toISOString();
-        getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [past, task.id]);
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          past,
+          task.id,
+        ]);
 
         await insertActiveSession({
           agentId: agent.id,
@@ -1063,7 +1150,7 @@ describe("Heartbeat Triage", () => {
           triggerType: "task_assigned",
         });
         const oldHb = new Date(Date.now() - 3_600_000).toISOString();
-        getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
           oldHb,
           task.id,
         ]);

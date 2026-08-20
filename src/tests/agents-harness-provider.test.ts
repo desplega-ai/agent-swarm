@@ -21,7 +21,7 @@ import {
   deleteSwarmConfigByKey,
   getAgentById,
   getAgentHarnessProviders,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   initDb,
   setAgentHarnessProvider,
@@ -82,20 +82,19 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Each test starts on an empty agents table.
-  getDb().prepare("DELETE FROM agents").run();
-  getDb().prepare("DELETE FROM swarm_config").run();
+  await getDbClient().run("DELETE FROM agents");
+  await getDbClient().run("DELETE FROM swarm_config");
 });
 
 // ─── Migration: column exists ────────────────────────────────────────────────
 
 describe("migration 054_agent_harness_provider", () => {
-  test("`harness_provider` column exists on the `agents` table", () => {
-    const cols = getDb()
-      .prepare<{ name: string }, []>(`PRAGMA table_info(agents)`)
-      .all()
-      .map((r) => r.name);
+  test("`harness_provider` column exists on the `agents` table", async () => {
+    const cols = (await getDbClient().query<{ name: string }>(`PRAGMA table_info(agents)`)).map(
+      (r) => r.name,
+    );
     expect(cols).toContain("harness_provider");
   });
 
@@ -167,7 +166,7 @@ describe("DB helpers", () => {
     });
     await createAgent({ name: "x4", isLead: false, status: "idle", capabilities: [] }); // NULL — excluded
 
-    const counts = getAgentHarnessProviders();
+    const counts = await getAgentHarnessProviders();
     expect(counts).toEqual([
       { provider: "claude", count: 2 },
       { provider: "codex", count: 1 },
@@ -315,7 +314,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const harnessRow = rows.find((r) => r.key === "HARNESS_PROVIDER");
     expect(harnessRow?.value).toBe("codex");
 
@@ -327,7 +326,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res2.status).toBe(200);
 
-    const rows2 = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows2 = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const harnessRow2 = rows2.find((r) => r.key === "HARNESS_PROVIDER");
     expect(harnessRow2?.value).toBe("claude");
     expect(rows2.filter((r) => r.key === "HARNESS_PROVIDER")).toHaveLength(1);
@@ -353,7 +352,7 @@ describe("PATCH /api/agents/:id/runtime", () => {
     const row = await getAgentById(a.id);
     expect(row?.harnessProvider).toBe("codex");
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "HARNESS_PROVIDER")?.value).toBe("codex");
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")?.value).toBe("gpt-5.4");
   });
@@ -397,7 +396,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const effortRow = rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE");
     expect(effortRow?.value).toBe("high");
   });
@@ -433,7 +432,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     expect(body.allowed).not.toContain("xhigh");
 
     // No row was written for the rejected value.
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
   });
 
@@ -457,7 +456,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(setRes.status).toBe(200);
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       )?.value,
     ).toBe("medium");
@@ -474,7 +473,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(clearRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
   });
 
@@ -494,8 +493,9 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(setRes.status).toBe(200);
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find((r) => r.key === "MODEL_OVERRIDE")
-        ?.value,
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
+        (r) => r.key === "MODEL_OVERRIDE",
+      )?.value,
     ).toBe("gpt-5.4");
 
     // Prior to this phase, there was no way to clear MODEL_OVERRIDE via the
@@ -508,7 +508,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(clearRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")).toBeUndefined();
     // HARNESS_PROVIDER is untouched by the model clear.
     expect(rows.find((r) => r.key === "HARNESS_PROVIDER")?.value).toBe("codex");
@@ -540,7 +540,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")?.value).toBe("low");
   });
 
@@ -570,7 +570,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(effortOnlyRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")?.value).toBe("xhigh");
     // Model is unaffected since it was omitted.
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")?.value).toBe("gpt-5.1-codex-max");
@@ -617,8 +617,12 @@ describe("PUT /api/agents/:id/credential-status — reasoningEffort echo", () =>
 // ─── deleteSwarmConfigByKey helper (Phase 2) ────────────────────────────────
 
 describe("deleteSwarmConfigByKey", () => {
-  test("no-ops (returns false) when no matching row exists", () => {
-    const result = deleteSwarmConfigByKey("agent", "no-such-agent", "REASONING_EFFORT_OVERRIDE");
+  test("no-ops (returns false) when no matching row exists", async () => {
+    const result = await deleteSwarmConfigByKey(
+      "agent",
+      "no-such-agent",
+      "REASONING_EFFORT_OVERRIDE",
+    );
     expect(result).toBe(false);
   });
 
@@ -637,16 +641,16 @@ describe("deleteSwarmConfigByKey", () => {
       description: "test setup",
     });
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       ),
     ).toBeDefined();
 
-    const result = deleteSwarmConfigByKey("agent", a.id, "REASONING_EFFORT_OVERRIDE");
+    const result = await deleteSwarmConfigByKey("agent", a.id, "REASONING_EFFORT_OVERRIDE");
     expect(result).toBe(true);
 
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       ),
     ).toBeUndefined();
@@ -659,10 +663,16 @@ describe("deleteSwarmConfigByKey", () => {
       value: "x",
       description: "test setup",
     });
-    const result = deleteSwarmConfigByKey("global", "irrelevant", "GLOBAL_TEST_DELETE_BY_KEY");
+    const result = await deleteSwarmConfigByKey(
+      "global",
+      "irrelevant",
+      "GLOBAL_TEST_DELETE_BY_KEY",
+    );
     expect(result).toBe(true);
     expect(
-      getSwarmConfigs({ scope: "global" }).find((r) => r.key === "GLOBAL_TEST_DELETE_BY_KEY"),
+      (await getSwarmConfigs({ scope: "global" })).find(
+        (r) => r.key === "GLOBAL_TEST_DELETE_BY_KEY",
+      ),
     ).toBeUndefined();
   });
 });

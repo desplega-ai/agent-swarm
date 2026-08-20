@@ -84,7 +84,7 @@ export const registerPollTaskTool = (server: McpServer) => {
 
       // Check for offered tasks first - these need immediate attention
       const offeredTasks = await getOfferedTasksForAgent(agentId);
-      const availableCount = getUnassignedTasksCount();
+      const availableCount = await getUnassignedTasksCount();
 
       if (offeredTasks.length > 0) {
         return toolOk(
@@ -135,7 +135,7 @@ export const registerPollTaskTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               task: startedTask,
               offeredTasks: [],
-              availableCount: getUnassignedTasksCount(),
+              availableCount: await getUnassignedTasksCount(),
               waitedForSeconds: waitedFor,
               emptyPollCount: 0,
             },
@@ -163,6 +163,7 @@ export const registerPollTaskTool = (server: McpServer) => {
         ? ((await getAgentById(agentId))?.emptyPollCount ?? 0)
         : await incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
+      const unassignedCount = await getUnassignedTasksCount();
 
       // If no task was found within the time limit. An empty poll is a routine
       // outcome, not a tool failure — isError:true here would make every idle
@@ -174,11 +175,11 @@ export const registerPollTaskTool = (server: McpServer) => {
         {
           details: shouldExit
             ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
-            : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
+            : `No task assigned within the polling duration (${waitedForSeconds}s). ${unassignedCount} unassigned task(s) available in pool.`,
           data: {
             yourAgentId: requestInfo.agentId,
             offeredTasks: [],
-            availableCount: getUnassignedTasksCount(),
+            availableCount: unassignedCount,
             waitedForSeconds,
             shouldExit,
             emptyPollCount: newCount,

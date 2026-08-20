@@ -4,7 +4,7 @@ import {
   closeDb,
   createUser,
   deleteKv,
-  getDb,
+  getDbClient,
   getKv,
   getTaskById,
   initDb,
@@ -41,24 +41,21 @@ function makeIssue(): {
   };
 }
 
-function identityEventTypes(userId: string): string[] {
-  return getDb()
-    .prepare<{ eventType: string }, string>(
-      "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
-    )
-    .all(userId)
-    .map((r) => r.eventType);
+async function identityEventTypes(userId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ eventType: string }>(
+    "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
+    [userId],
+  );
+  return rows.map((r) => r.eventType);
 }
 
-function externalIdsCount(): number {
-  const row = getDb()
-    .prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM user_external_ids")
-    .get();
+async function externalIdsCount(): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM user_external_ids");
   return row?.n ?? 0;
 }
 
-function usersCount(): number {
-  const row = getDb().prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM users").get();
+async function usersCount(): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users");
   return row?.n ?? 0;
 }
 
@@ -88,14 +85,14 @@ beforeEach(async () => {
   }
   // Reset identity-relevant rows between tests so each case starts clean.
   // Order matters — agent_tasks has FK on users.id via requestedByUserId.
-  const db = getDb();
-  db.prepare("DELETE FROM tracker_sync").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM user_external_ids").run();
-  db.prepare("DELETE FROM user_identity_events").run();
-  db.prepare("DELETE FROM users").run();
-  db.prepare("DELETE FROM kv_entries WHERE namespace = ?").run(UNMAPPED_NAMESPACE);
-  db.prepare("DELETE FROM kv_entries WHERE namespace = ?").run(APP_USER_ID_NAMESPACE);
+  const db = getDbClient();
+  await db.run("DELETE FROM tracker_sync");
+  await db.run("DELETE FROM agent_tasks");
+  await db.run("DELETE FROM user_external_ids");
+  await db.run("DELETE FROM user_identity_events");
+  await db.run("DELETE FROM users");
+  await db.run("DELETE FROM kv_entries WHERE namespace = ?", [UNMAPPED_NAMESPACE]);
+  await db.run("DELETE FROM kv_entries WHERE namespace = ?", [APP_USER_ID_NAMESPACE]);
 });
 
 // ─── AgentSessionEvent.created ────────────────────────────────────────────────
@@ -104,11 +101,11 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
   test("fast path: existing user_external_ids row resolves requestedByUserId", async () => {
     const issue = makeIssue();
     const linearUserId = "lin-user-fastpath-001";
-    const u = createUser({ name: "Existing Human", email: "existing@example.com" });
+    const u = await createUser({ name: "Existing Human", email: "existing@example.com" });
     await linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
 
-    const beforeUsers = usersCount();
-    const beforeExt = externalIdsCount();
+    const beforeUsers = await usersCount();
+    const beforeExt = await externalIdsCount();
 
     const event = {
       type: "AgentSessionEvent",
@@ -124,21 +121,21 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(u.id);
 
     // No new user / no new external-id row was inserted.
-    expect(usersCount()).toBe(beforeUsers);
-    expect(externalIdsCount()).toBe(beforeExt);
+    expect(await usersCount()).toBe(beforeUsers);
+    expect(await externalIdsCount()).toBe(beforeExt);
   });
 
   test("cascade: unknown linear ID + email present creates user + links identity", async () => {
     const issue = makeIssue();
     const linearUserId = "lin-user-cascade-001";
 
-    expect(findUserByExternalId("linear", linearUserId)).toBeNull();
+    expect(await findUserByExternalId("linear", linearUserId)).toBeNull();
 
     const event = {
       type: "AgentSessionEvent",
@@ -154,19 +151,19 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeTruthy();
 
-    const linked = findUserByExternalId("linear", linearUserId);
+    const linked = await findUserByExternalId("linear", linearUserId);
     expect(linked).not.toBeNull();
     expect(linked!.email).toBe("cascade@example.com");
     expect(task?.requestedByUserId).toBe(linked!.id);
 
     // Both auto_merge (from findOrCreateUserByEmail's create branch emits
     // identity_added) and identity_added (from linkIdentity) should be present.
-    const types = identityEventTypes(linked!.id);
+    const types = await identityEventTypes(linked!.id);
     expect(types).toContain("identity_added");
   });
 
@@ -190,7 +187,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
@@ -207,7 +204,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
     expect(count!.value).toBe(1);
 
     // No users / external-id rows were created.
-    expect(findUserByExternalId("linear", linearUserId)).toBeNull();
+    expect(await findUserByExternalId("linear", linearUserId)).toBeNull();
   });
 
   test("appUserId guard: creator.id === storedAppUserId → no user, no unmapped", async () => {
@@ -221,7 +218,7 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
       expiresAt: null,
     });
 
-    const before = { users: usersCount(), ext: externalIdsCount() };
+    const before = { users: await usersCount(), ext: await externalIdsCount() };
 
     const event = {
       type: "AgentSessionEvent",
@@ -237,21 +234,21 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
 
     // Crucially: no users row, no unmapped entry. The swarm doesn't hear itself.
-    expect(usersCount()).toBe(before.users);
-    expect(externalIdsCount()).toBe(before.ext);
+    expect(await usersCount()).toBe(before.users);
+    expect(await externalIdsCount()).toBe(before.ext);
     expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
     expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:count`)).toBeNull();
   });
 
   test("regression: OLD event.actor shape no longer enrolls a user", async () => {
     const issue = makeIssue();
-    const before = { users: usersCount(), ext: externalIdsCount() };
+    const before = { users: await usersCount(), ext: await externalIdsCount() };
 
     // Construct a payload in the broken old shape — top-level `actor` with no
     // `agentSession.creator`. The new extraction reads the nested path only;
@@ -271,12 +268,12 @@ describe("handleAgentSessionEvent — identity resolution (Q21.A fix)", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBeUndefined();
-    expect(usersCount()).toBe(before.users);
-    expect(externalIdsCount()).toBe(before.ext);
+    expect(await usersCount()).toBe(before.users);
+    expect(await externalIdsCount()).toBe(before.ext);
     expect(await getKv(UNMAPPED_NAMESPACE, `lin-user-regression-001:meta`)).toBeNull();
   });
 });
@@ -292,9 +289,9 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
       source: "linear",
       taskType: "linear-issue",
     });
-    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(t.id);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [t.id]);
     const { createTrackerSync } = await import("../be/db-queries/tracker");
-    createTrackerSync({
+    await createTrackerSync({
       provider: "linear",
       entityType: "task",
       providerEntityType: "Issue",
@@ -312,7 +309,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
     await seedCompletedTask(issue.id, issue.identifier);
 
     const linearUserId = "lin-user-prompted-fastpath-001";
-    const u = createUser({ name: "Prompted Human", email: "pf@example.com" });
+    const u = await createUser({ name: "Prompted Human", email: "pf@example.com" });
     await linkIdentity(u.id, "linear", linearUserId, { kind: "system", id: "test-fixture" });
 
     const event = {
@@ -329,7 +326,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     await handleAgentSessionPrompted(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(u.id);
@@ -355,10 +352,10 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     await handleAgentSessionPrompted(event);
 
-    const linked = findUserByExternalId("linear", linearUserId);
+    const linked = await findUserByExternalId("linear", linearUserId);
     expect(linked).not.toBeNull();
 
-    const sync = getTrackerSyncByExternalId("linear", "task", issue.id);
+    const sync = await getTrackerSyncByExternalId("linear", "task", issue.id);
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync!.swarmId);
     expect(task?.requestedByUserId).toBe(linked!.id);
@@ -407,7 +404,7 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
       expiresAt: null,
     });
 
-    const before = { users: usersCount(), ext: externalIdsCount() };
+    const before = { users: await usersCount(), ext: await externalIdsCount() };
 
     const event = {
       type: "AgentSessionEvent",
@@ -423,8 +420,8 @@ describe("handleAgentSessionPrompted — identity resolution (Q21.A fix)", () =>
 
     await handleAgentSessionPrompted(event);
 
-    expect(usersCount()).toBe(before.users);
-    expect(externalIdsCount()).toBe(before.ext);
+    expect(await usersCount()).toBe(before.users);
+    expect(await externalIdsCount()).toBe(before.ext);
     expect(await getKv(UNMAPPED_NAMESPACE, `${appUserId}:meta`)).toBeNull();
   });
 });

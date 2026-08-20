@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -63,8 +63,8 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
   await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-  userAId = createUser({ name: "User A", email: "user-a@example.com" }).id;
-  userBId = createUser({ name: "User B", email: "user-b@example.com" }).id;
+  userAId = (await createUser({ name: "User A", email: "user-a@example.com" })).id;
+  userBId = (await createUser({ name: "User B", email: "user-b@example.com" })).id;
 });
 
 afterAll(async () => {
@@ -172,9 +172,10 @@ describe("send-task: requestedByUserId inheritance", () => {
     expect(s.success).toBe(true);
     expect(s.message).toContain("Skipped: Linear tracker contextKey");
     expect(s.task?.id).toBe(parentTask.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
+    const count = (await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    )) as { count: number };
     expect(count.count).toBe(1);
   });
 });

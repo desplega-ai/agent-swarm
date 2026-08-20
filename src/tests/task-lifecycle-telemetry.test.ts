@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   initDb,
   updateTaskClaudeSessionId,
 } from "../be/db";
@@ -17,7 +17,9 @@ const TEST_DB_PATH = "./test-task-lifecycle-telemetry.sqlite";
 const WORKER_ID = "bbbb0000-0000-4000-8000-000000000002";
 
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
+  // The post-commit telemetry hook runs through DbClient.afterSettled and then
+  // chains an async verify read, so one microtask turn no longer covers it.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function removeTestDb(): Promise<void> {
@@ -78,15 +80,15 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("does not emit task.created when an enclosing transaction rolls back", async () => {
-    const txn = getDb().transaction(async () => {
-      await createTaskExtended("rolled back telemetry", {
-        agentId: WORKER_ID,
-        source: "mcp",
-      });
-      throw new Error("rollback");
-    });
-
-    expect(() => txn()).toThrow("rollback");
+    await expect(
+      getDbClient().transaction(async () => {
+        await createTaskExtended("rolled back telemetry", {
+          agentId: WORKER_ID,
+          source: "mcp",
+        });
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
 
     await flushMicrotasks();
 

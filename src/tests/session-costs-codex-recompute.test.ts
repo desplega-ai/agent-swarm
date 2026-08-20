@@ -15,7 +15,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -73,13 +73,13 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
+afterEach(async () => {
+  const dbClient = getDbClient();
+  await dbClient.run("DELETE FROM session_costs");
   // Leave seed pricing rows in place; remove anything we added explicitly.
-  db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+  await dbClient.run("DELETE FROM pricing WHERE effective_from > 0");
   // Also delete the seed rows for the synthetic models we use in some tests.
-  db.prepare("DELETE FROM pricing WHERE model = 'codex-test-synth'").run();
+  await dbClient.run("DELETE FROM pricing WHERE model = 'codex-test-synth'");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {

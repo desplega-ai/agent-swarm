@@ -30,8 +30,11 @@ const deps: ExecutorDependencies = {
 
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(name: string, def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({ name: `${name}-${Date.now()}-${Math.random()}`, definition: def });
+async function makeWorkflow(name: string, def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
+    name: `${name}-${Date.now()}-${Math.random()}`,
+    definition: def,
+  });
   createdWorkflowIds.push(wf.id);
   return wf;
 }
@@ -75,9 +78,9 @@ afterEach(() => {
 
 const baseUrl = `http://localhost:${TEST_PORT}`;
 
-async function waitFor(pred: () => boolean, timeoutMs = 1000): Promise<void> {
+async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const t0 = Date.now();
-  while (!pred()) {
+  while (!(await pred())) {
     if (Date.now() - t0 > timeoutMs) throw new Error("waitFor: timeout");
     await new Promise((r) => setTimeout(r, 10));
   }
@@ -98,14 +101,14 @@ describe("Workflow events HTTP signal endpoints", () => {
         { id: "done", type: "notify", config: { channel: "swarm", template: "got it" } },
       ],
     };
-    const wf = makeWorkflow("wait-http-run-scope", def);
+    const wf = await makeWorkflow("wait-http-run-scope", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     await initWaitBusSubscriptions(registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
-    expect(getWaitStateByStepId(w1!.id)?.status).toBe("pending");
+    expect((await getWaitStateByStepId(w1!.id))?.status).toBe("pending");
 
     // POST run-scoped signal — handler must inject _runId.
     const res = await fetch(`${baseUrl}/api/workflow-runs/${runId}/events`, {
@@ -118,8 +121,8 @@ describe("Workflow events HTTP signal endpoints", () => {
     expect(body.ok).toBe(true);
     expect(body.runId).toBe(runId);
 
-    await waitFor(() => getWaitStateByStepId(w1!.id)?.status === "fired");
-    expect(getWaitStateByStepId(w1!.id)?.status).toBe("fired");
+    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
+    expect((await getWaitStateByStepId(w1!.id))?.status).toBe("fired");
   });
 
   test("POST /api/workflow-runs/:runId/events returns 404 for unknown runId", async () => {
@@ -148,12 +151,12 @@ describe("Workflow events HTTP signal endpoints", () => {
         { id: "done", type: "notify", config: { channel: "swarm", template: "ok" } },
       ],
     };
-    const wf = makeWorkflow("wait-http-global", def);
+    const wf = await makeWorkflow("wait-http-global", def);
     const runId = await startWorkflowExecution(wf, {}, registry);
 
     await initWaitBusSubscriptions(registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const w1 = steps.find((s) => s.nodeId === "w1");
 
     const res = await fetch(`${baseUrl}/api/workflow-events`, {
@@ -163,7 +166,7 @@ describe("Workflow events HTTP signal endpoints", () => {
     });
     expect(res.status).toBe(200);
 
-    await waitFor(() => getWaitStateByStepId(w1!.id)?.status === "fired");
+    await waitFor(async () => (await getWaitStateByStepId(w1!.id))?.status === "fired");
   });
 
   test("POST /api/workflow-events validates body (missing name → 400)", async () => {

@@ -121,14 +121,14 @@ describe("OAuth keepalive", () => {
 
     await Promise.resolve();
     expect(stopResolved).toBe(false);
-    expect(getOAuthTokens("jira")?.refreshToken).toBe("old-jira-refresh");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("old-jira-refresh");
 
     releaseTokenResponse();
     await stopPromise;
     await keepaliveRun;
 
     expect(stopResolved).toBe(true);
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });

@@ -18,7 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import {
   buildRatingsFromLlm,
@@ -546,8 +546,8 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
-function makeMemory(name: string): { id: string } {
-  return store.store({
+async function makeMemory(name: string): Promise<{ id: string }> {
+  return await store.store({
     agentId: agentA,
     scope: "agent",
     name,
@@ -556,38 +556,33 @@ function makeMemory(name: string): { id: string } {
   });
 }
 
-function insertRetrieval(taskId: string, memoryId: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
+async function insertRetrieval(taskId: string, memoryId: string): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
        VALUES (?, ?, ?, NULL, ?, 0.85, ?)`,
-    )
-    .run(randomUUID(), taskId, agentA, memoryId, new Date().toISOString());
+    [randomUUID(), taskId, agentA, memoryId, new Date().toISOString()],
+  );
 }
 
-function readPosterior(id: string): { alpha: number; beta: number } {
-  const row = getDb()
-    .prepare<{ alpha: number; beta: number }, [string]>(
-      "SELECT alpha, beta FROM agent_memory WHERE id = ?",
-    )
-    .get(id);
+async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+  const row = await getDbClient().get<{ alpha: number; beta: number }>(
+    "SELECT alpha, beta FROM agent_memory WHERE id = ?",
+    [id],
+  );
   if (!row) throw new Error(`memory ${id} not found`);
   return { alpha: row.alpha, beta: row.beta };
 }
 
-function getRatings(taskId: string) {
-  return getDb()
-    .prepare<
-      {
-        memoryId: string;
-        source: string;
-        signal: number;
-        weight: number;
-        reasoning: string | null;
-      },
-      [string]
-    >("SELECT memoryId, source, signal, weight, reasoning FROM memory_rating WHERE taskId = ?")
-    .all(taskId);
+async function getRatings(taskId: string) {
+  return await getDbClient().query<{
+    memoryId: string;
+    source: string;
+    signal: number;
+    weight: number;
+    reasoning: string | null;
+  }>("SELECT memoryId, source, signal, weight, reasoning FROM memory_rating WHERE taskId = ?", [
+    taskId,
+  ]);
 }
 
 describe("HTTP integration: hook-piggyback dry-run", () => {
@@ -632,13 +627,11 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     initDb(TEST_DB_PATH);
     await createAgent({ id: agentA, name: "Rater LLM Test", isLead: false, status: "idle" });
 
-    const insertTask = getDb().prepare(
-      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
-    );
+    const insertTaskSql = `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`;
     const now = new Date().toISOString();
-    insertTask.run(taskA, agentA, "rater llm task A", now, now);
-    insertTask.run(taskB, agentA, "rater llm task B", now, now);
+    await getDbClient().run(insertTaskSql, [taskA, agentA, "rater llm task A", now, now]);
+    await getDbClient().run(insertTaskSql, [taskB, agentA, "rater llm task B", now, now]);
 
     store = new SqliteMemoryStore();
   }, 20000);
@@ -661,15 +654,16 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM memory_rating");
-    getDb().run("DELETE FROM memory_retrieval");
-    getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+  beforeEach(async () => {
+    const client = getDbClient();
+    await client.run("DELETE FROM memory_rating");
+    await client.run("DELETE FROM memory_retrieval");
+    await client.run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
   });
 
   test("fetchRetrievalsForTask returns rows for the requesting agent", async () => {
-    const m = makeMemory("retr-fetch-1");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("retr-fetch-1");
+    await insertRetrieval(taskA, m.id);
     const rows = await fetchRetrievalsForTask({
       apiUrl: BASE,
       apiKey: API_KEY,
@@ -691,14 +685,14 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
   });
 
   test("postRatings → applies events; alpha/beta posteriors move per mocked generateObject result", async () => {
-    const useful = makeMemory("piggyback-useful");
-    const misleading = makeMemory("piggyback-misleading");
-    const neutral = makeMemory("piggyback-neutral");
+    const useful = await makeMemory("piggyback-useful");
+    const misleading = await makeMemory("piggyback-misleading");
+    const neutral = await makeMemory("piggyback-neutral");
 
     // Worker has retrieved these three.
-    insertRetrieval(taskA, useful.id);
-    insertRetrieval(taskA, misleading.id);
-    insertRetrieval(taskA, neutral.id);
+    await insertRetrieval(taskA, useful.id);
+    await insertRetrieval(taskA, misleading.id);
+    await insertRetrieval(taskA, neutral.id);
 
     // Simulate hook flow: fetch retrievals, run schema validation against a
     // mocked `generateObject` result (object — not stringified envelope —
@@ -747,11 +741,11 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     // useful: signal=+1 → alpha += 0.8
     // misleading: signal=-1 → beta += 0.8
     // neutral: signal=0 → no shift
-    expect(readPosterior(useful.id)).toEqual({ alpha: 1.8, beta: 1.0 });
-    expect(readPosterior(misleading.id)).toEqual({ alpha: 1.0, beta: 1.8 });
-    expect(readPosterior(neutral.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await readPosterior(useful.id)).toEqual({ alpha: 1.8, beta: 1.0 });
+    expect(await readPosterior(misleading.id)).toEqual({ alpha: 1.0, beta: 1.8 });
+    expect(await readPosterior(neutral.id)).toEqual({ alpha: 1.0, beta: 1.0 });
 
-    const ratings = getRatings(taskA);
+    const ratings = await getRatings(taskA);
     expect(ratings).toHaveLength(3);
     for (const row of ratings) {
       expect(row.source).toBe("llm");
@@ -762,8 +756,8 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
   });
 
   test("hallucinated memoryId is dropped before POST (defence-in-depth)", async () => {
-    const real = makeMemory("piggyback-real");
-    insertRetrieval(taskB, real.id);
+    const real = await makeMemory("piggyback-real");
+    await insertRetrieval(taskB, real.id);
     const retrievals = await fetchRetrievalsForTask({
       apiUrl: BASE,
       apiKey: API_KEY,
@@ -788,12 +782,12 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
       events,
     });
     expect(r.ok).toBe(true);
-    expect(getRatings(taskB)).toHaveLength(1);
+    expect(await getRatings(taskB)).toHaveLength(1);
   });
 
   test("negative path: simulated hook with MEMORY_RATERS unset → no /api/memory/rate call", async () => {
-    const m = makeMemory("piggyback-negative");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-negative");
+    await insertRetrieval(taskA, m.id);
 
     const prev = process.env.MEMORY_RATERS;
     delete process.env.MEMORY_RATERS;
@@ -826,13 +820,13 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
 
     // No memory_rating rows for taskA in this test.
-    expect(getRatings(taskA)).toHaveLength(0);
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await getRatings(taskA)).toHaveLength(0);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("postRatings logs but does not throw on 4xx (best-effort)", async () => {
-    const m = makeMemory("piggyback-4xx");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-4xx");
+    await insertRetrieval(taskA, m.id);
 
     const evt: RatingEvent = {
       memoryId: m.id,
@@ -852,12 +846,12 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     expect(r.ok).toBe(false);
     expect(r.status).toBeGreaterThanOrEqual(400);
     // Posterior unchanged — 400 means nothing was applied.
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("OPENROUTER_API_KEY unset → hook is a no-op (no fetch, no index, no rate POST)", async () => {
-    const m = makeMemory("piggyback-openrouter-unset");
-    insertRetrieval(taskA, m.id);
+    const m = await makeMemory("piggyback-openrouter-unset");
+    await insertRetrieval(taskA, m.id);
 
     // Mirror the hook's outer gate exactly: when OPENROUTER_API_KEY is unset,
     // the entire summary + rating block must early-return. No call to
@@ -893,16 +887,16 @@ describe("HTTP integration: hook-piggyback dry-run", () => {
     }
 
     // No memory_rating rows for taskA, posterior unchanged.
-    expect(getRatings(taskA)).toHaveLength(0);
-    expect(readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
+    expect(await getRatings(taskA)).toHaveLength(0);
+    expect(await readPosterior(m.id)).toEqual({ alpha: 1.0, beta: 1.0 });
   });
 
   test("happy path: mocked generateObject result → postRatings called with expected events", async () => {
-    const useful = makeMemory("happy-useful");
-    const misleading = makeMemory("happy-misleading");
+    const useful = await makeMemory("happy-useful");
+    const misleading = await makeMemory("happy-misleading");
 
-    insertRetrieval(taskB, useful.id);
-    insertRetrieval(taskB, misleading.id);
+    await insertRetrieval(taskB, useful.id);
+    await insertRetrieval(taskB, misleading.id);
 
     const retrievals = await fetchRetrievalsForTask({
       apiUrl: BASE,

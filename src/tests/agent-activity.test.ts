@@ -14,10 +14,10 @@ const TEST_DB_PATH = "./test-agent-activity.sqlite";
 const TEST_PORT = 13025;
 
 // Minimal HTTP handler for activity endpoint
-async function handleRequest(req: { method: string; url: string }): {
+async function handleRequest(req: { method: string; url: string }): Promise<{
   status: number;
   body: unknown;
-} {
+}> {
   const pathEnd = req.url.indexOf("?");
   const path = pathEnd === -1 ? req.url : req.url.slice(0, pathEnd);
   const pathSegments = path.split("/").filter(Boolean);
@@ -46,7 +46,7 @@ async function handleRequest(req: { method: string; url: string }): {
 
 function createTestServer(): Server {
   return createHttpServer(async (req, res) => {
-    const result = handleRequest({ method: req.method || "GET", url: req.url || "/" });
+    const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" });
 
     if (result.body === null) {
       res.writeHead(result.status);
@@ -150,9 +150,9 @@ describe("Agent Activity Tracking (lastActivityAt)", () => {
       );
     });
 
-    test("should not throw for non-existent agent ID", () => {
-      // Should not throw — just silently does nothing
-      expect(() => updateAgentActivity("non-existent-agent-id")).not.toThrow();
+    test("should not throw for non-existent agent ID", async () => {
+      // Should not reject — the UPDATE simply matches no row.
+      await expect(updateAgentActivity("non-existent-agent-id")).resolves.toBeUndefined();
     });
 
     test("should not modify lastUpdatedAt when updating activity", async () => {

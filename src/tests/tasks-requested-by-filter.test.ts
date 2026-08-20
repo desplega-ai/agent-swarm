@@ -41,8 +41,8 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
         status: "idle",
       })
     ).id;
-    userAId = createUser({ name: "User A", email: "user-a@example.com" }).id;
-    userBId = createUser({ name: "User B", email: "user-b@example.com" }).id;
+    userAId = (await createUser({ name: "User A", email: "user-a@example.com" })).id;
+    userBId = (await createUser({ name: "User B", email: "user-b@example.com" })).id;
   });
 
   afterAll(async () => {
@@ -65,13 +65,13 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
     });
     const taskUnattributed = await createTaskExtended("task with no requester", { agentId });
 
-    const listForA = getAllTasks({ requestedByUserId: userAId, includeHeartbeat: true });
+    const listForA = await getAllTasks({ requestedByUserId: userAId, includeHeartbeat: true });
     const ids = listForA.map((t) => t.id);
     expect(ids).toContain(taskA.id);
     expect(ids).not.toContain(taskB.id);
     expect(ids).not.toContain(taskUnattributed.id);
 
-    expect(getTasksCount({ requestedByUserId: userAId, includeHeartbeat: true })).toBe(
+    expect(await getTasksCount({ requestedByUserId: userAId, includeHeartbeat: true })).toBe(
       listForA.length,
     );
   });
@@ -83,13 +83,13 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
     });
     const taskUnattributed = await createTaskExtended("second task with no requester", { agentId });
 
-    const nullList = getAllTasks({ requestedByUserIdIsNull: true, includeHeartbeat: true });
+    const nullList = await getAllTasks({ requestedByUserIdIsNull: true, includeHeartbeat: true });
     const ids = nullList.map((t) => t.id);
     expect(ids).toContain(taskUnattributed.id);
     expect(ids).not.toContain(taskA.id);
     expect(nullList.every((t) => !t.requestedByUserId)).toBe(true);
 
-    expect(getTasksCount({ requestedByUserIdIsNull: true, includeHeartbeat: true })).toBe(
+    expect(await getTasksCount({ requestedByUserIdIsNull: true, includeHeartbeat: true })).toBe(
       nullList.length,
     );
   });
@@ -151,7 +151,7 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
         status: "idle",
       })
     ).id;
-    routeUserId = createUser({ name: "Route User", email: "route-user@example.com" }).id;
+    routeUserId = (await createUser({ name: "Route User", email: "route-user@example.com" })).id;
     server = createTestServer(ROUTE_API_KEY);
     port = await listen(server);
   });

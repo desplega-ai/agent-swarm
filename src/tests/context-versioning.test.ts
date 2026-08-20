@@ -133,14 +133,14 @@ describe("Context Versioning", () => {
         contentHash: sha256("claude md content"),
       });
 
-      const fetched = getContextVersion(created.id);
+      const fetched = await getContextVersion(created.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(created.id);
       expect(fetched!.content).toBe("claude md content");
     });
 
-    test("returns null for non-existent ID", () => {
-      const result = getContextVersion("00000000-0000-4000-8000-999999999999");
+    test("returns null for non-existent ID", async () => {
+      const result = await getContextVersion("00000000-0000-4000-8000-999999999999");
       expect(result).toBeNull();
     });
   });
@@ -229,13 +229,13 @@ describe("Context Versioning", () => {
       }
     });
 
-    test("returns all versions for an agent (no field filter)", () => {
-      const history = getContextVersionHistory({ agentId: historyAgentId, limit: 50 });
+    test("returns all versions for an agent (no field filter)", async () => {
+      const history = await getContextVersionHistory({ agentId: historyAgentId, limit: 50 });
       expect(history.length).toBe(7); // 5 soulMd + 2 identityMd
     });
 
-    test("filters by field", () => {
-      const history = getContextVersionHistory({
+    test("filters by field", async () => {
+      const history = await getContextVersionHistory({
         agentId: historyAgentId,
         field: "soulMd",
         limit: 50,
@@ -246,8 +246,8 @@ describe("Context Versioning", () => {
       }
     });
 
-    test("respects limit parameter", () => {
-      const history = getContextVersionHistory({
+    test("respects limit parameter", async () => {
+      const history = await getContextVersionHistory({
         agentId: historyAgentId,
         field: "soulMd",
         limit: 3,
@@ -259,13 +259,13 @@ describe("Context Versioning", () => {
       expect(history[2]!.version).toBe(3);
     });
 
-    test("defaults limit to 10", () => {
-      const history = getContextVersionHistory({ agentId: historyAgentId });
+    test("defaults limit to 10", async () => {
+      const history = await getContextVersionHistory({ agentId: historyAgentId });
       expect(history.length).toBe(7); // Only 7 versions exist, so all returned
     });
 
-    test("returns empty array for agent with no versions", () => {
-      const history = getContextVersionHistory({
+    test("returns empty array for agent with no versions", async () => {
+      const history = await getContextVersionHistory({
         agentId: "00000000-0000-4000-8000-999999999999",
       });
       expect(history).toEqual([]);
@@ -367,7 +367,7 @@ describe("Context Versioning", () => {
       expect(v3!.previousVersionId).not.toBeNull();
 
       // The previous version should be v2
-      const v2 = getContextVersion(v3!.previousVersionId!);
+      const v2 = await getContextVersion(v3!.previousVersionId!);
       expect(v2).not.toBeNull();
       expect(v2!.version).toBe(2);
     });
@@ -395,10 +395,10 @@ describe("Context Versioning", () => {
     // so no versions should have been seeded for them.
     // Test by creating an agent with content and re-running initDb (which re-seeds).
 
-    test("agents without content fields get no seeded versions", () => {
+    test("agents without content fields get no seeded versions", async () => {
       // workerId was created without any soulMd/identityMd content
       // So no auto-seeded versions should exist for fields that were null
-      const history = getContextVersionHistory({
+      const history = await getContextVersionHistory({
         agentId: leadId,
         field: "soulMd",
         limit: 50,

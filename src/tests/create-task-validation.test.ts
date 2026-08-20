@@ -6,7 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { type CreateTaskOptions, closeDb, createTaskExtended, getDb, initDb } from "../be/db";
+import { type CreateTaskOptions, closeDb, createTaskExtended, getDbClient, initDb } from "../be/db";
 import { handleMcpBridge } from "../http/mcp-bridge";
 import { getPathSegments } from "../http/utils";
 
@@ -15,8 +15,8 @@ const TEST_DB_PATH = "./test-create-task-validation.sqlite";
 let server: Server;
 let baseUrl: string;
 
-function taskCount(): number {
-  return (getDb().prepare("SELECT COUNT(*) AS c FROM agent_tasks").get() as { c: number }).c;
+async function taskCount(): Promise<number> {
+  return (await getDbClient().get<{ c: number }>("SELECT COUNT(*) AS c FROM agent_tasks"))!.c;
 }
 
 beforeAll(async () => {
@@ -54,7 +54,7 @@ describe("scripts-bridge input validation", () => {
   // handler without parsing args, the TEXT value landed in the INTEGER
   // priority column, and response validation then 500'd every task listing.
   test("raw priority:'high' through the bridge returns 400 and writes no row", async () => {
-    const before = taskCount();
+    const before = await taskCount();
     const res = await fetch(`${baseUrl}/api/mcp-bridge`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-agent-id": "test-agent" },
@@ -66,19 +66,19 @@ describe("scripts-bridge input validation", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toContain("Invalid arguments for tool 'send-task'");
-    expect(taskCount()).toBe(before);
+    expect(await taskCount()).toBe(before);
   });
 });
 
 describe("createTaskExtended input validation", () => {
   test("string priority throws and writes no row", async () => {
-    const before = taskCount();
+    const before = await taskCount();
     await expect(
       createTaskExtended("bad priority", {
         priority: "high",
       } as unknown as CreateTaskOptions),
     ).rejects.toThrow();
-    expect(taskCount()).toBe(before);
+    expect(await taskCount()).toBe(before);
   });
 
   test("priority 101 throws", async () => {

@@ -20,7 +20,7 @@ import {
   createTaskExtended,
   failPendingResumeIfUnclaimed,
   getChildTasks,
-  getDb,
+  getDbClient,
   getLeadAgent,
   getTaskById,
   initDb,
@@ -125,11 +125,11 @@ function structuredOf(result: CallToolResult) {
 }
 
 /** Age a row's createdAt so the reaper's grace window (measured from createdAt) has elapsed. */
-function ageCreatedAtPastGrace(taskId: string) {
+async function ageCreatedAtPastGrace(taskId: string): Promise<void> {
   const old = new Date(
     Date.now() - (HEARTBEAT_RESUME_PIN_GRACE_MIN + 10) * 60 * 1000,
   ).toISOString();
-  getDb().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [old, taskId]);
+  await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [old, taskId]);
 }
 
 describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
@@ -157,11 +157,12 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     }
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM tracker_sync");
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
-    getDb().run("DELETE FROM active_sessions");
+  beforeEach(async () => {
+    const client = getDbClient();
+    await client.run("DELETE FROM tracker_sync");
+    await client.run("DELETE FROM agent_tasks");
+    await client.run("DELETE FROM agents");
+    await client.run("DELETE FROM active_sessions");
   });
 
   // --------------------------------------------------------------------------
@@ -172,7 +173,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { agent, original, r1 } = await seedPinnedCrash("coder-7");
     // Give the crashed agent an identity slice so the template carries context.
-    getDb().run("UPDATE agents SET identityMd = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agents SET identityMd = ? WHERE id = ?", [
       "Senior backend coder — owns the billing service.",
       agent.id,
     ]);
@@ -272,7 +273,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   test("pinned resume older than grace → escalated to a Lead decision exactly once (idempotent)", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { original, r1 } = await seedPinnedCrash("coder-grace");
-    ageCreatedAtPastGrace(r1.id);
+    await ageCreatedAtPastGrace(r1.id);
 
     const first = await codeLevelTriage();
     expect(first.escalatedReroutes.length).toBe(1);
@@ -298,7 +299,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { original, r1 } = await seedPinnedGracefulShutdown("coder-graceful");
     expect(r1.tags).toContain(GRACEFUL_SHUTDOWN_PIN_TAG);
-    ageCreatedAtPastGrace(r1.id);
+    await ageCreatedAtPastGrace(r1.id);
 
     const findings = await codeLevelTriage();
 
@@ -321,7 +322,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   test("pinned resume reclaimed (in_progress) before the grace window is NOT escalated", async () => {
     await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { original, r1 } = await seedPinnedCrash("coder-reclaim");
-    ageCreatedAtPastGrace(r1.id);
+    await ageCreatedAtPastGrace(r1.id);
     // The original agent returned and reclaimed it: pending → in_progress. startTask
     // also refreshes lastUpdatedAt, so the stall detector leaves it alone too.
     await startTask(r1.id);
@@ -353,7 +354,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       ],
     });
     await supersedeTask(original.id, { reason: "crash", resumeTaskId: capped.id });
-    ageCreatedAtPastGrace(capped.id);
+    await ageCreatedAtPastGrace(capped.id);
 
     const findings = await codeLevelTriage();
     expect(findings.escalatedReroutes.length).toBe(0);
@@ -388,16 +389,16 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     if (pin.kind !== "created") throw new Error("expected pin");
     const r1 = pin.task;
     expect(r1.agentId).toBe(agentA.id);
-    expect(getTrackerSync("linear", "task", r1.id)?.externalId).toBe("ENG-900");
-    expect(getTrackerSync("linear", "task", original.id)).toBeNull();
+    expect((await getTrackerSync("linear", "task", r1.id))?.externalId).toBe("ENG-900");
+    expect(await getTrackerSync("linear", "task", original.id)).toBeNull();
 
     // Reaper: R1 stale → terminalize + repoint tracker R1 → original + Lead decision.
-    ageCreatedAtPastGrace(r1.id);
+    await ageCreatedAtPastGrace(r1.id);
     const findings = await codeLevelTriage();
     expect(findings.escalatedReroutes.length).toBe(1);
     expect((await getTaskById(r1.id))!.status).not.toBe("pending");
-    expect(getTrackerSync("linear", "task", original.id)?.externalId).toBe("ENG-900");
-    expect(getTrackerSync("linear", "task", r1.id)).toBeNull();
+    expect((await getTrackerSync("linear", "task", original.id))?.externalId).toBe("ENG-900");
+    expect(await getTrackerSync("linear", "task", r1.id)).toBeNull();
 
     const decision = (await getChildTasks(original.id)).find(
       (c) => c.taskType === "reroute-decision",
@@ -421,9 +422,9 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const s = structuredOf(result);
     expect(s.success).toBe(true);
     const r2Id = s.task!.id;
-    expect(getTrackerSync("linear", "task", r2Id)?.externalId).toBe("ENG-900");
-    expect(getTrackerSync("linear", "task", original.id)).toBeNull();
-    expect(getTrackerSync("linear", "task", r1.id)).toBeNull();
+    expect((await getTrackerSync("linear", "task", r2Id))?.externalId).toBe("ENG-900");
+    expect(await getTrackerSync("linear", "task", original.id)).toBeNull();
+    expect(await getTrackerSync("linear", "task", r1.id)).toBeNull();
   });
 
   test("a fresh (within-grace) crash pin is NOT escalated by the reaper", async () => {
@@ -454,7 +455,11 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       taskType: "resume",
     });
     expect(pendingResume.status).toBe("pending");
-    const cancelled = failPendingResumeIfUnclaimed(pendingResume.id, "cancelled", "test_reason");
+    const cancelled = await failPendingResumeIfUnclaimed(
+      pendingResume.id,
+      "cancelled",
+      "test_reason",
+    );
     expect(cancelled).not.toBeNull();
     expect(cancelled!.status).toBe("cancelled");
     expect((await getTaskById(pendingResume.id))!.status).toBe("cancelled");
@@ -468,7 +473,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     });
     await startTask(reclaimed.id);
     expect((await getTaskById(reclaimed.id))!.status).toBe("in_progress");
-    const result = failPendingResumeIfUnclaimed(reclaimed.id, "cancelled", "test_reason");
+    const result = await failPendingResumeIfUnclaimed(reclaimed.id, "cancelled", "test_reason");
     expect(result).toBeNull();
     expect((await getTaskById(reclaimed.id))!.status).toBe("in_progress");
   });
@@ -491,7 +496,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     });
     expect(pooled.status).toBe("unassigned");
     await supersedeTask(original.id, { reason: "shutdown", resumeTaskId: pooled.id });
-    ageCreatedAtPastGrace(pooled.id);
+    await ageCreatedAtPastGrace(pooled.id);
 
     const findings = await codeLevelTriage();
 
@@ -522,7 +527,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       ],
     });
     await supersedeTask(original.id, { reason: "crash", resumeTaskId: r.id });
-    ageCreatedAtPastGrace(r.id);
+    await ageCreatedAtPastGrace(r.id);
 
     const findings = await codeLevelTriage();
 
@@ -583,7 +588,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   test("offline-only Lead → reaper leaves the pin pending (no escalation to an unpollable Lead)", async () => {
     await createAgent({ name: "stale-lead", isLead: true, status: "offline" });
     const { original, r1 } = await seedPinnedCrash("coder-offlinelead");
-    ageCreatedAtPastGrace(r1.id);
+    await ageCreatedAtPastGrace(r1.id);
 
     const findings = await codeLevelTriage();
 
@@ -601,7 +606,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     // The offline lead was registered first but must not shadow the live one.
     expect((await getLeadAgent())!.id).toBe(online.id);
     // When every lead is offline, still return one (preserves "is there a lead?" semantics).
-    getDb().run("UPDATE agents SET status = 'offline' WHERE id = ?", [online.id]);
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [online.id]);
     expect((await getLeadAgent())!.isLead).toBe(true);
     expect(offline.isLead).toBe(true); // (referenced to keep the binding meaningful)
   });
@@ -620,7 +625,10 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     await startTask(decision.id); // in_progress
     // Stale + no active session → the no-session crash branch (Case A).
     const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [old, decision.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      old,
+      decision.id,
+    ]);
 
     await codeLevelTriage();
 

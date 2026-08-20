@@ -101,8 +101,8 @@ describe("Slack thread steering", () => {
     bufferThreadMessage(channelId, threadTs, "follow up after the current task", "U1", "1000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
-    expect(getSteeringMessagesForTask(leadTask.id)).toEqual([]);
-    expect(getChildTasks(leadTask.id)).toHaveLength(1);
+    expect(await getSteeringMessagesForTask(leadTask.id)).toEqual([]);
+    expect(await getChildTasks(leadTask.id)).toHaveLength(1);
   });
 
   test("lead mode sends one steering message to an in-progress lead and creates no task", async () => {
@@ -112,7 +112,7 @@ describe("Slack thread steering", () => {
     const threadTs = "2000.0001";
     const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
 
-    const result = requestSlackThreadSteering({
+    const result = await requestSlackThreadSteering({
       channelId,
       threadTs,
       message: "use the safer approach",
@@ -123,17 +123,17 @@ describe("Slack thread steering", () => {
       task: { id: leadTask.id },
       result: { outcome: "steered", effectiveMode: "steer" },
     });
-    expect(getSteeringMessagesForTask(leadTask.id)).toHaveLength(1);
+    expect(await getSteeringMessagesForTask(leadTask.id)).toHaveLength(1);
     // Several logs land in the same millisecond, so `ORDER BY createdAt DESC`
     // leaves their relative order up to SQLite — index 0 is not stable across
     // test-file orderings. Assert the log exists rather than where it sits.
-    const steerLogs = getLogsByTaskId(leadTask.id).map((log) =>
+    const steerLogs = (await getLogsByTaskId(leadTask.id)).map((log) =>
       log.metadata ? JSON.parse(log.metadata) : {},
     );
     expect(steerLogs).toContainEqual(
       expect.objectContaining({ slackChannelId: channelId, slackMessageTs: "2000.0002" }),
     );
-    expect(getChildTasks(leadTask.id)).toEqual([]);
+    expect(await getChildTasks(leadTask.id)).toEqual([]);
   });
 
   test("lead mode excludes an in-progress worker task", async () => {
@@ -153,14 +153,14 @@ describe("Slack thread steering", () => {
     const workerTask = await createRunningSlackTask(workerId, channelId, threadTs);
 
     expect(
-      requestSlackThreadSteering({ channelId, threadTs, message: "do not steer the worker" }),
+      await requestSlackThreadSteering({ channelId, threadTs, message: "do not steer the worker" }),
     ).toBeNull();
 
     bufferThreadMessage(channelId, threadTs, "create a normal follow-up", "U1", "3000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
-    expect(getSteeringMessagesForTask(workerTask.id)).toEqual([]);
-    expect(getChildTasks(workerTask.id)).toHaveLength(1);
+    expect(await getSteeringMessagesForTask(workerTask.id)).toEqual([]);
+    expect(await getChildTasks(workerTask.id)).toHaveLength(1);
   });
 
   test("terminal lead task falls back to task creation", async () => {
@@ -170,13 +170,15 @@ describe("Slack thread steering", () => {
     const leadTask = await createRunningSlackTask(leadId, channelId, threadTs);
     expect((await completeTask(leadTask.id))?.status).toBe("completed");
 
-    expect(requestSlackThreadSteering({ channelId, threadTs, message: "follow up" })).toBeNull();
+    expect(
+      await requestSlackThreadSteering({ channelId, threadTs, message: "follow up" }),
+    ).toBeNull();
 
     bufferThreadMessage(channelId, threadTs, "normal follow-up", "U1", "4000.0002");
     await instantFlush(`${channelId}:${threadTs}`);
 
-    expect(getSteeringMessagesForTask(leadTask.id)).toEqual([]);
-    expect(getChildTasks(leadTask.id)).toHaveLength(1);
+    expect(await getSteeringMessagesForTask(leadTask.id)).toEqual([]);
+    expect(await getChildTasks(leadTask.id)).toHaveLength(1);
   });
 
   test("a buffered multi-message flush produces exactly one steering message", async () => {
@@ -190,13 +192,13 @@ describe("Slack thread steering", () => {
     bufferThreadMessage(channelId, threadTs, "second correction", "U1", "5000.0003");
     await instantFlush(`${channelId}:${threadTs}`);
 
-    const messages = getSteeringMessagesForTask(leadTask.id);
+    const messages = await getSteeringMessagesForTask(leadTask.id);
     expect(messages).toHaveLength(1);
     expect(messages[0]?.body).toContain("first correction\n---\nsecond correction");
     expect(
-      getLogsByTaskId(leadTask.id).filter((log) => log.newValue === "slack_reaction"),
+      (await getLogsByTaskId(leadTask.id)).filter((log) => log.newValue === "slack_reaction"),
     ).toHaveLength(2);
-    expect(getChildTasks(leadTask.id)).toEqual([]);
+    expect(await getChildTasks(leadTask.id)).toEqual([]);
   });
 
   test("all mode targets the latest active task", async () => {
@@ -215,7 +217,7 @@ describe("Slack thread steering", () => {
     const workerTask = await createRunningSlackTask(workerId, channelId, threadTs);
 
     expect(
-      requestSlackThreadSteering({ channelId, threadTs, message: "all-mode correction" }),
+      await requestSlackThreadSteering({ channelId, threadTs, message: "all-mode correction" }),
     ).toMatchObject({
       task: { id: workerTask.id },
       result: { outcome: "queued" },
@@ -230,11 +232,11 @@ describe("Slack thread steering", () => {
 
     for (const mode of ["off", "lead"]) {
       process.env.SLACK_THREAD_STEERING = mode;
-      expect(routeMessage("plain thread reply", "BOT123", false, { channelId, threadTs })).toEqual(
-        [],
-      );
       expect(
-        routeMessage("<@BOT123> explicit reply", "BOT123", true, { channelId, threadTs }),
+        await routeMessage("plain thread reply", "BOT123", false, { channelId, threadTs }),
+      ).toEqual([]);
+      expect(
+        await routeMessage("<@BOT123> explicit reply", "BOT123", true, { channelId, threadTs }),
       ).toHaveLength(1);
     }
   });
@@ -253,8 +255,8 @@ describe("Slack thread steering", () => {
     expect(blocks[0]?.text.text).toContain("_steered_");
   });
 
-  test("buffered fallback remains discoverable as the newest active task", () => {
-    const task = getLatestActiveTaskInThread("C_STEER_WORKER", "3000.0001");
+  test("buffered fallback remains discoverable as the newest active task", async () => {
+    const task = await getLatestActiveTaskInThread("C_STEER_WORKER", "3000.0001");
     expect(task?.task).toContain("create a normal follow-up");
   });
 });

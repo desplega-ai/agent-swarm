@@ -15,7 +15,7 @@ import {
   createTaskExtended,
   createUser,
   getDailySpendForUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
   upsertBudget,
@@ -53,15 +53,15 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM user_identity_events").run();
-  db.prepare("DELETE FROM user_tokens").run();
-  db.prepare("DELETE FROM users").run();
-  db.prepare("DELETE FROM agents").run();
+  const db = getDbClient();
+  await db.run("DELETE FROM session_costs");
+  await db.run("DELETE FROM budget_refusal_notifications");
+  await db.run("DELETE FROM agent_tasks");
+  await db.run("DELETE FROM budgets");
+  await db.run("DELETE FROM user_identity_events");
+  await db.run("DELETE FROM user_tokens");
+  await db.run("DELETE FROM users");
+  await db.run("DELETE FROM agents");
   await createAgent({
     id: "agent-1",
     name: "agent-1",
@@ -93,7 +93,10 @@ async function insertUserTaskSpend(
     numTurns: 1,
     model: "test-model",
   });
-  getDb().prepare("UPDATE session_costs SET createdAt = ? WHERE id = ?").run(createdAt, cost.id);
+  await getDbClient().run("UPDATE session_costs SET createdAt = ? WHERE id = ?", [
+    createdAt,
+    cost.id,
+  ]);
   return { task, cost };
 }
 
@@ -220,8 +223,8 @@ async function callPoll(agentId: string): Promise<{
 
 describe("user budget scope", () => {
   test("getDailySpendForUser sums only costs for that user's tasks on that UTC day", async () => {
-    const userA = createUser({ name: "User A" });
-    const userB = createUser({ name: "User B" });
+    const userA = await createUser({ name: "User A" });
+    const userB = await createUser({ name: "User B" });
 
     await insertUserTaskSpend(userA.id, 1.25);
     await insertUserTaskSpend(userA.id, 2.75);
@@ -244,11 +247,11 @@ describe("user budget scope", () => {
   });
 
   test("canClaim refuses with cause='user' when requested user's spend is at the cap", async () => {
-    const user = createUser({ name: "Budgeted User" });
+    const user = await createUser({ name: "Budgeted User" });
     await upsertBudget("user", user.id, 2);
     await insertUserTaskSpend(user.id, 2);
 
-    const result = canClaim("agent-1", NOW, user.id);
+    const result = await canClaim("agent-1", NOW, user.id);
 
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
@@ -260,39 +263,39 @@ describe("user budget scope", () => {
   });
 
   test("canClaim allows user-scoped tasks when user spend is below the cap", async () => {
-    const user = createUser({ name: "Budgeted User" });
+    const user = await createUser({ name: "Budgeted User" });
     await upsertBudget("user", user.id, 2);
     await insertUserTaskSpend(user.id, 1.99);
 
-    const result = canClaim("agent-1", NOW, user.id);
+    const result = await canClaim("agent-1", NOW, user.id);
 
     expect(result.allowed).toBe(true);
   });
 
   test("agent and global gates keep their existing precedence", async () => {
-    const user = createUser({ name: "Budgeted User" });
+    const user = await createUser({ name: "Budgeted User" });
     await upsertBudget("global", "", 1);
     await upsertBudget("agent", "agent-1", 1);
     await upsertBudget("user", user.id, 1);
     await insertUserTaskSpend(user.id, 1);
 
-    const globalResult = canClaim("agent-1", NOW, user.id);
+    const globalResult = await canClaim("agent-1", NOW, user.id);
     expect(globalResult.allowed).toBe(false);
     if (globalResult.allowed) throw new Error("unreachable");
     expect(globalResult.cause).toBe("global");
 
-    getDb().prepare("DELETE FROM budgets WHERE scope = 'global'").run();
-    const agentResult = canClaim("agent-1", NOW, user.id);
+    await getDbClient().run("DELETE FROM budgets WHERE scope = 'global'");
+    const agentResult = await canClaim("agent-1", NOW, user.id);
     expect(agentResult.allowed).toBe(false);
     if (agentResult.allowed) throw new Error("unreachable");
     expect(agentResult.cause).toBe("agent");
   });
 
   test("user gate is skipped when the candidate task has no requested user", async () => {
-    const user = createUser({ name: "Budgeted User" });
+    const user = await createUser({ name: "Budgeted User" });
     await upsertBudget("user", user.id, 0);
 
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
 
     expect(result.allowed).toBe(true);
   });
@@ -308,9 +311,9 @@ describe("user budget scope", () => {
         status: "idle",
         maxTasks: 1,
       });
-      const user = createUser({ name: "MCP Budget User", dailyBudgetUsd: 0.5 });
+      const user = await createUser({ name: "MCP Budget User", dailyBudgetUsd: 0.5 });
       await upsertBudget("user", user.id, 0.5);
-      const token = mintToken(user.id, "qa", ACTOR);
+      const token = await mintToken(user.id, "qa", ACTOR);
       const baseUrl = `http://127.0.0.1:${port}`;
       const sessionId = await initializeMcpUser(baseUrl, token.plaintext);
 
@@ -354,11 +357,13 @@ describe("user budget scope", () => {
       expect((firstPoll.body.trigger as { userBudget: number }).userBudget).toBe(0.5);
       expect((await getTaskById(taskId))?.status).toBe("unassigned");
 
-      const firstDedup = getDb()
-        .prepare<{ follow_up_task_id: string | null; user_spend_usd: number | null }, [string]>(
-          "SELECT follow_up_task_id, user_spend_usd FROM budget_refusal_notifications WHERE task_id = ?",
-        )
-        .get(taskId);
+      const firstDedup = await getDbClient().get<{
+        follow_up_task_id: string | null;
+        user_spend_usd: number | null;
+      }>(
+        "SELECT follow_up_task_id, user_spend_usd FROM budget_refusal_notifications WHERE task_id = ?",
+        [taskId],
+      );
       expect(firstDedup?.user_spend_usd).toBe(0.5);
       expect(firstDedup?.follow_up_task_id).toBeTruthy();
       const firstFollowUpId = firstDedup?.follow_up_task_id;
@@ -368,11 +373,10 @@ describe("user budget scope", () => {
       expect(secondPoll.status).toBe(200);
       if ("error" in secondPoll.body) throw new Error("unexpected poll error");
       expect(secondPoll.body.trigger?.type).toBe("budget_refused");
-      const notificationCount = getDb()
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) AS count FROM budget_refusal_notifications WHERE task_id = ?",
-        )
-        .get(taskId);
+      const notificationCount = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM budget_refusal_notifications WHERE task_id = ?",
+        [taskId],
+      );
       expect(notificationCount?.count).toBe(1);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -80,12 +80,12 @@ describe("seed-scripts catalog", () => {
     }
   });
 
-  test("every catalog script passes the import allowlist and the script typecheck", () => {
+  test("every catalog script passes the import allowlist and the script typecheck", async () => {
     const failures: string[] = [];
     for (const s of SEED_SCRIPTS) {
       const imports = validateScriptImports(s.source);
       if (!imports.ok) failures.push(`${s.name}: import — ${imports.diagnostic}`);
-      const tc = typecheckScript(s.source);
+      const tc = await typecheckScript(s.source);
       if (!tc.ok) failures.push(`${s.name}: typecheck — ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
@@ -157,7 +157,7 @@ describe("seed-scripts catalog", () => {
       result.created + result.updated + result.skippedUnchanged + result.skippedUserModified,
     ).toBe(SEED_SCRIPTS.length);
 
-    const globals = listScripts({ scope: "global" });
+    const globals = await listScripts({ scope: "global" });
     for (const s of SEED_SCRIPTS) {
       const row = globals.find((g) => g.name === s.name);
       expect(row, `${s.name} was not seeded`).toBeDefined();
@@ -203,7 +203,7 @@ describe("seed-scripts catalog", () => {
     expect(result.skippedUnchanged).toBe(SEED_SCRIPTS.length - 1);
 
     // The user's edit survived — the seed did not clobber it.
-    const row = getScript({ name: target.name, scope: "global" });
+    const row = await getScript({ name: target.name, scope: "global" });
     expect(row?.source).toBe(userSource);
   });
 
@@ -959,7 +959,7 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
 
     const failures: string[] = [];
     for (const s of SEED_SCRIPTS) {
-      const tc = typecheckScript(s.source);
+      const tc = await typecheckScript(s.source);
       if (!tc.ok) failures.push(`${s.name}: ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
@@ -972,7 +972,7 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
     const empty = await makeTmpDir();
     process.env[ENV_KEY] = empty;
 
-    const result = typecheckScript(SEED_SCRIPTS[0].source);
+    const result = await typecheckScript(SEED_SCRIPTS[0].source);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.diagnostics.join(" ")).toContain("TS2307");

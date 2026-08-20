@@ -42,19 +42,19 @@ describe("reassociateSessionLogs", () => {
     });
 
     // Verify logs exist under random UUID
-    const beforeLogs = getSessionLogsByTaskId(randomUuid);
+    const beforeLogs = await getSessionLogsByTaskId(randomUuid);
     expect(beforeLogs.length).toBe(3);
 
     // Reassociate
-    const count = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const count = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(count).toBe(3);
 
     // Verify logs now exist under real task ID
-    const afterLogs = getSessionLogsByTaskId(realTaskId);
+    const afterLogs = await getSessionLogsByTaskId(realTaskId);
     expect(afterLogs.length).toBe(3);
 
     // Verify no logs remain under random UUID
-    const oldLogs = getSessionLogsByTaskId(randomUuid);
+    const oldLogs = await getSessionLogsByTaskId(randomUuid);
     expect(oldLogs.length).toBe(0);
   });
 
@@ -71,10 +71,10 @@ describe("reassociateSessionLogs", () => {
       lines: ["line a"],
     });
 
-    const first = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const first = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(first).toBe(1);
 
-    const second = reassociateSessionLogs(runnerSessionId, realTaskId);
+    const second = await reassociateSessionLogs(runnerSessionId, realTaskId);
     expect(second).toBe(0);
   });
 
@@ -107,7 +107,7 @@ describe("reassociateSessionLogs", () => {
     await reassociateSessionLogs(runnerSessionId, realTaskId);
 
     // Other session's logs should be unchanged
-    const otherLogs = getSessionLogsByTaskId(otherTaskId);
+    const otherLogs = await getSessionLogsByTaskId(otherTaskId);
     expect(otherLogs.length).toBe(1);
     expect(otherLogs[0]?.sessionId).toBe(otherSessionId);
   });
@@ -118,7 +118,7 @@ describe("pool task claim flow", () => {
     const agentId = crypto.randomUUID();
     await createAgent({ id: agentId, name: "Pool Test Agent", isLead: false, status: "idle" });
 
-    const session = insertActiveSession({
+    const session = await insertActiveSession({
       agentId,
       taskId: "effective-task-id",
       triggerType: "pool_tasks_available",
@@ -128,7 +128,7 @@ describe("pool task claim flow", () => {
     expect(session.runnerSessionId).toBe("runner-sess-4");
 
     // Verify it can be retrieved
-    const sessions = getActiveSessions(agentId);
+    const sessions = await getActiveSessions(agentId);
     const found = sessions.find((s) => s.runnerSessionId === "runner-sess-4");
     expect(found).toBeDefined();
   });
@@ -163,19 +163,19 @@ describe("pool task claim flow", () => {
     });
 
     // 4. Verify logs are NOT under the real task ID yet
-    const beforeClaim = getSessionLogsByTaskId(task.id);
+    const beforeClaim = await getSessionLogsByTaskId(task.id);
     expect(beforeClaim.length).toBe(0);
 
     // 5. Simulate what task-action claim does: reassociate logs
-    const sessions = getActiveSessions(agentId);
+    const sessions = await getActiveSessions(agentId);
     const activeSession = sessions.find((s) => s.runnerSessionId);
     expect(activeSession?.runnerSessionId).toBe(runnerSessionId);
 
-    const count = reassociateSessionLogs(runnerSessionId, task.id);
+    const count = await reassociateSessionLogs(runnerSessionId, task.id);
     expect(count).toBe(3);
 
     // 6. Verify logs now appear under the real task ID
-    const afterClaim = getSessionLogsByTaskId(task.id);
+    const afterClaim = await getSessionLogsByTaskId(task.id);
     expect(afterClaim.length).toBe(3);
 
     // 7. Simulate more logs arriving after claim (with old effectiveTaskId)
@@ -189,11 +189,11 @@ describe("pool task claim flow", () => {
     });
 
     // 8. Reinforce reassociation (like store-progress would)
-    const reinforceCount = reassociateSessionLogs(runnerSessionId, task.id);
+    const reinforceCount = await reassociateSessionLogs(runnerSessionId, task.id);
     expect(reinforceCount).toBe(1);
 
     // 9. All logs should now be under the real task ID
-    const allLogs = getSessionLogsByTaskId(task.id);
+    const allLogs = await getSessionLogsByTaskId(task.id);
     expect(allLogs.length).toBe(4);
   });
 });

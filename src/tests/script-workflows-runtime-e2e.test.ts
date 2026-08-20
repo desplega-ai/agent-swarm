@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { closeDb, createAgent, getDb, initDb, listScriptRunJournalSteps } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, listScriptRunJournalSteps } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
@@ -130,9 +130,9 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM script_run_journal");
+  await getDbClient().run("DELETE FROM script_runs");
 });
 
 describe("script workflow runtime", () => {

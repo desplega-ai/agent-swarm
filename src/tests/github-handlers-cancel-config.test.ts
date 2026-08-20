@@ -16,7 +16,7 @@ import {
   createAgent,
   createTaskExtended,
   deleteSwarmConfig,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   getTaskById,
   initDb,
@@ -72,8 +72,7 @@ afterAll(async () => {
 
 // Clear tasks and config rows between tests.
 beforeEach(async () => {
-  const db = getDb();
-  db.prepare("DELETE FROM agent_tasks").run();
+  await getDbClient().run("DELETE FROM agent_tasks");
   // Remove both flag rows so each test starts from a clean slate.
   for (const key of ["github.cancelOnUnassign", "github.cancelOnReviewRequestRemoved"]) {
     const rows = await getSwarmConfigs({ scope: "global", key });
@@ -83,7 +82,7 @@ beforeEach(async () => {
 
 // ── Helpers ──
 
-async function seedTask(vcsNumber: number, kind: "pr" | "issue"): string {
+async function seedTask(vcsNumber: number, kind: "pr" | "issue"): Promise<string> {
   const task = await createTaskExtended("test task", {
     agentId: "lead-cancel-config-test",
     source: "github",
@@ -99,7 +98,7 @@ async function setConfigFlag(key: string, value: string) {
   await upsertSwarmConfig({ scope: "global", key, value });
 }
 
-async function getTaskStatus(taskId: string): string | undefined {
+async function getTaskStatus(taskId: string): Promise<string | undefined> {
   return (await getTaskById(taskId))?.status;
 }
 

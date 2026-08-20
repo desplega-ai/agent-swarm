@@ -52,8 +52,9 @@ beforeAll(async () => {
       maxTasks: 10,
     })
   ).id;
-  userId = createUser({ name: "MCP Namespace User", email: "mcp-namespace@example.com" }).id;
-  otherUserId = createUser({ name: "Other MCP User", email: "mcp-other@example.com" }).id;
+  userId = (await createUser({ name: "MCP Namespace User", email: "mcp-namespace@example.com" }))
+    .id;
+  otherUserId = (await createUser({ name: "Other MCP User", email: "mcp-other@example.com" })).id;
   sourceTaskId = (
     await createTaskExtended("trusted MCP source", {
       agentId,

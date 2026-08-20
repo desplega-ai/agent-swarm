@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   getAuthorizationById,
   getOAuthApp,
@@ -70,13 +70,14 @@ beforeAll(async () => {
   await createAgent({ id: LEAD_ID, name: "OAuth Refresh Lead", isLead: true, status: "idle" });
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   globalThis.fetch = originalFetch;
   clearVolatileSecretsForTesting();
-  getDb().run("DELETE FROM oauth_refresh_locks");
-  getDb().run("DELETE FROM script_credential_bindings");
-  getDb().run("DELETE FROM oauth_authorizations");
-  getDb().run("DELETE FROM oauth_apps");
+  const client = getDbClient();
+  await client.run("DELETE FROM oauth_refresh_locks");
+  await client.run("DELETE FROM script_credential_bindings");
+  await client.run("DELETE FROM oauth_authorizations");
+  await client.run("DELETE FROM oauth_apps");
 });
 
 afterAll(async () => {
@@ -98,13 +99,12 @@ async function seedDefault(
     expiresAt: new Date(Date.now() + expiresInMs).toISOString(),
     scope: "read,write",
   });
-  const id = getDb()
-    .query(
-      `SELECT z.id AS id FROM oauth_authorizations z
-       JOIN oauth_apps a ON a.id = z.appId
-       WHERE a.provider = ? AND a.mcpServerId IS NULL AND z.label = 'default'`,
-    )
-    .get(provider) as { id: string } | null;
+  const id = await getDbClient().get<{ id: string }>(
+    `SELECT z.id AS id FROM oauth_authorizations z
+     JOIN oauth_apps a ON a.id = z.appId
+     WHERE a.provider = ? AND a.mcpServerId IS NULL AND z.label = 'default'`,
+    [provider],
+  );
   if (!id) throw new Error("default authorization not seeded");
   return id.id;
 }
@@ -119,7 +119,7 @@ describe("OAuth refresh failure semantics", () => {
       OAuthRefreshError,
     );
 
-    const after = getAuthorizationById(authId);
+    const after = await getAuthorizationById(authId);
     expect(after?.status).toBe("refresh-failed");
     expect(after?.lastErrorMessage).toBeTruthy();
     expect(after?.lastErrorMessage).toContain("400");
@@ -133,12 +133,12 @@ describe("OAuth refresh failure semantics", () => {
     await expect(forceRefreshAuthorizationOrThrow(authId)).rejects.toBeInstanceOf(
       OAuthRefreshError,
     );
-    expect(getAuthorizationById(authId)?.status).toBe("refresh-failed");
+    expect((await getAuthorizationById(authId))?.status).toBe("refresh-failed");
 
     // Provider recovers.
     mockTokenEndpoint();
     await forceRefreshAuthorizationOrThrow(authId);
-    const healed = getAuthorizationById(authId);
+    const healed = await getAuthorizationById(authId);
     expect(healed?.status).toBe("active");
     expect(healed?.lastErrorMessage).toBeNull();
     expect(healed?.accessToken).toBe("healed-access-token");
@@ -178,7 +178,7 @@ describe("OAuth refresh failure semantics", () => {
         }),
       );
       // The authorization is now persisted as broken.
-      expect(getAuthorizationById(authId)?.status).toBe("refresh-failed");
+      expect((await getAuthorizationById(authId))?.status).toBe("refresh-failed");
     } finally {
       delete process.env.HEALTHY_CONFIG;
     }
@@ -226,10 +226,10 @@ describe("OAuth refresh failure semantics", () => {
 
   test("two authorizations under one app refresh independently (per-authorization isolation)", async () => {
     await upsertOAuthApp("acme", appConfig("acme"));
-    const app = getOAuthApp("acme");
+    const app = await getOAuthApp("acme");
     if (!app) throw new Error("app not created");
 
-    const broken = upsertAuthorization({
+    const broken = await upsertAuthorization({
       appId: app.id,
       label: "default",
       accessToken: "broken-access",
@@ -237,7 +237,7 @@ describe("OAuth refresh failure semantics", () => {
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
       status: "active",
     });
-    const healthy = upsertAuthorization({
+    const healthy = await upsertAuthorization({
       appId: app.id,
       label: "secondary",
       accessToken: "healthy-access",
@@ -259,8 +259,8 @@ describe("OAuth refresh failure semantics", () => {
     }
     expect(healthyResult.status).toBe("fulfilled");
 
-    expect(getAuthorizationById(broken.id)?.status).toBe("refresh-failed");
-    const healed = getAuthorizationById(healthy.id);
+    expect((await getAuthorizationById(broken.id))?.status).toBe("refresh-failed");
+    const healed = await getAuthorizationById(healthy.id);
     expect(healed?.status).toBe("active");
     expect(healed?.accessToken).toBe("healed-access-token");
   });

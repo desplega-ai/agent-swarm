@@ -117,8 +117,8 @@ describe("MCP server resolvedEnv key mapping", () => {
     });
   });
 
-  test("array format envConfigKeys uses key names, not array indices", () => {
-    const server = createMcpServer({
+  test("array format envConfigKeys uses key names, not array indices", async () => {
+    const server = await createMcpServer({
       name: "test-array-env",
       transport: "stdio",
       command: "node",
@@ -127,7 +127,7 @@ describe("MCP server resolvedEnv key mapping", () => {
       envConfigKeys: JSON.stringify(["KEY_A", "KEY_B"]),
     });
 
-    const configs = getResolvedConfig(agentId);
+    const configs = await getResolvedConfig(agentId);
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
     const { resolvedEnv } = resolveSecrets(
@@ -141,8 +141,8 @@ describe("MCP server resolvedEnv key mapping", () => {
     expect(resolvedEnv["1"]).toBeUndefined();
   });
 
-  test("object format envConfigKeys still works correctly", () => {
-    const server = createMcpServer({
+  test("object format envConfigKeys still works correctly", async () => {
+    const server = await createMcpServer({
       name: "test-object-env",
       transport: "stdio",
       command: "node",
@@ -151,7 +151,7 @@ describe("MCP server resolvedEnv key mapping", () => {
       envConfigKeys: JSON.stringify({ MY_KEY_A: "KEY_A", MY_KEY_B: "KEY_B" }),
     });
 
-    const configs = getResolvedConfig(agentId);
+    const configs = await getResolvedConfig(agentId);
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
     const { resolvedEnv } = resolveSecrets(
@@ -162,8 +162,8 @@ describe("MCP server resolvedEnv key mapping", () => {
     expect(resolvedEnv).toEqual({ MY_KEY_A: "value_a", MY_KEY_B: "value_b" });
   });
 
-  test("array format headerConfigKeys uses key names, not array indices", () => {
-    const server = createMcpServer({
+  test("array format headerConfigKeys uses key names, not array indices", async () => {
+    const server = await createMcpServer({
       name: "test-array-headers",
       transport: "http",
       url: "http://example.com",
@@ -172,7 +172,7 @@ describe("MCP server resolvedEnv key mapping", () => {
       headerConfigKeys: JSON.stringify(["HEADER_X"]),
     });
 
-    const configs = getResolvedConfig(agentId);
+    const configs = await getResolvedConfig(agentId);
     const configMap = new Map(configs.map((c) => [c.key, c.value]));
 
     const { resolvedHeaders } = resolveSecrets(

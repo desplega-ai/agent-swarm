@@ -13,7 +13,7 @@ import {
   createTaskExtended,
   createUser,
   getAgentById,
-  getDb,
+  getDbClient,
   incrementEmptyPollCount,
   initDb,
 } from "../be/db";
@@ -40,15 +40,15 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  const db = getDb();
+beforeEach(async () => {
+  const client = getDbClient();
   // Clear data from previous test, leave schema in place. Delete task-graph
   // tables in dependency order so FKs don't trip.
-  db.prepare("DELETE FROM session_costs").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM budget_refusal_notifications");
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -95,13 +95,16 @@ async function callPoll(agentId: string | undefined): Promise<PollResponse> {
   return { status, body: bodyStr ? JSON.parse(bodyStr) : null };
 }
 
-function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd: number): void {
+async function insertBudget(
+  scope: "global" | "agent",
+  scopeId: string,
+  dailyBudgetUsd: number,
+): Promise<void> {
   const now = Date.now();
-  getDb()
-    .prepare(
-      "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-    )
-    .run(scope, scopeId, dailyBudgetUsd, now, now);
+  await getDbClient().run(
+    "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+    [scope, scopeId, dailyBudgetUsd, now, now],
+  );
 }
 
 async function insertSpend(agentId: string, totalCostUsd: number): Promise<void> {
@@ -138,7 +141,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    const requester = createUser({
+    const requester = await createUser({
       name: "Requester One",
       email: "requester@example.com",
       role: "engineering manager",
@@ -181,7 +184,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 10.0);
+    await insertBudget("agent", worker.id, 10.0);
     await insertSpend(worker.id, 1.0); // well below 10.0
     const task = await createTaskExtended("budgeted task", { agentId: worker.id });
 
@@ -198,7 +201,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05); // blows the 0.01 budget
     await createTaskExtended("blocked task", { agentId: worker.id });
 
@@ -223,7 +226,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("global", "", 0.01);
+    await insertBudget("global", "", 0.01);
     await insertSpend(worker.id, 0.1); // blows the global budget
     await createTaskExtended("blocked-by-global", { agentId: worker.id });
 
@@ -244,7 +247,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
     // Unassigned (pool) task — no `agentId`.
     const pooled = await createTaskExtended("pool task", {});
@@ -255,9 +258,10 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     expect(body.trigger?.type).toBe("budget_refused");
 
     // The pool task must still be unassigned (refusal short-circuited claim).
-    const row = getDb()
-      .prepare<{ status: string }, [string]>("SELECT status FROM agent_tasks WHERE id = ?")
-      .get(pooled.id);
+    const row = await getDbClient().get<{ status: string }>(
+      "SELECT status FROM agent_tasks WHERE id = ?",
+      [pooled.id],
+    );
     expect(row?.status).toBe("unassigned");
   });
 
@@ -268,7 +272,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
     await createTaskExtended("blocked", { agentId: worker.id });
 
@@ -284,7 +288,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     expect(after).toBe(0);
     // Quick sanity that the bookkeeping helper itself still works (regression
     // guard for the wasBudgetRefused flag plumbing in poll-task.ts).
-    const newCount = incrementEmptyPollCount(worker.id);
+    const newCount = await incrementEmptyPollCount(worker.id);
     expect(newCount).toBe(1);
   });
 
@@ -352,10 +356,10 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
 
-    const result = canClaim(worker.id, new Date());
+    const result = await canClaim(worker.id, new Date());
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.cause).toBe("agent");
@@ -373,7 +377,7 @@ describe("Phase 3 — MCP task-action accept gate (canClaim integration)", () =>
       status: "idle",
       maxTasks: 1,
     });
-    const result = canClaim(worker.id, new Date());
+    const result = await canClaim(worker.id, new Date());
     expect(result.allowed).toBe(true);
   });
 });

@@ -175,7 +175,7 @@ describe("steering worker transport", () => {
       source: "api",
     });
     expect((await startTask(task.id))?.status).toBe("in_progress");
-    const requested = requestSteering({
+    const requested = await requestSteering({
       taskId: task.id,
       message: "continue as a follow-up",
       mode: "queue",
@@ -191,12 +191,12 @@ describe("steering worker transport", () => {
       createSteeringDispatchState(),
     );
 
-    expect(getPendingSteeringForTask(task.id)).toEqual([]);
+    expect(await getPendingSteeringForTask(task.id)).toEqual([]);
     expect(await getSteeringMessageById(requested.steeringMessageId!)).toMatchObject({
       status: "promoted",
       promotedTaskId: expect.any(String),
     });
-    expect(getChildTasks(task.id)).toEqual([
+    expect(await getChildTasks(task.id)).toEqual([
       expect.objectContaining({
         parentTaskId: task.id,
         task: "continue as a follow-up",
@@ -222,7 +222,7 @@ describe("steering worker transport", () => {
     });
     expect((await startTask(task.id))?.status).toBe("in_progress");
 
-    const requested = requestSteering({
+    const requested = await requestSteering({
       taskId: task.id,
       message: "codex follow-up",
       mode: "steer",
@@ -242,10 +242,10 @@ describe("steering worker transport", () => {
       createSteeringDispatchState(),
     );
 
-    expect(getPendingSteeringForTask(task.id)).toEqual([
+    expect(await getPendingSteeringForTask(task.id)).toEqual([
       expect.objectContaining({ id: requested.steeringMessageId, status: "pending" }),
     ]);
-    expect(getChildTasks(task.id)).toEqual([]);
+    expect(await getChildTasks(task.id)).toEqual([]);
   });
 
   test("accept-steer marks a delivered row handled and is idempotent", async () => {
@@ -266,14 +266,14 @@ describe("steering worker transport", () => {
         source: "api",
       });
       expect((await startTask(task.id))?.status).toBe("in_progress");
-      const steering = createSteeringMessage({
+      const steering = await createSteeringMessage({
         taskId: task.id,
         body: "acknowledge this",
         mode: "queue",
         source: "api",
         createdByKind: "system",
       });
-      expect(markSteeringDelivered(steering.id, "queue")?.status).toBe("delivered");
+      expect((await markSteeringDelivered(steering.id, "queue"))?.status).toBe("delivered");
       const otherAgent = await createAgent({
         name: "other accept steering worker",
         isLead: false,
@@ -302,7 +302,7 @@ describe("steering worker transport", () => {
       );
       expect(deniedResult.ok).toBe(false);
       expect(deniedResult.message).toContain("assigned to another agent");
-      const denied = finalizeSwarmToolResult("accept-steer", deniedResult);
+      const denied = await finalizeSwarmToolResult("accept-steer", deniedResult);
       expect(denied.isError).toBe(true);
       expect(denied.content[0]?.type).toBe("text");
       expect(denied.content[0]?.text).toContain("assigned to another agent");
@@ -324,7 +324,7 @@ describe("steering worker transport", () => {
       // NEW CONTRACT: assert ok:true on the SwarmToolResult itself (see comment above).
       expect(first.ok).toBe(true);
       expect(second.ok).toBe(true);
-      const finalizedSecond = finalizeSwarmToolResult("accept-steer", second);
+      const finalizedSecond = await finalizeSwarmToolResult("accept-steer", second);
       expect(finalizedSecond.isError).not.toBe(true);
       expect((finalizedSecond.structuredContent as { success?: boolean })?.success).toBe(true);
       expect(await getSteeringMessageById(steering.id)).toMatchObject({

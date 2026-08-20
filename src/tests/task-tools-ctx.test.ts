@@ -27,7 +27,7 @@ afterAll(async () => {
 
 describe("task tool ctx", () => {
   test("sendTaskHandler with user ctx writes requestedByUserId", async () => {
-    const user = createUser({ name: "MCP User" });
+    const user = await createUser({ name: "MCP User" });
 
     const result = await sendTaskHandler(userCtx(user), {
       task: "user requested task",
@@ -49,8 +49,8 @@ describe("task tool ctx", () => {
   });
 
   test("getTasksHandler with user ctx only returns that user's tasks", async () => {
-    const userA = createUser({ name: "List User A" });
-    const userB = createUser({ name: "List User B" });
+    const userA = await createUser({ name: "List User A" });
+    const userB = await createUser({ name: "List User B" });
 
     const a1 = await createTaskExtended("owned task one", { requestedByUserId: userA.id });
     const a2 = await createTaskExtended("owned task two", { requestedByUserId: userA.id });
@@ -75,7 +75,7 @@ describe("task tool ctx", () => {
   });
 
   test("getTasksHandler renders compact escaped markdown without changing structured tasks", async () => {
-    const user = createUser({ name: "Markdown List User" });
+    const user = await createUser({ name: "Markdown List User" });
     const taskText = "triage | path\\one\nsecond line";
     const task = await createTaskExtended(taskText, { requestedByUserId: user.id });
 
@@ -93,7 +93,7 @@ describe("task tool ctx", () => {
   });
 
   test("getTasksHandler uses a human empty-state instead of a raw data fallback", async () => {
-    const user = createUser({ name: "Empty List User" });
+    const user = await createUser({ name: "Empty List User" });
     const result = await getTasksHandler(userCtx(user), {
       includeHeartbeat: true,
       limit: 50,
@@ -104,8 +104,8 @@ describe("task tool ctx", () => {
   });
 
   test("assertOwnsTask gates user tasks and allows owned or owner ctx", async () => {
-    const owner = createUser({ name: "Task Owner" });
-    const foreignUser = createUser({ name: "Foreign User" });
+    const owner = await createUser({ name: "Task Owner" });
+    const foreignUser = await createUser({ name: "Foreign User" });
     const ownedTask = await createTaskExtended("owned", { requestedByUserId: owner.id });
 
     expect(assertOwnsTask(userCtx(owner), ownedTask)).toBeNull();

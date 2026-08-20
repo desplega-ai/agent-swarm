@@ -229,7 +229,7 @@ describe("resolveOAuthAccessToken", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.accessToken).toBe("new-jira-access-token-plain-value");
-    expect(getOAuthTokens("jira")?.refreshToken).toBe("new-jira-refresh-token");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("new-jira-refresh-token");
   });
 
   test("rejects a near-expiry token when no refresh token is available", async () => {

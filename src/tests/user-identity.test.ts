@@ -7,7 +7,7 @@ import {
   createUser,
   deleteUser,
   getAllUsers,
-  getDb,
+  getDbClient,
   getTaskById,
   getUserById,
   initDb,
@@ -31,28 +31,31 @@ import {
 
 const TEST_DB_PATH = "./test-user-identity.sqlite";
 
-let leadAgent: ReturnType<typeof createAgent>;
-let workerAgent: ReturnType<typeof createAgent>;
+let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+let workerAgent: Awaited<ReturnType<typeof createAgent>>;
 
 const SYSTEM_ACTOR: IdentityActor = { kind: "system", id: "test-suite" };
 const OPERATOR_ACTOR: IdentityActor = { kind: "operator", id: "op:0000000000000000" };
 
-function eventsFor(userId: string): Array<{
-  eventType: string;
-  actor: string;
-  beforeJson: string | null;
-  afterJson: string | null;
-}> {
+async function eventsFor(userId: string): Promise<
+  Array<{
+    eventType: string;
+    actor: string;
+    beforeJson: string | null;
+    afterJson: string | null;
+  }>
+> {
   // Order by createdAt then rowid — events emitted within the same
   // millisecond (synchronous bursts in tests) need a stable tiebreaker.
-  return getDb()
-    .prepare<
-      { eventType: string; actor: string; beforeJson: string | null; afterJson: string | null },
-      string
-    >(
-      "SELECT eventType, actor, beforeJson, afterJson FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
-    )
-    .all(userId);
+  return getDbClient().query<{
+    eventType: string;
+    actor: string;
+    beforeJson: string | null;
+    afterJson: string | null;
+  }>(
+    "SELECT eventType, actor, beforeJson, afterJson FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
+    [userId],
+  );
 }
 
 beforeAll(async () => {
@@ -93,7 +96,7 @@ describe("createUser", () => {
     expect(user.dailyBudgetUsd).toBeNull();
     expect(user.createdAt).toBeDefined();
     expect(user.lastUpdatedAt).toBeDefined();
-    expect(getUserIdentities(user.id)).toEqual([]);
+    expect(await getUserIdentities(user.id)).toEqual([]);
   });
 
   test("links identities one-by-one via linkIdentity", async () => {
@@ -115,7 +118,7 @@ describe("createUser", () => {
     await linkIdentity(user.id, "github", "bob-gh", SYSTEM_ACTOR);
     await linkIdentity(user.id, "gitlab", "bob-gl", SYSTEM_ACTOR);
 
-    const ids = getUserIdentities(user.id);
+    const ids = await getUserIdentities(user.id);
     expect(ids).toContainEqual({ kind: "slack", externalId: "U_BOB" });
     expect(ids).toContainEqual({ kind: "linear", externalId: "lin-bob-uuid" });
     expect(ids).toContainEqual({ kind: "github", externalId: "bob-gh" });
@@ -140,19 +143,19 @@ describe("linkIdentity", () => {
     const u1 = await createUser({ name: "Dup1" });
     const u2 = await createUser({ name: "Dup2" });
     await linkIdentity(u1.id, "slack", "U_DUP", SYSTEM_ACTOR);
-    expect(() => linkIdentity(u2.id, "slack", "U_DUP", SYSTEM_ACTOR)).toThrow();
+    await expect(linkIdentity(u2.id, "slack", "U_DUP", SYSTEM_ACTOR)).rejects.toThrow();
   });
 
   test("rejects duplicate (kind, externalId) — same user, second call", async () => {
     const u = await createUser({ name: "SelfDup" });
     await linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR);
-    expect(() => linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR)).toThrow();
+    await expect(linkIdentity(u.id, "github", "self-dup-gh", SYSTEM_ACTOR)).rejects.toThrow();
   });
 
   test("emits identity_added event in the same transaction", async () => {
     const u = await createUser({ name: "EventLink" });
     await linkIdentity(u.id, "slack", "U_EVENTLINK", SYSTEM_ACTOR);
-    const events = eventsFor(u.id);
+    const events = await eventsFor(u.id);
     expect(events.length).toBe(1);
     expect(events[0]!.eventType).toBe("identity_added");
     expect(events[0]!.actor).toBe("system:test-suite");
@@ -167,12 +170,12 @@ describe("unlinkIdentity", () => {
   test("removes the mapping and emits identity_removed", async () => {
     const u = await createUser({ name: "Unlink" });
     await linkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
-    expect(findUserByExternalId("slack", "U_UNLINK")).not.toBeNull();
+    expect(await findUserByExternalId("slack", "U_UNLINK")).not.toBeNull();
 
     await unlinkIdentity(u.id, "slack", "U_UNLINK", SYSTEM_ACTOR);
-    expect(findUserByExternalId("slack", "U_UNLINK")).toBeNull();
+    expect(await findUserByExternalId("slack", "U_UNLINK")).toBeNull();
 
-    const events = eventsFor(u.id);
+    const events = await eventsFor(u.id);
     expect(events.map((e) => e.eventType)).toEqual(["identity_added", "identity_removed"]);
     expect(JSON.parse(events[1]!.beforeJson!)).toEqual({
       kind: "slack",
@@ -191,15 +194,15 @@ describe("getUserById / getUserIdentities", () => {
     expect(fetched!.id).toBe(created.id);
   });
 
-  test("findUserById returns null for non-existent ID", () => {
-    expect(findUserById("nonexistent")).toBeNull();
+  test("findUserById returns null for non-existent ID", async () => {
+    expect(await findUserById("nonexistent")).toBeNull();
   });
 
   test("getUserIdentities returns sorted (kind, externalId) tuples", async () => {
     const u = await createUser({ name: "IdList" });
     await linkIdentity(u.id, "slack", "U_LIST", SYSTEM_ACTOR);
     await linkIdentity(u.id, "github", "list-gh", SYSTEM_ACTOR);
-    const list = getUserIdentities(u.id);
+    const list = await getUserIdentities(u.id);
     expect(list.length).toBe(2);
     expect(list).toEqual([
       { kind: "github", externalId: "list-gh" },
@@ -271,7 +274,7 @@ describe("deleteUser", () => {
   test("clears requestedByUserId on tasks AND cascades user_external_ids", async () => {
     const user = await createUser({ name: "TaskOwner" });
     await linkIdentity(user.id, "slack", "U_TASKOWNER", SYSTEM_ACTOR);
-    expect(findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
+    expect(await findUserByExternalId("slack", "U_TASKOWNER")).not.toBeNull();
 
     const task = await createTaskExtended("test task with user", {
       agentId: workerAgent.id,
@@ -283,7 +286,7 @@ describe("deleteUser", () => {
     await deleteUser(user.id);
     expect((await getTaskById(task.id))!.requestedByUserId).toBeUndefined();
     // ON DELETE CASCADE on user_external_ids.userId should clear the mapping.
-    expect(findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
+    expect(await findUserByExternalId("slack", "U_TASKOWNER")).toBeNull();
   });
 });
 
@@ -303,34 +306,34 @@ describe("findUserByExternalId", () => {
     await linkIdentity(testUser.id, "gitlab", "resolve-gl", SYSTEM_ACTOR);
   });
 
-  test("resolves by slack identity", () => {
-    const user = findUserByExternalId("slack", "U_RESOLVE_SLACK");
+  test("resolves by slack identity", async () => {
+    const user = await findUserByExternalId("slack", "U_RESOLVE_SLACK");
     expect(user).toBeDefined();
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by linear identity", () => {
-    const user = findUserByExternalId("linear", "lin-resolve-uuid");
+  test("resolves by linear identity", async () => {
+    const user = await findUserByExternalId("linear", "lin-resolve-uuid");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by github identity", () => {
-    const user = findUserByExternalId("github", "resolve-gh");
+  test("resolves by github identity", async () => {
+    const user = await findUserByExternalId("github", "resolve-gh");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("resolves by gitlab identity", () => {
-    const user = findUserByExternalId("gitlab", "resolve-gl");
+  test("resolves by gitlab identity", async () => {
+    const user = await findUserByExternalId("gitlab", "resolve-gl");
     expect(user!.id).toBe(testUser.id);
   });
 
-  test("returns null for unknown externalId", () => {
-    expect(findUserByExternalId("slack", "U_NONEXISTENT")).toBeNull();
-    expect(findUserByExternalId("github", "no-such-account")).toBeNull();
+  test("returns null for unknown externalId", async () => {
+    expect(await findUserByExternalId("slack", "U_NONEXISTENT")).toBeNull();
+    expect(await findUserByExternalId("github", "no-such-account")).toBeNull();
   });
 
-  test("kind is exact — slack externalId does not resolve under github", () => {
-    expect(findUserByExternalId("github", "U_RESOLVE_SLACK")).toBeNull();
+  test("kind is exact — slack externalId does not resolve under github", async () => {
+    expect(await findUserByExternalId("github", "U_RESOLVE_SLACK")).toBeNull();
   });
 });
 
@@ -342,8 +345,8 @@ describe("findUserByEmail", () => {
       name: "EmailPrimary",
       email: "primary@example.com",
     });
-    expect(findUserByEmail("primary@example.com")!.id).toBe(user.id);
-    expect(findUserByEmail("PRIMARY@example.com")!.id).toBe(user.id);
+    expect((await findUserByEmail("primary@example.com"))!.id).toBe(user.id);
+    expect((await findUserByEmail("PRIMARY@example.com"))!.id).toBe(user.id);
   });
 
   test("matches an emailAlias (case-insensitive)", async () => {
@@ -352,20 +355,20 @@ describe("findUserByEmail", () => {
       email: "main@example.com",
       emailAliases: ["alt@example.com", "other@example.com"],
     });
-    expect(findUserByEmail("alt@example.com")!.id).toBe(user.id);
-    expect(findUserByEmail("OTHER@EXAMPLE.COM")!.id).toBe(user.id);
+    expect((await findUserByEmail("alt@example.com"))!.id).toBe(user.id);
+    expect((await findUserByEmail("OTHER@EXAMPLE.COM"))!.id).toBe(user.id);
   });
 
-  test("returns null on no match", () => {
-    expect(findUserByEmail("nobody@nowhere.com")).toBeNull();
+  test("returns null on no match", async () => {
+    expect(await findUserByEmail("nobody@nowhere.com")).toBeNull();
   });
 });
 
 // ─── findOrCreateUserByEmail ──────────────────────────────────────────────────
 
 describe("findOrCreateUserByEmail", () => {
-  test("creates a fresh user + emits identity_added when no match", () => {
-    const result = findOrCreateUserByEmail(
+  test("creates a fresh user + emits identity_added when no match", async () => {
+    const result = await findOrCreateUserByEmail(
       "new-foc@example.com",
       { name: "FocNew" },
       { kind: "system", id: "webhook:test" },
@@ -373,21 +376,21 @@ describe("findOrCreateUserByEmail", () => {
     expect(result.created).toBe(true);
     expect(result.user.email).toBe("new-foc@example.com");
     expect(result.user.name).toBe("FocNew");
-    const events = eventsFor(result.user.id);
+    const events = await eventsFor(result.user.id);
     expect(events.length).toBe(1);
     expect(events[0]!.eventType).toBe("identity_added");
     expect(events[0]!.actor).toBe("system:webhook:test");
   });
 
-  test("returns the existing user + emits auto_merge on a second call", () => {
-    const first = findOrCreateUserByEmail(
+  test("returns the existing user + emits auto_merge on a second call", async () => {
+    const first = await findOrCreateUserByEmail(
       "merge-foc@example.com",
       { name: "FocMerge" },
       SYSTEM_ACTOR,
     );
     expect(first.created).toBe(true);
 
-    const second = findOrCreateUserByEmail(
+    const second = await findOrCreateUserByEmail(
       "merge-foc@example.com",
       { name: "FocMergeRetry" },
       SYSTEM_ACTOR,
@@ -395,13 +398,13 @@ describe("findOrCreateUserByEmail", () => {
     expect(second.created).toBe(false);
     expect(second.user.id).toBe(first.user.id);
 
-    const events = eventsFor(first.user.id);
+    const events = await eventsFor(first.user.id);
     // identity_added (initial) + auto_merge (second call) = 2 events.
     expect(events.map((e) => e.eventType)).toEqual(["identity_added", "auto_merge"]);
   });
 
-  test("falls back to email local-part when no name hint provided", () => {
-    const result = findOrCreateUserByEmail("auto-name@example.com", {}, SYSTEM_ACTOR);
+  test("falls back to email local-part when no name hint provided", async () => {
+    const result = await findOrCreateUserByEmail("auto-name@example.com", {}, SYSTEM_ACTOR);
     expect(result.created).toBe(true);
     expect(result.user.name).toBe("auto-name");
   });
@@ -412,25 +415,24 @@ describe("findOrCreateUserByEmail", () => {
 describe("mintToken / revokeToken / resolveUserByToken", () => {
   test("mintToken returns aswt_-prefixed plaintext and stores hash + 4-char preview", async () => {
     const user = await createUser({ name: "TokenUser" });
-    const { tokenId, plaintext } = mintToken(user.id, "CI test", OPERATOR_ACTOR);
+    const { tokenId, plaintext } = await mintToken(user.id, "CI test", OPERATOR_ACTOR);
 
     expect(plaintext.startsWith("aswt_")).toBe(true);
     expect(plaintext.length).toBeGreaterThanOrEqual(25);
     expect(tokenId).toBeDefined();
 
     // Stored row should have hash != plaintext and preview = last 4 chars.
-    const row = getDb()
-      .prepare<{ tokenHash: string; tokenPreview: string }, string>(
-        "SELECT tokenHash, tokenPreview FROM user_tokens WHERE id = ?",
-      )
-      .get(tokenId);
+    const row = await getDbClient().get<{ tokenHash: string; tokenPreview: string }>(
+      "SELECT tokenHash, tokenPreview FROM user_tokens WHERE id = ?",
+      [tokenId],
+    );
     expect(row).toBeDefined();
     expect(row!.tokenHash).not.toBe(plaintext);
     expect(row!.tokenHash.length).toBe(64); // sha256 hex
     expect(row!.tokenPreview).toBe(plaintext.slice(-4));
 
     // token_minted event landed with operator actor.
-    const events = eventsFor(user.id);
+    const events = await eventsFor(user.id);
     expect(events.find((e) => e.eventType === "token_minted")).toBeDefined();
     expect(events.find((e) => e.eventType === "token_minted")!.actor).toBe(
       "operator:op:0000000000000000",
@@ -439,40 +441,38 @@ describe("mintToken / revokeToken / resolveUserByToken", () => {
 
   test("resolveUserByToken returns the owning user and bumps lastUsedAt", async () => {
     const user = await createUser({ name: "ResolveTokenUser" });
-    const { tokenId, plaintext } = mintToken(user.id, null, OPERATOR_ACTOR);
+    const { tokenId, plaintext } = await mintToken(user.id, null, OPERATOR_ACTOR);
 
-    const resolved = resolveUserByToken(plaintext);
+    const resolved = await resolveUserByToken(plaintext);
     expect(resolved).not.toBeNull();
     expect(resolved!.id).toBe(user.id);
 
-    const row = getDb()
-      .prepare<{ lastUsedAt: string | null }, string>(
-        "SELECT lastUsedAt FROM user_tokens WHERE id = ?",
-      )
-      .get(tokenId);
+    const row = await getDbClient().get<{ lastUsedAt: string | null }>(
+      "SELECT lastUsedAt FROM user_tokens WHERE id = ?",
+      [tokenId],
+    );
     expect(row!.lastUsedAt).not.toBeNull();
   });
 
   test("revokeToken sets revokedAt + emits token_revoked + resolveUserByToken returns null", async () => {
     const user = await createUser({ name: "RevokeUser" });
-    const { tokenId, plaintext } = mintToken(user.id, "to-revoke", OPERATOR_ACTOR);
+    const { tokenId, plaintext } = await mintToken(user.id, "to-revoke", OPERATOR_ACTOR);
     await revokeToken(tokenId, OPERATOR_ACTOR);
 
-    const row = getDb()
-      .prepare<{ revokedAt: string | null }, string>(
-        "SELECT revokedAt FROM user_tokens WHERE id = ?",
-      )
-      .get(tokenId);
+    const row = await getDbClient().get<{ revokedAt: string | null }>(
+      "SELECT revokedAt FROM user_tokens WHERE id = ?",
+      [tokenId],
+    );
     expect(row!.revokedAt).not.toBeNull();
 
-    expect(resolveUserByToken(plaintext)).toBeNull();
+    expect(await resolveUserByToken(plaintext)).toBeNull();
 
-    const events = eventsFor(user.id);
+    const events = await eventsFor(user.id);
     expect(events.map((e) => e.eventType)).toContain("token_revoked");
   });
 
-  test("resolveUserByToken returns null for unknown plaintext", () => {
-    expect(resolveUserByToken("aswt_unknown000000000000000000000")).toBeNull();
+  test("resolveUserByToken returns null for unknown plaintext", async () => {
+    expect(await resolveUserByToken("aswt_unknown000000000000000000000")).toBeNull();
   });
 });
 
@@ -509,7 +509,7 @@ describe("recordIdentityEvent", () => {
     await recordIdentityEvent(user.id, "email_added", OPERATOR_ACTOR, null, { email: "x@y.com" });
     await recordIdentityEvent(user.id, "email_removed", OPERATOR_ACTOR, { email: "x@y.com" }, null);
 
-    const events = eventsFor(user.id);
+    const events = await eventsFor(user.id);
     expect(events.map((e) => e.eventType)).toEqual([
       "budget_changed",
       "status_changed",

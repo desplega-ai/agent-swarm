@@ -20,7 +20,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createUser, getBudget, getDb, initDb, upsertKv } from "../be/db";
+import { closeDb, createUser, getBudget, getDbClient, initDb, upsertKv } from "../be/db";
 import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
@@ -85,15 +85,15 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Clean slate between tests for deterministic event counts.
-  const db = getDb();
-  db.run("DELETE FROM user_identity_events");
-  db.run("DELETE FROM user_external_ids");
-  db.run("DELETE FROM user_tokens");
-  db.run("DELETE FROM users");
-  db.run("DELETE FROM budgets");
-  db.run("DELETE FROM kv_entries");
+  const client = getDbClient();
+  await client.run("DELETE FROM user_identity_events");
+  await client.run("DELETE FROM user_external_ids");
+  await client.run("DELETE FROM user_tokens");
+  await client.run("DELETE FROM users");
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM kv_entries");
 });
 
 function url(path: string): string {
@@ -132,7 +132,7 @@ describe("auth", () => {
 
 describe("GET /api/users", () => {
   test("returns users composed with identities, tokens, recentEvents", async () => {
-    const u = createUser({ name: "Composed", email: "c@x.com" });
+    const u = await createUser({ name: "Composed", email: "c@x.com" });
     await linkIdentity(u.id, "slack", "U_COMP", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch("/api/users");
@@ -214,7 +214,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("budget / status / emailAliases diffs each emit the right event types", async () => {
-    const u = createUser({
+    const u = await createUser({
       name: "Patcher",
       email: "p@x.com",
       emailAliases: ["a1@x.com"],
@@ -232,11 +232,10 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(r.status).toBe(200);
 
-    const events = getDb()
-      .prepare<{ eventType: string }, string>(
-        "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY rowid",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ eventType: string }>(
+      "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY rowid",
+      [u.id],
+    );
     const types = events.map((e) => e.eventType);
     expect(types).toContain("budget_changed");
     expect(types).toContain("status_changed");
@@ -245,7 +244,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("identities complete-list diff adds + removes", async () => {
-    const u = createUser({ name: "IdDiff" });
+    const u = await createUser({ name: "IdDiff" });
     await linkIdentity(u.id, "slack", "U_OLD", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch(`/api/users/${u.id}`, {
@@ -270,7 +269,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("profile_changed events fire for name / role / notes / timezone / preferredChannel edits", async () => {
-    const u = createUser({
+    const u = await createUser({
       name: "Old",
       email: "old@x.com",
       role: "viewer",
@@ -291,11 +290,10 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(r.status).toBe(200);
 
-    const events = getDb()
-      .prepare<{ eventType: string; afterJson: string | null }, string>(
-        "SELECT eventType, afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed' ORDER BY rowid",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ eventType: string; afterJson: string | null }>(
+      "SELECT eventType, afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed' ORDER BY rowid",
+      [u.id],
+    );
     const fields = events
       .map((e) => (e.afterJson ? Object.keys(JSON.parse(e.afterJson))[0] : null))
       .filter((f): f is string => !!f);
@@ -307,18 +305,17 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("profile_changed does NOT fire when value is unchanged", async () => {
-    const u = createUser({ name: "Same", role: "admin" });
+    const u = await createUser({ name: "Same", role: "admin" });
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
       // role unchanged, only emit no events for it; status doesn't change here either
       body: JSON.stringify({ role: "admin", name: "Renamed" }),
     });
     expect(r.status).toBe(200);
-    const events = getDb()
-      .prepare<{ afterJson: string | null }, string>(
-        "SELECT afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed'",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ afterJson: string | null }>(
+      "SELECT afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed'",
+      [u.id],
+    );
     const fields = events
       .map((e) => (e.afterJson ? Object.keys(JSON.parse(e.afterJson))[0] : null))
       .filter((f): f is string => !!f);
@@ -329,7 +326,7 @@ describe("PATCH /api/users/:id", () => {
 
 describe("identity link/unlink", () => {
   test("POST then DELETE round-trips", async () => {
-    const u = createUser({ name: "RoundTrip" });
+    const u = await createUser({ name: "RoundTrip" });
 
     const add = await authedFetch(`/api/users/${u.id}/identities`, {
       method: "POST",
@@ -355,7 +352,7 @@ describe("identity link/unlink", () => {
     // Webhook auto-link can store an externalId containing `@` (AgentMail
     // email-as-id, Linear `@handle`). The UI sends the path URL-encoded; the
     // handler must decode before SELECT/DELETE or the row sticks around.
-    const u = createUser({ name: "DecodeDelete" });
+    const u = await createUser({ name: "DecodeDelete" });
     const literal = "@deletable";
 
     const add = await authedFetch(`/api/users/${u.id}/identities`, {
@@ -386,7 +383,7 @@ describe("identity link/unlink", () => {
 
 describe("GET /api/users/:id/events", () => {
   test("returns events DESC and respects limit + before cursor", async () => {
-    const u = createUser({ name: "EventList" });
+    const u = await createUser({ name: "EventList" });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     // Emit a sequence of events with monotonically-increasing createdAt.
     await linkIdentity(u.id, "slack", "E1", actor);
@@ -463,7 +460,7 @@ describe("GET /api/users/unmapped", () => {
 
 describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
   test("link-to-existing branch links + clears kv rows", async () => {
-    const existing = createUser({ name: "ExistingTarget" });
+    const existing = await createUser({ name: "ExistingTarget" });
     const ns = "integration:unmapped:slack";
     await upsertKv({
       namespace: ns,
@@ -625,8 +622,12 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
 describe("POST /api/users/:id/merge", () => {
   test("moves identities, removes source, leaves manual_merge event", async () => {
-    const target = createUser({ name: "Target", email: "t@x.com" });
-    const source = createUser({ name: "Source", email: "s@x.com", emailAliases: ["alt@x.com"] });
+    const target = await createUser({ name: "Target", email: "t@x.com" });
+    const source = await createUser({
+      name: "Source",
+      email: "s@x.com",
+      emailAliases: ["alt@x.com"],
+    });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     await linkIdentity(source.id, "slack", "U_SRC", actor);
     await linkIdentity(source.id, "github", "src-gh", actor);
@@ -660,8 +661,8 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("manual_merge event payload carries the source user's id/name", async () => {
-    const target = createUser({ name: "MergeTarget", email: "mt@x.com" });
-    const source = createUser({ name: "MergeSource", email: "ms@x.com" });
+    const target = await createUser({ name: "MergeTarget", email: "mt@x.com" });
+    const source = await createUser({ name: "MergeSource", email: "ms@x.com" });
 
     const r = await authedFetch(`/api/users/${target.id}/merge`, {
       method: "POST",
@@ -686,7 +687,7 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("400 when target == source", async () => {
-    const u = createUser({ name: "Self" });
+    const u = await createUser({ name: "Self" });
     const r = await authedFetch(`/api/users/${u.id}/merge`, {
       method: "POST",
       body: JSON.stringify({ sourceUserId: u.id }),

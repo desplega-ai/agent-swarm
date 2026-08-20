@@ -144,7 +144,7 @@ describe("task steering core", () => {
 
   test("row lifecycle transitions pending -> delivered -> handled", async () => {
     const task = await runningTask("pi", "lifecycle");
-    const created = createSteeringMessage({
+    const created = await createSteeringMessage({
       taskId: task.id,
       body: "change direction",
       mode: "queue",
@@ -156,19 +156,19 @@ describe("task steering core", () => {
     expect(await getSteeringMessageById(created.id)).toEqual(created);
     expect(await getSteeringMessageById("missing-steering-message")).toBeNull();
     expect(SteeringMessageSchema.safeParse(created).success).toBe(true);
-    expect(hasPendingSteering(task.id)).toBe(true);
-    expect(getPendingSteeringForAgent(agentIds.get("pi")!)).toContainEqual(created);
+    expect(await hasPendingSteering(task.id)).toBe(true);
+    expect(await getPendingSteeringForAgent(agentIds.get("pi")!)).toContainEqual(created);
 
-    const delivered = markSteeringDelivered(created.id, "queue");
+    const delivered = await markSteeringDelivered(created.id, "queue");
     expect(delivered?.status).toBe("delivered");
     expect(delivered?.deliveredMode).toBe("queue");
     expect(delivered?.deliveredAt).toBeDefined();
-    expect(hasPendingSteering(task.id)).toBe(false);
+    expect(await hasPendingSteering(task.id)).toBe(false);
 
-    const handled = markSteeringHandled(created.id);
+    const handled = await markSteeringHandled(created.id);
     expect(handled?.status).toBe("handled");
     expect(handled?.handledAt).toBeDefined();
-    expect(markSteeringHandled(created.id)).toBeNull();
+    expect(await markSteeringHandled(created.id)).toBeNull();
   });
 
   test("cancels every pending row for a task", async () => {
@@ -183,9 +183,9 @@ describe("task steering core", () => {
       });
     }
 
-    expect(cancelPendingSteeringForTask(task.id)).toBe(2);
-    expect(hasPendingSteering(task.id)).toBe(false);
-    expect(getSteeringMessagesForTask(task.id).map((message) => message.status)).toEqual([
+    expect(await cancelPendingSteeringForTask(task.id)).toBe(2);
+    expect(await hasPendingSteering(task.id)).toBe(false);
+    expect((await getSteeringMessagesForTask(task.id)).map((message) => message.status)).toEqual([
       "cancelled",
       "cancelled",
     ]);
@@ -211,7 +211,7 @@ describe("task steering core", () => {
       degradedFrom: "steer",
     });
     expect(result.promotedTaskId).toBeUndefined();
-    expect(getSteeringMessagesForTask(task.id)).toEqual([
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({
         id: result.steeringMessageId,
         mode: "steer",
@@ -236,7 +236,7 @@ describe("task steering core", () => {
     });
     expect(result.outcome).toBe("queued");
 
-    const promoted = markSteeringUndeliverable(result.steeringMessageId, "session died");
+    const promoted = await markSteeringUndeliverable(result.steeringMessageId, "session died");
     expect(promoted.message.status).toBe("promoted");
     expect(promoted.promotedTaskId).not.toBe(parent.id);
     expect(await getTaskById(promoted.promotedTaskId!)).toMatchObject({
@@ -261,7 +261,7 @@ describe("task steering core", () => {
       effectiveMode: "queue",
       degradedFrom: "steer",
     });
-    expect(getSteeringMessagesForTask(task.id)).toEqual([
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({ mode: "steer", status: "pending" }),
     ]);
   });
@@ -399,7 +399,7 @@ describe("task steering core", () => {
         source: "api",
         createdByKind: "system",
       });
-      const stored = getSteeringMessagesForTask(task.id)[0]!;
+      const stored = (await getSteeringMessagesForTask(task.id))[0]!;
       expect(stored.body).not.toContain(secret);
       expect(stored.body).toContain("[REDACTED:OPENAI_API_KEY]");
     } finally {
@@ -427,7 +427,7 @@ describe("task steering core", () => {
       expect((error as Error).message).toContain("claude");
     }
 
-    expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
   });
 
   test('onUnsupported:"fail" leaves a paused task paused and creates no row', async () => {
@@ -450,12 +450,12 @@ describe("task steering core", () => {
     }
 
     expect((await getTaskById(task.id))?.status).toBe("paused");
-    expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
   });
 
   test("undeliverable service promotes once and is idempotent", async () => {
     const task = await runningTask("pi", "service undeliverable");
-    const message = createSteeringMessage({
+    const message = await createSteeringMessage({
       taskId: task.id,
       body: "promote from service",
       mode: "queue",
@@ -463,8 +463,8 @@ describe("task steering core", () => {
       createdByKind: "system",
     });
 
-    const first = markSteeringUndeliverable(message.id, "provider rejected delivery");
-    const second = markSteeringUndeliverable(message.id, "retry");
+    const first = await markSteeringUndeliverable(message.id, "provider rejected delivery");
+    const second = await markSteeringUndeliverable(message.id, "retry");
 
     expect(first.message.status).toBe("promoted");
     expect(first.promotedTaskId).toBeDefined();
@@ -476,7 +476,7 @@ describe("task steering core", () => {
     const ownerId = agentIds.get("pi")!;
     const otherAgentId = agentIds.get("claude")!;
     const task = await runningTask("pi", "delivery endpoint");
-    const message = createSteeringMessage({
+    const message = await createSteeringMessage({
       taskId: task.id,
       body: "deliver over HTTP",
       mode: "steer",
@@ -529,7 +529,7 @@ describe("task steering core", () => {
     const ownerId = agentIds.get("pi")!;
     const otherAgentId = agentIds.get("claude")!;
     const task = await runningTask("pi", "undeliverable endpoint");
-    const message = createSteeringMessage({
+    const message = await createSteeringMessage({
       taskId: task.id,
       body: "promote over HTTP",
       mode: "queue",

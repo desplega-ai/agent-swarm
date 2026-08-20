@@ -185,8 +185,9 @@ describe("Metrics HTTP API", () => {
       }),
     });
     expect(updated.status).toBe(200);
-    expect(getMetricVersions(id)).toHaveLength(1);
-    expect(getMetricVersions(id)[0]?.snapshot.title).toBe("Test Count");
+    const versions = await getMetricVersions(id);
+    expect(versions).toHaveLength(1);
+    expect(versions[0]?.snapshot.title).toBe("Test Count");
   });
 
   test("humans can create metrics through the UI without an agent header", async () => {

@@ -24,7 +24,7 @@ import {
   createAgent,
   createContextVersion,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getKv,
   getTaskById,
   initDb,
@@ -112,7 +112,7 @@ beforeAll(async () => {
   // fresh DB without re-checking the schema → "no such table: memory_fts".
   // Create the FTS table (same DDL as SqliteMemoryStore.ensureFtsTable) so the
   // memory-delete characterization below is order-independent under `bun test`.
-  getDb().run(`
+  await getDbClient().run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
       memory_id UNINDEXED,
       name,
@@ -283,7 +283,7 @@ describe("context-history / context-diff gates (characterization)", () => {
 describe("memory-delete gate (characterization)", () => {
   // memory-delete.ts:54,56 — owner OR (lead AND scope=swarm)
   test("worker cannot delete another agent's memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: LEAD_ID,
       scope: "agent",
       name: "charact lead memory",
@@ -298,11 +298,11 @@ describe("memory-delete gate (characterization)", () => {
       "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
     );
     // DB not mutated
-    expect(getMemoryStore().peek(memory.id)).not.toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });
 
   test("owner can delete their own memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "agent",
       name: "charact worker memory",
@@ -313,11 +313,11 @@ describe("memory-delete gate (characterization)", () => {
     const result = await callTool("memory-delete", WORKER_ID, { memoryId: memory.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getMemoryStore().peek(memory.id)).toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).toBeNull();
   });
 
   test("lead can delete another agent's swarm-scoped memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "swarm",
       name: "charact swarm memory",
@@ -328,12 +328,12 @@ describe("memory-delete gate (characterization)", () => {
     const result = await callTool("memory-delete", LEAD_ID, { memoryId: memory.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getMemoryStore().peek(memory.id)).toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).toBeNull();
   });
 
   test("lead cannot delete another agent's agent-scoped memory", async () => {
     // Characterizes the composite rule's other edge: lead + non-swarm scope = deny.
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "agent",
       name: "charact private worker memory",
@@ -347,7 +347,7 @@ describe("memory-delete gate (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
     );
-    expect(getMemoryStore().peek(memory.id)).not.toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });
 });
 

@@ -44,7 +44,7 @@ beforeAll(async () => {
   });
   otherAgentId = other.id;
 
-  const user = createUser({ name: "Audit User Test", email: "audit-user-test@example.com" });
+  const user = await createUser({ name: "Audit User Test", email: "audit-user-test@example.com" });
   humanUserId = user.id;
 
   const ownedTask = await createTaskExtended("owned task", {
@@ -75,32 +75,32 @@ afterAll(async () => {
 // ─── resolveTaskAuditUserId ──────────────────────────────────────────────────
 
 describe("resolveTaskAuditUserId", () => {
-  test("returns requester when source task is owned by the caller", () => {
-    expect(resolveTaskAuditUserId(ownedTaskId, agentId)).toBe(humanUserId);
+  test("returns requester when source task is owned by the caller", async () => {
+    expect(await resolveTaskAuditUserId(ownedTaskId, agentId)).toBe(humanUserId);
   });
 
-  test("returns null when source task belongs to a different agent", () => {
-    expect(resolveTaskAuditUserId(foreignTaskId, agentId)).toBeNull();
+  test("returns null when source task belongs to a different agent", async () => {
+    expect(await resolveTaskAuditUserId(foreignTaskId, agentId)).toBeNull();
   });
 
-  test("returns null when source task id is undefined", () => {
-    expect(resolveTaskAuditUserId(undefined, agentId)).toBeNull();
+  test("returns null when source task id is undefined", async () => {
+    expect(await resolveTaskAuditUserId(undefined, agentId)).toBeNull();
   });
 
-  test("returns null when caller agent id is undefined", () => {
-    expect(resolveTaskAuditUserId(ownedTaskId, undefined)).toBeNull();
+  test("returns null when caller agent id is undefined", async () => {
+    expect(await resolveTaskAuditUserId(ownedTaskId, undefined)).toBeNull();
   });
 
-  test("returns null when both arguments are undefined", () => {
-    expect(resolveTaskAuditUserId(undefined, undefined)).toBeNull();
+  test("returns null when both arguments are undefined", async () => {
+    expect(await resolveTaskAuditUserId(undefined, undefined)).toBeNull();
   });
 
-  test("returns null when source task does not exist", () => {
-    expect(resolveTaskAuditUserId("nonexistent-task-id", agentId)).toBeNull();
+  test("returns null when source task does not exist", async () => {
+    expect(await resolveTaskAuditUserId("nonexistent-task-id", agentId)).toBeNull();
   });
 
-  test("returns null when owned task has no human requester", () => {
-    expect(resolveTaskAuditUserId(noRequesterTaskId, agentId)).toBeNull();
+  test("returns null when owned task has no human requester", async () => {
+    expect(await resolveTaskAuditUserId(noRequesterTaskId, agentId)).toBeNull();
   });
 
   test("ambient-task fallback: no sourceTaskId resolves via the caller's current in-progress task", async () => {
@@ -115,16 +115,16 @@ describe("resolveTaskAuditUserId", () => {
     });
     await startTask(ambientTask.id);
 
-    expect(resolveTaskAuditUserId(undefined, ambientAgent.id)).toBe(humanUserId);
+    expect(await resolveTaskAuditUserId(undefined, ambientAgent.id)).toBe(humanUserId);
   });
 
   test("ambient-task fallback: no in-progress task for the caller still returns null", async () => {
     const idleAgent = await createAgent({ name: "idle-agent", isLead: false, status: "idle" });
-    expect(resolveTaskAuditUserId(undefined, idleAgent.id)).toBeNull();
+    expect(await resolveTaskAuditUserId(undefined, idleAgent.id)).toBeNull();
   });
 
   test("machine-carried external-ID fallback: no requestedByUserId but a linked Slack id resolves the user", async () => {
-    const slackLinkedUser = createUser({ name: "Slack Fallback User" });
+    const slackLinkedUser = await createUser({ name: "Slack Fallback User" });
     await linkIdentity(slackLinkedUser.id, "slack", "U_AUDIT_FALLBACK", SYSTEM_ACTOR);
 
     const fallbackAgent = await createAgent({
@@ -140,7 +140,9 @@ describe("resolveTaskAuditUserId", () => {
       },
     );
 
-    expect(resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBe(slackLinkedUser.id);
+    expect(await resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBe(
+      slackLinkedUser.id,
+    );
   });
 
   test("machine-carried external-ID fallback: unlinked Slack id still returns null (no guess)", async () => {
@@ -154,7 +156,7 @@ describe("resolveTaskAuditUserId", () => {
       slackUserId: "U_NEVER_LINKED_AUDIT",
     });
 
-    expect(resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBeNull();
+    expect(await resolveTaskAuditUserId(fallbackTask.id, fallbackAgent.id)).toBeNull();
   });
 });
 
@@ -169,49 +171,49 @@ describe("resolveHttpAuditUserId", () => {
     return req;
   }
 
-  test("prefers authenticated user over source-task header", () => {
-    const authUser = createUser({
+  test("prefers authenticated user over source-task header", async () => {
+    const authUser = await createUser({
       name: "Auth User",
       email: `auth-pref-${Date.now()}@example.com`,
     });
     const req = makeReq({ "x-source-task-id": ownedTaskId });
     setRequestAuth(req, { kind: "user", userId: authUser.id, user: authUser });
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(authUser.id);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(authUser.id);
   });
 
-  test("falls back to owned source task when no user auth", () => {
+  test("falls back to owned source task when no user auth", async () => {
     const req = makeReq({ "x-source-task-id": ownedTaskId });
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
-  test("ignores operator auth (not a user)", () => {
+  test("ignores operator auth (not a user)", async () => {
     const req = makeReq({ "x-source-task-id": ownedTaskId });
     setRequestAuth(req, { kind: "operator", fingerprint: "op-123" });
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
-  test("returns null for a foreign source task without user auth", () => {
+  test("returns null for a foreign source task without user auth", async () => {
     const req = makeReq({ "x-source-task-id": foreignTaskId });
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBeNull();
+    expect(await resolveHttpAuditUserId(req, agentId)).toBeNull();
   });
 
-  test("returns null when no source-task header and no user auth", () => {
+  test("returns null when no source-task header and no user auth", async () => {
     const req = makeReq();
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBeNull();
+    expect(await resolveHttpAuditUserId(req, agentId)).toBeNull();
   });
 
-  test("handles array-valued x-source-task-id header (uses first element)", () => {
+  test("handles array-valued x-source-task-id header (uses first element)", async () => {
     const req = makeReq({ "x-source-task-id": [ownedTaskId, "other-id"] });
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
-  test("returns null when caller agent id is undefined", () => {
+  test("returns null when caller agent id is undefined", async () => {
     const req = makeReq({ "x-source-task-id": ownedTaskId });
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, undefined)).toBeNull();
+    expect(await resolveHttpAuditUserId(req, undefined)).toBeNull();
   });
 });

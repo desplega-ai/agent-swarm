@@ -5,7 +5,7 @@ import {
   closeDb,
   createPage,
   deletePage,
-  getDb,
+  getDbClient,
   getPage,
   getPageBySlug,
   getPageVersion,
@@ -40,9 +40,9 @@ afterAll(() => {
 });
 
 describe("pages storage CRUD", () => {
-  test("create → get → list → delete cascades to versions", () => {
+  test("create → get → list → delete cascades to versions", async () => {
     const agentId = makeAgentId();
-    const created = createPage({
+    const created = await createPage({
       agentId,
       slug: "hello",
       title: "Hello",
@@ -57,34 +57,34 @@ describe("pages storage CRUD", () => {
     expect(created.contentType).toBe("text/html");
     expect(created.authMode).toBe("public");
 
-    const fetched = getPage(created.id);
+    const fetched = await getPage(created.id);
     expect(fetched).not.toBeNull();
     expect(fetched?.title).toBe("Hello");
 
-    const bySlug = getPageBySlug(agentId, "hello");
+    const bySlug = await getPageBySlug(agentId, "hello");
     expect(bySlug?.id).toBe(created.id);
 
-    const byAgent = listPagesByAgent(agentId);
+    const byAgent = await listPagesByAgent(agentId);
     expect(byAgent.map((p) => p.id)).toContain(created.id);
 
-    const all = listAllPages();
+    const all = await listAllPages();
     expect(all.map((p) => p.id)).toContain(created.id);
 
     // Create a version so we can verify cascade
-    const snap = snapshotPage(created.id, agentId);
+    const snap = await snapshotPage(created.id, agentId);
     expect(snap.version).toBe(1);
-    expect(getPageVersions(created.id)).toHaveLength(1);
+    expect(await getPageVersions(created.id)).toHaveLength(1);
 
-    const deleted = deletePage(created.id);
+    const deleted = await deletePage(created.id);
     expect(deleted).toBe(true);
-    expect(getPage(created.id)).toBeNull();
+    expect(await getPage(created.id)).toBeNull();
     // Cascade: version rows gone
-    expect(getPageVersions(created.id)).toHaveLength(0);
+    expect(await getPageVersions(created.id)).toHaveLength(0);
   });
 
-  test("createPage defaults authMode to authed when omitted", () => {
+  test("createPage defaults authMode to authed when omitted", async () => {
     const agentId = makeAgentId();
-    const created = createPage({
+    const created = await createPage({
       agentId,
       slug: "default-auth",
       title: "Default Auth",
@@ -95,14 +95,13 @@ describe("pages storage CRUD", () => {
     expect(created.authMode).toBe("authed");
   });
 
-  test("pages table defaults authMode to authed when omitted", () => {
+  test("pages table defaults authMode to authed when omitted", async () => {
     const agentId = makeAgentId();
-    const row = getDb()
-      .prepare<{ authMode: string }, [string, string, string, string, string]>(
-        `INSERT INTO pages (agentId, slug, title, contentType, body)
+    const row = await getDbClient().get<{ authMode: string }>(
+      `INSERT INTO pages (agentId, slug, title, contentType, body)
          VALUES (?, ?, ?, ?, ?) RETURNING authMode`,
-      )
-      .get(agentId, "sql-default-auth", "SQL Default Auth", "text/html", "<h1>default</h1>");
+      [agentId, "sql-default-auth", "SQL Default Auth", "text/html", "<h1>default</h1>"],
+    );
 
     expect(row?.authMode).toBe("authed");
   });
@@ -158,7 +157,7 @@ describe("pages storage CRUD", () => {
       body: "<h1>1</h1>",
     });
 
-    expect(() =>
+    await expect(
       createPage({
         agentId,
         slug: "dup",
@@ -167,11 +166,11 @@ describe("pages storage CRUD", () => {
         authMode: "public",
         body: "<h1>2</h1>",
       }),
-    ).toThrow(/UNIQUE/);
+    ).rejects.toThrow(/UNIQUE/);
 
     // Different agent — same slug is fine
     const otherAgent = makeAgentId();
-    const ok = createPage({
+    const ok = await createPage({
       agentId: otherAgent,
       slug: "dup",
       title: "Other agent",
@@ -188,7 +187,7 @@ describe("pages storage CRUD", () => {
     expect(hash).not.toBe(plaintext);
     expect(hash.length).toBeGreaterThan(20);
 
-    const page = createPage({
+    const page = await createPage({
       agentId: makeAgentId(),
       slug: "secret",
       title: "Secret",
@@ -202,8 +201,8 @@ describe("pages storage CRUD", () => {
     expect(await Bun.password.verify(plaintext, page.passwordHash!)).toBe(true);
   });
 
-  test("needsCredentials roundtrips as JSON array", () => {
-    const page = createPage({
+  test("needsCredentials roundtrips as JSON array", async () => {
+    const page = await createPage({
       agentId: makeAgentId(),
       slug: "needs-creds",
       title: "Needs",
@@ -212,11 +211,11 @@ describe("pages storage CRUD", () => {
       body: "{}",
       needsCredentials: ["GITHUB_TOKEN", "OPENAI_API_KEY"],
     });
-    const fetched = getPage(page.id);
+    const fetched = await getPage(page.id);
     expect(fetched?.needsCredentials).toEqual(["GITHUB_TOKEN", "OPENAI_API_KEY"]);
   });
 
-  test("snapshotPage throws on missing parent", () => {
-    expect(() => snapshotPage("0".repeat(32), "agent-x")).toThrow(/not found/);
+  test("snapshotPage throws on missing parent", async () => {
+    await expect(snapshotPage("0".repeat(32), "agent-x")).rejects.toThrow(/not found/);
   });
 });

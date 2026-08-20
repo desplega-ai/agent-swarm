@@ -20,7 +20,7 @@ import {
   createSessionCost,
   createTaskExtended,
   getBudgetRefusalNotification,
-  getDb,
+  getDbClient,
   initDb,
 } from "../be/db";
 import { handlePoll } from "../http/poll";
@@ -47,13 +47,13 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM budget_refusal_notifications");
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -94,13 +94,16 @@ async function callPoll(agentId: string | undefined): Promise<PollResponse> {
   return { status, body: bodyStr ? JSON.parse(bodyStr) : null };
 }
 
-function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd: number): void {
+async function insertBudget(
+  scope: "global" | "agent",
+  scopeId: string,
+  dailyBudgetUsd: number,
+): Promise<void> {
   const now = Date.now();
-  getDb()
-    .prepare(
-      "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-    )
-    .run(scope, scopeId, dailyBudgetUsd, now, now);
+  await getDbClient().run(
+    "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+    [scope, scopeId, dailyBudgetUsd, now, now],
+  );
 }
 
 async function insertSpend(agentId: string, totalCostUsd: number): Promise<void> {
@@ -130,15 +133,14 @@ interface FollowUpRow {
   source: string;
 }
 
-function listFollowUpTasks(parentTaskId: string): FollowUpRow[] {
-  return getDb()
-    .prepare<FollowUpRow, [string]>(
-      `SELECT id, agentId, parentTaskId, taskType, task, slackChannelId, slackThreadTs, slackUserId, source
+async function listFollowUpTasks(parentTaskId: string): Promise<FollowUpRow[]> {
+  return await getDbClient().query<FollowUpRow>(
+    `SELECT id, agentId, parentTaskId, taskType, task, slackChannelId, slackThreadTs, slackUserId, source
        FROM agent_tasks
        WHERE parentTaskId = ? AND taskType = 'follow-up'
        ORDER BY createdAt ASC`,
-    )
-    .all(parentTaskId);
+    [parentTaskId],
+  );
 }
 
 // Brief microtask-pump helper. The workflow bus emit goes through a dynamic
@@ -161,7 +163,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
     const parentTask = await createTaskExtended("over-budget task", {
@@ -175,7 +177,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("budget_refused");
 
-    const followUps = listFollowUpTasks(parentTask.id);
+    const followUps = await listFollowUpTasks(parentTask.id);
     expect(followUps).toHaveLength(1);
     const followUp = followUps[0]!;
     expect(followUp.agentId).toBe(lead.id);
@@ -202,7 +204,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.5);
 
     const parentTask = await createTaskExtended("dedup target", { agentId: worker.id });
@@ -210,13 +212,13 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     const r1 = await callPoll(worker.id);
     if ("error" in r1.body) throw new Error("unexpected error response");
     expect(r1.body.trigger?.type).toBe("budget_refused");
-    expect(listFollowUpTasks(parentTask.id)).toHaveLength(1);
+    expect(await listFollowUpTasks(parentTask.id)).toHaveLength(1);
 
     // Second poll on the same UTC day — refusal repeats, but no new follow-up.
     const r2 = await callPoll(worker.id);
     if ("error" in r2.body) throw new Error("unexpected error response");
     expect(r2.body.trigger?.type).toBe("budget_refused");
-    expect(listFollowUpTasks(parentTask.id)).toHaveLength(1);
+    expect(await listFollowUpTasks(parentTask.id)).toHaveLength(1);
   });
 
   test("dedup row's follow_up_task_id is written back to the new follow-up's id", async () => {
@@ -227,14 +229,14 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
     const parentTask = await createTaskExtended("audit-trail task", { agentId: worker.id });
 
     await callPoll(worker.id);
 
-    const followUps = listFollowUpTasks(parentTask.id);
+    const followUps = await listFollowUpTasks(parentTask.id);
     expect(followUps).toHaveLength(1);
     const followUpId = followUps[0]!.id;
 
@@ -251,14 +253,14 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
     const parentTask = await createTaskExtended("rollover task", { agentId: worker.id });
 
     // First refusal — first follow-up.
     await callPoll(worker.id);
-    expect(listFollowUpTasks(parentTask.id)).toHaveLength(1);
+    expect(await listFollowUpTasks(parentTask.id)).toHaveLength(1);
 
     // Simulate "yesterday already had a refusal" by manually inserting a row
     // for a different `(task, date)` PK is the wrong approach — we instead
@@ -266,9 +268,10 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     // row's `date` field to a yesterday placeholder, leaving the test poll
     // to insert a fresh row for the actual current UTC date.
     const yesterday = "1999-01-01"; // arbitrary past date guaranteed not to collide
-    getDb()
-      .prepare("UPDATE budget_refusal_notifications SET date = ? WHERE task_id = ? AND date = ?")
-      .run(yesterday, parentTask.id, todayUtc());
+    await getDbClient().run(
+      "UPDATE budget_refusal_notifications SET date = ? WHERE task_id = ? AND date = ?",
+      [yesterday, parentTask.id, todayUtc()],
+    );
 
     // Verify we moved the row.
     expect(await getBudgetRefusalNotification(parentTask.id, todayUtc())).toBeNull();
@@ -276,7 +279,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
 
     // Second refusal — fresh PK, fresh follow-up.
     await callPoll(worker.id);
-    const followUps = listFollowUpTasks(parentTask.id);
+    const followUps = await listFollowUpTasks(parentTask.id);
     expect(followUps).toHaveLength(2);
     // The newer dedup row exists for today.
     expect(await getBudgetRefusalNotification(parentTask.id, todayUtc())).not.toBeNull();
@@ -290,7 +293,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
     const parentTask = await createTaskExtended("event-bus task", { agentId: worker.id });
@@ -328,7 +331,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
       status: "idle",
       maxTasks: 1,
     });
-    insertBudget("agent", worker.id, 0.01);
+    await insertBudget("agent", worker.id, 0.01);
     await insertSpend(worker.id, 0.05);
 
     const parentTask = await createTaskExtended("no-lead task", { agentId: worker.id });
@@ -337,7 +340,7 @@ describe("Phase 5 — budget refusal lead notification + dedup", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("budget_refused");
 
-    expect(listFollowUpTasks(parentTask.id)).toHaveLength(0);
+    expect(await listFollowUpTasks(parentTask.id)).toHaveLength(0);
     // The dedup row is still recorded — write-back is a best-effort step that
     // won't run when there's no follow-up to link, but the row's existence
     // is what serves as the operator's "the lead was already notified

@@ -398,8 +398,8 @@ function githubMilestone(): SetupMilestone {
   };
 }
 
-function linearMilestone(): SetupMilestone {
-  const tokens = getOAuthTokens("linear");
+async function linearMilestone(): Promise<SetupMilestone> {
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     return {
       id: "linear",
@@ -519,7 +519,7 @@ async function buildSetup(): Promise<SetupMilestone[]> {
     await harnessMilestone(),
     slackMilestone(),
     githubMilestone(),
-    linearMilestone(),
+    await linearMilestone(),
     await jiraMilestone(),
     await workersMilestone(),
     await firstTaskMilestone(),

@@ -427,7 +427,7 @@ describe("Trigger Claiming - Offered Tasks", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     // Release stale reviewing tasks
-    const released = releaseStaleReviewingTasks(0);
+    const released = await releaseStaleReviewingTasks(0);
 
     // Should have released at least 1 task
     expect(released).toBeGreaterThanOrEqual(1);
@@ -453,8 +453,8 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channels
-    const channel1 = createChannel("test-channel-1", "public");
-    const channel2 = createChannel("test-channel-2", "public");
+    const channel1 = await createChannel("test-channel-1", "public");
+    const channel2 = await createChannel("test-channel-2", "public");
 
     // Post messages with mentions
     await postMessage(channel1.id, agent.id, `Hey @${agent.id}, check this out!`, {
@@ -463,7 +463,7 @@ describe("Trigger Claiming - Mentions", () => {
     await postMessage(channel2.id, agent.id, `@${agent.id} urgent task`, { mentions: [agent.id] });
 
     // Claim mentions
-    const claimed = claimMentions(agent.id);
+    const claimed = await claimMentions(agent.id);
 
     // Should claim both channels
     expect(claimed.length).toBe(2);
@@ -479,14 +479,14 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channel and post mentions
-    const channel = createChannel("concurrent-channel", "public");
+    const channel = await createChannel("concurrent-channel", "public");
     await postMessage(channel.id, agent.id, `@${agent.id} message 1`, { mentions: [agent.id] });
     await postMessage(channel.id, agent.id, `@${agent.id} message 2`, { mentions: [agent.id] });
 
     // Simulate concurrent polls
-    const claim1 = claimMentions(agent.id);
-    const claim2 = claimMentions(agent.id);
-    const claim3 = claimMentions(agent.id);
+    const claim1 = await claimMentions(agent.id);
+    const claim2 = await claimMentions(agent.id);
+    const claim3 = await claimMentions(agent.id);
 
     // First claim should succeed
     expect(claim1.length).toBe(1);
@@ -506,15 +506,15 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channel and post mention
-    const channel = createChannel("release-channel", "public");
+    const channel = await createChannel("release-channel", "public");
     await postMessage(channel.id, agent.id, `@${agent.id} test`, { mentions: [agent.id] });
 
     // Claim
-    const claimed = claimMentions(agent.id);
+    const claimed = await claimMentions(agent.id);
     expect(claimed.length).toBe(1);
 
     // Subsequent claim should fail
-    const claim2 = claimMentions(agent.id);
+    const claim2 = await claimMentions(agent.id);
     expect(claim2.length).toBe(0);
 
     // Release processing
@@ -522,7 +522,7 @@ describe("Trigger Claiming - Mentions", () => {
 
     // Now should be claimable again (but no NEW mentions, so count depends on read state)
     // Actually, since we didn't mark as read, the same mentions should still be there
-    const claim3 = claimMentions(agent.id);
+    const claim3 = await claimMentions(agent.id);
     expect(claim3.length).toBe(1);
   });
 
@@ -535,11 +535,11 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channel and post mention
-    const channel = createChannel("stale-channel", "public");
+    const channel = await createChannel("stale-channel", "public");
     await postMessage(channel.id, agent.id, `@${agent.id} stale test`, { mentions: [agent.id] });
 
     // Claim
-    const claimed = claimMentions(agent.id);
+    const claimed = await claimMentions(agent.id);
     expect(claimed.length).toBe(1);
 
     // Wait a bit
@@ -550,7 +550,7 @@ describe("Trigger Claiming - Mentions", () => {
     expect(released).toBeGreaterThanOrEqual(1);
 
     // Should be claimable again
-    const reclaimed = claimMentions(agent.id);
+    const reclaimed = await claimMentions(agent.id);
     expect(reclaimed.length).toBe(1);
     expect(reclaimed[0].channelId).toBe(channel.id);
   });
@@ -563,7 +563,7 @@ describe("Trigger Claiming - Mentions", () => {
       capabilities: [],
     });
 
-    const claimed = claimMentions(agent.id);
+    const claimed = await claimMentions(agent.id);
     expect(claimed.length).toBe(0);
   });
 
@@ -576,7 +576,7 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channel and post mention
-    const channel = createChannel("read-channel", "public");
+    const channel = await createChannel("read-channel", "public");
     const _msg = await postMessage(channel.id, agent.id, `@${agent.id} test message`, {
       mentions: [agent.id],
     });
@@ -585,7 +585,7 @@ describe("Trigger Claiming - Mentions", () => {
     await updateReadState(agent.id, channel.id);
 
     // Try to claim - should get nothing (already read)
-    const claimed = claimMentions(agent.id);
+    const claimed = await claimMentions(agent.id);
     expect(claimed.length).toBe(0);
   });
 
@@ -598,16 +598,16 @@ describe("Trigger Claiming - Mentions", () => {
     });
 
     // Create channel and post mentions
-    const channel = createChannel("repoll-channel", "public");
+    const channel = await createChannel("repoll-channel", "public");
     await postMessage(channel.id, agent.id, `@${agent.id} first`, { mentions: [agent.id] });
     await postMessage(channel.id, agent.id, `@${agent.id} second`, { mentions: [agent.id] });
 
     // Poll 1: Claim
-    const poll1 = claimMentions(agent.id);
+    const poll1 = await claimMentions(agent.id);
     expect(poll1.length).toBe(1);
 
     // Poll 2: Nothing (processing)
-    const poll2 = claimMentions(agent.id);
+    const poll2 = await claimMentions(agent.id);
     expect(poll2.length).toBe(0);
 
     // Agent marks as read and releases
@@ -615,7 +615,7 @@ describe("Trigger Claiming - Mentions", () => {
     await releaseMentionProcessing(agent.id, [channel.id]);
 
     // Poll 3: Nothing (no NEW unread mentions)
-    const poll3 = claimMentions(agent.id);
+    const poll3 = await claimMentions(agent.id);
     expect(poll3.length).toBe(0);
 
     // Wait a bit to ensure new message has later timestamp
@@ -625,7 +625,7 @@ describe("Trigger Claiming - Mentions", () => {
     await postMessage(channel.id, agent.id, `@${agent.id} third`, { mentions: [agent.id] });
 
     // Poll 4: Should claim new mention
-    const poll4 = claimMentions(agent.id);
+    const poll4 = await claimMentions(agent.id);
     expect(poll4.length).toBe(1);
   });
 });

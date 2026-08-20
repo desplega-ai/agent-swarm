@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskById,
   getUnassignedTaskIdsForAgent,
   initDb,
@@ -42,10 +42,10 @@ describe("Pool Affinity", () => {
   });
 
   // Clean up between tests to avoid interference
-  beforeEach(() => {
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
-    getDb().run("DELETE FROM agent_log");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM agent_tasks");
+    await getDbClient().run("DELETE FROM agents");
+    await getDbClient().run("DELETE FROM agent_log");
   });
 
   function affinity(overrides: Partial<RoutingAffinity>): RoutingAffinity {
@@ -173,11 +173,10 @@ describe("Pool Affinity", () => {
       const stillUnassigned = await getTaskById(task.id);
       expect(stillUnassigned?.status).toBe("unassigned");
 
-      const log = getDb()
-        .query(
-          "SELECT eventType FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1",
-        )
-        .get(task.id) as { eventType: string } | null;
+      const log = (await getDbClient().get(
+        "SELECT eventType FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1",
+        [task.id],
+      )) as { eventType: string } | null;
       expect(log?.eventType).toBe("task_claim_rejected_affinity");
     });
 

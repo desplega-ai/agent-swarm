@@ -12,7 +12,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -86,13 +86,13 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Clean slate between tests for deterministic token and task state.
-  const db = getDb();
-  db.run("DELETE FROM user_identity_events");
-  db.run("DELETE FROM user_tokens");
-  db.run("DELETE FROM agent_tasks");
-  db.run("DELETE FROM users");
+  const client = getDbClient();
+  await client.run("DELETE FROM user_identity_events");
+  await client.run("DELETE FROM user_tokens");
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM users");
 });
 
 function endpoint(path = "/mcp-user"): string {
@@ -198,8 +198,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request to /mcp-user with a revoked token returns 401", async () => {
-    const user = createUser({ name: "Revoked User" });
-    const token = mintToken(user.id, "revoked", ACTOR);
+    const user = await createUser({ name: "Revoked User" });
+    const token = await mintToken(user.id, "revoked", ACTOR);
     await revokeToken(token.tokenId, ACTOR);
 
     const { response } = await mcpPost(token.plaintext, {
@@ -217,8 +217,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request to /mcp-user with a suspended user's valid token returns 401", async () => {
-    const user = createUser({ name: "Suspended User", status: "suspended" });
-    const token = mintToken(user.id, "suspended", ACTOR);
+    const user = await createUser({ name: "Suspended User", status: "suspended" });
+    const token = await mintToken(user.id, "suspended", ACTOR);
 
     const { response } = await mcpPost(token.plaintext, {
       jsonrpc: "2.0",
@@ -235,10 +235,10 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request with a different user token than the opening session returns 401", async () => {
-    const userA = createUser({ name: "Session A" });
-    const userB = createUser({ name: "Session B" });
-    const tokenA = mintToken(userA.id, "a", ACTOR).plaintext;
-    const tokenB = mintToken(userB.id, "b", ACTOR).plaintext;
+    const userA = await createUser({ name: "Session A" });
+    const userB = await createUser({ name: "Session B" });
+    const tokenA = (await mintToken(userA.id, "a", ACTOR)).plaintext;
+    const tokenB = (await mintToken(userB.id, "b", ACTOR)).plaintext;
     const sessionId = await initialize(tokenA);
 
     const { response } = await mcpPost(
@@ -251,8 +251,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("valid active-user token initializes and tools/list returns exactly the 6 task tools", async () => {
-    const user = createUser({ name: "Active User" });
-    const token = mintToken(user.id, "active", ACTOR).plaintext;
+    const user = await createUser({ name: "Active User" });
+    const token = (await mintToken(user.id, "active", ACTOR)).plaintext;
     const sessionId = await initialize(token);
     await notifyInitialized(token, sessionId);
 
@@ -278,9 +278,9 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("send-task over /mcp-user records requestedByUserId and get-tasks returns only that user's tasks", async () => {
-    const user = createUser({ name: "Task Requester" });
-    const otherUser = createUser({ name: "Other Task Requester" });
-    const token = mintToken(user.id, "task", ACTOR).plaintext;
+    const user = await createUser({ name: "Task Requester" });
+    const otherUser = await createUser({ name: "Other Task Requester" });
+    const token = (await mintToken(user.id, "task", ACTOR)).plaintext;
     const sessionId = await initialize(token);
     await notifyInitialized(token, sessionId);
 

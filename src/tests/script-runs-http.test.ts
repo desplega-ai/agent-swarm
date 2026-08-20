@@ -8,7 +8,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
   initDb,
@@ -62,9 +62,10 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM script_run_journal");
+  await client.run("DELETE FROM script_runs");
   delete process.env.SCRIPT_RUN_CONCURRENCY_CAP;
   delete process.env.SCRIPT_RUN_MAX_STEPS;
   delete process.env.SCRIPT_RUN_MAX_AGENT_TASKS;
@@ -362,7 +363,7 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:implement`;
-    const dispatched = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const dispatched = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(dispatched).not.toBeNull();
     await completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
 
@@ -378,7 +379,7 @@ describe("/api/script-runs HTTP", () => {
       parentTaskId: dispatched?.id,
     });
     await completeTask(followUp.id, "reviewed");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     // Replay: same stepKey again (what ctx.step.agentTask's poll loop does,
     // and what a resumed harness process does after a crash mid-wait). Must
@@ -393,11 +394,10 @@ describe("/api/script-runs HTTP", () => {
     expect(secondBody.taskId).toBe((dispatched as { id: string }).id);
     expect(secondBody.taskOutput).toBe(JSON.stringify({ done: true }));
 
-    const stepCount = getDb()
-      .query(
-        "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-      )
-      .get(contextKey) as { c: number };
+    const stepCount = (await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
+      [contextKey],
+    )) as { c: number };
     expect(stepCount.c).toBe(1);
   });
 
@@ -417,7 +417,7 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:plan`;
-    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const step = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ plan: ["inspect", "implement", "verify"] });
     await completeTask((step as { id: string }).id, stepOutput);
@@ -429,7 +429,7 @@ describe("/api/script-runs HTTP", () => {
       parentTaskId: step?.id,
     });
     await completeTask(followUp.id, "Reviewed the plan; proceed.");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     const response = await callPromise;
     expect(response.status).toBe(200);
@@ -452,7 +452,7 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:review`;
-    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const step = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ approved: true });
     await completeTask((step as { id: string }).id, stepOutput);
@@ -464,7 +464,7 @@ describe("/api/script-runs HTTP", () => {
       parentTaskId: step?.id,
     });
     await failTask(followUp.id, "Lead follow-up failed");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     const response = await callPromise;
     expect(response.status).toBe(200);

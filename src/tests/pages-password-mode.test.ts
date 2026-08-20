@@ -103,7 +103,7 @@ describe("GET /p/:id — password mode (step-5)", () => {
 
   test("password is hashed in the DB row (passwordHash != plaintext)", async () => {
     const id = await createPasswordPage("hashed", "swordfish");
-    const row = getPage(id);
+    const row = await getPage(id);
     expect(row).toBeTruthy();
     // passwordHash field is private; should be bcrypt and clearly not the plaintext.
     expect(row!.passwordHash).toBeTruthy();

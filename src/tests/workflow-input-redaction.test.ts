@@ -182,7 +182,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
         },
       ],
     };
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: `redaction-test-${Date.now()}`,
       definition: def,
       triggers: [],
@@ -208,7 +208,7 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
     expect(CaptureExecutor.lastTokenSeen).toBe(SECRET_VALUE);
 
     // Persisted step.input must have the secret redacted
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     expect(steps.length).toBe(1);
     const persistedInput = steps[0]!.input as Record<string, unknown>;
     const persistedInputBlock = persistedInput.input as Record<string, unknown>;
@@ -222,10 +222,10 @@ describe("end-to-end — workflow step persistence redacts secrets", () => {
 });
 
 describe("resolveInputs (unchanged behavior)", () => {
-  test("still resolves env-var references", () => {
+  test("still resolves env-var references", async () => {
     process.env.TEST_REDACT_VAR = "resolved";
     // biome-ignore lint/suspicious/noTemplateCurlyInString: testing env-var syntax
-    const out = resolveInputs({ x: "${TEST_REDACT_VAR}" });
+    const out = await resolveInputs({ x: "${TEST_REDACT_VAR}" });
     expect(out.x).toBe("resolved");
     delete process.env.TEST_REDACT_VAR;
   });

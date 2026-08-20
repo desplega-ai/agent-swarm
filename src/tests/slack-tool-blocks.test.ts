@@ -158,7 +158,7 @@ describe("Slack tool Block Kit support", () => {
     });
     expect(payload).toMatchObject({ unfurl_links: false, unfurl_media: false });
     expect(JSON.stringify(payload.blocks)).not.toContain("↑ tree");
-    expect(getSlackMessageByChannelTs("C_BLOCKS", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackMessageByChannelTs("C_BLOCKS", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("slack-post preserves supplied blocks end to end and records agent provenance", async () => {
@@ -183,8 +183,8 @@ describe("Slack tool Block Kit support", () => {
       unfurl_media: false,
     });
     expect(mockChatPostMessage.mock.calls[0]![0].blocks).toEqual(supplied);
-    expect(getSlackTreeMessage(contextKey)?.kind).toBe("tree");
-    expect(getSlackMessageByChannelTs("C_DIRECT", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackTreeMessage(contextKey))?.kind).toBe("tree");
+    expect((await getSlackMessageByChannelTs("C_DIRECT", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("slack-reply does not append provenance when the task thread has no v2 tree", async () => {
@@ -280,7 +280,7 @@ describe("Slack tool Block Kit support", () => {
       unfurl_links: false,
       unfurl_media: false,
     });
-    expect(getSlackMessageByChannelTs("C_START", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackMessageByChannelTs("C_START", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("rejects 50 supplied blocks when the task provenance footer would exceed Slack's cap", async () => {

@@ -143,7 +143,7 @@ describe("list-endpoint slimming", () => {
     expect((slimWf as unknown as Workflow).definition).toBeUndefined();
     expect((slimWf as unknown as Workflow).triggers).toBeUndefined();
 
-    const full = listWorkflows().find((w) => w.name === "Slim Workflow");
+    const full = (await listWorkflows()).find((w) => w.name === "Slim Workflow");
     expect(full?.definition.nodes).toHaveLength(2);
     expect(Array.isArray(full?.triggers)).toBe(true);
   });
@@ -231,13 +231,13 @@ describe("list-endpoint slimming", () => {
     const longText = "Q".repeat(2000);
     await createTaskExtended(longText, { agentId: "slim-agent-1" });
 
-    const slim = listRecentSessions({ limit: 50, slim: true });
+    const slim = await listRecentSessions({ limit: 50, slim: true });
     const slimSession = slim.find((s) => s.root.task.startsWith("Q"));
     expect(slimSession).toBeDefined();
     expect(slimSession?.root.task.length).toBeLessThan(longText.length);
     expect("output" in slimSession!.root).toBe(false);
 
-    const full = listRecentSessions({ limit: 50 });
+    const full = await listRecentSessions({ limit: 50 });
     const fullSession = full.find((s) => s.root.task === longText);
     expect(fullSession).toBeDefined();
     expect(fullSession?.root.task).toBe(longText);

@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createUser, deleteKv, getDb, getKv, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, deleteKv, getDbClient, getKv, initDb } from "../be/db";
 import { linkIdentity } from "../be/users";
 import {
   handleComment,
@@ -72,10 +72,10 @@ afterAll(async () => {
 });
 
 // Clear unmapped kv rows + tasks between tests to keep assertions independent.
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM kv_entries WHERE namespace = ?").run(UNMAPPED_NAMESPACE);
-  db.prepare("DELETE FROM agent_tasks").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM kv_entries WHERE namespace = ?", [UNMAPPED_NAMESPACE]);
+  await client.run("DELETE FROM agent_tasks");
 });
 
 // ── Helpers ──
@@ -168,19 +168,18 @@ function makeReviewEvent(
   };
 }
 
-function getMappedUserTaskCount(userId: string): number {
-  const row = getDb()
-    .prepare<{ n: number }, string>(
-      "SELECT COUNT(*) AS n FROM agent_tasks WHERE requestedByUserId = ?",
-    )
-    .get(userId);
+async function getMappedUserTaskCount(userId: string): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM agent_tasks WHERE requestedByUserId = ?",
+    [userId],
+  );
   return row?.n ?? 0;
 }
 
-function getLatestTaskText(): string | null {
-  const row = getDb()
-    .prepare<{ task: string }, []>("SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1")
-    .get();
+async function getLatestTaskText(): Promise<string | null> {
+  const row = await getDbClient().get<{ task: string }>(
+    "SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1",
+  );
   return row?.task ?? null;
 }
 
@@ -188,7 +187,7 @@ function getLatestTaskText(): string | null {
 
 describe("known github sender", () => {
   test("PR event from a mapped user populates requestedByUserId and writes no kv rows", async () => {
-    const user = createUser({ name: "Mapped User", email: "mapped@example.com" });
+    const user = await createUser({ name: "Mapped User", email: "mapped@example.com" });
     await linkIdentity(user.id, "github", "mapped-login", SYSTEM_ACTOR);
 
     const result = await handlePullRequest(makePREvent("mapped-login", 100));
@@ -200,7 +199,7 @@ describe("known github sender", () => {
   });
 
   test("PR with bot assignment from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Assigner", email: "assigner@example.com" });
+    const user = await createUser({ name: "Mapped Assigner", email: "assigner@example.com" });
     await linkIdentity(user.id, "github", "assigner", SYSTEM_ACTOR);
 
     const event: PullRequestEvent = {
@@ -212,7 +211,7 @@ describe("known github sender", () => {
     };
     const result = await handlePullRequest(event);
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
     expect(await getKv(UNMAPPED_NAMESPACE, "assigner:meta")).toBeNull();
@@ -220,7 +219,7 @@ describe("known github sender", () => {
   });
 
   test("comment event with bot mention from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
+    const user = await createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
     await linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
 
     const result = await handleComment(
@@ -228,7 +227,7 @@ describe("known github sender", () => {
       "issue_comment",
     );
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
     expect(await getKv(UNMAPPED_NAMESPACE, "commenter:meta")).toBeNull();
@@ -236,12 +235,12 @@ describe("known github sender", () => {
   });
 
   test("review event from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
+    const user = await createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
     await linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("reviewer"));
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
     expect(await getKv(UNMAPPED_NAMESPACE, "reviewer:meta")).toBeNull();
@@ -249,13 +248,13 @@ describe("known github sender", () => {
   });
 
   test("review event from mapped user renders the resolved identity pair, never the raw login", async () => {
-    const user = createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
+    const user = await createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
     await linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("pair-reviewer", 1001));
     expect(result.created).toBe(true);
 
-    const text = getLatestTaskText();
+    const text = await getLatestTaskText();
     expect(text).toContain("Pair Reviewer (github:pair-reviewer)");
   });
 });
@@ -268,7 +267,7 @@ describe("self-authored review suppression", () => {
 
     expect(result.created).toBe(false);
     expect(
-      getDb().prepare<{ n: number }, never>("SELECT COUNT(*) AS n FROM agent_tasks").get()?.n,
+      (await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks"))?.n,
     ).toBe(0);
     expect(await getKv(UNMAPPED_NAMESPACE, `${GITHUB_BOT_NAME}:meta`)).toBeNull();
   });
@@ -392,7 +391,7 @@ describe("unknown github sender", () => {
     const result = await handlePullRequestReview(makeReviewEvent("sentinel-ghost", 1002));
     expect(result.created).toBe(true);
 
-    const text = getLatestTaskText();
+    const text = await getLatestTaskText();
     expect(text).toContain("github:sentinel-ghost (unknown user)");
   });
 });

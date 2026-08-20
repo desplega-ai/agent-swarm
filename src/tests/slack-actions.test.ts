@@ -13,8 +13,8 @@ import { buildCancelledBlocks, getTaskLink } from "../slack/blocks";
 
 const TEST_DB_PATH = "./test-slack-actions.sqlite";
 
-let leadAgent: ReturnType<typeof createAgent>;
-let slackTask: ReturnType<typeof createTaskExtended>;
+let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+let slackTask: Awaited<ReturnType<typeof createTaskExtended>>;
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);

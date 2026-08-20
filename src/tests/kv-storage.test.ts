@@ -4,7 +4,7 @@ import {
   closeDb,
   countKv,
   deleteKv,
-  getDb,
+  getDbClient,
   getKv,
   incrKv,
   initDb,
@@ -38,9 +38,9 @@ describe("kv-storage helpers", () => {
     await clearDb();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // Tests use distinct keys per case; nothing to wipe between tests.
-    getDb().run(`DELETE FROM kv_entries WHERE namespace = ?`, [NS]);
+    await getDbClient().run(`DELETE FROM kv_entries WHERE namespace = ?`, [NS]);
   });
 
   test("get returns null for missing keys", async () => {
@@ -115,11 +115,10 @@ describe("kv-storage helpers", () => {
 
     expect(await sweepExpiredKvPrefix("mcp:overflow", now)).toBe(2);
     expect((await getKv("mcp:overflow:agent-b", "live-b"))?.value).toBe("live-b");
-    const unrelated = getDb()
-      .prepare<{ count: number }, [string, string]>(
-        "SELECT COUNT(*) AS count FROM kv_entries WHERE namespace = ? AND key = ?",
-      )
-      .get("mcp:other:agent-a", "unrelated");
+    const unrelated = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM kv_entries WHERE namespace = ? AND key = ?",
+      ["mcp:other:agent-a", "unrelated"],
+    );
     expect(unrelated?.count).toBe(1);
   });
 
@@ -145,11 +144,10 @@ describe("kv-storage helpers", () => {
     });
     expect(await getKv(NS, "ttl")).toBeNull();
     // Row should have been deleted by the lazy sweep
-    const raw = getDb()
-      .prepare<{ key: string }, [string, string]>(
-        `SELECT key FROM kv_entries WHERE namespace = ? AND key = ?`,
-      )
-      .get(NS, "ttl");
+    const raw = await getDbClient().get<{ key: string }>(
+      `SELECT key FROM kv_entries WHERE namespace = ? AND key = ?`,
+      [NS, "ttl"],
+    );
     expect(raw).toBeNull();
   });
 
@@ -176,11 +174,10 @@ describe("kv-storage helpers", () => {
     const all = await listKv(NS, { limit: 100, offset: 0 });
     expect(all.map((e) => e.key)).toEqual(["alive"]);
     // The expired row should still exist on disk because listKv doesn't sweep.
-    const stillThere = getDb()
-      .prepare<{ key: string }, [string, string]>(
-        `SELECT key FROM kv_entries WHERE namespace = ? AND key = ?`,
-      )
-      .get(NS, "exp");
+    const stillThere = await getDbClient().get<{ key: string }>(
+      `SELECT key FROM kv_entries WHERE namespace = ? AND key = ?`,
+      [NS, "exp"],
+    );
     expect(stillThere?.key).toBe("exp");
   });
 
@@ -202,8 +199,8 @@ describe("kv-storage helpers", () => {
     expect(exact.map((e) => e.key)).toEqual(["x_1"]);
   });
 
-  test("incrKv creates from missing", () => {
-    const entry = incrKv(NS, "counter", 3);
+  test("incrKv creates from missing", async () => {
+    const entry = await incrKv(NS, "counter", 3);
     expect(entry.value).toBe(3);
     expect(entry.valueType).toBe("integer");
   });
@@ -211,7 +208,7 @@ describe("kv-storage helpers", () => {
   test("incrKv increments existing integer", async () => {
     await incrKv(NS, "counter", 1);
     await incrKv(NS, "counter", 4);
-    const entry = incrKv(NS, "counter", -2);
+    const entry = await incrKv(NS, "counter", -2);
     expect(entry.value).toBe(3);
   });
 
@@ -223,7 +220,7 @@ describe("kv-storage helpers", () => {
       valueType: "integer",
       expiresAt: Date.now() - 1,
     });
-    const entry = incrKv(NS, "decay", 5);
+    const entry = await incrKv(NS, "decay", 5);
     expect(entry.value).toBe(5);
     expect(entry.expiresAt).toBeNull();
   });
@@ -244,7 +241,7 @@ describe("kv-storage helpers", () => {
 
   test("incrKv collides with string valueType", async () => {
     await upsertKv({ namespace: NS, key: "str", value: "5", valueType: "string" });
-    expect(() => incrKv(NS, "str", 1)).toThrow(KvTypeCollisionError);
+    await expect(incrKv(NS, "str", 1)).rejects.toThrow(KvTypeCollisionError);
   });
 
   test("2 MiB exactly succeeds; 2 MiB + 1 byte rejected via upsert encoder is N/A — boundary lives in HTTP/MCP layer", async () => {

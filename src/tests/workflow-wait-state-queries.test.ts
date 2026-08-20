@@ -325,14 +325,14 @@ describe("getStuckWaitRuns", () => {
   // nodeType='wait') → wait_states. We build that triple via the public
   // helpers so the test mirrors what `recoverWaitStates` will see in production.
   test("returns waits whose run+step are 'waiting' and wait_state is overdue (case b)", async () => {
-    const wf = makeWorkflow("stuck-wait-overdue");
-    const run = createWorkflowRun({
+    const wf = await makeWorkflow("stuck-wait-overdue");
+    const run = await createWorkflowRun({
       id: crypto.randomUUID(),
       workflowId: wf.id,
     });
     await updateWorkflowRun(run.id, { status: "waiting" });
 
-    const step = createWorkflowRunStep({
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "w1",
@@ -360,14 +360,14 @@ describe("getStuckWaitRuns", () => {
   });
 
   test("returns waits whose status is non-pending while the step is still waiting (case a)", async () => {
-    const wf = makeWorkflow("stuck-wait-fired-while-down");
-    const run = createWorkflowRun({
+    const wf = await makeWorkflow("stuck-wait-fired-while-down");
+    const run = await createWorkflowRun({
       id: crypto.randomUUID(),
       workflowId: wf.id,
     });
     await updateWorkflowRun(run.id, { status: "waiting" });
 
-    const step = createWorkflowRunStep({
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "w2",
@@ -392,11 +392,11 @@ describe("getStuckWaitRuns", () => {
   });
 
   test("excludes runs that aren't 'waiting' or steps that aren't 'wait' nodeType", async () => {
-    const wf = makeWorkflow("stuck-wait-excludes");
+    const wf = await makeWorkflow("stuck-wait-excludes");
     // Run NOT in waiting state — should be excluded.
-    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
     // Leave run.status default (running)
-    const step = createWorkflowRunStep({
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "w3",

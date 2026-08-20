@@ -71,7 +71,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-ok",
       transport: "http",
       url: "https://mcp.example.com",
@@ -112,7 +112,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-lowercase-bearer",
       transport: "http",
       url: "https://mcp.example.com",
@@ -151,7 +151,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-mac",
       transport: "http",
       url: "https://mcp.example.com",
@@ -187,7 +187,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-no-token",
       transport: "http",
       url: "https://mcp.example.com",
@@ -211,7 +211,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-expired",
       transport: "http",
       url: "https://mcp.example.com",
@@ -250,7 +250,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-oauth-strip",
       transport: "http",
       url: "https://mcp.example.com",
@@ -285,7 +285,7 @@ describe("resolveSecrets integration — OAuth Authorization injection", () => {
       status: "idle",
       isLead: false,
     });
-    const mcp = createMcpServer({
+    const mcp = await createMcpServer({
       name: "mcp-static",
       transport: "http",
       url: "https://mcp.example.com",

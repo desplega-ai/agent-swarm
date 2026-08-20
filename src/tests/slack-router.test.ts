@@ -51,7 +51,7 @@ describe("Slack router — thread follow-up routing", () => {
         slackUserId: "U_HUMAN",
       });
 
-      const matches = routeMessage("<@BOT123> check the status", "BOT123", true, {
+      const matches = await routeMessage("<@BOT123> check the status", "BOT123", true, {
         channelId,
         threadTs,
       });
@@ -63,8 +63,8 @@ describe("Slack router — thread follow-up routing", () => {
   });
 
   describe("message in thread with no active worker falls through to lead", () => {
-    test("routes to lead when no tasks exist in thread", () => {
-      const matches = routeMessage("<@BOT123> do something", "BOT123", true, {
+    test("routes to lead when no tasks exist in thread", async () => {
+      const matches = await routeMessage("<@BOT123> do something", "BOT123", true, {
         channelId: "C200",
         threadTs: "2000.0001",
       });
@@ -97,7 +97,10 @@ describe("Slack router — thread follow-up routing", () => {
         slackUserId: "U_HUMAN",
       });
 
-      const matches = routeMessage("<@BOT123> follow up", "BOT123", true, { channelId, threadTs });
+      const matches = await routeMessage("<@BOT123> follow up", "BOT123", true, {
+        channelId,
+        threadTs,
+      });
 
       // Should route to lead via thread follow-up fallback (not generic @bot)
       expect(matches).toHaveLength(1);
@@ -129,7 +132,7 @@ describe("Slack router — thread follow-up routing", () => {
       });
 
       // Message explicitly targets worker2 via swarm#<uuid>
-      const matches = routeMessage(
+      const matches = await routeMessage(
         `<@BOT123> swarm#${worker2.id} do this instead`,
         "BOT123",
         true,
@@ -155,7 +158,7 @@ describe("Slack router — thread follow-up routing", () => {
         slackUserId: "U_HUMAN",
       });
 
-      const matches = routeMessage("<@BOT123> swarm#all deploy everything", "BOT123", true, {
+      const matches = await routeMessage("<@BOT123> swarm#all deploy everything", "BOT123", true, {
         channelId,
         threadTs,
       });
@@ -169,16 +172,16 @@ describe("Slack router — thread follow-up routing", () => {
   });
 
   describe("no thread context behaves normally", () => {
-    test("routes to lead when bot mentioned without thread context", () => {
-      const matches = routeMessage("<@BOT123> hello", "BOT123", true);
+    test("routes to lead when bot mentioned without thread context", async () => {
+      const matches = await routeMessage("<@BOT123> hello", "BOT123", true);
 
       expect(matches).toHaveLength(1);
       expect(matches[0].agent.id).toBe(leadAgent.id);
       expect(matches[0].matchedText).toBe("@bot");
     });
 
-    test("returns empty when bot not mentioned and no thread context", () => {
-      const matches = routeMessage("hello everyone", "BOT123", false);
+    test("returns empty when bot not mentioned and no thread context", async () => {
+      const matches = await routeMessage("hello everyone", "BOT123", false);
 
       expect(matches).toHaveLength(0);
     });

@@ -13,7 +13,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createUser, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, getDbClient, initDb } from "../be/db";
 import { flushAuditBuffer } from "../be/rbac-audit";
 import { attachRole, detachRole, ensureRbacSeedsSynced } from "../be/rbac-roles";
 import { type IdentityActor, mintToken } from "../be/users";
@@ -121,26 +121,24 @@ async function api(
   return { status: res.status, body: parsed };
 }
 
-function createTokenForUser(name: string): { userId: string; plaintext: string } {
-  const user = createUser({ name });
-  const { plaintext } = mintToken(user.id, "admission", ACTOR);
+async function createTokenForUser(name: string): Promise<{ userId: string; plaintext: string }> {
+  const user = await createUser({ name });
+  const { plaintext } = await mintToken(user.id, "admission", ACTOR);
   return { userId: user.id, plaintext };
 }
 
-async function narrowUserToRequester(userId: string): void {
+async function narrowUserToRequester(userId: string): Promise<void> {
   await detachRole(userId, "admin");
   await attachRole(userId, "requester");
 }
 
-function admissionAuditRows(): AdmissionAuditRow[] {
-  return getDb()
-    .prepare(
-      `SELECT principalType, principalId, verb, resourceType, resourceId, decision, reason, source
+async function admissionAuditRows(): Promise<AdmissionAuditRow[]> {
+  return getDbClient().query<AdmissionAuditRow>(
+    `SELECT principalType, principalId, verb, resourceType, resourceId, decision, reason, source
        FROM permission_audit
        WHERE resourceType = 'http-route'
        ORDER BY ts, id`,
-    )
-    .all() as AdmissionAuditRow[];
+  );
 }
 
 let savedEnv: NodeJS.ProcessEnv;
@@ -165,7 +163,7 @@ beforeEach(async () => {
   ensureRbacSeedsSynced({ quiet: true });
   await createAgent({ id: LEAD_ID, name: "Admission Lead", isLead: true, status: "idle" });
   await flushAuditBuffer();
-  getDb().run("DELETE FROM permission_audit");
+  await getDbClient().run("DELETE FROM permission_audit");
 
   server = createTestServer();
   port = await listen(server);
@@ -360,7 +358,7 @@ describe("decideToolAdmission", () => {
 
 describe("handleCore admission wiring", () => {
   test("flag off leaves narrowed user-token REST writes untouched and unaudited", async () => {
-    const { userId, plaintext } = createTokenForUser("Flag Off User");
+    const { userId, plaintext } = await createTokenForUser("Flag Off User");
     await detachRole(userId, "admin");
 
     const res = await api(port, "POST", "/api/tasks", {
@@ -370,13 +368,13 @@ describe("handleCore admission wiring", () => {
 
     expect(res.status).toBe(201);
     await flushAuditBuffer();
-    expect(admissionAuditRows()).toEqual([]);
+    expect(await admissionAuditRows()).toEqual([]);
   });
 
   test("OAuth authorize-url GET uses its declared verb instead of the GET fallback", async () => {
     const { userId: requesterId, plaintext: requesterToken } =
-      createTokenForUser("OAuth Requester User");
-    narrowUserToRequester(requesterId);
+      await createTokenForUser("OAuth Requester User");
+    await narrowUserToRequester(requesterId);
 
     process.env.RBAC_ENABLED = "true";
 
@@ -388,7 +386,7 @@ describe("handleCore admission wiring", () => {
       error: "Forbidden: admission: missing permission 'mcp-oauth.authorize.any'",
     });
 
-    const { plaintext: adminToken } = createTokenForUser("OAuth Admin User");
+    const { plaintext: adminToken } = await createTokenForUser("OAuth Admin User");
     const admin = await api(port, "GET", "/api/mcp-oauth/missing-server/authorize-url", {
       bearer: adminToken,
     });
@@ -405,7 +403,7 @@ describe("handleCore admission wiring", () => {
 
     await flushAuditBuffer();
     expect(
-      admissionAuditRows().find(
+      (await admissionAuditRows()).find(
         (row) =>
           row.principalId === requesterId &&
           row.resourceId === "GET /api/mcp-oauth/{mcpServerId}/authorize-url",
@@ -420,7 +418,7 @@ describe("handleCore admission wiring", () => {
 
   test("flag on default-admin users bypass admission and preserve no-op behavior", async () => {
     process.env.RBAC_ENABLED = "true";
-    const { plaintext } = createTokenForUser("Default Admin User");
+    const { plaintext } = await createTokenForUser("Default Admin User");
 
     const res = await api(port, "POST", "/api/tasks", {
       bearer: plaintext,
@@ -429,13 +427,13 @@ describe("handleCore admission wiring", () => {
 
     expect(res.status).toBe(201);
     await flushAuditBuffer();
-    expect(admissionAuditRows()).toEqual([]);
+    expect(await admissionAuditRows()).toEqual([]);
   });
 
   test("flag on requester grant denies verb-less writes, allows reads and declared verbs, and audits each decision", async () => {
     process.env.RBAC_ENABLED = "true";
-    const { userId, plaintext } = createTokenForUser("Requester User");
-    narrowUserToRequester(userId);
+    const { userId, plaintext } = await createTokenForUser("Requester User");
+    await narrowUserToRequester(userId);
 
     const denied = await api(port, "POST", "/api/tasks", {
       bearer: plaintext,
@@ -459,7 +457,7 @@ describe("handleCore admission wiring", () => {
     expect(declaredVerb.body).toEqual({ error: "Task not found" });
 
     await flushAuditBuffer();
-    const rows = admissionAuditRows();
+    const rows = await admissionAuditRows();
     expect(rows).toHaveLength(3);
 
     expect(rows.find((row) => row.resourceId === "POST /api/tasks")).toMatchObject({

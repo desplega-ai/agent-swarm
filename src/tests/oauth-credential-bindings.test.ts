@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   deleteOAuthTokens,
   getOAuthApp,
@@ -98,10 +98,10 @@ async function listen(server: Server): Promise<number> {
   return address.port;
 }
 
-function cleanupRows() {
-  const db = getDb();
-  db.run("DELETE FROM script_credential_bindings WHERE config_key LIKE 'PHASE2_%'");
-  db.run("DELETE FROM oauth_apps WHERE provider LIKE 'phase2-%'");
+async function cleanupRows(): Promise<void> {
+  const client = getDbClient();
+  await client.run("DELETE FROM script_credential_bindings WHERE config_key LIKE 'PHASE2_%'");
+  await client.run("DELETE FROM oauth_apps WHERE provider LIKE 'phase2-%'");
 }
 
 beforeAll(async () => {
@@ -112,15 +112,15 @@ beforeAll(async () => {
   await createAgent({ id: LEAD_ID, name: "OAuth Credential Lead", isLead: true, status: "idle" });
 });
 
-beforeEach(() => {
-  cleanupRows();
+beforeEach(async () => {
+  await cleanupRows();
   _clearPendingStates();
   process.env.PUBLIC_MCP_BASE_URL = "https://api.public.test";
   globalThis.fetch = originalFetch;
 });
 
-afterEach(() => {
-  cleanupRows();
+afterEach(async () => {
+  await cleanupRows();
   _clearPendingStates();
   globalThis.fetch = originalFetch;
   for (const key of Object.keys(process.env)) {
@@ -142,10 +142,9 @@ afterAll(async () => {
 
 describe("OAuth credential bindings", () => {
   test("migration columns round-trip through credential binding persistence", async () => {
-    const columns = getDb()
-      .query<{ name: string }, []>("PRAGMA table_info(script_credential_bindings)")
-      .all()
-      .map((column) => column.name);
+    const columns = (
+      await getDbClient().query<{ name: string }>("PRAGMA table_info(script_credential_bindings)")
+    ).map((column) => column.name);
     expect(columns).toContain("auth_kind");
     expect(columns).toContain("oauth_authorization_id");
 
@@ -154,9 +153,9 @@ describe("OAuth credential bindings", () => {
       accessToken: "roundtrip-access",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
-    const authorizationId = getOAuthTokens("phase2-roundtrip")!.id;
+    const authorizationId = (await getOAuthTokens("phase2-roundtrip"))!.id;
 
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "PHASE2_ROUNDTRIP_OAUTH",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_ROUNDTRIP_OAUTH]",
@@ -167,7 +166,7 @@ describe("OAuth credential bindings", () => {
     expect(binding.authKind).toBe("oauth");
     expect(binding.oauthAuthorizationId).toBe(authorizationId);
 
-    const listed = listRelationalCredentialBindings({ includeInactive: true }).find(
+    const listed = (await listRelationalCredentialBindings({ includeInactive: true })).find(
       (item) => item.id === binding.id,
     );
     expect(listed?.authKind).toBe("oauth");
@@ -186,7 +185,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_RESOLVE_OAUTH]",
       authKind: "oauth",
-      oauthAuthorizationId: getOAuthTokens("phase2-resolve")!.id,
+      oauthAuthorizationId: (await getOAuthTokens("phase2-resolve"))!.id,
     });
     process.env.PHASE2_RESOLVE_OAUTH = "env-must-not-win";
 
@@ -212,7 +211,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_REFRESH_OAUTH]",
       authKind: "oauth",
-      oauthAuthorizationId: getOAuthTokens("phase2-refresh")!.id,
+      oauthAuthorizationId: (await getOAuthTokens("phase2-refresh"))!.id,
     });
 
     const fetchSpy = mock((input: string | URL | Request, init?: RequestInit) => {
@@ -243,7 +242,7 @@ describe("OAuth credential bindings", () => {
         value: "new-access-token",
       }),
     );
-    expect(getOAuthTokens("phase2-refresh")?.refreshToken).toBe("new-refresh-token");
+    expect((await getOAuthTokens("phase2-refresh"))?.refreshToken).toBe("new-refresh-token");
   });
 
   test("basic tokenAuthStyle + json tokenBodyFormat reach the token endpoint (Notion-style)", async () => {
@@ -261,10 +260,10 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BASIC_OAUTH]",
       authKind: "oauth",
-      oauthAuthorizationId: getOAuthTokens("phase2-basic")!.id,
+      oauthAuthorizationId: (await getOAuthTokens("phase2-basic"))!.id,
     });
 
-    const config = getOAuthProviderConfig("phase2-basic");
+    const config = await getOAuthProviderConfig("phase2-basic");
     expect(config?.tokenAuthStyle).toBe("basic");
     expect(config?.tokenBodyFormat).toBe("json");
 
@@ -307,7 +306,7 @@ describe("OAuth credential bindings", () => {
 
   test("generic OAuth authorize URL uses space-separated scopes", async () => {
     await upsertOAuthApp("phase2-scopes", testApp("phase2-scopes"));
-    const config = getOAuthProviderConfig("phase2-scopes");
+    const config = await getOAuthProviderConfig("phase2-scopes");
     expect(config).not.toBeNull();
     if (!config) throw new Error("missing provider config");
     const { url } = await buildAuthorizationUrl(config);
@@ -321,7 +320,7 @@ describe("OAuth credential bindings", () => {
       metadata: JSON.stringify({ actor: "app" }),
     });
 
-    expect(getOAuthProviderConfig("phase2-actor")?.extraParams).toEqual({ actor: "app" });
+    expect((await getOAuthProviderConfig("phase2-actor"))?.extraParams).toEqual({ actor: "app" });
   });
 
   test("credential-bindings tool now accepts tracker providers (reserved carve-out removed in step-8)", async () => {
@@ -341,7 +340,7 @@ describe("OAuth credential bindings", () => {
     // linear/jira are ordinary oauth_apps rows now — no reserved-provider block.
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).not.toContain("dedicated tracker");
-    expect(getOAuthApp("jira")?.clientId).toBe("jira-client");
+    expect((await getOAuthApp("jira"))?.clientId).toBe("jira-client");
   });
 
   test("credential-bindings tool validates OAuth app URLs in production", async () => {
@@ -362,7 +361,7 @@ describe("OAuth credential bindings", () => {
 
     expect(rejected.structuredContent.success).toBe(false);
     expect(rejected.structuredContent.message).toMatch(/private IPv4|insecure/);
-    expect(getOAuthApp("phase2-tool-unsafe")).toBeNull();
+    expect(await getOAuthApp("phase2-tool-unsafe")).toBeNull();
 
     const accepted = (await credentialBindingsTool().handler(
       {
@@ -378,7 +377,7 @@ describe("OAuth credential bindings", () => {
     )) as ToolResult;
 
     expect(accepted.structuredContent.success).toBe(true);
-    expect(getOAuthApp("phase2-tool-safe")?.clientId).toBe("safe-client");
+    expect((await getOAuthApp("phase2-tool-safe"))?.clientId).toBe("safe-client");
   });
 
   test("failed OAuth token refresh skips only that binding, others still resolve", async () => {
@@ -393,7 +392,7 @@ describe("OAuth credential bindings", () => {
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:PHASE2_BROKEN_OAUTH]",
       authKind: "oauth",
-      oauthAuthorizationId: getOAuthTokens("phase2-broken")!.id,
+      oauthAuthorizationId: (await getOAuthTokens("phase2-broken"))!.id,
     });
     await upsertCredentialBinding({
       configKey: "PHASE2_HEALTHY_CONFIG",
@@ -429,7 +428,7 @@ describe("OAuth credential bindings", () => {
       accessToken: "soon-deleted",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
-    const authorizationId = getOAuthTokens("phase2-missing")!.id;
+    const authorizationId = (await getOAuthTokens("phase2-missing"))!.id;
     await upsertCredentialBinding({
       configKey: "PHASE2_MISSING_OAUTH",
       allowedHosts: ["api.vendor.test"],
@@ -459,7 +458,7 @@ describe("OAuth credential bindings", () => {
   test("generic OAuth callback exchanges code and stores tokens", async () => {
     const provider = "phase2-callback";
     await upsertOAuthApp(provider, testApp(provider));
-    const config = getOAuthProviderConfig(provider);
+    const config = await getOAuthProviderConfig(provider);
     if (!config) throw new Error("missing test oauth config");
     const { state } = await buildAuthorizationUrl(config);
 
@@ -489,7 +488,7 @@ describe("OAuth credential bindings", () => {
 
       expect(res.status).toBe(200);
       expect(await res.text()).toContain("You can close this tab.");
-      const tokens = getOAuthTokens(provider);
+      const tokens = await getOAuthTokens(provider);
       expect(tokens?.accessToken).toBe("callback-access-token");
       expect(tokens?.refreshToken).toBe("callback-refresh-token");
     } finally {

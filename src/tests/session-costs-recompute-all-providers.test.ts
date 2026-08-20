@@ -10,7 +10,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -68,12 +68,12 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
   // Wipe everything we explicitly inserted (effective_from > 0); leave the
   // migration-046 codex seeds alone.
-  db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -285,9 +285,10 @@ describe("Migration 128 — modelBreakdown persistence", () => {
       }),
     });
     expect(post.status).toBe(201);
-    getDb()
-      .prepare("UPDATE session_costs SET modelBreakdown = ? WHERE sessionId = ?")
-      .run("{not json", "breakdown-corrupt");
+    await getDbClient().run("UPDATE session_costs SET modelBreakdown = ? WHERE sessionId = ?", [
+      "{not json",
+      "breakdown-corrupt",
+    ]);
 
     const res = await authedFetch(`/api/session-costs?agentId=${testAgent.id}`);
     expect(res.status).toBe(200);

@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
@@ -58,7 +58,7 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(async () => {
+    const result = await getDbClient().transaction(async () => {
       const agent = await getAgentById(myAgentId);
 
       if (!agent) {
@@ -74,7 +74,6 @@ async function handleRequest(
       return { error: false };
     });
 
-    const result = tx();
     if (result.error) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -88,7 +87,7 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const tx = getDb().transaction(async () => {
+    const result = await getDbClient().transaction(async () => {
       const agent = await getAgentById(myAgentId);
 
       if (!agent) {
@@ -99,7 +98,6 @@ async function handleRequest(
       return { error: false };
     });
 
-    const result = tx();
     if (result.error) {
       return { status: 404, body: { error: "Agent not found" } };
     }
@@ -133,7 +131,7 @@ async function handleRequest(
     !pathSegments[3]
   ) {
     const taskId = pathSegments[2];
-    const task = getDb().query("SELECT * FROM agent_tasks WHERE id = ?").get(taskId) as unknown;
+    const task = await getDbClient().get("SELECT * FROM agent_tasks WHERE id = ?", [taskId]);
 
     if (!task) {
       return { status: 404, body: { error: "Task not found" } };
@@ -142,14 +140,18 @@ async function handleRequest(
     // Mirror the real `GET /api/tasks/:id` handler in `src/http/tasks.ts`
     // by decorating the row with `attachments`. The mock omits `logs` since
     // those tests live elsewhere; attachments are cheap enough to inline.
-    const attachments = getTaskAttachments(taskId);
+    const attachments = await getTaskAttachments(taskId);
     return { status: 200, body: { ...(task as object), attachments } };
   }
 
   // GET /api/stats - Dashboard summary stats
   if (req.method === "GET" && pathSegments[0] === "api" && pathSegments[1] === "stats") {
-    const agents = getDb().query("SELECT * FROM agents").all() as Array<{ status: string }>;
-    const tasks = getDb().query("SELECT * FROM agent_tasks").all() as Array<{ status: string }>;
+    const agents = (await getDbClient().query("SELECT * FROM agents")) as Array<{
+      status: string;
+    }>;
+    const tasks = (await getDbClient().query("SELECT * FROM agent_tasks")) as Array<{
+      status: string;
+    }>;
 
     const stats = {
       agents: {
@@ -486,12 +488,10 @@ describe("REST API Endpoints", () => {
       });
 
       // Update profile fields via SQL since createAgent doesn't accept them
-      getDb().run("UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?", [
-        "Test description",
-        "Test role",
-        JSON.stringify(["test-cap-1", "test-cap-2"]),
-        agentId,
-      ]);
+      await getDbClient().run(
+        "UPDATE agents SET description = ?, role = ?, capabilities = ? WHERE id = ?",
+        ["Test description", "Test role", JSON.stringify(["test-cap-1", "test-cap-2"]), agentId],
+      );
 
       const response = await fetch(`${baseUrl}/api/agents/${agentId}`);
 

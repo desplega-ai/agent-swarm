@@ -17,7 +17,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { Counter } from "@opentelemetry/api";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { SessionCostMetric } from "../otel";
@@ -206,10 +206,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
+afterEach(async () => {
   recordSessionCostSpy.mockClear();
-  getDb().prepare("DELETE FROM session_costs").run();
-  getDb().prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 function authedPost(body: Record<string, unknown>): Promise<Response> {

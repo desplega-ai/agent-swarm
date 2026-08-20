@@ -896,7 +896,7 @@ describe("Session Costs API", () => {
 
     test("byUser splits requester spend from unattributed spend", async () => {
       const agent = await createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "ByUser Requester" });
+      const user = await createUser({ name: "ByUser Requester" });
       const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
       const autonomous = await createTaskExtended("Heartbeat task");
 
@@ -935,7 +935,7 @@ describe("Session Costs API", () => {
 
     test("userId filter selects one requester, and `unattributed` selects the rest", async () => {
       const agent = await createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "UserFilter Requester" });
+      const user = await createUser({ name: "UserFilter Requester" });
       const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
       const autonomous = await createTaskExtended("Autonomous task");
 

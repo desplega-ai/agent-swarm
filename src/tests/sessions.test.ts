@@ -33,8 +33,8 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     }
   });
 
-  test("empty chain — no rows for non-existent root", () => {
-    const chain = getRootTaskChain("nonexistent-root-id");
+  test("empty chain — no rows for non-existent root", async () => {
+    const chain = await getRootTaskChain("nonexistent-root-id");
     expect(chain).toEqual([]);
   });
 
@@ -47,7 +47,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     });
     const root = await createTaskExtended("root only", { agentId: agent.id });
 
-    const chain = getRootTaskChain(root.id);
+    const chain = await getRootTaskChain(root.id);
     expect(chain).toHaveLength(1);
     expect(chain[0].id).toBe(root.id);
     expect(chain[0].parentTaskId).toBeUndefined();
@@ -70,7 +70,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
       parentTaskId: child.id,
     });
 
-    const chain = getRootTaskChain(root.id);
+    const chain = await getRootTaskChain(root.id);
     expect(chain).toHaveLength(3);
 
     // ordered by createdAt — root first, then child, then grandchild
@@ -97,7 +97,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
       parentTaskId: root.id,
     });
 
-    const chain = getRootTaskChain(root.id);
+    const chain = await getRootTaskChain(root.id);
     expect(chain).toHaveLength(3);
     expect(chain[0].id).toBe(root.id);
     // siblings appear in createdAt order (sibA before sibB)
@@ -105,8 +105,8 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(ids.indexOf(sibA.id)).toBeLessThan(ids.indexOf(sibB.id));
   });
 
-  test("listRecentSessions returns root tasks with chain summary", () => {
-    const sessions = listRecentSessions({ limit: 50 });
+  test("listRecentSessions returns root tasks with chain summary", async () => {
+    const sessions = await listRecentSessions({ limit: 50 });
     // We've created multiple roots above; each non-empty session must surface.
     expect(sessions.length).toBeGreaterThanOrEqual(3);
 
@@ -135,16 +135,16 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(single?.chainTaskCount).toBe(1);
   });
 
-  test("listRecentSessions ordered by lastActivityAt DESC", () => {
-    const sessions = listRecentSessions({ limit: 50 });
+  test("listRecentSessions ordered by lastActivityAt DESC", async () => {
+    const sessions = await listRecentSessions({ limit: 50 });
     for (let i = 1; i < sessions.length; i++) {
       expect(sessions[i - 1].lastActivityAt >= sessions[i].lastActivityAt).toBe(true);
     }
   });
 
   test("listRecentSessions — requestedByUserId filter: positive / negative / NULL exclusion / compat", async () => {
-    const userA = createUser({ name: "Test User A" });
-    const userB = createUser({ name: "Test User B" });
+    const userA = await createUser({ name: "Test User A" });
+    const userB = await createUser({ name: "Test User B" });
 
     const agent = await createAgent({
       id: "sessions-test-agent-user-filter",
@@ -166,7 +166,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     });
 
     // Positive: user A sees only their own sessions
-    const aOnly = listRecentSessions({ limit: 50, requestedByUserId: userA.id });
+    const aOnly = await listRecentSessions({ limit: 50, requestedByUserId: userA.id });
     const aTasks = aOnly.map((s) => s.root.task);
     expect(aTasks).toContain("user-a session 1");
     expect(aTasks).toContain("user-a session 2");
@@ -184,11 +184,14 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(hasNullInA).toBe(false);
 
     // Empty: unknown user ID returns empty list
-    const nobody = listRecentSessions({ limit: 50, requestedByUserId: "non-existent-user-id" });
+    const nobody = await listRecentSessions({
+      limit: 50,
+      requestedByUserId: "non-existent-user-id",
+    });
     expect(nobody).toHaveLength(0);
 
     // Compat: no filter returns all sessions including NULL rows and both users
-    const all = listRecentSessions({ limit: 100 });
+    const all = await listRecentSessions({ limit: 100 });
     expect(all.some((s) => s.root.requestedByUserId == null)).toBe(true);
     expect(all.some((s) => s.root.requestedByUserId === userA.id)).toBe(true);
     expect(all.some((s) => s.root.requestedByUserId === userB.id)).toBe(true);
@@ -206,7 +209,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     });
     expect(root.title).toBeUndefined();
 
-    const updated = updateTaskTitle(root.id, "Flaky deploy investigation");
+    const updated = await updateTaskTitle(root.id, "Flaky deploy investigation");
     expect(updated?.title).toBe("Flaky deploy investigation");
 
     // Full mode carries the title through untruncated.
@@ -232,7 +235,7 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(await countSessions({ q: "flaky deploy pipeline" })).toBe(byPrompt.length);
 
     // Clearing (empty string) reverts to the prompt fallback.
-    const cleared = updateTaskTitle(root.id, "");
+    const cleared = await updateTaskTitle(root.id, "");
     expect(cleared?.title).toBeUndefined();
     const afterClear = (await listRecentSessions({ limit: 50 })).find((s) => s.root.id === root.id);
     expect(afterClear?.root.title).toBeUndefined();

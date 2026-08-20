@@ -14,7 +14,7 @@ import {
   createAgent,
   createTaskExtended,
   getChildTasks,
-  getDb,
+  getDbClient,
   getLogsByTaskId,
   getTaskById,
   initDb,
@@ -58,12 +58,13 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     setBeforeHeartbeatSupersedeForTests(null);
-    getDb().run("DELETE FROM tracker_sync");
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
-    getDb().run("DELETE FROM active_sessions");
+    const db = getDbClient();
+    await db.run("DELETE FROM tracker_sync");
+    await db.run("DELETE FROM agent_tasks");
+    await db.run("DELETE FROM agents");
+    await db.run("DELETE FROM active_sessions");
   });
 
   // --------------------------------------------------------------------------
@@ -77,7 +78,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
 
     // 10 min stale — past the 5 min no-session threshold.
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -90,7 +94,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(updatedParent?.status).toBe("superseded");
 
     // A resume follow-up child exists.
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(1);
     const resume = children[0]!;
     expect(resume.taskType).toBe("resume");
@@ -99,7 +103,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(resume.tags).toContain(`${RESUME_GENERATION_TAG_PREFIX}1`);
     expect(resume.id).toBe(findings.autoResumedTasks[0]!.resumeTaskId);
 
-    const supersedeLog = getLogsByTaskId(parent.id).find(
+    const supersedeLog = (await getLogsByTaskId(parent.id)).find(
       (log) => log.eventType === "task_superseded",
     );
     expect(supersedeLog).toBeTruthy();
@@ -121,7 +125,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     await startTask(parent.id);
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -133,7 +140,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     const updatedParent = await getTaskById(parent.id);
     expect(updatedParent?.status).toBe("failed");
     expect(updatedParent?.failureReason).toBe(RESUME_BUDGET_EXHAUSTED_REASON);
-    expect(getChildTasks(parent.id).length).toBe(0);
+    expect((await getChildTasks(parent.id)).length).toBe(0);
   });
 
   test("Case A: supersede race does not create a resume child or repoint tracker_sync", async () => {
@@ -153,7 +160,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     });
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     setBeforeHeartbeatSupersedeForTests(async (task) => {
       expect(task.id).toBe(parent.id);
@@ -167,10 +177,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
 
     const updatedParent = await getTaskById(parent.id);
     expect(updatedParent?.status).toBe("completed");
-    expect(getChildTasks(parent.id).length).toBe(0);
+    expect((await getChildTasks(parent.id)).length).toBe(0);
 
-    expect(getTrackerSync("linear", "task", parent.id)).not.toBeNull();
-    const byExternal = getTrackerSyncByExternalId("linear", "task", "linear-race-issue");
+    expect(await getTrackerSync("linear", "task", parent.id)).not.toBeNull();
+    const byExternal = await getTrackerSyncByExternalId("linear", "task", "linear-race-issue");
     expect(byExternal?.swarmId).toBe(parent.id);
   });
 
@@ -187,7 +197,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     await startTask(parent.id);
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -199,7 +212,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(updatedParent?.status).toBe("failed");
 
     // No resume child was created.
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(0);
   });
 
@@ -224,7 +237,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(preexisting.status).toBe("pending");
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -237,7 +253,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(updatedParent?.status).toBe("failed");
 
     // Only the original pre-existing child remains — no second resume was created.
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(1);
     expect(children[0]!.id).toBe(preexisting.id);
   });
@@ -267,7 +283,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(delegated.status).toBe("pending");
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -280,7 +299,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(updatedParent?.status).toBe("superseded");
 
     // Children now: the original delegation + the new resume.
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(2);
     const resumeChild = children.find((c) => c.taskType === "resume");
     expect(resumeChild).not.toBeUndefined();
@@ -303,8 +322,11 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
 
     // Make both task and session heartbeat 20 min stale — past the 15 min threshold.
     const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
-    getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
+    await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
       oldTime,
       parent.id,
     ]);
@@ -318,7 +340,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     const updatedParent = await getTaskById(parent.id);
     expect(updatedParent?.status).toBe("superseded");
 
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(1);
     const resume = children[0]!;
     expect(resume.taskType).toBe("resume");
@@ -326,9 +348,10 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(resume.tags).toContain("reason:crash_recovery");
 
     // Orphan active_session row was cleaned up.
-    const remainingSessions = getDb()
-      .query("SELECT COUNT(*) as count FROM active_sessions WHERE taskId = ?")
-      .get(parent.id) as { count: number };
+    const remainingSessions = (await getDbClient().get(
+      "SELECT COUNT(*) as count FROM active_sessions WHERE taskId = ?",
+      [parent.id],
+    )) as { count: number };
     expect(remainingSessions.count).toBe(0);
   });
 
@@ -345,15 +368,21 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     // FKs are toggled off because this test only exercises the heartbeat path,
     // not the workflow engine itself (same pattern as task-supersede-resume.test.ts).
     const stepId = crypto.randomUUID();
-    getDb().exec("PRAGMA foreign_keys = OFF");
+    await getDbClient().run("PRAGMA foreign_keys = OFF");
     try {
-      getDb().run("UPDATE agent_tasks SET workflowRunStepId = ? WHERE id = ?", [stepId, parent.id]);
+      await getDbClient().run("UPDATE agent_tasks SET workflowRunStepId = ? WHERE id = ?", [
+        stepId,
+        parent.id,
+      ]);
     } finally {
-      getDb().exec("PRAGMA foreign_keys = ON");
+      await getDbClient().run("PRAGMA foreign_keys = ON");
     }
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -365,7 +394,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(findings.autoFailedTasks[0]!.reason).toBe("superseded_workflow_task");
 
     // No resume child was created.
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(0);
 
     const updatedParent = await getTaskById(parent.id);
@@ -392,7 +421,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
 
     // Force the default single-slot capacity so the capacity-ordering invariant
     // below is unambiguous.
-    getDb().run("UPDATE agents SET maxTasks = 1 WHERE id = ?", [agent.id]);
+    await getDbClient().run("UPDATE agents SET maxTasks = 1 WHERE id = ?", [agent.id]);
 
     // Stale on BOTH axes: the task hasn't updated in 10 min (past the no-session
     // threshold) AND the agent's lastActivityAt is 10 min old (far past
@@ -400,8 +429,14 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     // resume would have been released to the unassigned pool; the pin must now
     // hold regardless of staleness because the agent ID is stable across restart.
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
-    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
+    await getDbClient().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [
+      oldTime,
+      agent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
@@ -409,7 +444,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(findings.pinnedResumes.length).toBe(1);
     expect(findings.pinnedResumes[0]!.agentId).toBe(agent.id);
 
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(1);
     const resume = children[0]!;
     expect(resume.taskType).toBe("resume");
@@ -439,19 +474,25 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     });
 
     const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
-    getDb().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
       oldTime,
       parent.id,
     ]);
-    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+    await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+      oldTime,
+      parent.id,
+    ]);
+    await getDbClient().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [
+      oldTime,
+      agent.id,
+    ]);
 
     const findings = await codeLevelTriage();
 
     expect(findings.pinnedResumes.length).toBe(1);
     expect(findings.pinnedResumes[0]!.agentId).toBe(agent.id);
 
-    const resume = getChildTasks(parent.id)[0]!;
+    const resume = (await getChildTasks(parent.id))[0]!;
     expect(resume.taskType).toBe("resume");
     expect(resume.agentId).toBe(agent.id);
     expect(resume.status).toBe("pending");
@@ -463,11 +504,14 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     await startTask(parent.id);
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
     // Genuinely gone: a graceful close set the agent offline. The retained
     // `offline` gate must keep this routing to the pool. (The Phase 3 reaper
     // does NOT act here — it acts only on pinned, still-pending resumes.)
-    getDb().run("UPDATE agents SET status = 'offline' WHERE id = ?", [agent.id]);
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [agent.id]);
 
     const findings = await codeLevelTriage();
 
@@ -476,7 +520,7 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     expect(findings.autoResumedTasks.length).toBe(1);
     expect(findings.pinnedResumes.length).toBe(0);
 
-    const resume = getChildTasks(parent.id)[0]!;
+    const resume = (await getChildTasks(parent.id))[0]!;
     expect(resume.taskType).toBe("resume");
     // NOTE: we deliberately do NOT assert the resume's final agentId/status. The
     // resume is created `unassigned`, but `autoAssignPoolTasks` runs later in the
@@ -493,8 +537,14 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     await startTask(parent.id);
 
     const oldTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, parent.id]);
-    getDb().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [oldTime, agent.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      parent.id,
+    ]);
+    await getDbClient().run("UPDATE agents SET lastActivityAt = ? WHERE id = ?", [
+      oldTime,
+      agent.id,
+    ]);
 
     // First sweep pins the resume to the agent.
     const first = await codeLevelTriage();
@@ -506,13 +556,16 @@ describe("Heartbeat — supersede + resume (DES-523)", () => {
     // Age the pinned resume well past the stall threshold. It is `pending`, not
     // `in_progress`, so getStalledInProgressTasks cannot see it — no loop, no
     // second resume, and the agent's still-stale activity does not matter.
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [oldTime, resumeId]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      oldTime,
+      resumeId,
+    ]);
 
     const second = await codeLevelTriage();
     expect(second.autoResumedTasks.length).toBe(0);
     expect(second.pinnedResumes.length).toBe(0);
 
-    const children = getChildTasks(parent.id);
+    const children = await getChildTasks(parent.id);
     expect(children.length).toBe(1);
     expect(children[0]!.id).toBe(resumeId);
     expect((await getTaskById(resumeId))?.status).toBe("pending");

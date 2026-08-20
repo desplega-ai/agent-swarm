@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } fr
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import {
   getAuthorizationById,
   getOAuthApp,
@@ -144,15 +144,15 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   globalThis.fetch = originalFetch;
   setOpenapiSpecFetchForTesting(null);
   resetIntegrationsCatalogCacheForTesting();
-  getDb().run("DELETE FROM script_connections");
-  getDb().run("DELETE FROM script_credential_bindings");
-  getDb().run("DELETE FROM oauth_authorizations");
-  getDb().run("DELETE FROM oauth_apps");
-  getDb().run("DELETE FROM swarm_config");
+  await getDbClient().run("DELETE FROM script_connections");
+  await getDbClient().run("DELETE FROM script_credential_bindings");
+  await getDbClient().run("DELETE FROM oauth_authorizations");
+  await getDbClient().run("DELETE FROM oauth_apps");
+  await getDbClient().run("DELETE FROM swarm_config");
 });
 
 describe("/api/script-connections HTTP", () => {
@@ -196,14 +196,16 @@ describe("/api/script-connections HTTP", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { connection: { id: string } };
-    const bindingRow = getDb()
-      .prepare<{ header_template: string | null; query_template: string | null }, [string]>(
-        `SELECT b.header_template, b.query_template
+    const bindingRow = await getDbClient().get<{
+      header_template: string | null;
+      query_template: string | null;
+    }>(
+      `SELECT b.header_template, b.query_template
          FROM script_credential_bindings b
          JOIN script_connections c ON c.credential_binding_id = b.id
          WHERE c.id = ?`,
-      )
-      .get(body.connection.id);
+      [body.connection.id],
+    );
 
     expect(bindingRow?.header_template).toBeNull();
     expect(bindingRow?.query_template).toBe("api_key=[REDACTED:QUERY_AUTH_VENDOR_KEY]");
@@ -225,14 +227,13 @@ describe("/api/script-connections HTTP", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { connection: { id: string; allowedHosts: string[] } };
     expect(body.connection.allowedHosts).toEqual(["api.vendor.test"]);
-    const bindingRow = getDb()
-      .prepare<{ allowed_hosts_json: string }, [string]>(
-        `SELECT b.allowed_hosts_json
+    const bindingRow = await getDbClient().get<{ allowed_hosts_json: string }>(
+      `SELECT b.allowed_hosts_json
          FROM script_credential_bindings b
          JOIN script_connections c ON c.credential_binding_id = b.id
          WHERE c.id = ?`,
-      )
-      .get(body.connection.id);
+      [body.connection.id],
+    );
     expect(JSON.parse(bindingRow?.allowed_hosts_json ?? "[]")).toEqual(["api.vendor.test"]);
   });
 
@@ -260,7 +261,7 @@ describe("/api/script-connections HTTP", () => {
       value: SECRET_VALUE,
       isSecret: true,
     });
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "VENDOR_TOKEN",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_TOKEN]",
@@ -345,7 +346,7 @@ describe("/api/script-connections HTTP", () => {
     });
 
     expect(res.status).toBe(200);
-    const stored = getScriptConnectionById(connection.id);
+    const stored = await getScriptConnectionById(connection.id);
     expect(stored?.displayName).toBe("Renamed");
     expect(stored?.scope).toBe("agent");
     expect(stored?.scopeId).toBe(workerAgentId);
@@ -418,7 +419,7 @@ describe("/api/script-connections HTTP", () => {
 
     expect(updated.status).toBe(200);
     expect(requests).toEqual([firstUrl, secondUrl]);
-    const stored = getScriptConnectionById(createdBody.connection.id);
+    const stored = await getScriptConnectionById(createdBody.connection.id);
     expect(stored?.openapiSpecSource).toBe(secondUrl);
     expect(stored?.openapiSpecEtag).toBe('"two"');
   });
@@ -470,7 +471,9 @@ describe("/api/script-connections HTTP", () => {
     const body = (await res.json()) as { oauthApps: Array<Record<string, unknown>> };
     expect(body.oauthApps).toHaveLength(1);
     expect(typeof body.oauthApps[0]?.lastRefreshedAt).toBe("string");
-    expect(body.oauthApps[0]?.lastRefreshedAt).toBe(getOAuthTokens("vendor_oauth")?.updatedAt);
+    expect(body.oauthApps[0]?.lastRefreshedAt).toBe(
+      (await getOAuthTokens("vendor_oauth"))?.updatedAt,
+    );
     expect(res.text).not.toContain("access-token-should-not-leak");
     expect(res.text).not.toContain("refresh-token-should-not-leak");
   });
@@ -482,7 +485,7 @@ describe("/api/script-connections HTTP", () => {
       value: SECRET_VALUE,
       isSecret: true,
     });
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "VENDOR_TOKEN",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_TOKEN]",
@@ -562,8 +565,8 @@ describe("/api/script-connections HTTP", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true });
-    expect(getOAuthApp("vendor_oauth")).toBeNull();
-    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+    expect(await getOAuthApp("vendor_oauth")).toBeNull();
+    expect(await getOAuthTokens("vendor_oauth")).toBeNull();
   });
 
   test("DELETE oauth app by id does not revoke a same-provider sibling", async () => {
@@ -576,9 +579,9 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/callback",
       scopes: "read",
     });
-    const first = getOAuthApp("sibling_oauth");
+    const first = await getOAuthApp("sibling_oauth");
     if (!first) throw new Error("first app not created");
-    const firstAuth = upsertAuthorization({
+    const firstAuth = await upsertAuthorization({
       appId: first.id,
       accessToken: "first-access-token",
       status: "active",
@@ -587,17 +590,16 @@ describe("/api/script-connections HTTP", () => {
     // Second (newer) same-provider app — inserted directly because
     // upsertOAuthApp updates the existing provider row.
     const secondId = crypto.randomUUID();
-    getDb().run(
+    await getDbClient().run(
       `INSERT INTO oauth_apps
          (id, provider, clientId, clientSecret, clientSecretEncrypted,
           authorizeUrl, tokenUrl, redirectUri, scopes, createdAt)
        VALUES (?, 'sibling_oauth', 'second-client', 'second-secret', 0,
                'https://oauth.vendor.test/authorize', 'https://oauth.vendor.test/token',
                'https://api.public.test/api/oauth/callback', '[]', ?)`,
-      secondId,
-      "2035-06-01T00:00:00.000Z",
+      [secondId, "2035-06-01T00:00:00.000Z"],
     );
-    const secondAuth = upsertAuthorization({
+    const secondAuth = await upsertAuthorization({
       appId: secondId,
       accessToken: "second-access-token",
       status: "active",
@@ -611,13 +613,13 @@ describe("/api/script-connections HTTP", () => {
     expect(res.status).toBe(200);
 
     // Second app + its authorization are gone.
-    expect(getOAuthAppById(secondId)).toBeNull();
-    expect(getAuthorizationById(secondAuth.id)).toBeNull();
+    expect(await getOAuthAppById(secondId)).toBeNull();
+    expect(await getAuthorizationById(secondAuth.id)).toBeNull();
 
     // The oldest sibling's authorization is UNTOUCHED — the provider-keyed
     // revoke would have marked it 'revoked' (or dropped it).
-    expect(getAuthorizationById(firstAuth.id)?.status).toBe("active");
-    expect(getOAuthApp("sibling_oauth")?.id).toBe(first.id);
+    expect((await getAuthorizationById(firstAuth.id))?.status).toBe("active");
+    expect((await getOAuthApp("sibling_oauth"))?.id).toBe(first.id);
   });
 
   test("manual authorization refresh failure scrubs echoed secrets from the error", async () => {
@@ -629,9 +631,9 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/callback",
       scopes: "read",
     });
-    const app = getOAuthApp("leaky_oauth");
+    const app = await getOAuthApp("leaky_oauth");
     if (!app) throw new Error("app not created");
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId: app.id,
       accessToken: "leaky-access-token",
       refreshToken: "refresh-secret-should-not-leak",
@@ -670,7 +672,7 @@ describe("/api/script-connections HTTP", () => {
       redirectUri: "https://api.public.test/api/oauth/vendor_oauth/callback",
       scopes: "read",
     });
-    const existing = getOAuthApp("vendor_oauth");
+    const existing = await getOAuthApp("vendor_oauth");
     if (!existing) throw new Error("seed app not created");
 
     const res = await dispatch("/api/oauth-apps", {
@@ -686,7 +688,7 @@ describe("/api/script-connections HTTP", () => {
       },
     });
     expect(res.status).toBe(200);
-    const app = getOAuthAppById(existing.id);
+    const app = await getOAuthAppById(existing.id);
     expect(app?.clientId).toBe("updated-client");
     expect(app?.clientSecret).toBe("existing-client-secret");
     expect(app?.scopes).toBe("");
@@ -727,8 +729,8 @@ describe("/api/script-connections HTTP", () => {
 
     // Two distinct rows; the first row's credentials are untouched.
     expect(secondId).not.toBe(firstId);
-    const firstApp = getOAuthAppById(firstId);
-    const secondApp = getOAuthAppById(secondId);
+    const firstApp = await getOAuthAppById(firstId);
+    const secondApp = await getOAuthAppById(secondId);
     expect(firstApp?.clientId).toBe("first-client");
     expect(firstApp?.clientSecret).toBe("first-secret");
     expect(firstApp?.authorizeUrl).toBe("https://oauth.vendor.test/authorize");
@@ -778,11 +780,11 @@ describe("/api/script-connections HTTP", () => {
       },
     });
     expect(edit.status).toBe(200);
-    expect(getOAuthAppById(firstId)?.clientId).toBe("edited-a");
-    expect(getOAuthAppById(firstId)?.clientSecret).toBe("secret-a-new");
+    expect((await getOAuthAppById(firstId))?.clientId).toBe("edited-a");
+    expect((await getOAuthAppById(firstId))?.clientSecret).toBe("secret-a-new");
     // Sibling is untouched.
-    expect(getOAuthAppById(secondId)?.clientId).toBe("orig-b");
-    expect(getOAuthAppById(secondId)?.clientSecret).toBe("secret-b");
+    expect((await getOAuthAppById(secondId))?.clientId).toBe("orig-b");
+    expect((await getOAuthAppById(secondId))?.clientSecret).toBe("secret-b");
   });
 
   test("POST without id and without clientSecret is rejected (create requires a secret)", async () => {
@@ -828,7 +830,7 @@ describe("/api/script-connections HTTP", () => {
 
     // linear/jira are ordinary rows now — the generic surface manages them.
     expect(res.status).toBe(200);
-    expect(getOAuthApp("linear")?.clientId).toBe("linear-client");
+    expect((await getOAuthApp("linear"))?.clientId).toBe("linear-client");
   });
 
   test("oauth app upsert rejects unsafe endpoint URLs in production and accepts public HTTPS", async () => {
@@ -849,7 +851,7 @@ describe("/api/script-connections HTTP", () => {
       });
       expect(rejected.status).toBe(400);
       expect(((await rejected.json()) as { error: string }).error).toMatch(/private IPv4|insecure/);
-      expect(getOAuthApp("unsafe_vendor")).toBeNull();
+      expect(await getOAuthApp("unsafe_vendor")).toBeNull();
 
       const accepted = await dispatch("/api/oauth-apps", {
         method: "POST",
@@ -864,7 +866,7 @@ describe("/api/script-connections HTTP", () => {
         },
       });
       expect(accepted.status).toBe(200);
-      expect(getOAuthApp("safe_vendor")?.clientId).toBe("safe-client");
+      expect((await getOAuthApp("safe_vendor"))?.clientId).toBe("safe-client");
     } finally {
       if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = previousNodeEnv;
@@ -1245,7 +1247,7 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ disconnected: true, revocationAttempted: false });
-    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+    expect(await getOAuthTokens("vendor_oauth")).toBeNull();
     expect(res.text).not.toContain(ACCESS_TOKEN);
   });
 
@@ -1270,7 +1272,7 @@ describe("DELETE /api/oauth-apps/{provider}/tokens", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ disconnected: true, revocationAttempted: true });
-    expect(getOAuthTokens("vendor_oauth")).toBeNull();
+    expect(await getOAuthTokens("vendor_oauth")).toBeNull();
 
     expect(captured).not.toBeNull();
     expect(captured?.url).toBe("https://oauth.vendor.test/revoke");
@@ -1383,7 +1385,7 @@ describe("POST /api/oauth-apps/{provider}/refresh", () => {
     expect(captured?.body).toContain("grant_type=refresh_token");
 
     // Response carries the NEW expiry from the mocked expires_in=7200.
-    const stored = getOAuthTokens("vendor_oauth");
+    const stored = await getOAuthTokens("vendor_oauth");
     expect(stored?.accessToken).toBe("new-access-token-should-not-leak");
     expect(body.expiresAt).toBe(stored?.expiresAt ?? "");
     expect(new Date(body.expiresAt ?? 0).getTime()).toBeGreaterThan(Date.now() + 3_600_000);
@@ -1438,7 +1440,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
       scopes: "read,write",
       requiresRefreshTokenRotation: true,
     });
-    const app = getOAuthApp("rotator");
+    const app = await getOAuthApp("rotator");
     if (!app) throw new Error("app not created");
     return upsertAuthorization({
       appId: app.id,
@@ -1470,7 +1472,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     // through the shared locked refresh core means a genuine rotation failure
     // now also marks the row refresh-failed — correct, since the old refresh
     // token may be provider-invalidated, so the sweep must retry it.
-    const after = getAuthorizationById(authorization.id);
+    const after = await getAuthorizationById(authorization.id);
     expect(after?.lastRefreshedAt).toBeNull();
     expect(after?.accessToken).toBe("old-access-should-not-leak");
     expect(after?.refreshToken).toBe("old-refresh-should-not-leak");
@@ -1500,7 +1502,7 @@ describe("POST /api/oauth-authorizations/{id}/refresh", () => {
     expect(res.text).not.toContain("rotated-refresh-should-not-leak");
     const body = (await res.json()) as { ok: boolean; status: string };
     expect(body.ok).toBe(true);
-    const after = getAuthorizationById(authorization.id);
+    const after = await getAuthorizationById(authorization.id);
     expect(after?.lastRefreshedAt).not.toBeNull();
   });
 });

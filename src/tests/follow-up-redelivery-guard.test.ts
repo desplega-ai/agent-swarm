@@ -9,7 +9,7 @@ import {
   failTask,
   findCompletedTaskInThread,
   findRecentCancelledTaskInThread,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -50,7 +50,7 @@ describe("findCompletedTaskInThread", () => {
     await completeTask(task.id, "done");
 
     // Should find the completed task within a 2880-minute (48h) window
-    const result = findCompletedTaskInThread("C_DEDUP_1", "1000.0001", 2880);
+    const result = await findCompletedTaskInThread("C_DEDUP_1", "1000.0001", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
     expect(result!.status).toBe("completed");
@@ -71,7 +71,7 @@ describe("findCompletedTaskInThread", () => {
       slackThreadTs: "2000.0001",
     });
 
-    const result = findCompletedTaskInThread("C_DEDUP_2", "2000.0001", 2880);
+    const result = await findCompletedTaskInThread("C_DEDUP_2", "2000.0001", 2880);
     expect(result).toBeNull();
   });
 
@@ -93,13 +93,13 @@ describe("findCompletedTaskInThread", () => {
 
     // Backdate the lastUpdatedAt to 49 hours ago (beyond the 48h window)
     const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
       fortyNineHoursAgo,
       task.id,
     ]);
 
     // Should not find with a 48 hour window
-    const result = findCompletedTaskInThread("C_DEDUP_3", "3000.0001", 2880);
+    const result = await findCompletedTaskInThread("C_DEDUP_3", "3000.0001", 2880);
     expect(result).toBeNull();
   });
 
@@ -120,14 +120,14 @@ describe("findCompletedTaskInThread", () => {
     await completeTask(task.id, "done");
 
     // Search in a different thread — should not find
-    const result = findCompletedTaskInThread("C_DEDUP_4", "4000.9999", 2880);
+    const result = await findCompletedTaskInThread("C_DEDUP_4", "4000.9999", 2880);
     expect(result).toBeNull();
   });
 });
 
 describe("follow-up re-delegation guard logic", () => {
-  let leadAgent: ReturnType<typeof createAgent>;
-  let workerAgent: ReturnType<typeof createAgent>;
+  let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+  let workerAgent: Awaited<ReturnType<typeof createAgent>>;
 
   beforeAll(async () => {
     leadAgent = await createAgent({
@@ -173,7 +173,7 @@ describe("follow-up re-delegation guard logic", () => {
     expect(sourceTask!.slackThreadTs).toBe("5000.0001");
 
     // The guard should find the completed worker task
-    const recentCompleted = findCompletedTaskInThread(
+    const recentCompleted = await findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
       2880,
@@ -222,7 +222,7 @@ describe("follow-up re-delegation guard logic", () => {
     expect(sourceTask!.taskType).toBe("follow-up");
 
     // No completed tasks in this thread
-    const recentCompleted = findCompletedTaskInThread(
+    const recentCompleted = await findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
       2880,
@@ -246,7 +246,7 @@ describe("follow-up re-delegation guard logic", () => {
     });
     await cancelTask(task.id, "user cancelled");
 
-    const result = findRecentCancelledTaskInThread("C_CANCEL_1", "9000.0001", 2880);
+    const result = await findRecentCancelledTaskInThread("C_CANCEL_1", "9000.0001", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
     expect(result!.status).toBe("cancelled");
@@ -266,7 +266,7 @@ describe("follow-up re-delegation guard logic", () => {
     });
     await failTask(task.id, "cancelled");
 
-    const result = findRecentCancelledTaskInThread("C_CANCEL_2", "9000.0002", 2880);
+    const result = await findRecentCancelledTaskInThread("C_CANCEL_2", "9000.0002", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
     expect(result!.failureReason).toBe("cancelled");
@@ -286,7 +286,7 @@ describe("follow-up re-delegation guard logic", () => {
     });
     await failTask(task.id, "exit 130: aborted by user");
 
-    const result = findRecentCancelledTaskInThread("C_CANCEL_3", "9000.0003", 2880);
+    const result = await findRecentCancelledTaskInThread("C_CANCEL_3", "9000.0003", 2880);
     expect(result).not.toBeNull();
     expect(result!.id).toBe(task.id);
   });
@@ -305,7 +305,7 @@ describe("follow-up re-delegation guard logic", () => {
     });
     await failTask(task.id, "TypeError: cannot read property of undefined");
 
-    const result = findRecentCancelledTaskInThread("C_CANCEL_4", "9000.0004", 2880);
+    const result = await findRecentCancelledTaskInThread("C_CANCEL_4", "9000.0004", 2880);
     expect(result).toBeNull();
   });
 
@@ -323,7 +323,7 @@ describe("follow-up re-delegation guard logic", () => {
 
     // Backdate to 30 minutes ago so the cancellation is more recent.
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
       thirtyMinAgo,
       completedTask.id,
     ]);
@@ -337,8 +337,8 @@ describe("follow-up re-delegation guard logic", () => {
     await cancelTask(cancelledTask.id, "cancelled");
 
     // Guard checks:
-    const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
-    const recentCancelled = findRecentCancelledTaskInThread(channel, thread, 2880);
+    const recentCompleted = await findCompletedTaskInThread(channel, thread, 2880);
+    const recentCancelled = await findRecentCancelledTaskInThread(channel, thread, 2880);
     expect(recentCompleted).not.toBeNull();
     expect(recentCancelled).not.toBeNull();
 
@@ -366,7 +366,7 @@ describe("follow-up re-delegation guard logic", () => {
 
     // Backdate the cancellation to 30 minutes ago
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
       thirtyMinAgo,
       cancelledTask.id,
     ]);
@@ -380,8 +380,8 @@ describe("follow-up re-delegation guard logic", () => {
     await completeTask(completedTask.id, "retry succeeded");
 
     // Guard:
-    const recentCompleted = findCompletedTaskInThread(channel, thread, 2880);
-    const recentCancelled = findRecentCancelledTaskInThread(channel, thread, 2880);
+    const recentCompleted = await findCompletedTaskInThread(channel, thread, 2880);
+    const recentCancelled = await findRecentCancelledTaskInThread(channel, thread, 2880);
     expect(recentCompleted).not.toBeNull();
     expect(recentCancelled).not.toBeNull();
 
@@ -405,7 +405,7 @@ describe("follow-up re-delegation guard logic", () => {
 
     // Backdate to 49 hours ago (beyond the 48h window)
     const fortyNineHoursAgo = new Date(Date.now() - 49 * 60 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
       fortyNineHoursAgo,
       oldWorkerTask.id,
     ]);
@@ -420,7 +420,7 @@ describe("follow-up re-delegation guard logic", () => {
     });
 
     const sourceTask = await getTaskById(followUpTask.id);
-    const recentCompleted = findCompletedTaskInThread(
+    const recentCompleted = await findCompletedTaskInThread(
       sourceTask!.slackChannelId!,
       sourceTask!.slackThreadTs!,
       2880,

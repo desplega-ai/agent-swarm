@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { _resetAutoReloadForTests, flushPendingIntegrationsReload } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { getBasePrompt } from "../prompts/base-prompt";
@@ -207,7 +207,7 @@ beforeEach(async () => {
   savedSlackAppToken = process.env.SLACK_APP_TOKEN;
   process.env.SLACK_BOT_TOKEN = "test-bot-token";
   process.env.SLACK_APP_TOKEN = "test-app-token";
-  getDb().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
+  await getDbClient().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
 });
 
 afterEach(() => {
@@ -320,9 +320,9 @@ describe("scripts-only MCP gating", () => {
   test("keeps the scripts SDK bridge's explicit full surface", async () => {
     await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
-    await withScriptsOnlyMcpEnv("true", () => {
+    await withScriptsOnlyMcpEnv("true", async () => {
       const tools = (
-        createServer({ scriptsOnly: false }) as unknown as {
+        (await createServer({ scriptsOnly: false })) as unknown as {
           _registeredTools: RegisteredTool;
         }
       )._registeredTools;

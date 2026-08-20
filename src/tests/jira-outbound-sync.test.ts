@@ -21,7 +21,7 @@ mock.module("../jira/client", () => ({
   // The outbound module only imports `jiraFetch`; stub the others for
   // robustness in case the module surface grows.
   getJiraAccessToken: () => Promise.resolve("test-token"),
-  getJiraCloudId: () => "test-cloud-id",
+  getJiraCloudId: () => Promise.resolve("test-cloud-id"),
 }));
 
 beforeAll(() => {
@@ -208,7 +208,7 @@ describe("Jira Outbound Sync", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    const updated = getTrackerSync("jira", "task", "jira-out-origin-flip");
+    const updated = await getTrackerSync("jira", "task", "jira-out-origin-flip");
     expect(updated?.lastSyncOrigin).toBe("swarm");
   });
 
@@ -223,7 +223,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("loop prevention: skips when lastSyncOrigin='external' within 5s", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-loop",
@@ -246,7 +246,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("allows sync when lastSyncOrigin='external' but older than 5s", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-loop-old",
@@ -306,7 +306,7 @@ describe("Jira Outbound Sync", () => {
   });
 
   test("does NOT flip lastSyncOrigin on HTTP error from Jira", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "jira-out-error",
@@ -327,7 +327,7 @@ describe("Jira Outbound Sync", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(mockJiraFetch).toHaveBeenCalledTimes(1);
-    const after = getTrackerSync("jira", "task", "jira-out-error");
+    const after = await getTrackerSync("jira", "task", "jira-out-error");
     // Origin should remain 'external' — we did not write swarm-origin on failed POST.
     expect(after?.lastSyncOrigin).toBe("external");
   });

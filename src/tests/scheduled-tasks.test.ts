@@ -6,7 +6,7 @@ import {
   createScheduledTask,
   createUser,
   deleteScheduledTask,
-  getDb,
+  getDbClient,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
@@ -259,23 +259,26 @@ describe("Scheduled Tasks Integration", () => {
       });
 
       // Get task count before
-      const tasksBefore = getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as {
+      const tasksBefore = (await getDbClient().get(
+        "SELECT COUNT(*) as count FROM agent_tasks",
+      )) as {
         count: number;
       };
 
       await runScheduleNow(schedule.id);
 
       // Get task count after
-      const tasksAfter = getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as {
+      const tasksAfter = (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
         count: number;
       };
 
       expect(tasksAfter.count).toBe(tasksBefore.count + 1);
 
       // Verify the created task has correct properties
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as {
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as {
         id: string;
         taskType: string;
         tags: string;
@@ -318,7 +321,10 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("fired task inherits the schedule's createdBy as requestedByUserId", async () => {
-      const requester = createUser({ name: "Schedule Requester", email: "sched-req@example.com" });
+      const requester = await createUser({
+        name: "Schedule Requester",
+        email: "sched-req@example.com",
+      });
       const schedule = await createScheduledTask({
         name: "test-manual-run-createdby",
         cronExpression: "0 9 * * *",
@@ -330,9 +336,10 @@ describe("Scheduled Tasks Integration", () => {
 
       await runScheduleNow(schedule.id);
 
-      const createdTask = getDb()
-        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { id: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { id: string };
       const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId).toBe(requester.id);
     });
@@ -348,9 +355,10 @@ describe("Scheduled Tasks Integration", () => {
 
       await runScheduleNow(schedule.id);
 
-      const createdTask = getDb()
-        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { id: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { id: string };
       const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId ?? null).toBeNull();
     });
@@ -390,9 +398,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { agentId: string; status: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { agentId: string; status: string };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBe(targetAgent.id);
@@ -410,9 +419,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { agentId: string | null; status: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { agentId: string | null; status: string };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBeNull();
@@ -428,13 +438,17 @@ describe("Scheduled Tasks Integration", () => {
       });
 
       const taskCountBefore = (
-        getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as { count: number }
+        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
+          count: number;
+        }
       ).count;
 
       await runScheduleNow(schedule.id);
 
       const taskCountAfter = (
-        getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as { count: number }
+        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
+          count: number;
+        }
       ).count;
 
       const updatedSchedule = await getScheduledTaskById(schedule.id);
@@ -514,9 +528,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as {
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as {
         task: string;
         taskType: string;
         tags: string;
@@ -565,9 +580,10 @@ describe("Scheduled Tasks Integration", () => {
       expect(secondRunAt).not.toBe(firstRunAt);
 
       // Count tasks created
-      const tasks = getDb()
-        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE task = ?")
-        .get("Multiple run test") as { count: number };
+      const tasks = (await getDbClient().get(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE task = ?",
+        ["Multiple run test"],
+      )) as { count: number };
 
       expect(tasks.count).toBe(2);
     });

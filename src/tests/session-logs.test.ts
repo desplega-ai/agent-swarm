@@ -76,7 +76,7 @@ async function handleRequest(
       return { status: 404, body: { error: "Task not found" } };
     }
 
-    const logs = getSessionLogsByTaskId(taskId);
+    const logs = await getSessionLogsByTaskId(taskId);
     return { status: 200, body: { logs } };
   }
 
@@ -160,7 +160,7 @@ describe("Session Logs API", () => {
       });
 
       // Retrieve logs
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
 
       expect(logs.length).toBe(2);
       expect(logs[0]?.content).toBe('{"type":"system"}');
@@ -182,7 +182,7 @@ describe("Session Logs API", () => {
       });
 
       // Retrieve by session
-      const logs = getSessionLogsBySession("ai-loop-session", 1);
+      const logs = await getSessionLogsBySession("ai-loop-session", 1);
 
       expect(logs.length).toBe(1);
       expect(logs[0]?.taskId).toBeUndefined();
@@ -209,7 +209,7 @@ describe("Session Logs API", () => {
         lines: ["line1-iter2", "line2-iter2"],
       });
 
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
 
       expect(logs.length).toBe(4);
       // First iteration, first line
@@ -328,7 +328,7 @@ describe("Session Logs API", () => {
       expect(response.status).toBe(201);
 
       // Verify it was stored correctly
-      const logs = getSessionLogsByTaskId(task.id);
+      const logs = await getSessionLogsByTaskId(task.id);
       expect(logs.length).toBe(1);
       expect(logs[0]?.taskId).toBe(task.id);
     });

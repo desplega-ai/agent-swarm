@@ -26,7 +26,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getTaskAttachments,
   initDb,
   startTask,
@@ -126,7 +126,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("url");
     expect(rows[0].url).toBe("https://example.com/baseline");
@@ -155,7 +155,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("url");
     expect(rows[0].name).toBe("post-completion link");
@@ -188,7 +188,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("agent-fs");
     expect(rows[0].path).toBe("/thoughts/doc.md");
@@ -220,7 +220,7 @@ describe("store-progress handler — attachments insert path", () => {
     )) as StoreProgressResult;
 
     expect(result.structuredContent.success).toBe(true);
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].kind).toBe("agent-fs");
     expect(rows[0].path).toBe("/thoughts/legacy.md");
@@ -230,12 +230,12 @@ describe("store-progress handler — attachments insert path", () => {
 
   describe("agent-fs orgId/driveId auto-resolve from swarm config", () => {
     // Per-test cleanup so config rows from one case don't leak into the next.
-    function clearSwarmConfig() {
-      getDb().run("DELETE FROM swarm_config");
+    async function clearSwarmConfig() {
+      await getDbClient().run("DELETE FROM swarm_config");
     }
 
     test("missing orgId/driveId fills in from global swarm config", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
       await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
@@ -270,7 +270,7 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].kind).toBe("agent-fs");
       expect(rows[0].orgId).toBe("global-org");
@@ -278,7 +278,7 @@ describe("store-progress handler — attachments insert path", () => {
     });
 
     test("agent-scoped config wins over global (scope precedence)", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
       await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
@@ -325,14 +325,14 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("agent-org");
       expect(rows[0].driveId).toBe("agent-drive");
     });
 
     test("missing config + missing row IDs leaves null IDs (no throw, renderer falls back)", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
 
       const task = await createTaskExtended("handler agent-fs no config no ids", {
         agentId,
@@ -357,14 +357,14 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBeUndefined();
       expect(rows[0].driveId).toBeUndefined();
     });
 
     test("per-row IDs always win — config defaults never overwrite explicit values", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
       await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
@@ -401,14 +401,14 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("row-org");
       expect(rows[0].driveId).toBe("row-drive");
     });
 
     test("partial row IDs are preserved instead of mixing with config defaults", async () => {
-      clearSwarmConfig();
+      await clearSwarmConfig();
       await upsertSwarmConfig({
         scope: "global",
         key: "AGENT_FS_DEFAULT_ORG_ID",
@@ -445,7 +445,7 @@ describe("store-progress handler — attachments insert path", () => {
       )) as StoreProgressResult;
 
       expect(result.structuredContent.success).toBe(true);
-      const rows = getTaskAttachments(task.id);
+      const rows = await getTaskAttachments(task.id);
       expect(rows.length).toBe(1);
       expect(rows[0].orgId).toBe("row-org");
       expect(rows[0].driveId).toBeUndefined();
@@ -482,7 +482,7 @@ describe("store-progress handler — attachments insert path", () => {
     expect(result.structuredContent.message).toContain("Discarded write");
     expect(result.structuredContent.message).toContain("force: true");
     expect(result.structuredContent.wasNoOp).toBeUndefined();
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].url).toBe("https://example.com/retry");
   });

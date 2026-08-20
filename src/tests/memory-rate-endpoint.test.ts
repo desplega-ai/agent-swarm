@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_PORT = 19111;
@@ -76,7 +76,7 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
-function makeMemory(name: string, agentId = agentA): { id: string } {
+function makeMemory(name: string, agentId = agentA): Promise<{ id: string }> {
   return store.store({
     agentId,
     scope: "agent",
@@ -86,21 +86,19 @@ function makeMemory(name: string, agentId = agentA): { id: string } {
   });
 }
 
-function insertRetrieval(taskId: string, agentId: string, memoryId: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
+async function insertRetrieval(taskId: string, agentId: string, memoryId: string): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
        VALUES (?, ?, ?, NULL, ?, 0.85, ?)`,
-    )
-    .run(randomUUID(), taskId, agentId, memoryId, new Date().toISOString());
+    [randomUUID(), taskId, agentId, memoryId, new Date().toISOString()],
+  );
 }
 
-function readPosterior(id: string): { alpha: number; beta: number } {
-  const row = getDb()
-    .prepare<{ alpha: number; beta: number }, [string]>(
-      "SELECT alpha, beta FROM agent_memory WHERE id = ?",
-    )
-    .get(id);
+async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+  const row = await getDbClient().get<{ alpha: number; beta: number }>(
+    "SELECT alpha, beta FROM agent_memory WHERE id = ?",
+    [id],
+  );
   if (!row) throw new Error(`memory ${id} not found`);
   return { alpha: row.alpha, beta: row.beta };
 }
@@ -149,13 +147,11 @@ beforeAll(async () => {
   await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
   await createAgent({ id: agentB, name: "Agent B", isLead: false, status: "idle" });
 
-  const insertTask = getDb().prepare(
-    `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
-     VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
-  );
+  const insertTaskSql = `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+     VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`;
   const now = new Date().toISOString();
-  insertTask.run(taskA, agentA, "task A", now, now);
-  insertTask.run(taskB, agentA, "task B", now, now);
+  await getDbClient().run(insertTaskSql, [taskA, agentA, "task A", now, now]);
+  await getDbClient().run(insertTaskSql, [taskB, agentA, "task B", now, now]);
 
   store = new SqliteMemoryStore();
 }, 20000);
@@ -179,17 +175,17 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Reset per-test mutable state. agent_memory rows persist across tests;
   // alpha/beta are reset so each test starts from the Beta(1,1) prior.
-  getDb().run("DELETE FROM memory_rating");
-  getDb().run("DELETE FROM memory_retrieval");
-  getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+  await getDbClient().run("DELETE FROM memory_rating");
+  await getDbClient().run("DELETE FROM memory_retrieval");
+  await getDbClient().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
 });
 
 describe("POST /api/memory/rate", () => {
   test("happy path: source=llm with valid memoryId → 200, applied=1, alpha bumped", async () => {
-    const m = makeMemory("rate-llm-1");
+    const m = await makeMemory("rate-llm-1");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -199,11 +195,11 @@ describe("POST /api/memory/rate", () => {
     expect(r.status).toBe(200);
     expect(r.body.applied).toBe(1);
     expect(r.body.rejected).toEqual([]);
-    expect(readPosterior(m.id).alpha).toBeCloseTo(2, 5);
+    expect((await readPosterior(m.id)).alpha).toBeCloseTo(2, 5);
   });
 
   test("source=explicit-self with no retrieval row → 400 (R6 spam guard)", async () => {
-    const m = makeMemory("explicit-no-retr");
+    const m = await makeMemory("explicit-no-retr");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -215,7 +211,7 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("source=explicit-self without taskId → 400", async () => {
-    const m = makeMemory("explicit-no-task");
+    const m = await makeMemory("explicit-no-task");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -227,8 +223,8 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("source=explicit-self with retrieval row → 200, applied=1", async () => {
-    const m = makeMemory("explicit-ok");
-    insertRetrieval(taskA, agentA, m.id);
+    const m = await makeMemory("explicit-ok");
+    await insertRetrieval(taskA, agentA, m.id);
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -240,8 +236,8 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("duplicate explicit-self for same (taskId, memoryId) → 409", async () => {
-    const m = makeMemory("explicit-dup");
-    insertRetrieval(taskA, agentA, m.id);
+    const m = await makeMemory("explicit-dup");
+    await insertRetrieval(taskA, agentA, m.id);
     const evt = {
       memoryId: m.id,
       signal: 1,
@@ -263,7 +259,7 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("51 events → 400 (cap enforced)", async () => {
-    const m = makeMemory("cap");
+    const m = await makeMemory("cap");
     const events = Array.from({ length: 51 }, () => ({
       memoryId: m.id,
       signal: 1,
@@ -278,7 +274,7 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("source=implicit-citation rejected at HTTP boundary → 400", async () => {
-    const m = makeMemory("impl-cit-spoof");
+    const m = await makeMemory("impl-cit-spoof");
     const r = await api("POST", "/api/memory/rate", {
       agentId: agentA,
       body: {
@@ -289,7 +285,7 @@ describe("POST /api/memory/rate", () => {
   });
 
   test("missing X-Agent-ID → 400", async () => {
-    const m = makeMemory("no-agent");
+    const m = await makeMemory("no-agent");
     const r = await api("POST", "/api/memory/rate", {
       body: { events: [{ memoryId: m.id, signal: 1, weight: 1, source: "llm" }] },
     });
@@ -304,12 +300,12 @@ describe("GET /api/memory/retrievals", () => {
   });
 
   test("returns rows for the requesting agent only (defence-in-depth)", async () => {
-    const m1 = makeMemory("retr-1");
-    const m2 = makeMemory("retr-2");
-    const mOther = makeMemory("retr-other");
-    insertRetrieval(taskA, agentA, m1.id);
-    insertRetrieval(taskA, agentA, m2.id);
-    insertRetrieval(taskA, agentB, mOther.id); // wrong agent — must NOT leak
+    const m1 = await makeMemory("retr-1");
+    const m2 = await makeMemory("retr-2");
+    const mOther = await makeMemory("retr-other");
+    await insertRetrieval(taskA, agentA, m1.id);
+    await insertRetrieval(taskA, agentA, m2.id);
+    await insertRetrieval(taskA, agentB, mOther.id); // wrong agent — must NOT leak
 
     const r = await api("GET", `/api/memory/retrievals?taskId=${taskA}`, {
       agentId: agentA,

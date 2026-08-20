@@ -35,7 +35,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
-import { closeDb, createAgent, createSessionLogs, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createSessionLogs, getDbClient, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { ImplicitCitationRater } from "../be/memory/raters/implicit-citation";
 import { buildRatingsFromLlm } from "../be/memory/raters/llm";
@@ -100,36 +100,29 @@ async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
   throw new Error(`Server did not start within ${timeoutMs}ms`);
 }
 
-function readPosterior(id: string): { alpha: number; beta: number } {
-  const row = getDb()
-    .prepare<{ alpha: number; beta: number }, [string]>(
-      "SELECT alpha, beta FROM agent_memory WHERE id = ?",
-    )
-    .get(id);
+async function readPosterior(id: string): Promise<{ alpha: number; beta: number }> {
+  const row = await getDbClient().get<{ alpha: number; beta: number }>(
+    "SELECT alpha, beta FROM agent_memory WHERE id = ?",
+    [id],
+  );
   if (!row) throw new Error(`memory ${id} not found`);
   return { alpha: row.alpha, beta: row.beta };
 }
 
 function getRatings(taskIdArg: string) {
-  return getDb()
-    .prepare<
-      {
-        memoryId: string;
-        source: string;
-        signal: number;
-        weight: number;
-      },
-      [string]
-    >("SELECT memoryId, source, signal, weight FROM memory_rating WHERE taskId = ?")
-    .all(taskIdArg);
+  return getDbClient().query<{
+    memoryId: string;
+    source: string;
+    signal: number;
+    weight: number;
+  }>("SELECT memoryId, source, signal, weight FROM memory_rating WHERE taskId = ?", [taskIdArg]);
 }
 
-function countEdges(memoryId: string): number {
-  const row = getDb()
-    .prepare<{ n: number }, [string]>(
-      "SELECT COUNT(*) as n FROM agent_memory_edge WHERE from_id = ? AND type = 'references-source'",
-    )
-    .get(memoryId);
+async function countEdges(memoryId: string): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>(
+    "SELECT COUNT(*) as n FROM agent_memory_edge WHERE from_id = ? AND type = 'references-source'",
+    [memoryId],
+  );
   return row?.n ?? 0;
 }
 
@@ -174,12 +167,12 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
 
   await createAgent({ id: agentId, name: "E2E Agent", isLead: false, status: "idle" });
-  const insertTask = getDb().prepare(
+  const now = new Date().toISOString();
+  await getDbClient().run(
     `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
      VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
+    [taskId, agentId, "e2e task", now, now],
   );
-  const now = new Date().toISOString();
-  insertTask.run(taskId, agentId, "e2e task", now, now);
 
   store = new SqliteMemoryStore();
 }, 20000);
@@ -202,17 +195,17 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Each test starts fresh — wipe all rater-touched state but keep the
   // agent / task rows, and reset all memory posteriors to Beta(1,1).
-  getDb().run("DELETE FROM memory_rating");
-  getDb().run("DELETE FROM memory_retrieval");
-  getDb().run("DELETE FROM session_logs");
-  getDb().run("DELETE FROM agent_memory_edge");
-  getDb().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
+  await getDbClient().run("DELETE FROM memory_rating");
+  await getDbClient().run("DELETE FROM memory_retrieval");
+  await getDbClient().run("DELETE FROM session_logs");
+  await getDbClient().run("DELETE FROM agent_memory_edge");
+  await getDbClient().run("UPDATE agent_memory SET alpha = 1.0, beta = 1.0");
 });
 
-function makeMemory(name: string, scope: "agent" | "swarm"): { id: string } {
+function makeMemory(name: string, scope: "agent" | "swarm"): Promise<{ id: string }> {
   return store.store({
     agentId,
     scope,
@@ -224,26 +217,25 @@ function makeMemory(name: string, scope: "agent" | "swarm"): { id: string } {
 
 describe("memory-rater v1.5 — cross-cutting e2e", () => {
   test("Step A: retrieval bridge writes memory_retrieval rows", async () => {
-    const memA = makeMemory("mem-A-step-a", "agent");
-    const memB = makeMemory("mem-B-step-a", "swarm");
+    const memA = await makeMemory("mem-A-step-a", "agent");
+    const memB = await makeMemory("mem-B-step-a", "swarm");
 
     await recordRetrievals(taskId, agentId, [
       { memoryId: memA.id, similarity: 0.9 },
       { memoryId: memB.id, similarity: 0.7 },
     ]);
 
-    const rows = getDb()
-      .prepare<{ memoryId: string }, [string]>(
-        "SELECT memoryId FROM memory_retrieval WHERE taskId = ? ORDER BY memoryId",
-      )
-      .all(taskId);
+    const rows = await getDbClient().query<{ memoryId: string }>(
+      "SELECT memoryId FROM memory_retrieval WHERE taskId = ? ORDER BY memoryId",
+      [taskId],
+    );
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.memoryId).sort()).toEqual([memA.id, memB.id].sort());
   });
 
   test("Step B: explicit-self rating with edge updates posterior + creates edge", async () => {
-    const memA = makeMemory("mem-A-step-b", "agent");
-    insertRetrieval(taskId, agentId, memA.id);
+    const memA = await makeMemory("mem-A-step-b", "agent");
+    await insertRetrieval(taskId, agentId, memA.id);
 
     const r = await api("POST", "/api/memory/rate", {
       agentId,
@@ -264,13 +256,14 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     expect(r.status).toBe(200);
     expect(r.body.applied).toBe(1);
 
-    expect(readPosterior(memA.id).alpha).toBeCloseTo(2.0, 5);
+    expect((await readPosterior(memA.id)).alpha).toBeCloseTo(2.0, 5);
 
-    const edges = getDb()
-      .prepare<{ from_id: string; to_id: string; alpha: number; beta: number }, [string]>(
-        "SELECT from_id, to_id, alpha, beta FROM agent_memory_edge WHERE from_id = ?",
-      )
-      .all(memA.id);
+    const edges = await getDbClient().query<{
+      from_id: string;
+      to_id: string;
+      alpha: number;
+      beta: number;
+    }>("SELECT from_id, to_id, alpha, beta FROM agent_memory_edge WHERE from_id = ?", [memA.id]);
     expect(edges).toHaveLength(1);
     expect(edges[0]!.to_id).toBe("github:desplega-ai/agent-swarm#999");
     expect(edges[0]!.alpha).toBeCloseTo(2.0, 5);
@@ -278,13 +271,13 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
   });
 
   test("Step C: implicit-citation rater hits cited memory, misses the other", async () => {
-    const memA = makeMemory("mem-A-step-c", "agent");
-    const memB = makeMemory("mem-B-step-c", "swarm");
+    const memA = await makeMemory("mem-A-step-c", "agent");
+    const memB = await makeMemory("mem-B-step-c", "swarm");
 
     // Pre-condition: explicit-self has already moved alpha for mem-A to 2.0
     // (mirrors the actual flow in step B).
-    insertRetrieval(taskId, agentId, memA.id);
-    insertRetrieval(taskId, agentId, memB.id);
+    await insertRetrieval(taskId, agentId, memA.id);
+    await insertRetrieval(taskId, agentId, memB.id);
     await applyRating(
       [
         {
@@ -296,7 +289,7 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
       ],
       { taskId },
     );
-    expect(readPosterior(memA.id).alpha).toBeCloseTo(2.0, 5);
+    expect((await readPosterior(memA.id)).alpha).toBeCloseTo(2.0, 5);
 
     // session_logs cite mem-A but NOT mem-B.
     await createSessionLogs({
@@ -312,18 +305,16 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     // MEMORY_RATERS env (typically unset to avoid disturbing other suites),
     // and we want to exercise this rater regardless. Step G covers the
     // unset-env "byte-identical" backward-compat case separately.
+    const evidenceRows = await getDbClient().query<{ content: string }>(
+      "SELECT content FROM session_logs WHERE taskId = ? ORDER BY iteration, lineNumber",
+      [taskId],
+    );
     const result = await runServerRaters(
       {
         taskId,
         agentId,
         retrievedMemoryIds: [memA.id, memB.id],
-        evidence: getDb()
-          .prepare<{ content: string }, [string]>(
-            "SELECT content FROM session_logs WHERE taskId = ? ORDER BY iteration, lineNumber",
-          )
-          .all(taskId)
-          .map((r) => r.content)
-          .join("\n"),
+        evidence: evidenceRows.map((r) => r.content).join("\n"),
       },
       {
         raters: [new ImplicitCitationRater()],
@@ -333,21 +324,21 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
 
     // mem-A.alpha = 2.0 (explicit) + 0.5 (implicit hit) = 2.5
     // mem-B.beta  = 1.0 (prior)    + 0.25 (implicit miss) = 1.25
-    expect(readPosterior(memA.id)).toEqual({ alpha: 2.5, beta: 1.0 });
-    expect(readPosterior(memB.id)).toEqual({ alpha: 1.0, beta: 1.25 });
+    expect(await readPosterior(memA.id)).toEqual({ alpha: 2.5, beta: 1.0 });
+    expect(await readPosterior(memB.id)).toEqual({ alpha: 1.0, beta: 1.25 });
 
-    const ratings = getRatings(taskId);
+    const ratings = await getRatings(taskId);
     const sources = ratings.map((r) => r.source).sort();
     expect(sources).toContain("implicit-citation");
     expect(sources).toContain("explicit-self");
   });
 
   test("Step D: LlmRater piggyback updates posteriors + emits a second edge", async () => {
-    const memA = makeMemory("mem-A-step-d", "agent");
-    const memB = makeMemory("mem-B-step-d", "swarm");
+    const memA = await makeMemory("mem-A-step-d", "agent");
+    const memB = await makeMemory("mem-B-step-d", "swarm");
 
-    insertRetrieval(taskId, agentId, memA.id);
-    insertRetrieval(taskId, agentId, memB.id);
+    await insertRetrieval(taskId, agentId, memA.id);
+    await insertRetrieval(taskId, agentId, memB.id);
 
     // What the `claude -p` summary call returns when the hook piggybacks
     // — same structure as `SummaryWithRatingsSchema`. Keeping this hand-
@@ -391,26 +382,27 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     //                   betaDelta  = max(0, -signal) * weight.
     // mem-A: alpha = 1 + 0.8 * 0.8 = 1.64, beta = 1
     // mem-B: alpha = 1, beta = 1 + 0.6 * 0.8 = 1.48
-    expect(readPosterior(memA.id).alpha).toBeCloseTo(1.64, 5);
-    expect(readPosterior(memA.id).beta).toBeCloseTo(1.0, 5);
-    expect(readPosterior(memB.id).alpha).toBeCloseTo(1.0, 5);
-    expect(readPosterior(memB.id).beta).toBeCloseTo(1.48, 5);
+    expect((await readPosterior(memA.id)).alpha).toBeCloseTo(1.64, 5);
+    expect((await readPosterior(memA.id)).beta).toBeCloseTo(1.0, 5);
+    expect((await readPosterior(memB.id)).alpha).toBeCloseTo(1.0, 5);
+    expect((await readPosterior(memB.id)).beta).toBeCloseTo(1.48, 5);
 
-    expect(countEdges(memA.id)).toBe(1);
-    expect(countEdges(memB.id)).toBe(0);
+    expect(await countEdges(memA.id)).toBe(1);
+    expect(await countEdges(memB.id)).toBe(0);
 
-    const edges = getDb()
-      .prepare<{ to_id: string }, [string]>("SELECT to_id FROM agent_memory_edge WHERE from_id = ?")
-      .all(memA.id);
+    const edges = await getDbClient().query<{ to_id: string }>(
+      "SELECT to_id FROM agent_memory_edge WHERE from_id = ?",
+      [memA.id],
+    );
     expect(edges[0]!.to_id).toBe("linear:DES-294");
   });
 
   test("Step E: GET /api/memory/retrievals + GET /api/memory/edges return what was written", async () => {
-    const memA = makeMemory("mem-A-step-e", "agent");
-    const memB = makeMemory("mem-B-step-e", "swarm");
+    const memA = await makeMemory("mem-A-step-e", "agent");
+    const memB = await makeMemory("mem-B-step-e", "swarm");
 
-    insertRetrieval(taskId, agentId, memA.id);
-    insertRetrieval(taskId, agentId, memB.id);
+    await insertRetrieval(taskId, agentId, memA.id);
+    await insertRetrieval(taskId, agentId, memB.id);
 
     // Two edges on mem-A, one from explicit-self (github), one from llm (linear).
     await applyRating(
@@ -466,9 +458,9 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
     }
   });
 
-  test("Step F: reranker — usefulness > 1 after positive ratings, mem-A ranks higher than baseline", () => {
-    const memA = makeMemory("mem-A-step-f", "agent");
-    const memB = makeMemory("mem-B-step-f", "swarm");
+  test("Step F: reranker — usefulness > 1 after positive ratings, mem-A ranks higher than baseline", async () => {
+    const memA = await makeMemory("mem-A-step-f", "agent");
+    const memB = await makeMemory("mem-B-step-f", "swarm");
 
     // Build a reproducible candidate set — same fields as the reranker reads.
     const buildCandidate = (
@@ -565,11 +557,14 @@ describe("memory-rater v1.5 — cross-cutting e2e", () => {
   });
 });
 
-function insertRetrieval(taskIdArg: string, agentIdArg: string, memoryId: string): void {
-  getDb()
-    .prepare(
-      `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
+function insertRetrieval(
+  taskIdArg: string,
+  agentIdArg: string,
+  memoryId: string,
+): Promise<{ changes: number }> {
+  return getDbClient().run(
+    `INSERT INTO memory_retrieval (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt)
        VALUES (?, ?, ?, NULL, ?, 0.85, ?)`,
-    )
-    .run(randomUUID(), taskIdArg, agentIdArg, memoryId, new Date().toISOString());
+    [randomUUID(), taskIdArg, agentIdArg, memoryId, new Date().toISOString()],
+  );
 }

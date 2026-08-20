@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getRecentlyCancelledTasksForAgent,
   getTaskById,
   initDb,
@@ -71,7 +71,7 @@ async function handleRequest(req: {
     }
 
     // Return all recently cancelled tasks for agent
-    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
     return { status: 200, body: { cancelled: cancelledTasks } };
   }
 
@@ -202,10 +202,10 @@ describe("Task Cancellation", () => {
       });
 
       // Manually mark as completed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [new Date().toISOString(), task.id],
+      );
 
       const completedTask = await getTaskById(task.id);
       expect(completedTask?.status).toBe("completed");
@@ -220,10 +220,10 @@ describe("Task Cancellation", () => {
       });
 
       // Manually mark as failed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?",
+        [new Date().toISOString(), task.id],
+      );
 
       const failedTask = await getTaskById(task.id);
       expect(failedTask?.status).toBe("failed");
@@ -297,7 +297,7 @@ describe("Task Cancellation", () => {
       await cancelTask(task1.id, "Reason 1");
       await cancelTask(task2.id, "Reason 2");
 
-      const cancelledTasks = getRecentlyCancelledTasksForAgent(agentId);
+      const cancelledTasks = await getRecentlyCancelledTasksForAgent(agentId);
 
       expect(cancelledTasks.length).toBeGreaterThanOrEqual(2);
       const taskIds = cancelledTasks.map((t) => t.id);
@@ -334,7 +334,7 @@ describe("Task Cancellation", () => {
       await cancelTask(taskA.id, "Cancelled A");
       await cancelTask(taskB.id, "Cancelled B");
 
-      const cancelledForA = getRecentlyCancelledTasksForAgent(agentA);
+      const cancelledForA = await getRecentlyCancelledTasksForAgent(agentA);
       const taskIdsA = cancelledForA.map((t) => t.id);
       expect(taskIdsA).toContain(taskA.id);
       expect(taskIdsA).not.toContain(taskB.id);

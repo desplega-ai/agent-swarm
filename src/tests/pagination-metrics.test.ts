@@ -47,7 +47,7 @@ describe("pagination metrics", () => {
   });
 
   test("getTasksCount is filter-aware and independent of limit/offset", async () => {
-    const totalBefore = getTasksCount();
+    const totalBefore = await getTasksCount();
 
     for (let i = 0; i < 7; i++) {
       await createTaskExtended(`alpha task ${i}`, { tags: ["alpha"] });
@@ -57,24 +57,24 @@ describe("pagination metrics", () => {
     }
 
     // Filtered count matches the number of matching rows...
-    expect(getTasksCount({ tags: ["alpha"] })).toBe(7);
-    expect(getTasksCount({ tags: ["beta"] })).toBe(3);
+    expect(await getTasksCount({ tags: ["alpha"] })).toBe(7);
+    expect(await getTasksCount({ tags: ["beta"] })).toBe(3);
 
     // ...and is unaffected by the page window applied to the list query.
-    const page1 = getAllTasks({ tags: ["alpha"], limit: 2, offset: 0 });
-    const page2 = getAllTasks({ tags: ["alpha"], limit: 2, offset: 2 });
+    const page1 = await getAllTasks({ tags: ["alpha"], limit: 2, offset: 0 });
+    const page2 = await getAllTasks({ tags: ["alpha"], limit: 2, offset: 2 });
     expect(page1).toHaveLength(2);
     expect(page2).toHaveLength(2);
-    expect(getTasksCount({ tags: ["alpha"], limit: 2, offset: 0 })).toBe(7);
+    expect(await getTasksCount({ tags: ["alpha"], limit: 2, offset: 0 })).toBe(7);
 
     // The unfiltered count covers every task created above.
-    expect(getTasksCount() - totalBefore).toBe(10);
+    expect((await getTasksCount()) - totalBefore).toBe(10);
   });
 
   test("getTasksCount filter-aware on search", async () => {
     await createTaskExtended("needle-xyz unique marker", {});
-    expect(getTasksCount({ search: "needle-xyz" })).toBe(1);
-    expect(getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
+    expect(await getTasksCount({ search: "needle-xyz" })).toBe(1);
+    expect(await getAllTasks({ search: "needle-xyz" })).toHaveLength(1);
   });
 
   test("countAllPages and countPagesByAgent", async () => {

@@ -11,7 +11,7 @@ import {
   sha256,
   trimOpenapiSpec,
 } from "../../scripts/vendored-openapi-utils";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { refreshScriptConnection, upsertScriptConnection } from "../be/script-connections";
 import {
@@ -86,10 +86,10 @@ beforeAll(async () => {
     .id;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   resetIntegrationsCatalogCacheForTesting();
-  getDb().run("DELETE FROM script_connections");
+  await getDbClient().run("DELETE FROM script_connections");
 });
 
 afterAll(() => {

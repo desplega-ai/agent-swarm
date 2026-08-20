@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createBunSqliteClient, type DbClient } from "../be/db-client";
+import { createBunSqliteClient, type DbClient, type DbExecutor } from "../be/db-client";
 
 let raw: Database;
 let client: DbClient;
@@ -112,14 +112,15 @@ describe("db-client transactions", () => {
   });
 
   test("tx executor throws once the transaction closed", async () => {
-    let leaked: { run: (sql: string, params?: unknown[]) => Promise<unknown> } | null = null;
+    let leaked: DbExecutor | null = null;
     await client.transaction(async (tx) => {
       leaked = tx;
     });
-    expect(leaked).not.toBeNull();
-    await expect(
-      (leaked as NonNullable<typeof leaked>).run("INSERT INTO items (name) VALUES (?)", ["late"]),
-    ).rejects.toThrow("after the transaction closed");
+    expect<DbExecutor | null>(leaked).not.toBeNull();
+    const closedTx = leaked as DbExecutor | null;
+    await expect(closedTx!.run("INSERT INTO items (name) VALUES (?)", ["late"])).rejects.toThrow(
+      "after the transaction closed",
+    );
   });
 
   test("afterSettled hook scheduled inside a transaction observes committed state", async () => {
@@ -142,7 +143,7 @@ describe("db-client transactions", () => {
       expect(observed).toBeNull();
     });
     await done;
-    expect(observed).toEqual(["committed"]);
+    expect<string[] | null>(observed).toEqual(["committed"]);
   });
 
   test("afterSettled hook after a rollback observes the rolled-back state", async () => {
@@ -164,7 +165,7 @@ describe("db-client transactions", () => {
       }),
     ).rejects.toThrow("boom");
     await done;
-    expect(observed).toEqual([]);
+    expect<string[] | null>(observed).toEqual([]);
   });
 
   test("afterSettled with no open transaction runs promptly", async () => {
@@ -205,8 +206,8 @@ describe("db-client transactions", () => {
     expect(txRows.length).toBe(40 * 2);
     for (const n of txRows) expect(n.endsWith("-a") || n.endsWith("-b")).toBe(true);
     for (let k = 0; k < all.length; k++) {
-      if (all[k].startsWith("tx-") && all[k].endsWith("-a")) {
-        expect(all[k + 1]).toBe(all[k].replace(/-a$/, "-b"));
+      if (all[k]!.startsWith("tx-") && all[k]!.endsWith("-a")) {
+        expect(all[k + 1]).toBe(all[k]!.replace(/-a$/, "-b"));
       }
     }
     expect(all.filter((n) => n.startsWith("top-")).length).toBe(200);

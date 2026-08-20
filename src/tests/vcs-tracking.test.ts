@@ -154,7 +154,7 @@ describe("updateTaskVcs", () => {
         name: "superseded",
         number: 203,
         terminate: async (id: string) =>
-          supersedeTask(id, { reason: "manual_supersede", resumeTaskId: null }),
+          await supersedeTask(id, { reason: "manual_supersede", resumeTaskId: null }),
       },
     ];
     for (const c of TERMINAL_CASES) {

@@ -256,7 +256,7 @@ describe("update-profile authorization", () => {
 
     try {
       process.env.AGENT_ID = WORKER_ID;
-      expect(deleteAgent(WORKER_ID)).toBe(true);
+      expect(await deleteAgent(WORKER_ID)).toBe(true);
 
       const result = await callUpdateProfile(server, WORKER_ID, {
         soulMd: "must not reach the workspace",

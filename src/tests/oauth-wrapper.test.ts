@@ -68,7 +68,7 @@ describe("buildAuthorizationUrl", () => {
 
   test("persists a DB pending row (default label, generic flow) with the code verifier", async () => {
     const result = await buildAuthorizationUrl(testConfig);
-    const pending = consumeOAuthPending(result.state);
+    const pending = await consumeOAuthPending(result.state);
 
     expect(pending).toBeTruthy();
     expect(pending!.codeVerifier).toBe(result.codeVerifier);
@@ -79,7 +79,7 @@ describe("buildAuthorizationUrl", () => {
 
   test("honors an explicit label option", async () => {
     const result = await buildAuthorizationUrl(testConfig, { label: "support" });
-    const pending = consumeOAuthPending(result.state);
+    const pending = await consumeOAuthPending(result.state);
     expect(pending!.label).toBe("support");
   });
 

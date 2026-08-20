@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
 import { slackContextKey } from "../tasks/context-key";
 
 const TEST_DB_PATH = "./test-slack-metadata-inheritance.sqlite";
@@ -21,8 +21,8 @@ afterAll(() => {
 });
 
 /** Helper to set a task to in_progress status (simulates runner picking it up) */
-function setTaskInProgress(taskId: string): void {
-  getDb().run(
+async function setTaskInProgress(taskId: string): Promise<void> {
+  await getDbClient().run(
     "UPDATE agent_tasks SET status = 'in_progress', lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
     [taskId],
   );
@@ -37,8 +37,8 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
     capabilities: [],
   };
 
-  let leadAgent: ReturnType<typeof createAgent>;
-  let workerAgent: ReturnType<typeof createAgent>;
+  let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+  let workerAgent: Awaited<ReturnType<typeof createAgent>>;
 
   beforeAll(async () => {
     leadAgent = await createAgent(lead);
@@ -63,9 +63,10 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
 
     expect(parentTask.slackTriggerMessageTs).toBe("900.2");
     expect(
-      getDb()
-        .query("SELECT slackTriggerMessageTs FROM agent_tasks WHERE id = ?")
-        .get(parentTask.id),
+      await getDbClient().get<{ slackTriggerMessageTs: string }>(
+        "SELECT slackTriggerMessageTs FROM agent_tasks WHERE id = ?",
+        [parentTask.id],
+      ),
     ).toEqual({
       slackTriggerMessageTs: "900.2",
     });
@@ -82,7 +83,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "1000.0001",
       slackUserId: "U_TARAS",
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     // Create a child task using sourceTaskId
     const childTask = await createTaskExtended("child task", {
@@ -104,7 +105,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "2000.0001",
       slackUserId: "U_USER_A",
     });
-    setTaskInProgress(taskA.id);
+    await setTaskInProgress(taskA.id);
 
     const taskB = await createTaskExtended("lead task B", {
       agentId: leadAgent.id,
@@ -112,7 +113,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "3000.0001",
       slackUserId: "U_USER_B",
     });
-    setTaskInProgress(taskB.id);
+    await setTaskInProgress(taskB.id);
 
     // sourceTaskId = taskA → should inherit from A, not B (which is more recent)
     const childFromA = await createTaskExtended("child from A", {
@@ -141,7 +142,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "4000.0001",
       slackUserId: "U_FALLBACK",
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     // No sourceTaskId → no inheritance (adapters must provide sourceTaskId deterministically)
     const childTask = await createTaskExtended("child no sourceTaskId", {
@@ -161,7 +162,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "5000.0001",
       slackUserId: "U_LEAD_EXPLICIT",
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     // Explicit params should override sourceTaskId inheritance
     const childTask = await createTaskExtended("child explicit", {
@@ -192,7 +193,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "8000.0001",
       slackUserId: "U_LEAD_DIFFERENT",
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     // parentTaskId sets Slack metadata first, so sourceTaskId doesn't override
     const childTask = await createTaskExtended("child with parent", {
@@ -231,7 +232,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       agentId: leadAgent.id,
       // No Slack metadata on this task
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     const childTask = await createTaskExtended("child no slack inherit", {
       agentId: workerAgent.id,
@@ -258,7 +259,7 @@ describe("Slack metadata auto-inheritance via sourceTaskId", () => {
       slackThreadTs: "9000.0001",
       slackUserId: "U_NONEXIST",
     });
-    setTaskInProgress(leadTask.id);
+    await setTaskInProgress(leadTask.id);
 
     const childTask = await createTaskExtended("child with bad sourceTaskId", {
       agentId: workerAgent.id,
@@ -286,8 +287,8 @@ describe("Slack-routing coherence guard: createTaskExtended normalization (Phase
     capabilities: [],
   };
 
-  let leadAgent: ReturnType<typeof createAgent>;
-  let workerAgent: ReturnType<typeof createAgent>;
+  let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+  let workerAgent: Awaited<ReturnType<typeof createAgent>>;
 
   beforeAll(async () => {
     leadAgent = await createAgent(lead);

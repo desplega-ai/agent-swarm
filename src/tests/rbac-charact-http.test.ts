@@ -133,8 +133,8 @@ beforeAll(async () => {
   outsiderId = (await createAgent({ name: "rbac-fs-outsider", isLead: false, status: "idle" })).id;
   leadId = (await createAgent({ name: "rbac-fs-lead", isLead: true, status: "idle" })).id;
 
-  const user = createUser({ name: "RBAC FS User" });
-  userToken = mintToken(user.id, "rbac-charact", ACTOR).plaintext;
+  const user = await createUser({ name: "RBAC FS User" });
+  userToken = (await mintToken(user.id, "rbac-charact", ACTOR)).plaintext;
 });
 
 afterAll(async () => {
@@ -237,7 +237,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     const res = await bareUpload({ agentId: outsiderId });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("missing X-Agent-ID (no auth, no agent) is denied with 403", async () => {
@@ -257,7 +257,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toHaveLength(1);
+    expect(await getTaskAttachments(taskId)).toHaveLength(1);
   });
 
   test("DELETE: assignee agent can delete", async () => {
@@ -269,6 +269,6 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
       agentId: assigneeId,
     });
     expect(res.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 });

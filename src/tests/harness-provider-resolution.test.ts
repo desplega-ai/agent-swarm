@@ -17,7 +17,7 @@ import { createServer as createHttpServer, type Server } from "node:http";
 import {
   closeDb,
   createAgent,
-  getDb,
+  getDbClient,
   getResolvedConfig,
   initDb,
   upsertSwarmConfig,
@@ -81,9 +81,9 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().prepare("DELETE FROM swarm_config").run();
-  getDb().prepare("DELETE FROM agents").run();
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM swarm_config");
+  await getDbClient().run("DELETE FROM agents");
 });
 
 // ─── resolveHarnessProvider ──────────────────────────────────────────────────
@@ -279,8 +279,8 @@ describe("getResolvedConfig precedence for HARNESS_PROVIDER", () => {
     expect(harness?.value).toBe("pi");
   });
 
-  test("nothing resolved when no rows exist (env fallback handled by runner)", () => {
-    const resolved = getResolvedConfig("agent-nonexistent");
+  test("nothing resolved when no rows exist (env fallback handled by runner)", async () => {
+    const resolved = await getResolvedConfig("agent-nonexistent");
     expect(resolved.find((c) => c.key === "HARNESS_PROVIDER")).toBeUndefined();
   });
 });
@@ -315,7 +315,7 @@ describe("PUT /api/config rejects invalid HARNESS_PROVIDER", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getResolvedConfig();
+    const rows = await getResolvedConfig();
     const harness = rows.find((c) => c.key === "HARNESS_PROVIDER");
     expect(harness?.value).toBe("codex");
   });

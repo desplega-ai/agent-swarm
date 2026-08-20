@@ -8,7 +8,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   getDependentTasks,
   getTaskById,
   initDb,
@@ -48,7 +48,7 @@ describe("getDependentTasks", () => {
       dependsOn: [parent.id],
     });
 
-    const deps = getDependentTasks(parent.id, { includeTerminal: true });
+    const deps = await getDependentTasks(parent.id, { includeTerminal: true });
     expect(deps.length).toBeGreaterThanOrEqual(1);
     expect(deps.some((d) => d.id === child.id)).toBe(true);
   });
@@ -74,11 +74,11 @@ describe("getDependentTasks", () => {
     await startTask(child1.id);
     await completeTask(child1.id, "done");
 
-    const nonTerminalDeps = getDependentTasks(parent.id);
+    const nonTerminalDeps = await getDependentTasks(parent.id);
     expect(nonTerminalDeps.some((d) => d.id === child1.id)).toBe(false);
     expect(nonTerminalDeps.some((d) => d.id === child2.id)).toBe(true);
 
-    const allDeps = getDependentTasks(parent.id, { includeTerminal: true });
+    const allDeps = await getDependentTasks(parent.id, { includeTerminal: true });
     expect(allDeps.some((d) => d.id === child1.id)).toBe(true);
     expect(allDeps.some((d) => d.id === child2.id)).toBe(true);
   });
@@ -92,7 +92,7 @@ describe("getDependentTasks", () => {
     });
 
     const task = await createTaskExtended("Lonely task", { agentId: agent.id });
-    const deps = getDependentTasks(task.id);
+    const deps = await getDependentTasks(task.id);
     expect(deps).toEqual([]);
   });
 });
@@ -166,14 +166,14 @@ describe("cascadeFailDependents", () => {
       dependsOn: [taskA.id],
     });
     // Manually update taskA to depend on taskB (creating a cycle)
-    getDb().run("UPDATE agent_tasks SET dependsOn = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE agent_tasks SET dependsOn = ? WHERE id = ?", [
       JSON.stringify([taskB.id]),
       taskA.id,
     ]);
 
     // This should not infinite-loop — the visited set protects us
     await startTask(taskA.id);
-    const results = cascadeFailDependents(taskA.id, "failed");
+    const results = await cascadeFailDependents(taskA.id, "failed");
 
     // taskB should be cascade-failed
     const bAfter = await getTaskById(taskB.id);
@@ -261,13 +261,13 @@ describe("cascadeFailDependents", () => {
     });
 
     const parent = await createTaskExtended("Parent wide", { agentId: agent.id });
-    const children = Array.from(
-      { length: 5 },
-      async (_, i) =>
-        await createTaskExtended(`Child ${i}`, {
+    const children = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        createTaskExtended(`Child ${i}`, {
           agentId: agent.id,
           dependsOn: [parent.id],
         }),
+      ),
     );
 
     await startTask(parent.id);

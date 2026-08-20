@@ -6,7 +6,7 @@ import {
   createAgent,
   createTask,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -54,7 +54,7 @@ describe("Task swarmVersion tracking", () => {
       status: "idle",
     });
 
-    const task = createTask(agent.id, "basic task");
+    const task = await createTask(agent.id, "basic task");
 
     expect(task.swarmVersion).toBe(pkg.version);
 
@@ -62,20 +62,18 @@ describe("Task swarmVersion tracking", () => {
     expect(reloaded?.swarmVersion).toBe(pkg.version);
   });
 
-  test("column exists and is indexed", () => {
-    const db = getDb();
-    const columns = db
-      .prepare<{ name: string }, []>("PRAGMA table_info(agent_tasks)")
-      .all()
-      .map((c) => c.name);
+  test("column exists and is indexed", async () => {
+    const client = getDbClient();
+    const columns = (await client.query<{ name: string }>("PRAGMA table_info(agent_tasks)")).map(
+      (c) => c.name,
+    );
     expect(columns).toContain("swarmVersion");
 
-    const indexes = db
-      .prepare<{ name: string }, []>(
+    const indexes = (
+      await client.query<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='agent_tasks'",
       )
-      .all()
-      .map((i) => i.name);
+    ).map((i) => i.name);
     expect(indexes).toContain("idx_agent_tasks_swarmVersion");
   });
 });

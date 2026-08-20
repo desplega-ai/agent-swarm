@@ -10,7 +10,7 @@ import {
   createTaskExtended,
   failTask,
   getChildTasks,
-  getDb,
+  getDbClient,
   getSteeringMessagesForTask,
   getTaskById,
   initDb,
@@ -49,10 +49,11 @@ describe("steering promotion on terminal tasks", () => {
   });
 
   beforeEach(async () => {
-    getDb().run("DELETE FROM task_steering_messages");
-    getDb().run("DELETE FROM agent_tasks");
-    getDb().run("DELETE FROM agents");
-    getDb().run("DELETE FROM active_sessions");
+    const client = getDbClient();
+    await client.run("DELETE FROM task_steering_messages");
+    await client.run("DELETE FROM agent_tasks");
+    await client.run("DELETE FROM agents");
+    await client.run("DELETE FROM active_sessions");
     agentId = (await createAgent({ name: "steering worker", isLead: false, status: "busy" })).id;
   });
 
@@ -65,7 +66,7 @@ describe("steering promotion on terminal tasks", () => {
       followUpConfig: options?.followUpConfig,
     });
     expect((await startTask(task.id))?.status).toBe("in_progress");
-    const message = createSteeringMessage({
+    const message = await createSteeringMessage({
       taskId: task.id,
       body,
       mode: "queue",
@@ -82,8 +83,8 @@ describe("steering promotion on terminal tasks", () => {
   ])("promotes pending steering when a task is %s", async (_status, transition) => {
     const { task, message } = await taskWithPendingSteer("preserve this instruction");
 
-    expect(transition(task.id)?.status).toBe(_status);
-    const [promoted] = getSteeringMessagesForTask(task.id);
+    expect((await transition(task.id))?.status).toBe(_status);
+    const [promoted] = await getSteeringMessagesForTask(task.id);
     expect(promoted).toMatchObject({ id: message.id, status: "promoted" });
     expect(promoted?.promotedTaskId).toBeDefined();
     expect(await getTaskById(promoted!.promotedTaskId!)).toMatchObject({
@@ -99,7 +100,7 @@ describe("steering promotion on terminal tasks", () => {
     });
 
     expect((await completeTask(task.id, "done"))?.status).toBe("completed");
-    expect(getChildTasks(task.id)).toContainEqual(
+    expect(await getChildTasks(task.id)).toContainEqual(
       expect.objectContaining({ task: "must still be followed", taskType: "follow-up" }),
     );
   });
@@ -108,13 +109,13 @@ describe("steering promotion on terminal tasks", () => {
     const { task } = await taskWithPendingSteer("do not lose this steer");
 
     expect((await failTask(task.id, "worker failed"))?.status).toBe("failed");
-    const [promoted] = getSteeringMessagesForTask(task.id);
+    const [promoted] = await getSteeringMessagesForTask(task.id);
     const followUp = await getTaskById(promoted!.promotedTaskId!);
     expect(followUp).toMatchObject({ taskType: "follow-up" });
 
     expect((await failTask(followUp!.id, "follow-up failed"))?.status).toBe("failed");
-    expect(getChildTasks(followUp!.id)).toEqual([]);
-    expect(getSteeringMessagesForTask(task.id)).toEqual([
+    expect(await getChildTasks(followUp!.id)).toEqual([]);
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({ status: "promoted", promotedTaskId: followUp!.id }),
     ]);
   });
@@ -122,14 +123,17 @@ describe("steering promotion on terminal tasks", () => {
   test("fresh steering defers a stalled task only until the grace window expires", async () => {
     const { task, message } = await taskWithPendingSteer("wait for this steering");
     const staleTaskTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    getDb().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [staleTaskTime, task.id]);
+    await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+      staleTaskTime,
+      task.id,
+    ]);
 
     const duringGrace = await codeLevelTriage();
     expect(duringGrace.autoResumedTasks).toEqual([]);
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
 
     const expiredSteeringTime = new Date(Date.now() - 6 * 60 * 1000).toISOString();
-    getDb().run("UPDATE task_steering_messages SET created_at = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE task_steering_messages SET created_at = ? WHERE id = ?", [
       expiredSteeringTime,
       message.id,
     ]);
@@ -137,7 +141,7 @@ describe("steering promotion on terminal tasks", () => {
 
     expect(afterGrace.autoResumedTasks).toHaveLength(1);
     expect((await getTaskById(task.id))?.status).toBe("superseded");
-    expect(getSteeringMessagesForTask(task.id)).toEqual([
+    expect(await getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({
         id: message.id,
         status: "promoted",

@@ -62,7 +62,7 @@ describe("ensureToken", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
 
     // Token should be unchanged
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("valid-token");
   });
 
@@ -99,7 +99,7 @@ describe("ensureToken", () => {
     expect(init.body).toContain("refresh_token=refresh-token");
 
     // Token should be updated in DB
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("new-access-token");
     expect(tokens?.refreshToken).toBe("new-refresh-token");
   });
@@ -152,7 +152,7 @@ describe("ensureToken", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     // Original token should still be in DB (refresh failed)
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("old-token");
   });
 
@@ -186,7 +186,7 @@ describe("ensureToken", () => {
     await ensureToken("test-provider", 13 * 60 * 60 * 1000);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("refreshed-token");
   });
 
@@ -267,7 +267,7 @@ describe("ensureTokenOrThrow", () => {
     await ensureTokenOrThrow("test-provider", Number.MAX_SAFE_INTEGER);
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const tokens = getOAuthTokens("test-provider");
+    const tokens = await getOAuthTokens("test-provider");
     expect(tokens?.accessToken).toBe("rotated-token");
     expect(tokens?.refreshToken).toBe("rotated-refresh");
   });
@@ -295,7 +295,7 @@ describe("ensureTokenOrThrow", () => {
 
     await ensureTokenOrThrow("jira", Number.MAX_SAFE_INTEGER);
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });
@@ -332,7 +332,7 @@ describe("ensureTokenOrThrow", () => {
     const [_url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
     expect(init.body).toContain("refresh_token=old-jira-refresh");
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });
@@ -366,7 +366,7 @@ describe("ensureTokenOrThrow", () => {
     ]);
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });
@@ -393,7 +393,7 @@ describe("ensureTokenOrThrow", () => {
 
     await expect(ensureTokenOrThrow("jira")).rejects.toThrow(/rotated refresh_token/);
 
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("old-jira-access");
     expect(tokens?.refreshToken).toBe("old-jira-refresh");
   });
@@ -430,7 +430,7 @@ describe("ensureTokenOrThrow", () => {
     await ensureTokenOrThrow("jira");
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("concurrent-jira-access");
     expect(tokens?.refreshToken).toBe("concurrent-jira-refresh");
   });
@@ -468,7 +468,7 @@ describe("ensureTokenOrThrow", () => {
     await ensureTokenOrThrow("jira");
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("same-refresh-concurrent-winner");
     expect(tokens?.refreshToken).toBe("stable-jira-refresh");
   });

@@ -8,7 +8,7 @@ import {
   createPage,
   createPageVersion,
   createUser,
-  getDb,
+  getDbClient,
   getPage,
   getPageVersions,
   initDb,
@@ -86,7 +86,7 @@ describe("delete-page MCP tool", () => {
   });
 
   test("owner can delete by pageId and receives deleted page metadata", async () => {
-    const page = makePage(ownerId, "owner-id-delete", "Owner Delete");
+    const page = await makePage(ownerId, "owner-id-delete", "Owner Delete");
 
     const result = await callDeletePage({ pageId: page.id }, ownerId);
     const sc = result.structuredContent as {
@@ -100,45 +100,45 @@ describe("delete-page MCP tool", () => {
       slug: "owner-id-delete",
       title: "Owner Delete",
     });
-    expect(getPage(page.id)).toBeNull();
+    expect(await getPage(page.id)).toBeNull();
   });
 
   test("slug deletes only from the caller's page namespace", async () => {
-    const ownerPage = makePage(ownerId, "shared-slug", "Owner Shared Slug");
-    const otherPage = makePage(otherAgentId, "shared-slug", "Other Shared Slug");
+    const ownerPage = await makePage(ownerId, "shared-slug", "Owner Shared Slug");
+    const otherPage = await makePage(otherAgentId, "shared-slug", "Other Shared Slug");
 
     const result = await callDeletePage({ slug: "shared-slug" }, ownerId);
     const sc = result.structuredContent as { success: boolean; deletedPage?: { id: string } };
 
     expect(sc.success).toBe(true);
     expect(sc.deletedPage?.id).toBe(ownerPage.id);
-    expect(getPage(ownerPage.id)).toBeNull();
-    expect(getPage(otherPage.id)).not.toBeNull();
+    expect(await getPage(ownerPage.id)).toBeNull();
+    expect(await getPage(otherPage.id)).not.toBeNull();
   });
 
   test("lead can delete another agent's page by pageId", async () => {
-    const page = makePage(ownerId, "lead-delete", "Lead Delete");
+    const page = await makePage(ownerId, "lead-delete", "Lead Delete");
 
     const result = await callDeletePage({ pageId: page.id }, leadId);
     const sc = result.structuredContent as { success: boolean };
 
     expect(sc.success).toBe(true);
-    expect(getPage(page.id)).toBeNull();
+    expect(await getPage(page.id)).toBeNull();
   });
 
   test("non-owner non-lead gets a clear permission error and page remains", async () => {
-    const page = makePage(ownerId, "deny-delete", "Deny Delete");
+    const page = await makePage(ownerId, "deny-delete", "Deny Delete");
 
     const result = await callDeletePage({ pageId: page.id }, otherAgentId);
     const sc = result.structuredContent as { success: boolean; message: string };
 
     expect(sc.success).toBe(false);
     expect(sc.message).toBe("Only the lead or page owner can delete pages.");
-    expect(getPage(page.id)).not.toBeNull();
+    expect(await getPage(page.id)).not.toBeNull();
   });
 
   test("delete cascades versions and removes page-scoped KV and favorites", async () => {
-    const page = makePage(ownerId, "cascade-delete", "Cascade Delete");
+    const page = await makePage(ownerId, "cascade-delete", "Cascade Delete");
     await createPageVersion({
       pageId: page.id,
       version: 1,
@@ -158,7 +158,7 @@ describe("delete-page MCP tool", () => {
       value: { ok: true },
       valueType: "json",
     });
-    const user = createUser({ name: "Delete Page Favorite User" });
+    const user = await createUser({ name: "Delete Page Favorite User" });
     await setUserFavorite({
       userId: user.id,
       itemType: "page",
@@ -170,15 +170,16 @@ describe("delete-page MCP tool", () => {
     const sc = result.structuredContent as { success: boolean };
 
     expect(sc.success).toBe(true);
-    expect(getPageVersions(page.id)).toHaveLength(0);
+    expect(await getPageVersions(page.id)).toHaveLength(0);
     expect(
-      getDb()
-        .prepare<{ n: number }, [string]>(
+      (
+        await getDbClient().get<{ n: number }>(
           "SELECT COUNT(*) AS n FROM kv_entries WHERE namespace = ?",
+          [`task:page:${page.id}`],
         )
-        .get(`task:page:${page.id}`)?.n,
+      )?.n,
     ).toBe(0);
-    expect(listUserFavorites({ userId: user.id, itemType: "page" })).toHaveLength(0);
+    expect(await listUserFavorites({ userId: user.id, itemType: "page" })).toHaveLength(0);
   });
 
   test("missing selector or missing agent id returns success false", async () => {

@@ -12,7 +12,7 @@ import {
   createUser,
   createWorkflowRun,
   createWorkflowRunStep,
-  getDb,
+  getDbClient,
   getWorkflowRun,
   getWorkflowVersions,
   initDb,
@@ -346,12 +346,15 @@ describe("Workflow HTTP API v2", () => {
         body: JSON.stringify({ enabled: false }),
       });
 
-      const failedRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: failedLatest.id });
+      const failedRun = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: failedLatest.id,
+      });
       await updateWorkflowRun(failedRun.id, {
         status: "failed",
         finishedAt: new Date().toISOString(),
       });
-      const completedRun = createWorkflowRun({
+      const completedRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: completedLatest.id,
       });
@@ -380,7 +383,7 @@ describe("Workflow HTTP API v2", () => {
       const recovered = await createTestWorkflow({ name: `recovered-${crypto.randomUUID()}` });
 
       for (const workflow of [twoFailures, recovered]) {
-        const oldFailedRun = createWorkflowRun({
+        const oldFailedRun = await createWorkflowRun({
           id: crypto.randomUUID(),
           workflowId: workflow.id,
         });
@@ -391,14 +394,17 @@ describe("Workflow HTTP API v2", () => {
       }
 
       await Bun.sleep(2);
-      const recoveredRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: recovered.id });
+      const recoveredRun = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: recovered.id,
+      });
       await updateWorkflowRun(recoveredRun.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
 
       await Bun.sleep(2);
-      const latestFailedRun = createWorkflowRun({
+      const latestFailedRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: twoFailures.id,
       });
@@ -438,7 +444,7 @@ describe("Workflow HTTP API v2", () => {
       expect(res2.status).toBe(200);
 
       // Verify versions were created
-      const versions = getWorkflowVersions(workflow.id);
+      const versions = await getWorkflowVersions(workflow.id);
       expect(versions.length).toBe(2);
       // Version 1 should have original description (undefined)
       expect(versions.find((v) => v.version === 1)?.snapshot.description).toBeUndefined();
@@ -514,7 +520,7 @@ describe("Workflow HTTP API v2", () => {
       expect(body.error).toContain("config.timeoutMs");
       expect(body.error).toContain("300001");
       expect(body.error).toContain("300000");
-      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
+      expect(await getWorkflowVersions(workflow.id)).toHaveLength(0);
 
       const storedRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}`, { headers });
       const stored = (await storedRes.json()) as Workflow;
@@ -544,7 +550,7 @@ describe("Workflow HTTP API v2", () => {
       expect(body.error).toContain("config.timeoutMs");
       expect(body.error).toContain("300001");
       expect(body.error).toContain("300000");
-      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
+      expect(await getWorkflowVersions(workflow.id)).toHaveLength(0);
     });
 
     test("returns 404 for missing workflow", async () => {
@@ -611,12 +617,15 @@ describe("Workflow HTTP API v2", () => {
     });
 
     test("falls back to the workflow author when the trigger has no user auth", async () => {
-      const author = createUser({
+      const author = await createUser({
         name: "Workflow Author",
         email: `workflow-author-${crypto.randomUUID()}@example.com`,
       });
       const workflow = await createTestWorkflow();
-      getDb().run("UPDATE workflows SET created_by = ? WHERE id = ?", [author.id, workflow.id]);
+      await getDbClient().run("UPDATE workflows SET created_by = ? WHERE id = ?", [
+        author.id,
+        workflow.id,
+      ]);
 
       const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}/trigger`, {
         method: "POST",
@@ -625,7 +634,9 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(201);
       const { runId } = (await res.json()) as { runId: string };
-      expect(getWorkflowRun(runId)?.context?.swarm).toEqual({ requestedByUserId: author.id });
+      expect((await getWorkflowRun(runId))?.context?.swarm).toEqual({
+        requestedByUserId: author.id,
+      });
     });
 
     test("returns 400 for disabled workflow", async () => {
@@ -693,7 +704,7 @@ describe("Workflow HTTP API v2", () => {
 
       for (const [index, id] of runIds.entries()) {
         await createWorkflowRun({ id, workflowId: workflow.id });
-        getDb().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
+        await getDbClient().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
           statuses[index]!,
           new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
           id,
@@ -750,7 +761,7 @@ describe("Workflow HTTP API v2", () => {
     test("MCP run listing defaults to bounded slim rows and preserves an explicit full-row opt-in", async () => {
       const workflow = await createTestWorkflow();
       const largeValue = "x".repeat(100_000);
-      const run = createWorkflowRun({
+      const run = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
         triggerData: { largeValue },
@@ -764,7 +775,7 @@ describe("Workflow HTTP API v2", () => {
         listWorkflowRunsInputSchema.parse({ workflowId: workflow.id, limit: 101 }),
       ).toThrow();
 
-      const result = listWorkflowRunsHandler(parsed);
+      const result = await listWorkflowRunsHandler(parsed);
       expect(result.ok).toBe(true);
       const data = result.data as {
         runs: Array<{
@@ -788,7 +799,7 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(JSON.stringify(result).length).toBeLessThan(20_000);
 
-      const fullResult = listWorkflowRunsHandler({
+      const fullResult = await listWorkflowRunsHandler({
         ...parsed,
         includeContext: true,
       });

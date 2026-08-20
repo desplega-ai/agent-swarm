@@ -5,7 +5,7 @@ import {
   completeTask,
   createAgent,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -61,8 +61,8 @@ const { getTemplateDefinition } = await import("../prompts/registry");
 
 beforeEach(async () => {
   // Reset tracker_sync rows + tasks each test
-  getDb().query("DELETE FROM tracker_sync").run();
-  getDb().query("DELETE FROM agent_tasks").run();
+  await getDbClient().run("DELETE FROM tracker_sync");
+  await getDbClient().run("DELETE FROM agent_tasks");
   _setBotAccountIdForTesting(BOT_ACCOUNT_ID);
   // Re-register Jira templates if a parallel test file has cleared the registry.
   if (!getTemplateDefinition("jira.issue.assigned")) {
@@ -125,7 +125,7 @@ describe("handleIssueEvent — assignee→bot", () => {
   test("creates fresh task + tracker_sync when no prior row exists", async () => {
     await handleIssueEvent(makeIssueAssignedEvent("10001", "KAN-1", "Add feature"));
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10001");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10001");
     expect(sync).not.toBeNull();
     expect(sync?.externalIdentifier).toBe("KAN-1");
     expect(sync?.lastSyncOrigin).toBe("external");
@@ -149,7 +149,7 @@ describe("handleIssueEvent — assignee→bot", () => {
     };
     await handleIssueEvent(event);
 
-    expect(getTrackerSyncByExternalId("jira", "task", "10002")).toBeNull();
+    expect(await getTrackerSyncByExternalId("jira", "task", "10002")).toBeNull();
   });
 
   test("UNIQUE-gates concurrent inserts (second call no-ops)", async () => {
@@ -169,32 +169,34 @@ describe("handleIssueEvent — assignee→bot", () => {
     await handleIssueEvent(makeIssueAssignedEvent("10003", "KAN-3"));
 
     // Should only have ONE sync row (UNIQUE-gated insert).
-    const rows = getDb()
-      .query("SELECT COUNT(*) AS c FROM tracker_sync WHERE externalId = '10003'")
-      .get() as { c: number };
-    expect(rows.c).toBe(1);
+    const rows = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM tracker_sync WHERE externalId = '10003'",
+    );
+    expect(rows?.c).toBe(1);
   });
 
   test("re-assignment with active prior task is ignored (no duplicate task)", async () => {
     // First assignment creates the task.
     await handleIssueEvent(makeIssueAssignedEvent("10004", "KAN-4"));
-    const beforeRow = getTrackerSyncByExternalId("jira", "task", "10004");
+    const beforeRow = await getTrackerSyncByExternalId("jira", "task", "10004");
     expect(beforeRow?.swarmId).toBeTruthy();
     const firstTaskId = beforeRow?.swarmId;
 
     // Re-assign while task is still active (not completed/failed/cancelled).
     await handleIssueEvent(makeIssueAssignedEvent("10004", "KAN-4"));
 
-    const afterRow = getTrackerSyncByExternalId("jira", "task", "10004");
+    const afterRow = await getTrackerSyncByExternalId("jira", "task", "10004");
     expect(afterRow?.swarmId).toBe(firstTaskId ?? "");
     // Task count should still be 1
-    const taskCount = getDb().query("SELECT COUNT(*) AS c FROM agent_tasks").get() as { c: number };
-    expect(taskCount.c).toBe(1);
+    const taskCount = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks",
+    );
+    expect(taskCount?.c).toBe(1);
   });
 
   test("re-assignment after task completion creates follow-up task", async () => {
     await handleIssueEvent(makeIssueAssignedEvent("10005", "KAN-5"));
-    const firstSync = getTrackerSyncByExternalId("jira", "task", "10005");
+    const firstSync = await getTrackerSyncByExternalId("jira", "task", "10005");
     const firstTaskId = firstSync?.swarmId;
     expect(firstTaskId).toBeTruthy();
 
@@ -208,9 +210,11 @@ describe("handleIssueEvent — assignee→bot", () => {
 
     // We should now have 2 tasks for this externalId chain. Note tracker_sync's
     // swarmId points at the most-recent task.
-    const taskCount = getDb().query("SELECT COUNT(*) AS c FROM agent_tasks").get() as { c: number };
-    expect(taskCount.c).toBe(2);
-    const afterSync = getTrackerSyncByExternalId("jira", "task", "10005");
+    const taskCount = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks",
+    );
+    expect(taskCount?.c).toBe(2);
+    const afterSync = await getTrackerSyncByExternalId("jira", "task", "10005");
     expect(afterSync?.swarmId).not.toBe(firstTaskId ?? "");
     const followupTask = await getTaskById(afterSync?.swarmId ?? "");
     expect(followupTask?.task).toContain("Follow-up");
@@ -223,13 +227,13 @@ describe("handleCommentEvent — short-circuits", () => {
     await handleCommentEvent(
       makeCommentEvent("10010", "KAN-10", BOT_ACCOUNT_ID, "Ping", [BOT_ACCOUNT_ID]),
     );
-    expect(getTrackerSyncByExternalId("jira", "task", "10010")).toBeNull();
+    expect(await getTrackerSyncByExternalId("jira", "task", "10010")).toBeNull();
   });
 
   test("outbound-echo skip: lastSyncOrigin='swarm' within 5s short-circuits", async () => {
     // Pre-create a tracker_sync row marked as swarm-origin with a fresh
     // lastSyncedAt so the 5s echo window is active.
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "task-existing",
@@ -248,12 +252,14 @@ describe("handleCommentEvent — short-circuits", () => {
       makeCommentEvent("10011", "KAN-11", "user-other", "ping", [BOT_ACCOUNT_ID]),
     );
 
-    const taskCount = getDb().query("SELECT COUNT(*) AS c FROM agent_tasks").get() as { c: number };
-    expect(taskCount.c).toBe(0);
+    const taskCount = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks",
+    );
+    expect(taskCount?.c).toBe(0);
   });
 
   test("outbound-echo skip ages out after 6s — comment now creates a task", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "jira",
       entityType: "task",
       swarmId: "", // orphan → followup branch
@@ -272,24 +278,24 @@ describe("handleCommentEvent — short-circuits", () => {
       makeCommentEvent("10012", "KAN-12", "user-other", "ping", [BOT_ACCOUNT_ID]),
     );
 
-    const taskCount = getDb()
-      .query("SELECT COUNT(*) AS c FROM agent_tasks WHERE source = 'jira'")
-      .get() as { c: number };
-    expect(taskCount.c).toBe(1);
+    const taskCount = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks WHERE source = 'jira'",
+    );
+    expect(taskCount?.c).toBe(1);
   });
 
   test("comment without bot mention is ignored", async () => {
     await handleCommentEvent(
       makeCommentEvent("10013", "KAN-13", "user-other", "no mention here", []),
     );
-    expect(getTrackerSyncByExternalId("jira", "task", "10013")).toBeNull();
+    expect(await getTrackerSyncByExternalId("jira", "task", "10013")).toBeNull();
   });
 
   test("bot-mention with no prior sync creates fresh comment-mention task", async () => {
     await handleCommentEvent(
       makeCommentEvent("10014", "KAN-14", "user-other", "Hey ", [BOT_ACCOUNT_ID]),
     );
-    const sync = getTrackerSyncByExternalId("jira", "task", "10014");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10014");
     expect(sync).not.toBeNull();
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task?.source).toBe("jira");
@@ -298,7 +304,7 @@ describe("handleCommentEvent — short-circuits", () => {
   test("bot-mention triggers follow-up on completed prior task", async () => {
     // Establish prior task via assignee path
     await handleIssueEvent(makeIssueAssignedEvent("10015", "KAN-15"));
-    const sync = getTrackerSyncByExternalId("jira", "task", "10015");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10015");
     const firstTaskId = sync?.swarmId;
     expect(firstTaskId).toBeTruthy();
     if (firstTaskId) await completeTask(firstTaskId);
@@ -307,16 +313,19 @@ describe("handleCommentEvent — short-circuits", () => {
       makeCommentEvent("10015", "KAN-15", "user-other", "follow-up please", [BOT_ACCOUNT_ID]),
     );
 
-    const taskCount = getDb()
-      .query("SELECT COUNT(*) AS c FROM agent_tasks WHERE source = 'jira'")
-      .get() as { c: number };
-    expect(taskCount.c).toBe(2);
+    const taskCount = await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) AS c FROM agent_tasks WHERE source = 'jira'",
+    );
+    expect(taskCount?.c).toBe(2);
   });
 });
 
 describe("identity resolution — Jira routes through resolveIdentity, never raw displayName", () => {
   test("issue-assigned: reporter linked by accountId -> requestedByUserId set + rendered pair in task text", async () => {
-    const reporter = createUser({ name: "Zbigniew Reporter", email: "zbigniew-jira@example.com" });
+    const reporter = await createUser({
+      name: "Zbigniew Reporter",
+      email: "zbigniew-jira@example.com",
+    });
     await linkIdentity(reporter.id, "jira", "reporter-linked-1", SYSTEM_ACTOR);
 
     const event = makeIssueAssignedEvent("10030", "KAN-30", "Linked reporter issue");
@@ -326,7 +335,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     };
     await handleIssueEvent(event);
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10030");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10030");
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId).toBe(reporter.id);
@@ -343,11 +352,11 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     };
     await handleIssueEvent(event);
 
-    const linked = findUserByExternalId("jira", "reporter-autolink-1");
+    const linked = await findUserByExternalId("jira", "reporter-autolink-1");
     expect(linked).not.toBeNull();
     expect(linked?.name).toBe("Auto Linked");
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10031");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10031");
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task?.requestedByUserId).toBe(linked?.id);
     expect(task?.task).toContain("Auto Linked (jira:reporter-autolink-1)");
@@ -361,7 +370,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
     };
     await handleIssueEvent(event);
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10032");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10032");
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId ?? null).toBeNull();
@@ -370,7 +379,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
   });
 
   test("comment-mention: linked author -> requestedByUserId set + rendered pair as comment_author", async () => {
-    const author = createUser({ name: "Manuel Commenter", email: "manuel-jira@example.com" });
+    const author = await createUser({ name: "Manuel Commenter", email: "manuel-jira@example.com" });
     await linkIdentity(author.id, "jira", "commenter-linked-1", SYSTEM_ACTOR);
 
     await handleCommentEvent(
@@ -379,7 +388,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
       ]),
     );
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10033");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10033");
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId).toBe(author.id);
@@ -392,7 +401,7 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
       makeCommentEvent("10034", "KAN-34", "commenter-unknown-1", "any updates?", [BOT_ACCOUNT_ID]),
     );
 
-    const sync = getTrackerSyncByExternalId("jira", "task", "10034");
+    const sync = await getTrackerSyncByExternalId("jira", "task", "10034");
     const task = await getTaskById(sync?.swarmId ?? "");
     expect(task).not.toBeNull();
     expect(task?.requestedByUserId ?? null).toBeNull();
@@ -402,8 +411,8 @@ describe("identity resolution — Jira routes through resolveIdentity, never raw
 });
 
 describe("createTrackerSyncIfAbsent — UNIQUE-gated insert", () => {
-  test("first call inserts; second call returns existing", () => {
-    const first = createTrackerSyncIfAbsent({
+  test("first call inserts; second call returns existing", async () => {
+    const first = await createTrackerSyncIfAbsent({
       provider: "jira",
       entityType: "task",
       swarmId: "",
@@ -412,7 +421,7 @@ describe("createTrackerSyncIfAbsent — UNIQUE-gated insert", () => {
     });
     expect(first.inserted).toBe(true);
 
-    const second = createTrackerSyncIfAbsent({
+    const second = await createTrackerSyncIfAbsent({
       provider: "jira",
       entityType: "task",
       swarmId: "",

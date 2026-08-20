@@ -159,7 +159,7 @@ describe("STEERING_ENABLED opt-in", () => {
   test("rejects new requests with 403 before looking up or creating rows", async () => {
     await withSteeringDisabled(async () => {
       const { task } = await createRunningTask("disabled request");
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
       let thrown: unknown;
       try {
         await requestSteering({ taskId: task.id, message: "do not create a row" });
@@ -171,7 +171,7 @@ describe("STEERING_ENABLED opt-in", () => {
         message: "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
         statusCode: 403,
       });
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
     });
   });
 
@@ -199,29 +199,31 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("removes steering MCP tools when disabled and restores them when enabled", async () => {
-    await withSteeringDisabled(() => {
-      const serverTools = registeredTools(createServer({ fullSurface: true }));
-      const userTools = registeredTools(createUserServer(createUser({ name: "disabled user" })));
+    await withSteeringDisabled(async () => {
+      const serverTools = registeredTools(await createServer({ fullSurface: true }));
+      const userTools = registeredTools(
+        createUserServer(await createUser({ name: "disabled user" })),
+      );
       expect(serverTools["steer-task"]).toBeUndefined();
       expect(serverTools["accept-steer"]).toBeUndefined();
       expect(userTools["steer-task"]).toBeUndefined();
     });
 
-    const serverTools = registeredTools(createServer({ fullSurface: true }));
-    const userTools = registeredTools(createUserServer(createUser({ name: "enabled user" })));
+    const serverTools = registeredTools(await createServer({ fullSurface: true }));
+    const userTools = registeredTools(createUserServer(await createUser({ name: "enabled user" })));
     expect(serverTools["steer-task"]).toBeDefined();
     expect(serverTools["accept-steer"]).toBeDefined();
     expect(userTools["steer-task"]).toBeDefined();
   });
 
-  test("registers steering tools with core capability alone (no task-pool)", () => {
+  test("registers steering tools with core capability alone (no task-pool)", async () => {
     // Steering delivery works on directly-assigned tasks, so the acknowledge
     // path must not depend on the optional task-pool capability — otherwise
     // delivered messages could never reach `handled` on core-only deployments.
     const previous = process.env.CAPABILITIES;
     process.env.CAPABILITIES = "core";
     try {
-      const serverTools = registeredTools(createServer());
+      const serverTools = registeredTools(await createServer());
       expect(serverTools["accept-steer"]).toBeDefined();
       expect(serverTools["steer-task"]).toBeDefined();
       expect(serverTools["task-action"]).toBeUndefined();
@@ -232,14 +234,14 @@ describe("STEERING_ENABLED opt-in", () => {
 
   test("keeps history reads and all worker drain callbacks available", async () => {
     const { agent, task } = await createRunningTask("disabled drain callbacks");
-    const delivered = createSteeringMessage({
+    const delivered = await createSteeringMessage({
       taskId: task.id,
       body: "deliver this",
       mode: "queue",
       source: "api",
       createdByKind: "system",
     });
-    const undeliverable = createSteeringMessage({
+    const undeliverable = await createSteeringMessage({
       taskId: task.id,
       body: "promote this",
       mode: "queue",
@@ -340,7 +342,7 @@ describe("STEERING_ENABLED opt-in", () => {
         await instantFlush(`${channelId}:${threadTs}`);
       });
 
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
       expect(await getChildTasks(task.id)).toHaveLength(1);
     } finally {
       restoreEnv("SLACK_THREAD_STEERING", previousMode);

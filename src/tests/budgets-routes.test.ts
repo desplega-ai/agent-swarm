@@ -14,7 +14,7 @@ import {
 } from "node:http";
 import {
   closeDb,
-  getDb,
+  getDbClient,
   getLogsByEventType,
   initDb,
   recordBudgetRefusalNotification,
@@ -74,11 +74,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'budget.%'").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM agent_log WHERE eventType LIKE 'budget.%'");
+  await client.run("DELETE FROM budget_refusal_notifications");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -225,7 +225,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
         body: JSON.stringify({ dailyBudgetUsd: 7 }),
       });
 
-      const logs = getLogsByEventType("budget.upserted");
+      const logs = await getLogsByEventType("budget.upserted");
       expect(logs.length).toBe(2);
 
       // Logs land within the same millisecond so the DESC-by-createdAt order
@@ -318,7 +318,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
       });
       await authedFetch(`/api/budgets/agent/${agentId}`, { method: "DELETE" });
 
-      const logs = getLogsByEventType("budget.deleted");
+      const logs = await getLogsByEventType("budget.deleted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.scope).toBe("agent");

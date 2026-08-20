@@ -9,7 +9,7 @@ import {
 import { parseAppDefinition } from "../apps/definition";
 import { appIndexKey, appsNamespace, createAppRow, purgeAppRows } from "../apps/row-store";
 import { deleteApp, getApp } from "../apps/store";
-import { closeDb, countKv, getDb, getKv, initDb } from "../be/db";
+import { closeDb, countKv, getDbClient, getKv, initDb } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -95,9 +95,9 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -112,9 +112,9 @@ afterAll(async () => {
 
 describe("apps spike", () => {
   test("validates app definitions with normalized issue paths", async () => {
-    expect(parseAppDefinition(ideasDefinition).success).toBe(true);
+    expect((await parseAppDefinition(ideasDefinition)).success).toBe(true);
 
-    const missingEnum = parseAppDefinition({
+    const missingEnum = await parseAppDefinition({
       ...ideasDefinition,
       models: { idea: { columns: { status: { kind: "enum" } } } },
     });
@@ -123,7 +123,7 @@ describe("apps spike", () => {
       issues: [{ path: "models.idea.columns.status.enum" }],
     });
 
-    const prototypeReferences = parseAppDefinition({
+    const prototypeReferences = await parseAppDefinition({
       ...ideasDefinition,
       queries: {
         badModel: { model: "toString" },
@@ -138,7 +138,7 @@ describe("apps spike", () => {
       ]);
     }
 
-    const invalidDateDefault = parseAppDefinition({
+    const invalidDateDefault = await parseAppDefinition({
       ...ideasDefinition,
       models: { idea: { columns: { due: { kind: "date", default: "1" } } } },
     });
@@ -215,8 +215,8 @@ describe("apps spike", () => {
     });
   });
 
-  test("preserves the record-key validation message", () => {
-    const result = parseAppDefinition({
+  test("preserves the record-key validation message", async () => {
+    const result = await parseAppDefinition({
       ...ideasDefinition,
       models: {
         idea: { columns: { BadName: { kind: "string" } } },
@@ -437,7 +437,7 @@ describe("apps spike", () => {
 
   test("same-millisecond creates preserve creation order when sorted by createdAt", async () => {
     const appId = await createIdeasApp();
-    const app = getApp(appId);
+    const app = await getApp(appId);
     if (!app) throw new Error("created app missing");
     const model = app.definition.models.idea!;
     const originalDateNow = Date.now;
@@ -547,7 +547,7 @@ describe("apps spike", () => {
     });
     // Simulate a legacy/manually corrupted row: DELETE is the recovery path and
     // must not depend on the definition parsing.
-    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", ["{not json", appId]);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", ["{not json", appId]);
 
     const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
     expect(deleted).toEqual({ status: 200, body: { ok: true } });
@@ -574,13 +574,13 @@ describe("apps spike", () => {
 
   test("a mutation queued during app purge cannot recreate orphan KV rows", async () => {
     const appId = await createIdeasApp();
-    const app = getApp(appId);
+    const app = await getApp(appId);
     if (!app) throw new Error("created app missing");
     const model = app.definition.models.idea!;
     let lateCreateOutcome: Promise<boolean> | undefined;
 
-    await purgeAppRows(appId, ["idea"], () => {
-      expect(deleteApp(appId)).toBe(true);
+    await purgeAppRows(appId, ["idea"], async () => {
+      expect(await deleteApp(appId)).toBe(true);
       lateCreateOutcome = createAppRow(appId, "idea", model, { title: "Too late" }).then(
         () => false,
         () => true,

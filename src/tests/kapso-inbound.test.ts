@@ -130,7 +130,7 @@ describe("routeKapsoInbound", () => {
       agentId,
       createdAt: new Date().toISOString(),
     });
-    const user = createUser({ name: "Known WhatsApp Sender" });
+    const user = await createUser({ name: "Known WhatsApp Sender" });
     await linkIdentity(user.id, "kapso", "34679077778", { kind: "system", id: "test-fixture" });
 
     const routing = await routeKapsoInbound(
@@ -159,7 +159,7 @@ describe("routeKapsoInbound", () => {
       agentId,
       createdAt: new Date().toISOString(),
     });
-    expect(findUserByExternalId("kapso", "34679077779")).toBeNull();
+    expect(await findUserByExternalId("kapso", "34679077779")).toBeNull();
 
     const routing = await routeKapsoInbound(
       makePayload({

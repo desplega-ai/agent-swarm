@@ -4,7 +4,7 @@ import {
   closeDb,
   createAgent,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
@@ -67,7 +67,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(stored.path).toBe("/thoughts/2026-05-22/report.pdf");
     expect(stored.intent).toBe("deliverable for Taras");
 
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(rows[0].name).toBe("report.pdf");
   });
@@ -93,7 +93,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       isPrimary: true,
     });
 
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(2);
     expect(rows[0].name).toBe("step1.png");
     expect(rows[1].name).toBe("final.md");
@@ -122,7 +122,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     });
 
     expect(b.id).toBe(a.id);
-    expect(getTaskAttachments(task.id).length).toBe(1);
+    expect((await getTaskAttachments(task.id)).length).toBe(1);
   });
 
   test("dedup by (kind, pointer, name) tuple when sha256 missing", async () => {
@@ -143,7 +143,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     });
 
     expect(b.id).toBe(a.id);
-    expect(getTaskAttachments(task.id).length).toBe(1);
+    expect((await getTaskAttachments(task.id)).length).toBe(1);
   });
 
   test("dedup by tuple: name change is treated as a new attachment", async () => {
@@ -163,7 +163,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       url: "https://example.com/page",
     });
 
-    expect(getTaskAttachments(task.id).length).toBe(2);
+    expect((await getTaskAttachments(task.id)).length).toBe(2);
   });
 
   test("dedup is scoped per task — same pointer on a different task inserts", async () => {
@@ -186,8 +186,8 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       sha256: "shared-sha",
     });
 
-    expect(getTaskAttachments(t1.id).length).toBe(1);
-    expect(getTaskAttachments(t2.id).length).toBe(1);
+    expect((await getTaskAttachments(t1.id)).length).toBe(1);
+    expect((await getTaskAttachments(t2.id)).length).toBe(1);
   });
 
   test("zod AttachmentInputSchema rejects array of length > 20", () => {
@@ -231,13 +231,13 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
 
   test("SQL kind CHECK constraint rejects an unknown kind", async () => {
     const task = await newTask("kind check raw insert");
-    expect(() => {
-      getDb().run(
+    await expect(
+      getDbClient().run(
         `INSERT INTO task_attachments (id, task_id, agent_id, name, kind, path)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [crypto.randomUUID(), task.id, agentId, "bogus.bin", "inline", "/tmp/x"],
-      );
-    }).toThrow();
+      ),
+    ).rejects.toThrow();
   });
 
   test("ON DELETE CASCADE: deleting parent task removes attachments", async () => {
@@ -249,10 +249,10 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       kind: "agent-fs",
       path: "/a.txt",
     });
-    expect(getTaskAttachments(task.id).length).toBe(1);
+    expect((await getTaskAttachments(task.id)).length).toBe(1);
 
-    getDb().run("DELETE FROM agent_tasks WHERE id = ?", [task.id]);
-    expect(getTaskAttachments(task.id).length).toBe(0);
+    await getDbClient().run("DELETE FROM agent_tasks WHERE id = ?", [task.id]);
+    expect((await getTaskAttachments(task.id)).length).toBe(0);
   });
 
   // Regression: created_at must be ISO-8601 UTC so a stored row round-trips
@@ -281,7 +281,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(insertParse.success).toBe(true);
 
     // And the row read back via getTaskAttachments must parse too.
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     for (const row of rows) {
       const parsed = TaskAttachmentSchema.safeParse(row);
@@ -305,7 +305,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
       kind: "url",
       url: "https://example.com/x",
     });
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     expect(rows.length).toBe(1);
     expect(TaskAttachmentSchema.safeParse(rows[0]).success).toBe(true);
   });
@@ -326,7 +326,7 @@ describe("task_attachments — Phase 1 (pointer-based, append-only)", () => {
     expect(stored.orgId).toBe("org-abc");
     expect(stored.driveId).toBe("drive-xyz");
 
-    const rows = getTaskAttachments(task.id);
+    const rows = await getTaskAttachments(task.id);
     const target = rows.find((r) => r.id === stored.id);
     expect(target?.orgId).toBe("org-abc");
     expect(target?.driveId).toBe("drive-xyz");

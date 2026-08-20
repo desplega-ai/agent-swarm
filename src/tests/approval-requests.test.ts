@@ -10,7 +10,7 @@ import {
   getAgentCurrentTask,
   getApprovalRequestById,
   getApprovalRequestByStepId,
-  getDb,
+  getDbClient,
   getExpiredPendingApprovals,
   initDb,
   listApprovalRequests,
@@ -68,7 +68,7 @@ async function handleRequest(
   ) {
     const data = JSON.parse(body);
     const id = crypto.randomUUID();
-    const request = createApprovalRequest({
+    const request = await createApprovalRequest({
       id,
       title: data.title,
       questions: data.questions,
@@ -89,7 +89,7 @@ async function handleRequest(
     pathSegments[1] === "approval-requests" &&
     !pathSegments[2]
   ) {
-    const requests = listApprovalRequests({
+    const requests = await listApprovalRequests({
       status: queryParams.get("status") || undefined,
       workflowRunId: queryParams.get("workflowRunId") || undefined,
       limit: queryParams.get("limit") ? Number(queryParams.get("limit")) : undefined,
@@ -106,7 +106,7 @@ async function handleRequest(
     pathSegments[3] === "respond"
   ) {
     const id = pathSegments[2];
-    const existing = getApprovalRequestById(id);
+    const existing = await getApprovalRequestById(id);
     if (!existing) return { status: 404, body: { error: "Not found" } };
     if (existing.status !== "pending") {
       return { status: 409, body: { error: `Already resolved: ${existing.status}` } };
@@ -132,7 +132,7 @@ async function handleRequest(
       }
     }
 
-    const updated = resolveApprovalRequest(id, {
+    const updated = await resolveApprovalRequest(id, {
       status,
       responses: data.responses,
       resolvedBy: data.respondedBy,
@@ -149,7 +149,7 @@ async function handleRequest(
     pathSegments[1] === "approval-requests" &&
     pathSegments[2]
   ) {
-    const request = getApprovalRequestById(pathSegments[2]);
+    const request = await getApprovalRequestById(pathSegments[2]);
     if (!request) return { status: 404, body: { error: "Not found" } };
     return { status: 200, body: { approvalRequest: request } };
   }
@@ -203,9 +203,9 @@ describe("Approval Requests", () => {
   // ─── DB Functions ───────────────────────────────────────────
 
   describe("DB: createApprovalRequest", () => {
-    test("creates a minimal approval request", () => {
+    test("creates a minimal approval request", async () => {
       const data = makeApprovalData();
-      const result = createApprovalRequest(data);
+      const result = await createApprovalRequest(data);
 
       expect(result.id).toBe(data.id);
       expect(result.title).toBe("Approve deployment");
@@ -218,10 +218,10 @@ describe("Approval Requests", () => {
       expect(result.createdAt).toBeTruthy();
     });
 
-    test("creates request with timeout and computes expiresAt", () => {
+    test("creates request with timeout and computes expiresAt", async () => {
       const data = makeApprovalData({ timeoutSeconds: 3600 });
       const before = Date.now();
-      const result = createApprovalRequest(data);
+      const result = await createApprovalRequest(data);
 
       expect(result.expiresAt).toBeTruthy();
       const expiresMs = new Date(result.expiresAt!).getTime();
@@ -230,25 +230,25 @@ describe("Approval Requests", () => {
       expect(expiresMs).toBeLessThanOrEqual(before + 3600 * 1000 + 5000);
     });
 
-    test("creates request with workflow linkage", () => {
+    test("creates request with workflow linkage", async () => {
       const runId = crypto.randomUUID();
       const stepId = crypto.randomUUID();
       const data = makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId });
-      const result = createApprovalRequest(data);
+      const result = await createApprovalRequest(data);
 
       expect(result.workflowRunId).toBe(runId);
       expect(result.workflowRunStepId).toBe(stepId);
     });
 
-    test("creates request with notification channels", () => {
+    test("creates request with notification channels", async () => {
       const data = makeApprovalData({
         notificationChannels: [{ channel: "slack", target: "#general" }],
       });
-      const result = createApprovalRequest(data);
+      const result = await createApprovalRequest(data);
       expect(result.notificationChannels).toEqual([{ channel: "slack", target: "#general" }]);
     });
 
-    test("creates request with multiple question types", () => {
+    test("creates request with multiple question types", async () => {
       const questions = [
         { id: "q1", type: "approval", label: "Approve?", required: true },
         { id: "q2", type: "text", label: "Comments", required: false },
@@ -264,38 +264,38 @@ describe("Approval Requests", () => {
         { id: "q4", type: "boolean", label: "Urgent?", defaultValue: false },
       ];
       const data = makeApprovalData({ questions });
-      const result = createApprovalRequest(data);
+      const result = await createApprovalRequest(data);
       expect(result.questions).toEqual(questions);
     });
 
-    test("stamps createdBy when provided, round-trips through getApprovalRequestById", () => {
-      const requester = createUser({
+    test("stamps createdBy when provided, round-trips through getApprovalRequestById", async () => {
+      const requester = await createUser({
         name: "Approval Provenance User",
         email: "approval-provenance@example.com",
       });
       const data = makeApprovalData({ createdBy: requester.id });
-      const created = createApprovalRequest(data);
+      const created = await createApprovalRequest(data);
       expect(created.createdBy).toBe(requester.id);
 
-      const fetched = getApprovalRequestById(created.id);
+      const fetched = await getApprovalRequestById(created.id);
       expect(fetched?.createdBy).toBe(requester.id);
     });
 
-    test("createdBy is undefined when not provided", () => {
-      const result = createApprovalRequest(makeApprovalData());
+    test("createdBy is undefined when not provided", async () => {
+      const result = await createApprovalRequest(makeApprovalData());
       expect(result.createdBy).toBeUndefined();
     });
   });
 
   describe("DB: getApprovalRequestById", () => {
-    test("returns null for nonexistent ID", () => {
-      expect(getApprovalRequestById(crypto.randomUUID())).toBeNull();
+    test("returns null for nonexistent ID", async () => {
+      expect(await getApprovalRequestById(crypto.randomUUID())).toBeNull();
     });
 
     test("returns the correct request", async () => {
       const data = makeApprovalData();
       await createApprovalRequest(data);
-      const fetched = getApprovalRequestById(data.id);
+      const fetched = await getApprovalRequestById(data.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(data.id);
       expect(fetched!.title).toBe(data.title);
@@ -303,8 +303,8 @@ describe("Approval Requests", () => {
   });
 
   describe("DB: getApprovalRequestByStepId", () => {
-    test("returns null when no request for step", () => {
-      expect(getApprovalRequestByStepId(crypto.randomUUID())).toBeNull();
+    test("returns null when no request for step", async () => {
+      expect(await getApprovalRequestByStepId(crypto.randomUUID())).toBeNull();
     });
 
     test("returns the request linked to a step", async () => {
@@ -314,7 +314,7 @@ describe("Approval Requests", () => {
         workflowRunStepId: stepId,
       });
       await createApprovalRequest(data);
-      const fetched = getApprovalRequestByStepId(stepId);
+      const fetched = await getApprovalRequestByStepId(stepId);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(data.id);
     });
@@ -325,7 +325,7 @@ describe("Approval Requests", () => {
       const data = makeApprovalData();
       await createApprovalRequest(data);
 
-      const result = resolveApprovalRequest(data.id, {
+      const result = await resolveApprovalRequest(data.id, {
         status: "approved",
         responses: { q1: { approved: true } },
         resolvedBy: "user-1",
@@ -342,7 +342,7 @@ describe("Approval Requests", () => {
       const data = makeApprovalData();
       await createApprovalRequest(data);
 
-      const result = resolveApprovalRequest(data.id, { status: "rejected" });
+      const result = await resolveApprovalRequest(data.id, { status: "rejected" });
       expect(result).not.toBeNull();
       expect(result!.status).toBe("rejected");
     });
@@ -353,19 +353,19 @@ describe("Approval Requests", () => {
       await resolveApprovalRequest(data.id, { status: "approved" });
 
       // Second resolve should fail (idempotency guard)
-      const result = resolveApprovalRequest(data.id, { status: "rejected" });
+      const result = await resolveApprovalRequest(data.id, { status: "rejected" });
       expect(result).toBeNull();
     });
 
-    test("returns null for nonexistent ID", () => {
-      const result = resolveApprovalRequest(crypto.randomUUID(), { status: "approved" });
+    test("returns null for nonexistent ID", async () => {
+      const result = await resolveApprovalRequest(crypto.randomUUID(), { status: "approved" });
       expect(result).toBeNull();
     });
   });
 
   describe("DB: listApprovalRequests", () => {
-    test("lists all requests (with limit)", () => {
-      const results = listApprovalRequests({ limit: 1000 });
+    test("lists all requests (with limit)", async () => {
+      const results = await listApprovalRequests({ limit: 1000 });
       expect(results.length).toBeGreaterThan(0);
     });
 
@@ -374,7 +374,7 @@ describe("Approval Requests", () => {
       const data = makeApprovalData();
       await createApprovalRequest(data);
 
-      const pending = listApprovalRequests({ status: "pending" });
+      const pending = await listApprovalRequests({ status: "pending" });
       expect(pending.length).toBeGreaterThan(0);
       for (const r of pending) {
         expect(r.status).toBe("pending");
@@ -386,21 +386,21 @@ describe("Approval Requests", () => {
       const data = makeApprovalData({ workflowRunId: runId });
       await createApprovalRequest(data);
 
-      const results = listApprovalRequests({ workflowRunId: runId });
+      const results = await listApprovalRequests({ workflowRunId: runId });
       expect(results).toHaveLength(1);
       expect(results[0].workflowRunId).toBe(runId);
     });
 
-    test("respects limit", () => {
-      const results = listApprovalRequests({ limit: 1 });
+    test("respects limit", async () => {
+      const results = await listApprovalRequests({ limit: 1 });
       expect(results).toHaveLength(1);
     });
   });
 
   describe("DB: getExpiredPendingApprovals", () => {
-    test("returns empty for non-expired requests", () => {
+    test("returns empty for non-expired requests", async () => {
       // All our test requests with timeout have expiresAt in the future
-      const expired = getExpiredPendingApprovals();
+      const expired = await getExpiredPendingApprovals();
       // Filter to only our test requests
       for (const r of expired) {
         expect(r.status).toBe("pending");
@@ -451,22 +451,26 @@ describe("Approval Requests", () => {
     });
 
     test("applies status before limiting newer rows", async () => {
-      const pending = createApprovalRequest(makeApprovalData({ title: "Older pending request" }));
-      getDb()
-        .prepare("UPDATE approval_requests SET createdAt = ? WHERE id = ?")
-        .run("2099-01-01T00:00:00.000Z", pending.id);
+      const pending = await createApprovalRequest(
+        makeApprovalData({ title: "Older pending request" }),
+      );
+      await getDbClient().run("UPDATE approval_requests SET createdAt = ? WHERE id = ?", [
+        "2099-01-01T00:00:00.000Z",
+        pending.id,
+      ]);
 
       for (const index of [1, 2]) {
-        const resolved = createApprovalRequest(
+        const resolved = await createApprovalRequest(
           makeApprovalData({ title: `Newer resolved request ${index}` }),
         );
         await resolveApprovalRequest(resolved.id, {
           status: "approved",
           responses: { q1: { approved: true } },
         });
-        getDb()
-          .prepare("UPDATE approval_requests SET createdAt = ? WHERE id = ?")
-          .run(`2100-01-0${index}T00:00:00.000Z`, resolved.id);
+        await getDbClient().run("UPDATE approval_requests SET createdAt = ? WHERE id = ?", [
+          `2100-01-0${index}T00:00:00.000Z`,
+          resolved.id,
+        ]);
       }
 
       const unfiltered = await fetch(`${baseUrl}/api/approval-requests?limit=1`);
@@ -505,7 +509,7 @@ describe("Approval Requests", () => {
     });
 
     test("returns the request", async () => {
-      const created = createApprovalRequest(makeApprovalData());
+      const created = await createApprovalRequest(makeApprovalData());
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}`);
       expect(res.status).toBe(200);
       const data = (await res.json()) as { approvalRequest: { id: string; title: string } };
@@ -515,7 +519,7 @@ describe("Approval Requests", () => {
 
   describe("HTTP: POST /api/approval-requests/:id/respond", () => {
     test("approves a pending request", async () => {
-      const created = createApprovalRequest(makeApprovalData());
+      const created = await createApprovalRequest(makeApprovalData());
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
         method: "POST",
@@ -535,7 +539,7 @@ describe("Approval Requests", () => {
     });
 
     test("rejects when approval question has approved: false", async () => {
-      const created = createApprovalRequest(makeApprovalData());
+      const created = await createApprovalRequest(makeApprovalData());
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
         method: "POST",
@@ -551,7 +555,7 @@ describe("Approval Requests", () => {
     });
 
     test("keeps the request pending when a required rejection reason is blank", async () => {
-      const created = createApprovalRequest(
+      const created = await createApprovalRequest(
         makeApprovalData({
           questions: [
             { id: "q1", type: "approval", label: "Approve?", required: true },
@@ -569,11 +573,11 @@ describe("Approval Requests", () => {
       });
 
       expect(res.status).toBe(400);
-      expect(getApprovalRequestById(created.id)?.status).toBe("pending");
+      expect((await getApprovalRequestById(created.id))?.status).toBe("pending");
     });
 
     test("keeps the request pending when a required approval decision is missing", async () => {
-      const created = createApprovalRequest(makeApprovalData());
+      const created = await createApprovalRequest(makeApprovalData());
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
         method: "POST",
@@ -582,7 +586,7 @@ describe("Approval Requests", () => {
       });
 
       expect(res.status).toBe(400);
-      expect(getApprovalRequestById(created.id)?.status).toBe("pending");
+      expect((await getApprovalRequestById(created.id))?.status).toBe("pending");
     });
 
     test("returns 404 for nonexistent request", async () => {
@@ -595,7 +599,7 @@ describe("Approval Requests", () => {
     });
 
     test("returns 409 for already-resolved request", async () => {
-      const created = createApprovalRequest(makeApprovalData());
+      const created = await createApprovalRequest(makeApprovalData());
       await resolveApprovalRequest(created.id, { status: "approved" });
 
       const res = await fetch(`${baseUrl}/api/approval-requests/${created.id}/respond`, {
@@ -607,7 +611,7 @@ describe("Approval Requests", () => {
     });
 
     test("approves when there are no approval-type questions", async () => {
-      const created = createApprovalRequest(
+      const created = await createApprovalRequest(
         makeApprovalData({
           questions: [{ id: "q1", type: "text", label: "Comments" }],
         }),
@@ -680,14 +684,14 @@ describe("Approval Requests", () => {
       expect((result as any).correlationId).toBeTruthy();
 
       // Verify the request was created in DB
-      const created = getApprovalRequestByStepId(stepId);
+      const created = await getApprovalRequestByStepId(stepId);
       expect(created).not.toBeNull();
       expect(created!.title).toBe("Deploy approval");
       expect(created!.workflowRunStepId).toBe(stepId);
     });
 
     test("stamps createdBy from meta.requestedByUserId (workflow-run provenance)", async () => {
-      const requester = createUser({
+      const requester = await createUser({
         name: "HITL Requester",
         email: "hitl-requester@example.com",
       });
@@ -705,7 +709,7 @@ describe("Approval Requests", () => {
         meta,
       });
 
-      const created = getApprovalRequestByStepId(stepId);
+      const created = await getApprovalRequestByStepId(stepId);
       expect(created?.createdBy).toBe(requester.id);
     });
 
@@ -724,7 +728,7 @@ describe("Approval Requests", () => {
         meta,
       });
 
-      const created = getApprovalRequestByStepId(stepId);
+      const created = await getApprovalRequestByStepId(stepId);
       expect(created?.createdBy).toBeUndefined();
     });
 
@@ -839,7 +843,7 @@ describe("Approval Requests", () => {
         meta: { ...mockMeta, stepId },
       });
 
-      const created = getApprovalRequestByStepId(stepId);
+      const created = await getApprovalRequestByStepId(stepId);
       expect(created).not.toBeNull();
       expect(created!.timeoutSeconds).toBe(7200);
       expect(created!.expiresAt).toBeTruthy();
@@ -897,11 +901,11 @@ describe("Approval Requests", () => {
 
       // Create approval request linked to source task
       const approvalData = makeApprovalData({ sourceTaskId: sourceTask.id });
-      const approval = createApprovalRequest(approvalData);
+      const approval = await createApprovalRequest(approvalData);
       expect(approval.sourceTaskId).toBe(sourceTask.id);
 
       // Resolve it
-      const resolved = resolveApprovalRequest(approval.id, {
+      const resolved = await resolveApprovalRequest(approval.id, {
         status: "approved",
         responses: { q1: { approved: true } },
       });
@@ -970,13 +974,13 @@ describe("Approval Requests", () => {
       expect(followUp.slackUserId).toBe("U_AUTO");
     });
 
-    test("no follow-up for workflow-linked requests (workflowRunId set)", () => {
+    test("no follow-up for workflow-linked requests (workflowRunId set)", async () => {
       const approvalData = makeApprovalData({
         sourceTaskId: crypto.randomUUID(),
         workflowRunId: crypto.randomUUID(),
         workflowRunStepId: crypto.randomUUID(),
       });
-      const approval = createApprovalRequest(approvalData);
+      const approval = await createApprovalRequest(approvalData);
 
       // The condition in the handler is: !updated.workflowRunId && updated.sourceTaskId
       // With workflowRunId set, this should be false
@@ -986,9 +990,9 @@ describe("Approval Requests", () => {
       expect(!approval.workflowRunId && approval.sourceTaskId).toBe(false);
     });
 
-    test("no follow-up when sourceTaskId is missing", () => {
+    test("no follow-up when sourceTaskId is missing", async () => {
       const approvalData = makeApprovalData(); // no sourceTaskId
-      const approval = createApprovalRequest(approvalData);
+      const approval = await createApprovalRequest(approvalData);
 
       expect(approval.sourceTaskId).toBeNull();
       // The handler condition would be false
@@ -1012,7 +1016,7 @@ describe("Approval Requests", () => {
       });
       await startTask(task.id);
 
-      const currentTask = getAgentCurrentTask(agent.id);
+      const currentTask = await getAgentCurrentTask(agent.id);
       expect(currentTask).not.toBeNull();
       expect(currentTask!.id).toBe(task.id);
     });
@@ -1024,7 +1028,7 @@ describe("Approval Requests", () => {
         status: "idle",
       });
 
-      const currentTask = getAgentCurrentTask(agent.id);
+      const currentTask = await getAgentCurrentTask(agent.id);
       expect(currentTask).toBeNull();
     });
 
@@ -1048,13 +1052,13 @@ describe("Approval Requests", () => {
       const headerSourceTaskId: string | undefined = undefined;
       let sourceTaskId = headerSourceTaskId;
       if (!sourceTaskId) {
-        const currentTask = getAgentCurrentTask(agent.id);
+        const currentTask = await getAgentCurrentTask(agent.id);
         if (currentTask) {
           sourceTaskId = currentTask.id;
         }
       }
 
-      const approval = createApprovalRequest(makeApprovalData({ sourceTaskId }));
+      const approval = await createApprovalRequest(makeApprovalData({ sourceTaskId }));
       expect(approval.sourceTaskId).toBe(task.id);
     });
   });
@@ -1076,7 +1080,7 @@ describe("Approval Requests", () => {
       ];
       await updateApprovalRequestNotifications(approval.id, updatedChannels);
 
-      const fetched = getApprovalRequestById(approval.id);
+      const fetched = await getApprovalRequestById(approval.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.notificationChannels).toEqual(updatedChannels);
     });

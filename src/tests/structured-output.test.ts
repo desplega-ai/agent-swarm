@@ -290,9 +290,12 @@ describe("Workflow agent-task creates task with outputSchema", () => {
     });
 
     // Create prerequisites for FK constraints
-    const wf = createWorkflow({ name: "test-output-schema", definition: { nodes: [], edges: [] } });
-    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    const step = createWorkflowRunStep({
+    const wf = await createWorkflow({
+      name: "test-output-schema",
+      definition: { nodes: [], edges: [] },
+    });
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "n1",
@@ -337,12 +340,12 @@ describe("Workflow agent-task creates task with outputSchema", () => {
       interpolate: (t: string) => t,
     });
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: "test-follow-up-config",
       definition: { nodes: [], edges: [] },
     });
-    const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
-    const step = createWorkflowRunStep({
+    const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+    const step = await createWorkflowRunStep({
       id: crypto.randomUUID(),
       runId: run.id,
       nodeId: "n1",

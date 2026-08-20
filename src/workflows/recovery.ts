@@ -155,6 +155,7 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         ctx,
         taskCompleted ? undefined : reason,
       );
+      if (!routing.claimed) continue;
       if (routing.foreachChild && !routing.joined) {
         // The parent remains waiting until another child closes the join.
         await finalizeOrWait(stuck.runId);

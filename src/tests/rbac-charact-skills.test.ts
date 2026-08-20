@@ -289,7 +289,7 @@ describe("skill tool gates (characterization)", () => {
       "Only the owning agent or lead can delete this skill.",
     );
     // DB not mutated
-    expect(getSkillById(skill.id)).not.toBeNull();
+    expect(await getSkillById(skill.id)).not.toBeNull();
   });
 
   test("owner can delete their own skill", async () => {
@@ -306,7 +306,7 @@ describe("skill tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getSkillById(skill.id)).toBeNull();
+    expect(await getSkillById(skill.id)).toBeNull();
   });
 
   test("lead can delete another agent's skill", async () => {
@@ -323,7 +323,7 @@ describe("skill tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getSkillById(skill.id)).toBeNull();
+    expect(await getSkillById(skill.id)).toBeNull();
   });
 });
 
@@ -398,7 +398,7 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can install an MCP server for another agent", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-install-allow",
       transport: "stdio",
       scope: "agent",
@@ -436,7 +436,7 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can uninstall an MCP server for another agent", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-uninstall-allow",
       transport: "stdio",
       scope: "agent",
@@ -457,7 +457,7 @@ describe("mcp-server tool gates (characterization)", () => {
 
   // mcp-server-delete.ts:43 — delete requires owner OR lead
   test("worker cannot delete an MCP server they don't own", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-delete-deny",
       transport: "stdio",
       scope: "agent",
@@ -478,11 +478,11 @@ describe("mcp-server tool gates (characterization)", () => {
       "Only the owning agent or lead can delete this MCP server.",
     );
     // DB not mutated
-    expect(getMcpServerById(mcpServer.id)).not.toBeNull();
+    expect(await getMcpServerById(mcpServer.id)).not.toBeNull();
   });
 
   test("lead can delete another agent's MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-delete-lead",
       transport: "stdio",
       scope: "agent",
@@ -494,12 +494,12 @@ describe("mcp-server tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getMcpServerById(mcpServer.id)).toBeNull();
+    expect(await getMcpServerById(mcpServer.id)).toBeNull();
   });
 
   // mcp-server-update.ts:62 — update requires owner OR lead
   test("worker cannot update an MCP server they don't own", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-deny",
       transport: "stdio",
       scope: "agent",
@@ -523,11 +523,11 @@ describe("mcp-server tool gates (characterization)", () => {
       "Only the owning agent or lead can update this MCP server.",
     );
     // DB not mutated
-    expect(getMcpServerById(mcpServer.id)?.name).toBe("charact-mcp-update-deny");
+    expect((await getMcpServerById(mcpServer.id))?.name).toBe("charact-mcp-update-deny");
   });
 
   test("owner can update their own MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-owner",
       transport: "stdio",
       scope: "agent",
@@ -545,7 +545,7 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can update another agent's MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-lead",
       transport: "stdio",
       scope: "agent",

@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getPausedTasksForAgent,
   getTaskById,
   initDb,
@@ -227,10 +227,10 @@ describe("Task Pause/Resume", () => {
       });
 
       // Manually mark as completed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'completed', finishedAt = ? WHERE id = ?",
+        [new Date().toISOString(), task.id],
+      );
 
       const completedTask = await getTaskById(task.id);
       expect(completedTask?.status).toBe("completed");
@@ -245,10 +245,10 @@ describe("Task Pause/Resume", () => {
       });
 
       // Manually mark as failed via SQL
-      getDb().run("UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?", [
-        new Date().toISOString(),
-        task.id,
-      ]);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'failed', finishedAt = ? WHERE id = ?",
+        [new Date().toISOString(), task.id],
+      );
 
       const failedTask = await getTaskById(task.id);
       expect(failedTask?.status).toBe("failed");

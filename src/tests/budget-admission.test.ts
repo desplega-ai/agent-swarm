@@ -7,7 +7,7 @@ import {
   createSessionCost,
   getBudgetRefusalNotification,
   getDailySpendForAgent,
-  getDb,
+  getDbClient,
   hasBudgetRefusalNotificationToday,
   initDb,
   recordBudgetRefusalNotification,
@@ -43,12 +43,12 @@ afterAll(async () => {
 // We also wipe `agents` because session_costs has a FK to agents and the test
 // helper `insertSpendForAgent` re-creates agents on demand. Tests don't use
 // any other agent-related rows.
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM agents").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM budget_refusal_notifications");
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM agents");
   ensuredAgentIds.clear();
 });
 
@@ -62,7 +62,7 @@ afterEach(() => {
 // hit the PK collision on a second `createAgent`. Cleared in `beforeEach`.
 const ensuredAgentIds = new Set<string>();
 
-async function ensureAgent(agentId: string): void {
+async function ensureAgent(agentId: string): Promise<void> {
   if (ensuredAgentIds.has(agentId)) return;
   await createAgent({
     id: agentId,
@@ -73,12 +73,15 @@ async function ensureAgent(agentId: string): void {
   ensuredAgentIds.add(agentId);
 }
 
-function insertBudget(scope: "global" | "agent", scopeId: string, dailyBudgetUsd: number): void {
-  getDb()
-    .prepare(
-      "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-    )
-    .run(scope, scopeId, dailyBudgetUsd, Date.now(), Date.now());
+async function insertBudget(
+  scope: "global" | "agent",
+  scopeId: string,
+  dailyBudgetUsd: number,
+): Promise<void> {
+  await getDbClient().run(
+    "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+    [scope, scopeId, dailyBudgetUsd, Date.now(), Date.now()],
+  );
 }
 
 // Pinned to the same UTC day as `NOW` so spend rows fall inside the queried day window regardless of when CI runs.
@@ -88,9 +91,9 @@ async function insertSpendForAgent(
   agentId: string,
   totalCostUsd: number,
   opts: { createdAt?: string } = {},
-): string {
+): Promise<string> {
   await ensureAgent(agentId);
-  const cost = createSessionCost({
+  const cost = await createSessionCost({
     sessionId: `sess-${crypto.randomUUID()}`,
     agentId,
     totalCostUsd,
@@ -99,7 +102,10 @@ async function insertSpendForAgent(
     model: "test-model",
   });
   const createdAt = opts.createdAt ?? DEFAULT_SPEND_CREATED_AT;
-  getDb().prepare("UPDATE session_costs SET createdAt = ? WHERE id = ?").run(createdAt, cost.id);
+  await getDbClient().run("UPDATE session_costs SET createdAt = ? WHERE id = ?", [
+    createdAt,
+    cost.id,
+  ]);
   return cost.id;
 }
 
@@ -107,25 +113,25 @@ describe("canClaim — budget admission predicate", () => {
   const NOW = new Date("2026-04-28T15:30:00.000Z");
   const TODAY = "2026-04-28";
 
-  test("missing budget rows ⇒ allowed (default unlimited)", () => {
-    const result = canClaim("agent-1", NOW);
+  test("missing budget rows ⇒ allowed (default unlimited)", async () => {
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(true);
   });
 
   test("global budget set, spend below ceiling ⇒ allowed", async () => {
-    insertBudget("global", "", 10.0);
+    await insertBudget("global", "", 10.0);
     await insertSpendForAgent("agent-x", 3.5);
 
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(true);
   });
 
   test("global budget set, spend at ceiling ⇒ refused with cause='global'", async () => {
-    insertBudget("global", "", 10.0);
+    await insertBudget("global", "", 10.0);
     await insertSpendForAgent("agent-x", 7.0);
     await insertSpendForAgent("agent-y", 3.0); // exactly hits 10.0
 
-    const result = canClaim("agent-z", NOW);
+    const result = await canClaim("agent-z", NOW);
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.cause).toBe("global");
@@ -137,10 +143,10 @@ describe("canClaim — budget admission predicate", () => {
   });
 
   test("agent budget set, agent spend at ceiling ⇒ refused with cause='agent'", async () => {
-    insertBudget("agent", "agent-1", 5.0);
+    await insertBudget("agent", "agent-1", 5.0);
     await insertSpendForAgent("agent-1", 5.0);
 
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.cause).toBe("agent");
@@ -151,18 +157,18 @@ describe("canClaim — budget admission predicate", () => {
   });
 
   test("both budgets set + both blown ⇒ refused with cause='global' (global is checked first)", async () => {
-    insertBudget("global", "", 10.0);
-    insertBudget("agent", "agent-1", 2.0);
+    await insertBudget("global", "", 10.0);
+    await insertBudget("agent", "agent-1", 2.0);
     await insertSpendForAgent("agent-1", 10.0);
 
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.cause).toBe("global");
   });
 
   test("spend on a different UTC day does NOT count toward today", async () => {
-    insertBudget("agent", "agent-1", 5.0);
+    await insertBudget("agent", "agent-1", 5.0);
     // Backdated cost from yesterday — should not contribute to today's total.
     await insertSpendForAgent("agent-1", 50.0, { createdAt: "2026-04-27T23:59:59.999Z" });
     // A small cost today that does not blow the budget.
@@ -171,56 +177,56 @@ describe("canClaim — budget admission predicate", () => {
     const todaySpend = await getDailySpendForAgent("agent-1", TODAY);
     expect(todaySpend).toBe(1.0);
 
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(true);
   });
 
-  test("resetAt for nowUtc=15:30Z is the FOLLOWING UTC midnight", () => {
-    insertBudget("global", "", 0.0); // force a refusal so resetAt is set
-    const result = canClaim("agent-1", new Date("2026-04-28T15:30:00.000Z"));
+  test("resetAt for nowUtc=15:30Z is the FOLLOWING UTC midnight", async () => {
+    await insertBudget("global", "", 0.0); // force a refusal so resetAt is set
+    const result = await canClaim("agent-1", new Date("2026-04-28T15:30:00.000Z"));
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.resetAt).toBe("2026-04-29T00:00:00.000Z");
   });
 
-  test("resetAt at exact UTC midnight rolls forward by +24h, not the current instant", () => {
-    insertBudget("global", "", 0.0);
-    const result = canClaim("agent-1", new Date("2026-04-28T00:00:00.000Z"));
+  test("resetAt at exact UTC midnight rolls forward by +24h, not the current instant", async () => {
+    await insertBudget("global", "", 0.0);
+    const result = await canClaim("agent-1", new Date("2026-04-28T00:00:00.000Z"));
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.resetAt).toBe("2026-04-29T00:00:00.000Z");
   });
 
-  test("resetAt rolls over month boundary: 2026-04-30T23:59:59.999Z → 2026-05-01T00:00:00.000Z", () => {
-    insertBudget("global", "", 0.0);
-    const result = canClaim("agent-1", new Date("2026-04-30T23:59:59.999Z"));
+  test("resetAt rolls over month boundary: 2026-04-30T23:59:59.999Z → 2026-05-01T00:00:00.000Z", async () => {
+    await insertBudget("global", "", 0.0);
+    const result = await canClaim("agent-1", new Date("2026-04-30T23:59:59.999Z"));
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.resetAt).toBe("2026-05-01T00:00:00.000Z");
   });
 
-  test("resetAt rolls over year boundary: 2026-12-31T23:59:59.999Z → 2027-01-01T00:00:00.000Z", () => {
-    insertBudget("global", "", 0.0);
-    const result = canClaim("agent-1", new Date("2026-12-31T23:59:59.999Z"));
+  test("resetAt rolls over year boundary: 2026-12-31T23:59:59.999Z → 2027-01-01T00:00:00.000Z", async () => {
+    await insertBudget("global", "", 0.0);
+    const result = await canClaim("agent-1", new Date("2026-12-31T23:59:59.999Z"));
     expect(result.allowed).toBe(false);
     if (result.allowed) throw new Error("unreachable");
     expect(result.resetAt).toBe("2027-01-01T00:00:00.000Z");
   });
 
   test("BUDGET_ADMISSION_DISABLED=true short-circuits to allowed regardless of budget rows", async () => {
-    insertBudget("global", "", 0.0); // would refuse without the flag
-    insertBudget("agent", "agent-1", 0.0);
+    await insertBudget("global", "", 0.0); // would refuse without the flag
+    await insertBudget("agent", "agent-1", 0.0);
     await insertSpendForAgent("agent-1", 100.0);
 
     process.env.BUDGET_ADMISSION_DISABLED = "true";
-    const result = canClaim("agent-1", NOW);
+    const result = await canClaim("agent-1", NOW);
     expect(result.allowed).toBe(true);
   });
 });
 
 describe("recordBudgetRefusalNotification — idempotent dedup", () => {
-  beforeEach(() => {
-    getDb().prepare("DELETE FROM budget_refusal_notifications").run();
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM budget_refusal_notifications");
   });
 
   test("first call inserts; second call with same (taskId, date) returns existing row with inserted=false", async () => {
@@ -319,18 +325,17 @@ describe("getDailySpendForAgent — uses an agentId-leading index (no full table
     detail: string;
   }
 
-  test("EXPLAIN QUERY PLAN uses an idx_session_costs_agent* index", () => {
+  test("EXPLAIN QUERY PLAN uses an idx_session_costs_agent* index", async () => {
     // Both `idx_session_costs_agentId` (single-column) and
     // `idx_session_costs_agent_createdAt` (composite) lead with `agentId`, so
     // either one is a valid plan — SQLite's optimizer picks based on stats.
     // What we MUST avoid is a full table scan ("SCAN session_costs" without
     // "USING INDEX"). The assertion below covers both index choices and
     // explicitly fails on a bare scan.
-    const rows = getDb()
-      .prepare<ExplainRow, [string, string]>(
-        "EXPLAIN QUERY PLAN SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
-      )
-      .all("agent-1", "2026-04-28");
+    const rows = await getDbClient().query<ExplainRow>(
+      "EXPLAIN QUERY PLAN SELECT COALESCE(SUM(totalCostUsd), 0) as total FROM session_costs WHERE agentId = ? AND substr(createdAt, 1, 10) = ?",
+      ["agent-1", "2026-04-28"],
+    );
 
     const detail = rows.map((r) => r.detail).join(" | ");
     expect(detail).toMatch(/USING INDEX idx_session_costs_agent/);

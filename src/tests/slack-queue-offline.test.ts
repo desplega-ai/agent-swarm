@@ -38,7 +38,7 @@ describe("Slack queue-when-offline", () => {
         capabilities: [],
       });
 
-      const matches = routeMessage("Hello <@BOT123>", "BOT123", true);
+      const matches = await routeMessage("Hello <@BOT123>", "BOT123", true);
       expect(matches).toHaveLength(0);
     });
 
@@ -50,7 +50,7 @@ describe("Slack queue-when-offline", () => {
         capabilities: [],
       });
 
-      const matches = routeMessage("<@BOT123> do something", "BOT123", true);
+      const matches = await routeMessage("<@BOT123> do something", "BOT123", true);
       expect(matches).toHaveLength(0);
     });
   });
@@ -137,8 +137,8 @@ describe("Slack queue-when-offline", () => {
       expect(task.slackUserId).toBe("U_HUMAN3");
     });
 
-    test("unassigned task appears in unassigned status query", () => {
-      const unassigned = getTasksByStatus("unassigned");
+    test("unassigned task appears in unassigned status query", async () => {
+      const unassigned = await getTasksByStatus("unassigned");
       const queued = unassigned.find((t) => t.task === "fix the CI pipeline");
       expect(queued).toBeDefined();
       expect(queued!.slackChannelId).toBe("C777");

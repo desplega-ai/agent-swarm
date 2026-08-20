@@ -10,7 +10,7 @@ import {
   closeDb,
   createAgent,
   getActivePricingRow,
-  getDb,
+  getDbClient,
   initDb,
   insertPricingRow,
 } from "../be/db";
@@ -100,9 +100,10 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  getDb().prepare("DELETE FROM session_costs").run();
-  getDb().prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 async function seedRate(

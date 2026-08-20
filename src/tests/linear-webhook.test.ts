@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { closeDb, createTaskExtended, getDb, getTaskById, initDb } from "../be/db";
+import { closeDb, createTaskExtended, getDbClient, getTaskById, initDb } from "../be/db";
 import { createTrackerSync, getTrackerSyncByExternalId } from "../be/db-queries/tracker";
 import {
   buildSkipMessage,
@@ -201,7 +201,7 @@ describe("handleAgentSessionEvent", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
     expect(sync).not.toBeNull();
     expect(sync!.externalIdentifier).toBe("ENG-100");
     expect(sync!.externalUrl).toBe("https://linear.app/team/issue/ENG-100");
@@ -231,14 +231,18 @@ describe("handleAgentSessionEvent", () => {
     };
 
     // The task from the previous test is still pending (active)
-    const syncBefore = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const syncBefore = await getTrackerSyncByExternalId(
+      "linear",
+      "task",
+      "issue-agent-session-001",
+    );
     expect(syncBefore).not.toBeNull();
     const originalSwarmId = syncBefore!.swarmId;
 
     await handleAgentSessionEvent(event);
 
     // Sync should still point to the same task (no follow-up created)
-    const syncAfter = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
+    const syncAfter = await getTrackerSyncByExternalId("linear", "task", "issue-agent-session-001");
     expect(syncAfter).not.toBeNull();
     expect(syncAfter!.swarmId).toBe(originalSwarmId);
   });
@@ -266,12 +270,13 @@ describe("handleAgentSessionEvent", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-agent-session-race-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-agent-session-race-001");
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).toBe(originalTask.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
+    const count = (await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    )) as { count: number };
     expect(count.count).toBe(1);
   });
 
@@ -281,8 +286,9 @@ describe("handleAgentSessionEvent", () => {
       source: "linear",
       taskType: "linear-issue",
     });
-    const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(originalTask.id);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [
+      originalTask.id,
+    ]);
 
     await createTrackerSync({
       provider: "linear",
@@ -313,7 +319,7 @@ describe("handleAgentSessionEvent", () => {
     await handleAgentSessionEvent(event);
 
     // tracker_sync should now point to a NEW task
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-completed-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-followup-completed-001");
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
@@ -331,8 +337,9 @@ describe("handleAgentSessionEvent", () => {
       source: "linear",
       taskType: "linear-issue",
     });
-    const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'failed' WHERE id = ?").run(originalTask.id);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'failed' WHERE id = ?", [
+      originalTask.id,
+    ]);
 
     await createTrackerSync({
       provider: "linear",
@@ -361,7 +368,7 @@ describe("handleAgentSessionEvent", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-followup-failed-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-followup-failed-001");
     expect(sync).not.toBeNull();
     expect(sync!.swarmId).not.toBe(originalTask.id);
 
@@ -404,7 +411,7 @@ describe("handleIssueUpdate", () => {
 
     await handleIssueUpdate(event, "delivery-update-001");
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-update-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-update-001");
     expect(sync).not.toBeNull();
     expect(sync!.lastSyncOrigin).toBe("external");
     expect(sync!.lastDeliveryId).toBe("delivery-update-001");
@@ -523,8 +530,7 @@ describe("handleIssueDelete", () => {
       source: "linear",
     });
     // Manually complete the task to test guard
-    const { getDb } = await import("../be/db");
-    getDb().query("UPDATE agent_tasks SET status = 'completed' WHERE id = ?").run(task.id);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
 
     await createTrackerSync({
       provider: "linear",
@@ -792,7 +798,7 @@ describe("handleAgentSessionEvent — state gate", () => {
     await handleAgentSessionEvent(event);
 
     // No tracker_sync should have been created.
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-backlog-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-backlog-001");
     expect(sync).toBeNull();
   });
 
@@ -815,7 +821,7 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-triage-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-triage-001");
     expect(sync).toBeNull();
   });
 
@@ -838,7 +844,7 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-override-001");
     expect(sync).not.toBeNull();
     expect(sync!.externalIdentifier).toBe("ENG-502");
     const task = await getTaskById(sync!.swarmId);
@@ -865,7 +871,7 @@ describe("handleAgentSessionEvent — state gate", () => {
         },
       };
       await handleAgentSessionEvent(event);
-      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-allow-001");
+      const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-env-allow-001");
       expect(sync).not.toBeNull();
     } finally {
       delete process.env.LINEAR_ALLOWED_STATES;
@@ -891,7 +897,7 @@ describe("handleAgentSessionEvent — state gate", () => {
         },
       };
       await handleAgentSessionEvent(event);
-      const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-env-label-001");
+      const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-env-label-001");
       expect(sync).not.toBeNull();
     } finally {
       delete process.env.LINEAR_SWARM_READY_LABEL;
@@ -917,7 +923,7 @@ describe("handleAgentSessionEvent — state gate", () => {
 
     await handleAgentSessionEvent(event);
 
-    const sync = getTrackerSyncByExternalId("linear", "task", "issue-gate-todo-001");
+    const sync = await getTrackerSyncByExternalId("linear", "task", "issue-gate-todo-001");
     expect(sync).not.toBeNull();
   });
 });

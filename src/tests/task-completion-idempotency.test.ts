@@ -10,7 +10,7 @@ import {
   createTaskExtended,
   failTask,
   getAgentById,
-  getDb,
+  getDbClient,
   getLeadAgent,
   getLogsByTaskId,
   getTaskById,
@@ -80,7 +80,7 @@ describe("completeTask idempotency", () => {
     await startTask(task.id);
 
     await completeTask(task.id, "done");
-    const logsAfterFirst = getLogsByTaskId(task.id);
+    const logsAfterFirst = await getLogsByTaskId(task.id);
     const completedLogsAfterFirst = logsAfterFirst.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "completed",
     );
@@ -88,7 +88,7 @@ describe("completeTask idempotency", () => {
 
     // Second completion should not log another status-change row
     await completeTask(task.id, "done again");
-    const logsAfterSecond = getLogsByTaskId(task.id);
+    const logsAfterSecond = await getLogsByTaskId(task.id);
     const completedLogsAfterSecond = logsAfterSecond.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "completed",
     );
@@ -181,14 +181,14 @@ describe("failTask idempotency", () => {
     await startTask(task.id);
 
     await failTask(task.id, "boom");
-    const logsAfterFirst = getLogsByTaskId(task.id);
+    const logsAfterFirst = await getLogsByTaskId(task.id);
     const failedLogsAfterFirst = logsAfterFirst.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "failed",
     );
     expect(failedLogsAfterFirst.length).toBe(1);
 
     await failTask(task.id, "boom again");
-    const logsAfterSecond = getLogsByTaskId(task.id);
+    const logsAfterSecond = await getLogsByTaskId(task.id);
     const failedLogsAfterSecond = logsAfterSecond.filter(
       (l) => l.eventType === "task_status_change" && l.newValue === "failed",
     );
@@ -261,7 +261,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
 
     // Snapshot the row state
     const snapshot = await getTaskById(task.id);
-    const snapshotLogs = getLogsByTaskId(task.id).length;
+    const snapshotLogs = (await getLogsByTaskId(task.id)).length;
 
     // Simulate store-progress(status="completed") on a terminal task.
     // The store-progress tool's short-circuit returns wasNoOp=true and
@@ -274,7 +274,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     expect(after!.output).toBe(snapshot!.output);
     expect(after!.finishedAt).toBe(snapshot!.finishedAt);
     expect(after!.status).toBe(snapshot!.status);
-    expect(getLogsByTaskId(task.id).length).toBe(snapshotLogs);
+    expect((await getLogsByTaskId(task.id)).length).toBe(snapshotLogs);
   });
 
   test("failing an already-failed task is a no-op at the DB layer", async () => {
@@ -290,7 +290,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     await failTask(task.id, "first reason");
 
     const snapshot = await getTaskById(task.id);
-    const snapshotLogs = getLogsByTaskId(task.id).length;
+    const snapshotLogs = (await getLogsByTaskId(task.id)).length;
 
     const result = await failTask(task.id, "second reason");
     expect(result).toBeNull();
@@ -299,7 +299,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     expect(after!.failureReason).toBe(snapshot!.failureReason);
     expect(after!.finishedAt).toBe(snapshot!.finishedAt);
     expect(after!.status).toBe(snapshot!.status);
-    expect(getLogsByTaskId(task.id).length).toBe(snapshotLogs);
+    expect((await getLogsByTaskId(task.id)).length).toBe(snapshotLogs);
   });
 
   test("completing a task manually marked terminal returns null", async () => {
@@ -313,7 +313,7 @@ describe("store-progress idempotency on terminal status (integration via DB laye
     });
 
     const task = await createTaskExtended("SP Task C", { agentId: agent.id });
-    getDb().run(
+    await getDbClient().run(
       "UPDATE agent_tasks SET status = 'completed', output = 'manually written', finishedAt = ? WHERE id = ?",
       [new Date().toISOString(), task.id],
     );
@@ -337,15 +337,14 @@ interface FollowUpRow {
   slackUserId: string | null;
 }
 
-function listFollowUpTasks(parentTaskId: string): FollowUpRow[] {
-  return getDb()
-    .prepare<FollowUpRow, [string]>(
-      `SELECT id, agentId, parentTaskId, taskType, task, slackChannelId, slackThreadTs, slackUserId
+function listFollowUpTasks(parentTaskId: string): Promise<FollowUpRow[]> {
+  return getDbClient().query<FollowUpRow>(
+    `SELECT id, agentId, parentTaskId, taskType, task, slackChannelId, slackThreadTs, slackUserId
        FROM agent_tasks
        WHERE parentTaskId = ? AND taskType = 'follow-up'
        ORDER BY createdAt ASC`,
-    )
-    .all(parentTaskId);
+    [parentTaskId],
+  );
 }
 
 type StoreProgressResult = {
@@ -379,12 +378,12 @@ function storeProgressMeta(agentId: string) {
   };
 }
 
-function countTaskCompletionMemories(taskId: string): number {
-  return getDb()
-    .prepare<{ count: number }, [string]>(
-      "SELECT COUNT(*) AS count FROM agent_memory WHERE sourceTaskId = ?",
-    )
-    .get(taskId)!.count;
+async function countTaskCompletionMemories(taskId: string): Promise<number> {
+  const row = await getDbClient().get<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM agent_memory WHERE sourceTaskId = ?",
+    [taskId],
+  );
+  return row!.count;
 }
 
 describe("store-progress terminal result reporting", () => {
@@ -466,9 +465,9 @@ describe("store-progress terminal result reporting", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const before = (await getTaskById(task.id))!;
-    const logsBefore = getLogsByTaskId(task.id).length;
-    const memoriesBefore = countTaskCompletionMemories(task.id);
-    const followUpsBefore = listFollowUpTasks(task.id).length;
+    const logsBefore = (await getLogsByTaskId(task.id)).length;
+    const memoriesBefore = await countTaskCompletionMemories(task.id);
+    const followUpsBefore = (await listFollowUpTasks(task.id)).length;
     const agentStatusBefore = (await getAgentById(agent.id))!.status;
     let terminalEvents = 0;
     const onTerminalEvent = () => {
@@ -499,9 +498,9 @@ describe("store-progress terminal result reporting", () => {
       expect(fresh.status).toBe(before.status);
       expect(fresh.finishedAt).toBe(before.finishedAt);
       expect(fresh.lastUpdatedAt).toBe(before.lastUpdatedAt);
-      expect(getLogsByTaskId(task.id)).toHaveLength(logsBefore);
-      expect(countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
-      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
+      expect(await getLogsByTaskId(task.id)).toHaveLength(logsBefore);
+      expect(await countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
+      expect(await listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
       expect((await getAgentById(agent.id))!.status).toBe(agentStatusBefore);
       expect(terminalEvents).toBe(0);
 
@@ -513,9 +512,9 @@ describe("store-progress terminal result reporting", () => {
       expect(forceWithoutStatus.structuredContent.wasForcedOverwrite).toBe(true);
       expect((await getTaskById(task.id))!.failureReason).toBe("second correction");
       expect((await getTaskById(task.id))!.finishedAt).toBe(before.finishedAt);
-      expect(getLogsByTaskId(task.id)).toHaveLength(logsBefore);
-      expect(countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
-      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
+      expect(await getLogsByTaskId(task.id)).toHaveLength(logsBefore);
+      expect(await countTaskCompletionMemories(task.id)).toBe(memoriesBefore);
+      expect(await listFollowUpTasks(task.id)).toHaveLength(followUpsBefore);
       expect(terminalEvents).toBe(0);
     } finally {
       workflowEventBus.off("task.completed", onTerminalEvent);
@@ -598,9 +597,9 @@ describe("store-progress terminal result reporting", () => {
       )) as StoreProgressResult;
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(first.structuredContent.success).toBe(true);
-      const logsAfterFirst = getLogsByTaskId(task.id).length;
-      const memoriesAfterFirst = countTaskCompletionMemories(task.id);
-      const followUpsAfterFirst = listFollowUpTasks(task.id).length;
+      const logsAfterFirst = (await getLogsByTaskId(task.id)).length;
+      const memoriesAfterFirst = await countTaskCompletionMemories(task.id);
+      const followUpsAfterFirst = (await listFollowUpTasks(task.id)).length;
       const eventsAfterFirst = completedEvents;
 
       const second = (await handler.handler(
@@ -610,9 +609,9 @@ describe("store-progress terminal result reporting", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       expect(second.structuredContent.success).toBe(true);
       expect(second.structuredContent.wasNoOp).toBe(true);
-      expect(getLogsByTaskId(task.id)).toHaveLength(logsAfterFirst);
-      expect(countTaskCompletionMemories(task.id)).toBe(memoriesAfterFirst);
-      expect(listFollowUpTasks(task.id)).toHaveLength(followUpsAfterFirst);
+      expect(await getLogsByTaskId(task.id)).toHaveLength(logsAfterFirst);
+      expect(await countTaskCompletionMemories(task.id)).toBe(memoriesAfterFirst);
+      expect(await listFollowUpTasks(task.id)).toHaveLength(followUpsAfterFirst);
       expect(completedEvents).toBe(eventsAfterFirst);
       expect(followUpsAfterFirst).toBe(1);
       expect(eventsAfterFirst).toBe(1);
@@ -654,7 +653,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).not.toBeNull();
-    const rows = listFollowUpTasks(task.id);
+    const rows = await listFollowUpTasks(task.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.agentId).toBe(lead.id);
     expect(rows[0]!.parentTaskId).toBe(task.id);
@@ -694,7 +693,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).toBeNull();
-    expect(listFollowUpTasks(task.id)).toHaveLength(0);
+    expect(await listFollowUpTasks(task.id)).toHaveLength(0);
   });
 
   test("injects onCompleted instructions into completed follow-up", async () => {
@@ -727,7 +726,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).not.toBeNull();
-    const rows = listFollowUpTasks(task.id);
+    const rows = await listFollowUpTasks(task.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.task).toContain(`Original task created by agent ${worker.id}`);
     expect(rows[0]!.task).toContain("Additional instructions from the task creator:");
@@ -764,7 +763,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).not.toBeNull();
-    const rows = listFollowUpTasks(task.id);
+    const rows = await listFollowUpTasks(task.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.task).toContain(`Original task created by agent ${worker.id}`);
     expect(rows[0]!.task).toContain("page Taras");
@@ -807,7 +806,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).toBeNull();
-    expect(listFollowUpTasks(child.id)).toHaveLength(0);
+    expect(await listFollowUpTasks(child.id)).toHaveLength(0);
   });
 
   test("does not create follow-up for lead-owned task", async () => {
@@ -830,7 +829,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).toBeNull();
-    expect(listFollowUpTasks(task.id)).toHaveLength(0);
+    expect(await listFollowUpTasks(task.id)).toHaveLength(0);
   });
 
   test("marks original creator as you when lead created the worker task", async () => {
@@ -864,7 +863,7 @@ describe("worker task follow-up creation", () => {
     });
 
     expect(followUp).not.toBeNull();
-    const rows = listFollowUpTasks(task.id);
+    const rows = await listFollowUpTasks(task.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]!.task).toContain(`Original task created by agent ${lead.id} (you)`);
   });

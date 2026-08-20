@@ -14,7 +14,7 @@ process.env.SLACK_RENDER_V2 = "false";
 
 const TEST_DB_PATH = "./test-slack-assistant.sqlite";
 
-let _leadAgent: ReturnType<typeof createAgent>;
+let _leadAgent: Awaited<ReturnType<typeof createAgent>>;
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
@@ -33,8 +33,8 @@ afterAll(() => {
 });
 
 describe("assistant userMessage routing — new thread (no working agent)", () => {
-  test("getAgentWorkingOnThread returns null when no tasks exist for thread", () => {
-    const result = getAgentWorkingOnThread("D_ASSISTANT", "6666666666.000001");
+  test("getAgentWorkingOnThread returns null when no tasks exist for thread", async () => {
+    const result = await getAgentWorkingOnThread("D_ASSISTANT", "6666666666.000001");
     expect(result).toBeNull();
   });
 
@@ -94,13 +94,13 @@ describe("assistant userMessage routing — follow-up (working agent exists)", (
       slackUserId: "U_FOLLOWUP",
     });
 
-    const result = getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
+    const result = await getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
     expect(result).toBeDefined();
     expect(result!.name).toBe("ThreadWorker");
   });
 
   test("creates follow-up task assigned to the working agent", async () => {
-    const workingAgent = getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
+    const workingAgent = await getAgentWorkingOnThread("D_FOLLOWUP", "9999999999.000001");
     expect(workingAgent).toBeDefined();
 
     const followUp = await createTaskExtended("follow-up message in assistant thread", {

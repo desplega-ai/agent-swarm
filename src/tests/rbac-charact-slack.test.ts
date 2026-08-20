@@ -216,7 +216,7 @@ describe("slack tool gates (characterization)", () => {
 describe("delete-channel gate (characterization)", () => {
   // delete-channel.ts:48 — lead only (pure DB, allow asserts full success)
   test("worker cannot delete a channel", async () => {
-    const channel = createChannel("charact-delete-deny");
+    const channel = await createChannel("charact-delete-deny");
 
     const result = await callTool("delete-channel", WORKER_ID, { channelId: channel.id });
 
@@ -225,17 +225,17 @@ describe("delete-channel gate (characterization)", () => {
       "Not authorized. Only the lead agent can delete channels.",
     );
     // DB not mutated
-    expect(getChannelById(channel.id)).not.toBeNull();
+    expect(await getChannelById(channel.id)).not.toBeNull();
   });
 
   test("lead can delete a channel", async () => {
-    const channel = createChannel("charact-delete-allow");
+    const channel = await createChannel("charact-delete-allow");
 
     const result = await callTool("delete-channel", LEAD_ID, { channelId: channel.id });
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toBe('Deleted channel "charact-delete-allow".');
-    expect(getChannelById(channel.id)).toBeNull();
+    expect(await getChannelById(channel.id)).toBeNull();
   });
 });
 

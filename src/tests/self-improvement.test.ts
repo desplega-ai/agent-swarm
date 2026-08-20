@@ -71,7 +71,7 @@ describe("Self-Improvement Mechanisms", () => {
 
       // Simulate what store-progress does: create memory for completed task
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output}`;
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -117,7 +117,7 @@ describe("Self-Improvement Mechanisms", () => {
 
       // Simulate store-progress failed task memory creation
       const taskContent = `Task: ${task.task}\n\nFailure reason:\n${failureReason}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -258,7 +258,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
 
       // Verify swarm memory can be created
-      const swarmMemory = store.store({
+      const swarmMemory = await store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Shared: ${task.task.slice(0, 80)}`,
@@ -354,7 +354,7 @@ describe("Self-Improvement Mechanisms", () => {
       const learning = "Always run lint before committing";
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
 
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
@@ -378,10 +378,10 @@ describe("Self-Improvement Mechanisms", () => {
       expect(canInject).toBe(false);
     });
 
-    test("injected learning is visible to target worker in memory search", () => {
+    test("injected learning is visible to target worker in memory search", async () => {
       // Create memory with embedding for searchability
       const content = "[Lead Feedback — mistake-pattern]\n\nNever force-push to main branch";
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: mistake-pattern — Never force-push to main branch",
@@ -390,10 +390,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.7, 0.3, 0.0]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Worker can find it via search
-      const results = store.search(new Float32Array([0.7, 0.3, 0.0]), workerId, {
+      const results = await store.search(new Float32Array([0.7, 0.3, 0.0]), workerId, {
         isLead: false,
         scope: "agent",
       });
@@ -403,9 +403,9 @@ describe("Self-Improvement Mechanisms", () => {
       expect(found!.content).toContain("Never force-push");
     });
 
-    test("injected learning is NOT visible to other workers", () => {
+    test("injected learning is NOT visible to other workers", async () => {
       const content = "[Lead Feedback — preference]\n\nUse bun instead of npm";
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: preference — Use bun instead of npm",
@@ -414,10 +414,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.2, 0.8, 0.1]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Other worker should NOT see it
-      const results = store.search(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
+      const results = await store.search(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
         isLead: false,
         scope: "agent",
       });
@@ -441,28 +441,28 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("memory search agent ID security", () => {
-    test("agent can only search their own memories (not others)", () => {
+    test("agent can only search their own memories (not others)", async () => {
       // Create private memories for worker and other worker
-      const workerMemory = store.store({
+      const workerMemory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Worker Private Secret",
         content: "My secret API key pattern",
         source: "manual",
       });
-      store.updateEmbedding(workerMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(workerMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
-      const otherMemory = store.store({
+      const otherMemory = await store.store({
         agentId: otherWorkerId,
         scope: "agent",
         name: "Other Worker Secret",
         content: "Other agent's private data",
         source: "manual",
       });
-      store.updateEmbedding(otherMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(otherMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
       // Worker searching with their own ID should see their memory but not other's
-      const workerResults = store.search(new Float32Array([0.5, 0.5, 0.0]), workerId, {
+      const workerResults = await store.search(new Float32Array([0.5, 0.5, 0.0]), workerId, {
         isLead: false,
         scope: "all",
       });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
-import { closeDb, deleteSwarmConfig, getDb, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, deleteSwarmConfig, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { initGitHub, resetGitHub } from "../github";
 import {
   __resetInjectedEnvTracking,
@@ -47,10 +47,10 @@ afterAll(() => {
   originalIntegrationDisableValues.clear();
 });
 
-function insertLegacyReservedRow(key: string, value = "legacy"): string {
+async function insertLegacyReservedRow(key: string, value = "legacy"): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
      VALUES (?, ?, NULL, ?, ?, 0, NULL, NULL, ?, ?)`,
     [id, "global", key, value, now, now],
@@ -58,10 +58,10 @@ function insertLegacyReservedRow(key: string, value = "legacy"): string {
   return id;
 }
 
-function insertUnreadableReservedSecretRow(key: string): string {
+async function insertUnreadableReservedSecretRow(key: string): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
      VALUES (?, ?, NULL, ?, ?, 1, NULL, NULL, ?, ?, 1)`,
     [id, "global", key, "definitely-not-valid-ciphertext", now, now],
@@ -191,7 +191,7 @@ describe("reload-config", () => {
   });
 
   test("loadGlobalConfigsIntoEnv skips legacy reserved keys instead of injecting them", async () => {
-    insertLegacyReservedRow("API_KEY", "legacy-api-key");
+    await insertLegacyReservedRow("API_KEY", "legacy-api-key");
 
     delete process.env.API_KEY;
     const updated = await loadGlobalConfigsIntoEnv(true);
@@ -201,7 +201,7 @@ describe("reload-config", () => {
   });
 
   test("loadGlobalConfigsIntoEnv skips unreadable reserved secret rows before decrypting them", async () => {
-    const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
+    const id = await insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 
     try {
       delete process.env.SECRETS_ENCRYPTION_KEY;
@@ -209,7 +209,7 @@ describe("reload-config", () => {
       expect(updated).not.toContain("SECRETS_ENCRYPTION_KEY");
       expect(process.env.SECRETS_ENCRYPTION_KEY).toBeUndefined();
     } finally {
-      getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+      await getDbClient().run("DELETE FROM swarm_config WHERE id = ?", [id]);
     }
   });
 

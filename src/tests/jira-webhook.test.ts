@@ -10,7 +10,7 @@ import {
   test,
 } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import {
   createTrackerSync,
@@ -56,12 +56,12 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   issueHandler.mockClear();
   commentHandler.mockClear();
   issueDeleteHandler.mockClear();
   // Reset tracker_sync rows
-  getDb().query("DELETE FROM tracker_sync").run();
+  await getDbClient().run("DELETE FROM tracker_sync");
 });
 
 afterEach(() => {
@@ -125,15 +125,15 @@ describe("DB-persisted dedup (hasTrackerDelivery + markTrackerDelivery)", () => 
       externalId: "10001",
       externalIdentifier: "KAN-1",
     });
-    expect(hasTrackerDelivery("jira", "delivery-abc")).toBe(false);
+    expect(await hasTrackerDelivery("jira", "delivery-abc")).toBe(false);
     await markTrackerDelivery("jira", "task", "10001", "delivery-abc");
-    expect(hasTrackerDelivery("jira", "delivery-abc")).toBe(true);
+    expect(await hasTrackerDelivery("jira", "delivery-abc")).toBe(true);
   });
 
-  test("hasTrackerDelivery returns false for empty/null deliveryId", () => {
-    expect(hasTrackerDelivery("jira", null)).toBe(false);
-    expect(hasTrackerDelivery("jira", "")).toBe(false);
-    expect(hasTrackerDelivery("jira", undefined)).toBe(false);
+  test("hasTrackerDelivery returns false for empty/null deliveryId", async () => {
+    expect(await hasTrackerDelivery("jira", null)).toBe(false);
+    expect(await hasTrackerDelivery("jira", "")).toBe(false);
+    expect(await hasTrackerDelivery("jira", undefined)).toBe(false);
   });
 
   test("dedup state is durable: marked deliveries survive any number of subsequent reads", async () => {
@@ -151,13 +151,13 @@ describe("DB-persisted dedup (hasTrackerDelivery + markTrackerDelivery)", () => 
     });
     await markTrackerDelivery("jira", "task", "10099", "persistent-id");
     for (let i = 0; i < 5; i++) {
-      expect(hasTrackerDelivery("jira", "persistent-id")).toBe(true);
+      expect(await hasTrackerDelivery("jira", "persistent-id")).toBe(true);
     }
     // And the row exists in the underlying SQL store (proves it's not just a
     // process-local Map).
-    const row = getDb()
-      .query("SELECT lastDeliveryId FROM tracker_sync WHERE externalId = '10099'")
-      .get() as { lastDeliveryId: string };
+    const row = (await getDbClient().get(
+      "SELECT lastDeliveryId FROM tracker_sync WHERE externalId = '10099'",
+    )) as { lastDeliveryId: string };
     expect(row.lastDeliveryId).toBe("persistent-id");
   });
 });
@@ -263,7 +263,7 @@ describe("handleJiraWebhook — dispatcher routing", () => {
     const did = synthesizeDeliveryId(body, raw);
     await markTrackerDelivery("jira", "task", "10006", did);
 
-    expect(isDuplicateDelivery(did)).toBe(true);
+    expect(await isDuplicateDelivery(did)).toBe(true);
 
     const result = await handleJiraWebhook(TEST_TOKEN, raw);
     expect(result.status).toBe(200);

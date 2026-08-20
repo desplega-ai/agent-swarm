@@ -138,6 +138,9 @@ async function resumeFromTaskCompletion(
     stepOutput,
     ctx,
   );
+  // Another handler already routed this step — routing it twice would create
+  // duplicate successor steps.
+  if (!routing.claimed) return;
 
   // Use direct successor-based routing (same as resumeFromApprovalResolution).
   // findReadyNodes is NOT loop-aware — it excludes nodes with any completed step,
@@ -220,6 +223,7 @@ async function handleTaskFailure(
     ctx,
     reason,
   );
+  if (!routing.claimed) return;
 
   // Use direct successor-based routing (loop-aware).
   const successors = routing.successors;

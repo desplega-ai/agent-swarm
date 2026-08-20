@@ -5,7 +5,7 @@ import {
   closeDb,
   createAgent,
   deleteSwarmConfig,
-  getDb,
+  getDbClient,
   getSwarmConfigById,
   getSwarmConfigs,
   initDb,
@@ -29,10 +29,10 @@ const EXPECTED_MESSAGE = (key: string) =>
 
 // Insert a legacy reserved-key row directly, bypassing the guard, to simulate
 // data that predates the hardening (so we can verify cleanup/remediation paths).
-function insertLegacyReservedRow(key: string, value = "legacy"): string {
+async function insertLegacyReservedRow(key: string, value = "legacy"): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt)
      VALUES (?, ?, NULL, ?, ?, 0, NULL, NULL, ?, ?)`,
     [id, "global", key, value, now, now],
@@ -40,10 +40,10 @@ function insertLegacyReservedRow(key: string, value = "legacy"): string {
   return id;
 }
 
-function insertUnreadableReservedSecretRow(key: string): string {
+async function insertUnreadableReservedSecretRow(key: string): Promise<string> {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().run(
+  await getDbClient().run(
     `INSERT INTO swarm_config (id, scope, scopeId, key, value, isSecret, envPath, description, createdAt, lastUpdatedAt, encrypted)
      VALUES (?, ?, NULL, ?, ?, 1, NULL, NULL, ?, ?, 1)`,
     [id, "global", key, "definitely-not-valid-ciphertext", now, now],
@@ -163,40 +163,40 @@ describe("swarm-config reserved keys guard", () => {
 
   // ─── DB helper: upsertSwarmConfig ─────────────────────────────────────────
   describe("upsertSwarmConfig", () => {
-    test("rejects API_KEY", () => {
-      expect(() => upsertSwarmConfig({ scope: "global", key: "API_KEY", value: "secret" })).toThrow(
-        EXPECTED_MESSAGE("API_KEY"),
-      );
+    test("rejects API_KEY", async () => {
+      await expect(
+        upsertSwarmConfig({ scope: "global", key: "API_KEY", value: "secret" }),
+      ).rejects.toThrow(EXPECTED_MESSAGE("API_KEY"));
     });
 
-    test("rejects SECRETS_ENCRYPTION_KEY", () => {
-      expect(() =>
+    test("rejects SECRETS_ENCRYPTION_KEY", async () => {
+      await expect(
         upsertSwarmConfig({
           scope: "global",
           key: "SECRETS_ENCRYPTION_KEY",
           value: "abc",
         }),
-      ).toThrow(EXPECTED_MESSAGE("SECRETS_ENCRYPTION_KEY"));
+      ).rejects.toThrow(EXPECTED_MESSAGE("SECRETS_ENCRYPTION_KEY"));
     });
 
-    test("rejects case variants: api_key, Api_Key, secrets_encryption_key", () => {
-      expect(() => upsertSwarmConfig({ scope: "global", key: "api_key", value: "x" })).toThrow(
-        EXPECTED_MESSAGE("api_key"),
-      );
-      expect(() => upsertSwarmConfig({ scope: "global", key: "Api_Key", value: "x" })).toThrow(
-        EXPECTED_MESSAGE("Api_Key"),
-      );
-      expect(() =>
+    test("rejects case variants: api_key, Api_Key, secrets_encryption_key", async () => {
+      await expect(
+        upsertSwarmConfig({ scope: "global", key: "api_key", value: "x" }),
+      ).rejects.toThrow(EXPECTED_MESSAGE("api_key"));
+      await expect(
+        upsertSwarmConfig({ scope: "global", key: "Api_Key", value: "x" }),
+      ).rejects.toThrow(EXPECTED_MESSAGE("Api_Key"));
+      await expect(
         upsertSwarmConfig({
           scope: "global",
           key: "secrets_encryption_key",
           value: "x",
         }),
-      ).toThrow(EXPECTED_MESSAGE("secrets_encryption_key"));
+      ).rejects.toThrow(EXPECTED_MESSAGE("secrets_encryption_key"));
     });
 
-    test("accepts non-reserved keys (OPENAI_API_KEY, telemetry_user_id)", () => {
-      const openai = upsertSwarmConfig({
+    test("accepts non-reserved keys (OPENAI_API_KEY, telemetry_user_id)", async () => {
+      const openai = await upsertSwarmConfig({
         scope: "global",
         key: "OPENAI_API_KEY",
         value: "sk-test",
@@ -204,7 +204,7 @@ describe("swarm-config reserved keys guard", () => {
       });
       expect(openai.key).toBe("OPENAI_API_KEY");
 
-      const telem = upsertSwarmConfig({
+      const telem = await upsertSwarmConfig({
         scope: "global",
         key: "telemetry_user_id",
         value: "user-123",
@@ -215,31 +215,31 @@ describe("swarm-config reserved keys guard", () => {
 
   // ─── DB helper: deleteSwarmConfig ─────────────────────────────────────────
   describe("deleteSwarmConfig", () => {
-    test("allows deleting a legacy reserved-key row for cleanup", () => {
-      const id = insertLegacyReservedRow("API_KEY", "legacy-value");
+    test("allows deleting a legacy reserved-key row for cleanup", async () => {
+      const id = await insertLegacyReservedRow("API_KEY", "legacy-value");
 
-      expect(deleteSwarmConfig(id)).toBe(true);
-      const remaining = getSwarmConfigs({ scope: "global", key: "API_KEY" });
+      expect(await deleteSwarmConfig(id)).toBe(true);
+      const remaining = await getSwarmConfigs({ scope: "global", key: "API_KEY" });
       expect(remaining).toHaveLength(0);
     });
 
-    test("still deletes non-reserved rows", () => {
-      const inserted = upsertSwarmConfig({
+    test("still deletes non-reserved rows", async () => {
+      const inserted = await upsertSwarmConfig({
         scope: "global",
         key: "TEMP_DELETE_ME",
         value: "x",
       });
-      expect(deleteSwarmConfig(inserted.id)).toBe(true);
-      const remaining = getSwarmConfigs({ scope: "global", key: "TEMP_DELETE_ME" });
+      expect(await deleteSwarmConfig(inserted.id)).toBe(true);
+      const remaining = await getSwarmConfigs({ scope: "global", key: "TEMP_DELETE_ME" });
       expect(remaining).toHaveLength(0);
     });
   });
 
   describe("reserved-row reads for cleanup", () => {
-    test("getSwarmConfigById returns a cleanup placeholder instead of decrypting reserved rows", () => {
-      const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
+    test("getSwarmConfigById returns a cleanup placeholder instead of decrypting reserved rows", async () => {
+      const id = await insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 
-      const config = getSwarmConfigById(id);
+      const config = await getSwarmConfigById(id);
       expect(config).not.toBeNull();
       expect(config?.key).toBe("SECRETS_ENCRYPTION_KEY");
       expect(config?.value).toContain("delete this row");
@@ -309,7 +309,7 @@ describe("swarm-config reserved keys guard", () => {
   // ─── MCP tool: delete-config ──────────────────────────────────────────────
   describe("MCP delete-config tool", () => {
     test("allows deleting a legacy reserved-key row with structured success", async () => {
-      const id = insertLegacyReservedRow("SECRETS_ENCRYPTION_KEY");
+      const id = await insertLegacyReservedRow("SECRETS_ENCRYPTION_KEY");
 
       const handler = mcpServer.handlers.get("delete-config");
       const result = (await handler!({ id }, makeRequestInfo())) as {
@@ -323,7 +323,7 @@ describe("swarm-config reserved keys guard", () => {
     });
 
     test("still deletes non-reserved rows", async () => {
-      const inserted = upsertSwarmConfig({
+      const inserted = await upsertSwarmConfig({
         scope: "global",
         key: "TEMP_MCP_DELETE",
         value: "x",
@@ -338,7 +338,7 @@ describe("swarm-config reserved keys guard", () => {
 
   describe("MCP list-config tool", () => {
     test("lists unreadable reserved rows without failing", async () => {
-      const id = insertUnreadableReservedSecretRow("API_KEY");
+      const id = await insertUnreadableReservedSecretRow("API_KEY");
 
       try {
         const handler = mcpServer.handlers.get("list-config");
@@ -357,7 +357,7 @@ describe("swarm-config reserved keys guard", () => {
           result.structuredContent.configs.some((c) => c.id === id && c.key === "API_KEY"),
         ).toBe(true);
       } finally {
-        getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+        await getDbClient().run("DELETE FROM swarm_config WHERE id = ?", [id]);
       }
     });
   });
@@ -428,7 +428,7 @@ describe("swarm-config reserved keys guard", () => {
   // ─── HTTP: DELETE /api/config/{id} ────────────────────────────────────────
   describe("HTTP DELETE /api/config/{id}", () => {
     test("allows deleting a legacy reserved-key row for remediation", async () => {
-      const id = insertLegacyReservedRow("API_KEY");
+      const id = await insertLegacyReservedRow("API_KEY");
 
       const res = await fetch(`${baseUrl}/api/config/${id}`, { method: "DELETE" });
       expect(res.status).toBe(200);
@@ -437,21 +437,25 @@ describe("swarm-config reserved keys guard", () => {
     });
 
     test("deletes an unreadable encrypted row without trying to decrypt it first", async () => {
-      const inserted = upsertSwarmConfig({
+      const inserted = await upsertSwarmConfig({
         scope: "global",
         key: "UNREADABLE_DELETE_TARGET",
         value: "plaintext-before-corruption",
         isSecret: true,
       });
 
-      const raw = getDb()
-        .prepare<{ value: string }, [string]>("SELECT value FROM swarm_config WHERE id = ?")
-        .get(inserted.id);
+      const raw = await getDbClient().get<{ value: string }>(
+        "SELECT value FROM swarm_config WHERE id = ?",
+        [inserted.id],
+      );
       expect(raw).not.toBeNull();
       const original = raw?.value ?? "";
       const corrupted =
         original.slice(0, 10) + (original[10] === "A" ? "B" : "A") + original.slice(11);
-      getDb().run("UPDATE swarm_config SET value = ? WHERE id = ?", [corrupted, inserted.id]);
+      await getDbClient().run("UPDATE swarm_config SET value = ? WHERE id = ?", [
+        corrupted,
+        inserted.id,
+      ]);
 
       const res = await fetch(`${baseUrl}/api/config/${inserted.id}`, { method: "DELETE" });
       expect(res.status).toBe(200);
@@ -460,7 +464,7 @@ describe("swarm-config reserved keys guard", () => {
     });
 
     test("still deletes non-reserved rows via HTTP", async () => {
-      const inserted = upsertSwarmConfig({
+      const inserted = await upsertSwarmConfig({
         scope: "global",
         key: "HTTP_TEMP_DELETE",
         value: "x",
@@ -474,7 +478,7 @@ describe("swarm-config reserved keys guard", () => {
 
   describe("HTTP GET config routes", () => {
     test("GET /api/config lists unreadable reserved rows instead of 500ing", async () => {
-      const id = insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
+      const id = await insertUnreadableReservedSecretRow("SECRETS_ENCRYPTION_KEY");
 
       try {
         const res = await fetch(`${baseUrl}/api/config?scope=global&includeSecrets=true`);
@@ -491,7 +495,7 @@ describe("swarm-config reserved keys guard", () => {
           ),
         ).toBe(true);
       } finally {
-        getDb().run("DELETE FROM swarm_config WHERE id = ?", [id]);
+        await getDbClient().run("DELETE FROM swarm_config WHERE id = ?", [id]);
       }
     });
   });

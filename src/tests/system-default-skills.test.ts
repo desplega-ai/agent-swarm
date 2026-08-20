@@ -5,7 +5,7 @@ import {
   createAgent,
   createSkill,
   getAgentSkills,
-  getDb,
+  getDbClient,
   getSystemDefaultSkills,
   initDb,
   toggleAgentSkill,
@@ -73,7 +73,7 @@ describe("system-default skills", () => {
     const result = await runSeeder(skillsSeeder, { quiet: true });
     expect(result.failed).toEqual([]);
 
-    const defaults = getSystemDefaultSkills().map((skill) => skill.name);
+    const defaults = (await getSystemDefaultSkills()).map((skill) => skill.name);
     expect(defaults).toContain("asset-namespaces");
     expect(defaults).toContain("attio-interaction");
     expect(defaults).toContain("script-workflows");
@@ -95,7 +95,7 @@ describe("system-default skills", () => {
       capabilities: [],
     });
 
-    const manualDefault = createSkill({
+    const manualDefault = await createSkill({
       name: "manual-system-default",
       description: "Manual default",
       content: "---\nname: manual-system-default\ndescription: Manual default\n---\nBody.",
@@ -120,7 +120,7 @@ describe("system-default skills", () => {
       capabilities: [],
     });
 
-    const swarmSkill = createSkill({
+    const swarmSkill = await createSkill({
       name: "manual-swarm-scope-skill",
       description: "Manual swarm scope skill",
       content:
@@ -130,14 +130,13 @@ describe("system-default skills", () => {
       systemDefault: false,
     });
 
-    const installRow = getDb()
-      .prepare<{ count: number }, [string, string]>(
-        `SELECT COUNT(*) AS count
+    const installRow = await getDbClient().get<{ count: number }>(
+      `SELECT COUNT(*) AS count
          FROM agent_skills
          WHERE agentId = ?
            AND skillId = ?`,
-      )
-      .get(existingAgent.id, swarmSkill.id);
+      [existingAgent.id, swarmSkill.id],
+    );
 
     expect(installRow?.count ?? 0).toBe(0);
 
@@ -157,14 +156,13 @@ describe("system-default skills", () => {
       capabilities: [],
     });
 
-    const row = getDb()
-      .prepare<{ count: number }, [string]>(
-        `SELECT COUNT(*) AS count
+    const row = await getDbClient().get<{ count: number }>(
+      `SELECT COUNT(*) AS count
          FROM agent_skills
          WHERE agentId = ?
            AND skillId IN (SELECT id FROM skills WHERE systemDefault = 1)`,
-      )
-      .get(beforeAgent.id);
+      [beforeAgent.id],
+    );
 
     expect(row?.count ?? 0).toBeGreaterThan(0);
   });
@@ -179,7 +177,7 @@ describe("system-default skills", () => {
       maxTasks: 1,
       capabilities: [],
     });
-    const skill = getSystemDefaultSkills().find((entry) => entry.name === "swarm-scripts");
+    const skill = (await getSystemDefaultSkills()).find((entry) => entry.name === "swarm-scripts");
     expect(skill).toBeDefined();
 
     await toggleAgentSkill(agent.id, skill!.id, false);

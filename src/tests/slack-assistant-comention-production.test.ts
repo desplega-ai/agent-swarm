@@ -58,17 +58,19 @@ function restoreEnvValue(key: keyof typeof originalEnv): void {
 }
 
 function installSpyImplementations(): void {
-  createTaskWithSiblingAwarenessSpy.mockImplementation(() => ({ id: "mock-task-id-prod-path" }));
-  getAllAgentsSpy.mockImplementation(() => []);
-  getAgentWorkingOnThreadSpy.mockImplementation(() => null);
-  getLeadAgentSpy.mockImplementation(() => ({
+  createTaskWithSiblingAwarenessSpy.mockImplementation(async () => ({
+    id: "mock-task-id-prod-path",
+  }));
+  getAllAgentsSpy.mockImplementation(async () => []);
+  getAgentWorkingOnThreadSpy.mockImplementation(async () => null);
+  getLeadAgentSpy.mockImplementation(async () => ({
     id: "lead-prod-test-1",
     name: "TestLead",
     isLead: true,
   }));
-  getMostRecentTaskInThreadSpy.mockImplementation(() => null);
-  getAgentByIdSpy.mockImplementation(() => null);
-  getTasksByAgentIdSpy.mockImplementation(() => []);
+  getMostRecentTaskInThreadSpy.mockImplementation(async () => null);
+  getAgentByIdSpy.mockImplementation(async () => null);
+  getTasksByAgentIdSpy.mockImplementation(async () => []);
   resolveSlackUserIdSpy.mockImplementation(async () => undefined);
   enrichSlackUserEmailSpy.mockImplementation(async () => null);
   wasEventSeenSpy.mockImplementation(() => false);

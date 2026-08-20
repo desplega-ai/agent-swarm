@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   getLogsByTaskId,
   getTaskById,
   initDb,
@@ -48,7 +48,7 @@ async function freshAgent(prefix: string, opts?: { maxTasks?: number; lastActivi
     status: "idle",
   });
   if (opts?.maxTasks !== undefined || opts?.lastActivityAt) {
-    getDb().run(
+    await getDbClient().run(
       "UPDATE agents SET maxTasks = COALESCE(?, maxTasks), lastActivityAt = COALESCE(?, lastActivityAt) WHERE id = ?",
       [opts.maxTasks ?? null, opts.lastActivityAt ?? null, id],
     );
@@ -88,7 +88,7 @@ describe("Task Supersede + Resume", () => {
       expect(result?.status).toBe("superseded");
       expect(result?.finishedAt).toBeTruthy();
 
-      const log = getLogsByTaskId(task.id).find((l) => l.eventType === "task_superseded");
+      const log = (await getLogsByTaskId(task.id)).find((l) => l.eventType === "task_superseded");
       expect(log).toBeTruthy();
     });
 
@@ -324,7 +324,7 @@ describe("Task Supersede + Resume", () => {
       });
 
       // Sanity: tracker_sync starts pointed at the parent.
-      const before = getTrackerSync("linear", "task", parent.id);
+      const before = await getTrackerSync("linear", "task", parent.id);
       expect(before).not.toBeNull();
 
       const result = await createResumeFollowUp({
@@ -334,12 +334,16 @@ describe("Task Supersede + Resume", () => {
       if (result.kind !== "created") throw new Error("expected created");
 
       // After resume creation, tracker_sync should now key on the resume child.
-      const parentLookup = getTrackerSync("linear", "task", parent.id);
+      const parentLookup = await getTrackerSync("linear", "task", parent.id);
       expect(parentLookup).toBeNull();
-      const childLookup = getTrackerSync("linear", "task", result.task.id);
+      const childLookup = await getTrackerSync("linear", "task", result.task.id);
       expect(childLookup).not.toBeNull();
       // External identity stays — only swarmId moved.
-      const byExternal = getTrackerSyncByExternalId("linear", "task", "linear-issue-uuid-12345");
+      const byExternal = await getTrackerSyncByExternalId(
+        "linear",
+        "task",
+        "linear-issue-uuid-12345",
+      );
       expect(byExternal?.swarmId).toBe(result.task.id);
       expect(byExternal?.externalIdentifier).toBe("ENG-42");
     });
@@ -369,22 +373,20 @@ describe("Task Supersede + Resume", () => {
       // it). Temporarily disable FKs since this test exercises only the
       // supersede carve-out, not the workflow engine itself.
       const stepId = crypto.randomUUID();
-      getDb().exec("PRAGMA foreign_keys = OFF");
+      await getDbClient().run("PRAGMA foreign_keys = OFF");
       try {
-        getDb().run("UPDATE agent_tasks SET workflowRunStepId = ? WHERE id = ?", [
+        await getDbClient().run("UPDATE agent_tasks SET workflowRunStepId = ? WHERE id = ?", [
           stepId,
           parent.id,
         ]);
       } finally {
-        getDb().exec("PRAGMA foreign_keys = ON");
+        await getDbClient().run("PRAGMA foreign_keys = ON");
       }
       await startTask(parent.id);
 
-      const before = getDb()
-        .prepare<{ count: number }, []>(
-          "SELECT COUNT(*) as count FROM agent_tasks WHERE taskType = 'resume'",
-        )
-        .get();
+      const before = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE taskType = 'resume'",
+      );
       const beforeCount = before?.count ?? 0;
 
       const result = await createResumeFollowUp({
@@ -396,11 +398,9 @@ describe("Task Supersede + Resume", () => {
         expect(result.stepId).toBe(stepId);
       }
 
-      const after = getDb()
-        .prepare<{ count: number }, []>(
-          "SELECT COUNT(*) as count FROM agent_tasks WHERE taskType = 'resume'",
-        )
-        .get();
+      const after = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE taskType = 'resume'",
+      );
       const afterCount = after?.count ?? 0;
       expect(afterCount).toBe(beforeCount);
     });

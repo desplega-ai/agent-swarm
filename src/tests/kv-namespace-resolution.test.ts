@@ -9,7 +9,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -64,8 +64,8 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries");
 });
 
 function url(path: string): string {

@@ -1,5 +1,12 @@
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { closeDb, createAgent, getAgentById, getDb, initDb, updateAgentProfile } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getAgentById,
+  getDbClient,
+  initDb,
+  updateAgentProfile,
+} from "../be/db";
 import { postHookProfileUpdate } from "../hooks/hook";
 import { BOOTSTRAP_MAX_CHARS } from "../prompts/base-prompt";
 import {
@@ -119,7 +126,7 @@ describe("updateAgentProfile identity budget enforcement", () => {
 
   test("allows an existing oversized value to shrink or change at equal length but rejects growth", async () => {
     const current = "c".repeat(BOOTSTRAP_MAX_CHARS + 10);
-    getDb().prepare("UPDATE agents SET claudeMd = ? WHERE id = ?").run(current, agentId);
+    await getDbClient().run("UPDATE agents SET claudeMd = ? WHERE id = ?", [current, agentId]);
 
     const shrunk = "s".repeat(BOOTSTRAP_MAX_CHARS + 9);
     expect((await updateAgentProfile(agentId, { claudeMd: shrunk }))?.claudeMd).toBe(shrunk);

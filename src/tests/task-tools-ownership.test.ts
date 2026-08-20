@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -62,11 +62,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM users").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
+  await client.run("DELETE FROM users");
 });
 
 function expectForbidden(result: CallToolResult): void {
@@ -78,8 +78,8 @@ function expectForbidden(result: CallToolResult): void {
 
 describe("ownership-gated task tools", () => {
   test("getTaskDetailsHandler gates user ctx and leaves owner ctx visible", async () => {
-    const owner = createUser({ name: "Task Owner" });
-    const foreignUser = createUser({ name: "Foreign User" });
+    const owner = await createUser({ name: "Task Owner" });
+    const foreignUser = await createUser({ name: "Foreign User" });
     const task = await createTaskExtended("owned details", { requestedByUserId: owner.id });
 
     expectForbidden(await callGetTaskDetails(userCtx(foreignUser), { taskId: task.id }));
@@ -100,8 +100,8 @@ describe("ownership-gated task tools", () => {
   });
 
   test("cancelTaskHandler gates user ctx and preserves owner lead permission", async () => {
-    const owner = createUser({ name: "Cancel Owner" });
-    const foreignUser = createUser({ name: "Cancel Foreign" });
+    const owner = await createUser({ name: "Cancel Owner" });
+    const foreignUser = await createUser({ name: "Cancel Foreign" });
     const task = await createTaskExtended("owned cancellation", { requestedByUserId: owner.id });
 
     expectForbidden(
@@ -133,8 +133,8 @@ describe("ownership-gated task tools", () => {
   });
 
   test("taskActionHandler gates user backlog moves and rejects agent-only actions", async () => {
-    const owner = createUser({ name: "Backlog Owner" });
-    const foreignUser = createUser({ name: "Backlog Foreign" });
+    const owner = await createUser({ name: "Backlog Owner" });
+    const foreignUser = await createUser({ name: "Backlog Foreign" });
     const task = await createTaskExtended("owned backlog move", { requestedByUserId: owner.id });
 
     expectForbidden(

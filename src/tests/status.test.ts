@@ -19,7 +19,7 @@ import { join } from "node:path";
 import {
   closeDb,
   createAgent,
-  getDb,
+  getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
   hasFirstCompletedTask,
@@ -120,12 +120,12 @@ function restoreEnv() {
   }
 }
 
-function clearTables() {
-  const db = getDb();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM oauth_authorizations").run();
-  db.prepare("DELETE FROM oauth_apps").run();
+async function clearTables() {
+  const client = getDbClient();
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
+  await client.run("DELETE FROM oauth_authorizations");
+  await client.run("DELETE FROM oauth_apps");
 }
 
 beforeAll(async () => {
@@ -140,9 +140,9 @@ afterAll(async () => {
   restoreEnv();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   clearEnv();
-  clearTables();
+  await clearTables();
   _resetTestConnectionCache();
 });
 
@@ -153,8 +153,8 @@ afterEach(() => {
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 describe("buildStatusPayload — identity", () => {
-  test("defaults when no SWARM_* envs set", () => {
-    const payload = buildStatusPayload();
+  test("defaults when no SWARM_* envs set", async () => {
+    const payload = await buildStatusPayload();
     expect(payload.identity).toEqual({
       name: "Swarm",
       logo_url: null,
@@ -166,7 +166,7 @@ describe("buildStatusPayload — identity", () => {
     });
   });
 
-  test("reflects SWARM_* envs when all set", () => {
+  test("reflects SWARM_* envs when all set", async () => {
     process.env.SWARM_CLOUD = "true";
     process.env.SWARM_ORG_NAME = "Acme";
     process.env.SWARM_ORG_ID = "org_acme_123";
@@ -175,7 +175,7 @@ describe("buildStatusPayload — identity", () => {
     process.env.SWARM_MARKETING_URL = "https://swarm.acme.example";
     process.env.SWARM_HIDE_CLOUD_PROMO = "true";
 
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(payload.identity).toEqual({
       name: "Acme",
       logo_url: "https://acme.example/logo.png",
@@ -187,24 +187,24 @@ describe("buildStatusPayload — identity", () => {
     });
   });
 
-  test("treats SWARM_CLOUD=1 the same as 'true'", () => {
+  test("treats SWARM_CLOUD=1 the same as 'true'", async () => {
     process.env.SWARM_CLOUD = "1";
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(payload.identity.is_cloud).toBe(true);
   });
 });
 
 // ─── Setup state machine ─────────────────────────────────────────────────────
 
-function getMilestone(payload: ReturnType<typeof buildStatusPayload>, id: string) {
+function getMilestone(payload: Awaited<ReturnType<typeof buildStatusPayload>>, id: string) {
   const m = payload.setup.find((row) => row.id === id);
   if (!m) throw new Error(`Milestone "${id}" missing from payload`);
   return m;
 }
 
 describe("setup milestones", () => {
-  test("all unverified on a clean swarm", () => {
-    const payload = buildStatusPayload();
+  test("all unverified on a clean swarm", async () => {
+    const payload = await buildStatusPayload();
     expect(payload.setup).toHaveLength(7);
     for (const m of payload.setup) {
       expect(m.state).toBe("unverified");
@@ -215,7 +215,7 @@ describe("setup milestones", () => {
     const a = await createAgent({ name: "w-cfg", isLead: false, status: "idle", capabilities: [] });
     await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
 
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("configured");
   });
 
@@ -227,12 +227,12 @@ describe("setup milestones", () => {
       liveTest: { ok: true, error: null, latency_ms: 42, testedAt: Date.now() },
     });
 
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("verified");
   });
 
-  test("harness stays `unverified` on an empty fleet (no agents registered)", () => {
-    const m = getMilestone(buildStatusPayload(), "harness");
+  test("harness stays `unverified` on an empty fleet (no agents registered)", async () => {
+    const m = getMilestone(await buildStatusPayload(), "harness");
     expect(m.state).toBe("unverified");
     expect(m.hint).toContain("No worker agents registered");
   });
@@ -250,7 +250,7 @@ describe("setup milestones", () => {
       satisfiedBy: null,
     });
 
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     const m = getMilestone(payload, "harness");
     expect(m.state).toBe("unverified");
     expect(m.hint).toContain("ANTHROPIC_API_KEY");
@@ -275,7 +275,7 @@ describe("setup milestones", () => {
       await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: fresh });
       await seedCredStatus(b.id, "codex", { ready: true, satisfiedBy: "file", liveTest: fresh });
 
-      const m = getMilestone(buildStatusPayload(), "harness");
+      const m = getMilestone(await buildStatusPayload(), "harness");
       expect(m.state).toBe("verified");
       // Multi-provider fleet → `provider` is undefined; `providers[]` lists both.
       expect(m.provider).toBeUndefined();
@@ -303,7 +303,7 @@ describe("setup milestones", () => {
       });
       await seedCredStatus(b.id, "codex", { ready: true, satisfiedBy: "file", liveTest: null });
 
-      const m = getMilestone(buildStatusPayload(), "harness");
+      const m = getMilestone(await buildStatusPayload(), "harness");
       expect(m.state).toBe("configured");
       expect(m.hint).toContain("claude");
       expect(m.hint).toContain("codex");
@@ -333,7 +333,7 @@ describe("setup milestones", () => {
         satisfiedBy: null,
       });
 
-      const m = getMilestone(buildStatusPayload(), "harness");
+      const m = getMilestone(await buildStatusPayload(), "harness");
       expect(m.state).toBe("unverified");
       expect(m.hint).toContain("pi");
       expect(m.hint).toContain("OPENROUTER_API_KEY");
@@ -347,46 +347,46 @@ describe("setup milestones", () => {
         capabilities: [],
       });
       await seedCredStatus(a.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
-      expect(getMilestone(buildStatusPayload(), "harness").provider).toBe("claude");
+      expect(getMilestone(await buildStatusPayload(), "harness").provider).toBe("claude");
     });
 
-    test("API process.env.HARNESS_PROVIDER is ignored — fleet wins", () => {
+    test("API process.env.HARNESS_PROVIDER is ignored — fleet wins", async () => {
       // Set a misleading env var on the API process. The milestone should
       // still be derived from the (empty) agent fleet.
       process.env.HARNESS_PROVIDER = "claude";
-      const m = getMilestone(buildStatusPayload(), "harness");
+      const m = getMilestone(await buildStatusPayload(), "harness");
       expect(m.state).toBe("unverified");
       expect(m.hint).toContain("No worker agents registered");
     });
   });
 
-  test("slack: needs both bot+app tokens AND not disabled", () => {
+  test("slack: needs both bot+app tokens AND not disabled", async () => {
     process.env.SLACK_BOT_TOKEN = "xoxb-test";
-    const a = buildStatusPayload();
+    const a = await buildStatusPayload();
     expect(getMilestone(a, "slack").state).toBe("unverified");
 
     process.env.SLACK_APP_TOKEN = "xapp-test";
-    const b = buildStatusPayload();
+    const b = await buildStatusPayload();
     expect(getMilestone(b, "slack").state).toBe("verified");
 
     process.env.SLACK_DISABLE = "true";
-    const c = buildStatusPayload();
+    const c = await buildStatusPayload();
     expect(getMilestone(c, "slack").state).toBe("unverified");
   });
 
-  test("github: needs webhook secret + app id + private key", () => {
+  test("github: needs webhook secret + app id + private key", async () => {
     process.env.GITHUB_WEBHOOK_SECRET = "secret";
     process.env.GITHUB_APP_ID = "12345";
-    const a = buildStatusPayload();
+    const a = await buildStatusPayload();
     expect(getMilestone(a, "github").state).toBe("unverified");
 
     process.env.GITHUB_APP_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\n...";
-    const b = buildStatusPayload();
+    const b = await buildStatusPayload();
     expect(getMilestone(b, "github").state).toBe("verified");
   });
 
   test("linear: authorization row flips to verified", async () => {
-    expect(getMilestone(buildStatusPayload(), "linear").state).toBe("unverified");
+    expect(getMilestone(await buildStatusPayload(), "linear").state).toBe("unverified");
 
     await upsertOAuthApp("linear", {
       clientId: "cid",
@@ -402,7 +402,7 @@ describe("setup milestones", () => {
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
       scope: "read",
     });
-    expect(getMilestone(buildStatusPayload(), "linear").state).toBe("verified");
+    expect(getMilestone(await buildStatusPayload(), "linear").state).toBe("verified");
   });
 
   test("jira: requires both an authorization row and oauth_apps.metadata.cloudId", async () => {
@@ -422,7 +422,7 @@ describe("setup milestones", () => {
       scope: null,
     });
     // Without cloudId yet — still unverified.
-    expect(getMilestone(buildStatusPayload(), "jira").state).toBe("unverified");
+    expect(getMilestone(await buildStatusPayload(), "jira").state).toBe("unverified");
 
     await upsertOAuthApp("jira", {
       clientId: "cid",
@@ -433,11 +433,11 @@ describe("setup milestones", () => {
       scopes: "read:jira-work",
       metadata: JSON.stringify({ cloudId: "abc-123" }),
     });
-    expect(getMilestone(buildStatusPayload(), "jira").state).toBe("verified");
+    expect(getMilestone(await buildStatusPayload(), "jira").state).toBe("verified");
   });
 
   test("workers: configured when agents exist; verified when lead+worker recently active", async () => {
-    expect(getMilestone(buildStatusPayload(), "workers").state).toBe("unverified");
+    expect(getMilestone(await buildStatusPayload(), "workers").state).toBe("unverified");
 
     const lead = await createAgent({
       name: "lead-1",
@@ -445,7 +445,7 @@ describe("setup milestones", () => {
       status: "idle",
       capabilities: [],
     });
-    expect(getMilestone(buildStatusPayload(), "workers").state).toBe("configured");
+    expect(getMilestone(await buildStatusPayload(), "workers").state).toBe("configured");
 
     const worker = await createAgent({
       name: "worker-1",
@@ -454,25 +454,24 @@ describe("setup milestones", () => {
       capabilities: [],
     });
     // Still configured — neither has lastActivityAt yet.
-    expect(getMilestone(buildStatusPayload(), "workers").state).toBe("configured");
+    expect(getMilestone(await buildStatusPayload(), "workers").state).toBe("configured");
 
     await updateAgentActivity(lead.id);
     await updateAgentActivity(worker.id);
-    expect(getMilestone(buildStatusPayload(), "workers").state).toBe("verified");
+    expect(getMilestone(await buildStatusPayload(), "workers").state).toBe("verified");
   });
 
-  test("first_task: unverified by default; verified after a completed task", () => {
-    expect(getMilestone(buildStatusPayload(), "first_task").state).toBe("unverified");
+  test("first_task: unverified by default; verified after a completed task", async () => {
+    expect(getMilestone(await buildStatusPayload(), "first_task").state).toBe("unverified");
 
-    getDb()
-      .prepare(
-        `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
-         VALUES (?, ?, 'completed', 'mcp', '1.0.0',
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      )
-      .run("task-completed-1", "first task");
-    expect(getMilestone(buildStatusPayload(), "first_task").state).toBe("verified");
+    await getDbClient().run(
+      `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'completed', 'mcp', '1.0.0',
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      ["task-completed-1", "first task"],
+    );
+    expect(getMilestone(await buildStatusPayload(), "first_task").state).toBe("verified");
   });
 });
 
@@ -517,7 +516,7 @@ describe("getLiveAgentCounts", () => {
     });
     // Backdate to 1h ago (well outside the 5min window).
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    getDb().prepare(`UPDATE agents SET lastActivityAt = ? WHERE id = ?`).run(past, w1.id);
+    await getDbClient().run(`UPDATE agents SET lastActivityAt = ? WHERE id = ?`, [past, w1.id]);
     expect((await getLiveAgentCounts(5)).workers_alive).toBe(0);
   });
 });
@@ -547,14 +546,13 @@ describe("getInstanceActivity", () => {
     await updateAgentActivity(lead.id);
     await updateAgentActivity(worker.id);
 
-    getDb()
-      .prepare(
-        `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
-         VALUES (?, ?, 'pending', 'mcp', '1.0.0',
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      )
-      .run("task-recent-1", "fresh task");
+    await getDbClient().run(
+      `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'pending', 'mcp', '1.0.0',
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      ["task-recent-1", "fresh task"],
+    );
 
     const a = await getInstanceActivity();
     expect(a.agents_online).toBe(2);
@@ -569,24 +567,22 @@ describe("hasFirstCompletedTask", () => {
   });
 
   test("flips on first completed task", async () => {
-    getDb()
-      .prepare(
-        `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
-         VALUES (?, ?, 'pending', 'mcp', '1.0.0',
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      )
-      .run("task-pend-1", "pending task");
+    await getDbClient().run(
+      `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'pending', 'mcp', '1.0.0',
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      ["task-pend-1", "pending task"],
+    );
     expect(await hasFirstCompletedTask()).toBe(false);
 
-    getDb()
-      .prepare(
-        `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
-         VALUES (?, ?, 'completed', 'mcp', '1.0.0',
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                 strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
-      )
-      .run("task-done-1", "done task");
+    await getDbClient().run(
+      `INSERT INTO agent_tasks (id, task, status, source, swarmVersion, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'completed', 'mcp', '1.0.0',
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`,
+      ["task-done-1", "done task"],
+    );
     expect(await hasFirstCompletedTask()).toBe(true);
   });
 });
@@ -783,13 +779,13 @@ describe("validateProviderCredentials — error scrubbing", () => {
 // ─── Phase 2: aggregate health rollup ────────────────────────────────────────
 
 describe("computeHealth (Phase 2)", () => {
-  test("`broken` on a clean swarm — harness + workers both unverified", () => {
-    const payload = buildStatusPayload();
+  test("`broken` on a clean swarm — harness + workers both unverified", async () => {
+    const payload = await buildStatusPayload();
     expect(payload.health).toBe("broken");
   });
 
-  test("`broken` when no agents ever joined (harness fleet is empty)", () => {
-    const payload = buildStatusPayload();
+  test("`broken` when no agents ever joined (harness fleet is empty)", async () => {
+    const payload = await buildStatusPayload();
     // Both harness and workers are `unverified` on a clean swarm → broken.
     expect(payload.health).toBe("broken");
     expect(getMilestone(payload, "harness").state).toBe("unverified");
@@ -814,7 +810,7 @@ describe("computeHealth (Phase 2)", () => {
     await seedCredStatus(lead.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
     await seedCredStatus(worker.id, "claude", { ready: true, satisfiedBy: "env", liveTest: null });
 
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("verified");
     expect(getMilestone(payload, "harness").state).toBe("configured");
     expect(payload.health).toBe("degraded");
@@ -835,7 +831,7 @@ describe("computeHealth (Phase 2)", () => {
       satisfiedBy: "env",
       liveTest: { ok: true, error: null, latency_ms: 12, testedAt: Date.now() },
     });
-    const payload = buildStatusPayload();
+    const payload = await buildStatusPayload();
     expect(getMilestone(payload, "workers").state).toBe("configured");
     expect(payload.health).toBe("ok");
   });
@@ -899,7 +895,7 @@ describe("worker-reported live test drives harness.state", () => {
       ready: true,
       liveTest: { ok: true, error: null, latency_ms: 80, testedAt: Date.now() },
     });
-    expect(getMilestone(buildStatusPayload(), "harness").state).toBe("verified");
+    expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("verified");
   });
 
   test("a stale live test (older than SWARM_VERIFY_TTL_MS) drops to `configured`", async () => {
@@ -915,7 +911,7 @@ describe("worker-reported live test drives harness.state", () => {
         testedAt: Date.now() - 60_000, // 60s ago, well beyond TTL
       },
     });
-    expect(getMilestone(buildStatusPayload(), "harness").state).toBe("configured");
+    expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("configured");
   });
 
   test("a failed live test still leaves harness `configured` if presence is ready", async () => {
@@ -936,6 +932,6 @@ describe("worker-reported live test drives harness.state", () => {
       },
     });
     // Presence is OK; live test failed → not verified, but still configured.
-    expect(getMilestone(buildStatusPayload(), "harness").state).toBe("configured");
+    expect(getMilestone(await buildStatusPayload(), "harness").state).toBe("configured");
   });
 });

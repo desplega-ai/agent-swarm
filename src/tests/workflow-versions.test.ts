@@ -125,7 +125,7 @@ describe("getWorkflowVersions", () => {
     await updateWorkflow(workflow.id, { description: "update 2" });
     await snapshotWorkflow(workflow.id);
 
-    const versions = getWorkflowVersions(workflow.id);
+    const versions = await getWorkflowVersions(workflow.id);
 
     expect(versions.length).toBe(3);
     expect(versions[0]!.version).toBe(3);
@@ -135,7 +135,7 @@ describe("getWorkflowVersions", () => {
 
   test("returns empty array for workflow with no versions", async () => {
     const workflow = await makeWorkflow();
-    const versions = getWorkflowVersions(workflow.id);
+    const versions = await getWorkflowVersions(workflow.id);
     expect(versions).toEqual([]);
   });
 });
@@ -148,12 +148,12 @@ describe("getWorkflowVersion", () => {
     await updateWorkflow(workflow.id, { description: "v2 state" });
     await snapshotWorkflow(workflow.id);
 
-    const v1 = getWorkflowVersion(workflow.id, 1);
+    const v1 = await getWorkflowVersion(workflow.id, 1);
     expect(v1).not.toBeNull();
     expect(v1!.version).toBe(1);
     expect(v1!.snapshot.description).toBeUndefined();
 
-    const v2 = getWorkflowVersion(workflow.id, 2);
+    const v2 = await getWorkflowVersion(workflow.id, 2);
     expect(v2).not.toBeNull();
     expect(v2!.version).toBe(2);
     expect(v2!.snapshot.description).toBe("v2 state");
@@ -161,7 +161,7 @@ describe("getWorkflowVersion", () => {
 
   test("returns null for non-existent version", async () => {
     const workflow = await makeWorkflow();
-    const result = getWorkflowVersion(workflow.id, 999);
+    const result = await getWorkflowVersion(workflow.id, 999);
     expect(result).toBeNull();
   });
 });
@@ -192,7 +192,7 @@ describe("version history workflow (snapshot before update)", () => {
     });
 
     // Verify version history
-    const versions = getWorkflowVersions(workflow.id);
+    const versions = await getWorkflowVersions(workflow.id);
     expect(versions.length).toBe(2);
 
     // v1 should have the initial state (no description)

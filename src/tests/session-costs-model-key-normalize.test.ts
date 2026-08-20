@@ -12,7 +12,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { normalizeModelKey } from "../be/pricing-normalize";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
@@ -75,10 +75,9 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
-  db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+afterEach(async () => {
+  await getDbClient().run("DELETE FROM session_costs");
+  await getDbClient().run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {

@@ -7,7 +7,7 @@ import {
   createUser,
   deleteKv,
   findTaskByVcs,
-  getDb,
+  getDbClient,
   getKv,
   getTaskById,
   initDb,
@@ -240,7 +240,7 @@ describe("handleMergeRequest", () => {
       agentId: "lead-gl-001",
     });
 
-    const existing = findTaskByVcs("group/project", 60);
+    const existing = await findTaskByVcs("group/project", 60);
     expect(existing).not.toBeNull();
 
     const event = makeMREvent({
@@ -297,7 +297,7 @@ describe("handleMergeRequest", () => {
     const result = await handleMergeRequest(event);
     expect(result.created).toBe(false);
 
-    const existing = findTaskByVcs("group/project", 61);
+    const existing = await findTaskByVcs("group/project", 61);
     // Should no longer be active (findTaskByVcs filters out completed/failed)
     expect(existing).toBeNull();
   });
@@ -444,7 +444,7 @@ describe("handleIssue", () => {
     expect(result.created).toBe(false);
 
     // Task should no longer be active
-    const task = findTaskByVcs("group/project", 30);
+    const task = await findTaskByVcs("group/project", 30);
     expect(task).toBeNull();
   });
 });
@@ -719,10 +719,9 @@ async function getUnmappedMeta(username: string): Promise<Record<string, unknown
   return row.value as Record<string, unknown>;
 }
 
-function countExternalIds(): number {
-  return (
-    getDb().prepare<{ c: number }, []>("SELECT COUNT(*) AS c FROM user_external_ids").get()?.c ?? 0
-  );
+async function countExternalIds(): Promise<number> {
+  const row = await getDbClient().get<{ c: number }>("SELECT COUNT(*) AS c FROM user_external_ids");
+  return row?.c ?? 0;
 }
 
 describe("identity resolution — MR handler", () => {
@@ -734,7 +733,7 @@ describe("identity resolution — MR handler", () => {
   });
 
   test("known GitLab user → requestedByUserId populated, no unmapped entry", async () => {
-    const known = createUser({ name: "Known User" });
+    const known = await createUser({ name: "Known User" });
     await linkIdentity(known.id, "gitlab", "knownuser", { kind: "system", id: "test" });
 
     const event = makeMREvent({
@@ -765,8 +764,8 @@ describe("identity resolution — MR handler", () => {
   });
 
   test("unknown user WITH inline email → auto-create user + link identity, no unmapped entry", async () => {
-    const beforeExt = countExternalIds();
-    expect(findUserByExternalId("gitlab", "inlineuser")).toBeNull();
+    const beforeExt = await countExternalIds();
+    expect(await findUserByExternalId("gitlab", "inlineuser")).toBeNull();
 
     const event = makeMREvent({
       user: {
@@ -794,7 +793,7 @@ describe("identity resolution — MR handler", () => {
     const result = await handleMergeRequest(event);
     expect(result.created).toBe(true);
 
-    const user = findUserByExternalId("gitlab", "inlineuser");
+    const user = await findUserByExternalId("gitlab", "inlineuser");
     expect(user).not.toBeNull();
     expect(user?.email).toBe("inline@example.com");
     expect(user?.name).toBe("Inline User");
@@ -803,7 +802,7 @@ describe("identity resolution — MR handler", () => {
     expect(task?.requestedByUserId).toBe(user!.id);
 
     // user_external_ids gained exactly one row for this auto-link.
-    expect(countExternalIds()).toBe(beforeExt + 1);
+    expect(await countExternalIds()).toBe(beforeExt + 1);
 
     // No unmapped entry written.
     expect(await getUnmappedMeta("inlineuser")).toBeNull();
@@ -895,7 +894,7 @@ describe("identity resolution — MR handler", () => {
     expect(result.created).toBe(true);
 
     // No auto-link should have occurred — no `user_external_ids` row for 'emptyemail'.
-    expect(findUserByExternalId("gitlab", "emptyemail")).toBeNull();
+    expect(await findUserByExternalId("gitlab", "emptyemail")).toBeNull();
 
     // Unmapped kv rows should be present.
     expect(await getUnmappedMeta("emptyemail")).not.toBeNull();
@@ -990,7 +989,7 @@ describe("identity resolution — Note handler", () => {
   });
 
   test("known GitLab user commenting -> requestedByUserId populated + rendered pair, never the raw username", async () => {
-    const known = createUser({ name: "Known Commenter" });
+    const known = await createUser({ name: "Known Commenter" });
     await linkIdentity(known.id, "gitlab", "knowncommenter", { kind: "system", id: "test" });
 
     const event = makeNoteEvent({
@@ -1030,7 +1029,7 @@ describe("identity resolution — Note handler", () => {
 
 describe("identity resolution — Pipeline handler", () => {
   test("known GitLab user triggers pipeline -> requestedByUserId populated on the task", async () => {
-    const known = createUser({ name: "Pipeline Trigger" });
+    const known = await createUser({ name: "Pipeline Trigger" });
     await linkIdentity(known.id, "gitlab", "pipelinetrigger", { kind: "system", id: "test" });
 
     await createTaskExtended("[GitLab MR #970] Pipeline identity test", {

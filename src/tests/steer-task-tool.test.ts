@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getSteeringMessagesForTask,
   initDb,
   startTask,
@@ -97,12 +97,12 @@ afterAll(async () => {
   await removeDbFiles();
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM task_steering_messages").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM users").run();
+beforeEach(async () => {
+  const db = getDbClient();
+  await db.run("DELETE FROM task_steering_messages");
+  await db.run("DELETE FROM agent_tasks");
+  await db.run("DELETE FROM agents");
+  await db.run("DELETE FROM users");
   delete process.env.RBAC_ENABLED;
 });
 
@@ -145,7 +145,7 @@ describe("steer-task MCP tool", () => {
       outcome: "queued",
       effectiveMode: "queue",
     });
-    expect(getSteeringMessagesForTask(task.id)[0]).toMatchObject({
+    expect((await getSteeringMessagesForTask(task.id))[0]).toMatchObject({
       mode: "queue",
       source: "mcp",
       createdByKind: "agent",
@@ -215,7 +215,7 @@ describe("steer-task MCP tool", () => {
   });
 
   test("user surface admits the creator and denies a user without the steering grant", async () => {
-    const owner = createUser({ name: "Steering owner" });
+    const owner = await createUser({ name: "Steering owner" });
     const task = await runningClaudeTask(undefined, owner.id);
     const handler = userToolHandler(createUserServer(owner));
 
@@ -225,9 +225,10 @@ describe("steer-task MCP tool", () => {
     )) as { structuredContent?: unknown };
     expect(structured(allowed)).toMatchObject({ success: true, outcome: "queued" });
 
-    getDb()
-      .prepare("DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?")
-      .run(owner.id);
+    await getDbClient().run(
+      "DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?",
+      [owner.id],
+    );
     process.env.RBAC_ENABLED = "true";
     const denied = (await handler(
       { taskId: task.id, message: "this must be denied", mode: "queue" },

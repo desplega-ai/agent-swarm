@@ -61,7 +61,7 @@ describe("Phase 3 — credential status routing", () => {
       maxTasks: 1,
     });
 
-    const updated = updateAgentCredentialState(agent.id, false, [
+    const updated = await updateAgentCredentialState(agent.id, false, [
       "CLAUDE_CODE_OAUTH_TOKEN",
       "ANTHROPIC_API_KEY",
     ]);
@@ -113,7 +113,7 @@ describe("Phase 3 — credential status routing", () => {
     expect((await getIdleWorkersWithCapacity()).some((a) => a.id === agent.id)).toBe(false);
 
     // Simulate creds arriving.
-    const recovered = updateAgentCredentialState(agent.id, true, null);
+    const recovered = await updateAgentCredentialState(agent.id, true, null);
     expect(recovered!.status).toBe("idle");
     expect(recovered!.credentialMissing).toBeNull();
 
@@ -133,7 +133,7 @@ describe("Phase 3 — credential status routing", () => {
     await updateAgentCredentialState(agent.id, false, ["X", "Y"]);
     // Even if a caller passes a non-null `missing` with `ready=true`, the helper
     // canonicalises to NULL so the dashboard doesn't render a stale list.
-    const cleared = updateAgentCredentialState(agent.id, true, ["X"]);
+    const cleared = await updateAgentCredentialState(agent.id, true, ["X"]);
     expect(cleared!.status).toBe("idle");
     expect(cleared!.credentialMissing).toBeNull();
   });
@@ -163,7 +163,7 @@ describe("Phase 3 — credential status routing", () => {
     expect((await getAgentById(agent.id))!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
 
     // Creds arrive: genuine waiting_for_credentials -> ready transition.
-    const recovered = updateAgentCredentialState(agent.id, true, null);
+    const recovered = await updateAgentCredentialState(agent.id, true, null);
     expect(recovered!.status).toBe("idle");
     // The gate is cleared, so the next poll is no longer blocked.
     expect((await getAgentById(agent.id))!.emptyPollCount).toBe(0);
@@ -187,7 +187,7 @@ describe("Phase 3 — credential status routing", () => {
     expect((await getAgentById(agent.id))!.emptyPollCount).toBe(MAX_EMPTY_POLLS);
 
     // A routine post-task ready:true report arrives while status is already idle.
-    const updated = updateAgentCredentialState(agent.id, true, null);
+    const updated = await updateAgentCredentialState(agent.id, true, null);
     expect(updated!.status).toBe("idle");
     // The count must be preserved — no waiting_for_credentials -> ready transition.
     expect((await getAgentById(agent.id))!.emptyPollCount).toBe(MAX_EMPTY_POLLS);

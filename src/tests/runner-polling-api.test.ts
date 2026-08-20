@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
@@ -48,7 +48,7 @@ async function handleRequest(
 
     const agentId = myAgentId || crypto.randomUUID();
 
-    const result = getDb().transaction(async () => {
+    const result = await getDbClient().transaction(async () => {
       const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
@@ -68,7 +68,7 @@ async function handleRequest(
       });
 
       return { agent, created: true };
-    })();
+    });
 
     return { status: result.created ? 201 : 200, body: result.agent };
   }
@@ -79,7 +79,7 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const result = getDb().transaction(async () => {
+    const result = await getDbClient().transaction(async () => {
       const agent = await getAgentById(myAgentId);
       if (!agent) {
         return { error: "Agent not found", status: 404 };
@@ -109,7 +109,7 @@ async function handleRequest(
       }
 
       // Check for unread mentions - all agents can be woken by @mentions
-      const inbox = getInboxSummary(myAgentId);
+      const inbox = await getInboxSummary(myAgentId);
       if (inbox.mentionsCount > 0) {
         return {
           trigger: {
@@ -123,7 +123,7 @@ async function handleRequest(
         // Lead-specific triggers would go here (inbox, etc.)
       } else {
         // Worker-specific: check for unassigned tasks in pool
-        const unassignedCount = getUnassignedTasksCount();
+        const unassignedCount = await getUnassignedTasksCount();
         if (unassignedCount > 0) {
           return {
             trigger: {
@@ -135,7 +135,7 @@ async function handleRequest(
       }
 
       return { trigger: null };
-    })();
+    });
 
     if ("error" in result) {
       return { status: result.status ?? 500, body: { error: result.error } };

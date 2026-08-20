@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, getKv, initDb } from "../be/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -211,10 +211,11 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM scripts");
+  await client.run("DELETE FROM script_run_journal");
+  await client.run("DELETE FROM script_runs");
 });
 
 describe("script_ MCP HTTP proxy tools", () => {

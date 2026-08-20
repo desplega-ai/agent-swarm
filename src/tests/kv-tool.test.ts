@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   registerKvDeleteTool,
   registerKvGetTool,
@@ -85,8 +85,8 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries");
 });
 
 describe("kv MCP tools", () => {
@@ -125,7 +125,7 @@ describe("kv MCP tools", () => {
   test("overflow retrieval hint round-trips for its owner and rejects another agent", async () => {
     const tools = buildServer();
     const blob = "private-result:".concat("x".repeat(30_000));
-    const spill = finalizeSwarmToolResult(
+    const spill = await finalizeSwarmToolResult(
       "private-tool",
       { ok: true, message: "Large result.", data: { blob } },
       { agentId: agentA },

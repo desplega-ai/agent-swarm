@@ -100,7 +100,7 @@ describe("findTaskByVcs", () => {
       agentId: "vcs-lead-001",
     });
 
-    const found = findTaskByVcs("findme/gh-repo", 100);
+    const found = await findTaskByVcs("findme/gh-repo", 100);
     expect(found).not.toBeNull();
     expect(found?.vcsProvider).toBe("github");
   });
@@ -114,7 +114,7 @@ describe("findTaskByVcs", () => {
       agentId: "vcs-lead-001",
     });
 
-    const found = findTaskByVcs("findme/gl-project", 200);
+    const found = await findTaskByVcs("findme/gl-project", 200);
     expect(found).not.toBeNull();
     expect(found?.vcsProvider).toBe("gitlab");
   });
@@ -130,15 +130,15 @@ describe("findTaskByVcs", () => {
 
     // Complete the task
     const db = require("../be/db");
-    db.startTask(task.id);
-    db.completeTask(task.id, "Done");
+    await db.startTask(task.id);
+    await db.completeTask(task.id, "Done");
 
-    const found = findTaskByVcs("findme/completed", 300);
+    const found = await findTaskByVcs("findme/completed", 300);
     expect(found).toBeNull();
   });
 
-  test("returns null for non-existent repo/number", () => {
-    const found = findTaskByVcs("nonexistent/repo", 9999);
+  test("returns null for non-existent repo/number", async () => {
+    const found = await findTaskByVcs("nonexistent/repo", 9999);
     expect(found).toBeNull();
   });
 });

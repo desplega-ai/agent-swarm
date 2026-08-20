@@ -29,8 +29,8 @@ afterAll(() => {
 });
 
 describe("getMostRecentTaskInThread", () => {
-  test("returns null when no tasks exist for thread", () => {
-    const result = getMostRecentTaskInThread("C_EMPTY", "9999.0001");
+  test("returns null when no tasks exist for thread", async () => {
+    const result = await getMostRecentTaskInThread("C_EMPTY", "9999.0001");
     expect(result).toBeNull();
   });
 
@@ -57,7 +57,7 @@ describe("getMostRecentTaskInThread", () => {
       slackThreadTs: "1000.0001",
     });
 
-    const result = getMostRecentTaskInThread("C_SOURCE", "1000.0001");
+    const result = await getMostRecentTaskInThread("C_SOURCE", "1000.0001");
     expect(result).not.toBeNull();
     // Should return one of the tasks — importantly, it doesn't filter by source
     expect([slackTask.id, systemTask.id]).toContain(result!.id);
@@ -85,7 +85,7 @@ describe("getMostRecentTaskInThread", () => {
       slackThreadTs: "2000.0001",
     });
 
-    const result = getMostRecentTaskInThread("C_STATUS", "2000.0001");
+    const result = await getMostRecentTaskInThread("C_STATUS", "2000.0001");
     expect(result).not.toBeNull();
     // Returns one of the tasks — importantly, it doesn't filter by status
     expect([task1.id, task2.id]).toContain(result!.id);
@@ -106,15 +106,15 @@ describe("getMostRecentTaskInThread", () => {
       slackThreadTs: "3000.0001",
     });
 
-    const result = getMostRecentTaskInThread("C_WORKER", "3000.0001");
+    const result = await getMostRecentTaskInThread("C_WORKER", "3000.0001");
     expect(result).not.toBeNull();
     expect(result!.id).toBe(workerTask.id);
   });
 });
 
 describe("routeMessage — thread follow-up with offline agent", () => {
-  let leadAgent: ReturnType<typeof createAgent>;
-  let workerAgent: ReturnType<typeof createAgent>;
+  let leadAgent: Awaited<ReturnType<typeof createAgent>>;
+  let workerAgent: Awaited<ReturnType<typeof createAgent>>;
 
   beforeAll(async () => {
     leadAgent = await createAgent({
@@ -139,8 +139,8 @@ describe("routeMessage — thread follow-up with offline agent", () => {
     });
   });
 
-  test("routes to lead when thread agent is offline and bot NOT mentioned", () => {
-    const matches = routeMessage("follow up question", "B_BOT", false, {
+  test("routes to lead when thread agent is offline and bot NOT mentioned", async () => {
+    const matches = await routeMessage("follow up question", "B_BOT", false, {
       channelId: "C_ROUTE",
       threadTs: "4000.0001",
     });
@@ -150,10 +150,10 @@ describe("routeMessage — thread follow-up with offline agent", () => {
     expect(matches[0].matchedText).toBe("thread follow-up (lead fallback)");
   });
 
-  test("routes to lead when thread agent is offline and bot IS mentioned", () => {
+  test("routes to lead when thread agent is offline and bot IS mentioned", async () => {
     // With botMentioned=true and thread context, the thread follow-up path should still fire
     // because it checks before the botMentioned fallback
-    const matches = routeMessage("follow up question", "B_BOT", true, {
+    const matches = await routeMessage("follow up question", "B_BOT", true, {
       channelId: "C_ROUTE",
       threadTs: "4000.0001",
     });
@@ -178,7 +178,7 @@ describe("routeMessage — thread follow-up with offline agent", () => {
       slackThreadTs: "5000.0001",
     });
 
-    const matches = routeMessage("follow up", "B_BOT", false, {
+    const matches = await routeMessage("follow up", "B_BOT", false, {
       channelId: "C_ROUTE_ONLINE",
       threadTs: "5000.0001",
     });
@@ -190,8 +190,8 @@ describe("routeMessage — thread follow-up with offline agent", () => {
 });
 
 describe("follow-up task creation includes parentTaskId", () => {
-  test("parentTaskId is null when thread has no previous tasks (new thread)", () => {
-    const result = getMostRecentTaskInThread("C_NEW_THREAD", "8000.0001");
+  test("parentTaskId is null when thread has no previous tasks (new thread)", async () => {
+    const result = await getMostRecentTaskInThread("C_NEW_THREAD", "8000.0001");
     expect(result).toBeNull();
   });
 
@@ -211,7 +211,7 @@ describe("follow-up task creation includes parentTaskId", () => {
     });
 
     // The most recent task should be returned for parentTaskId linking
-    const result = getMostRecentTaskInThread("C_PARENT", "6000.0001");
+    const result = await getMostRecentTaskInThread("C_PARENT", "6000.0001");
     expect(result).not.toBeNull();
     expect(result!.id).toBe(firstTask.id);
 
@@ -245,8 +245,8 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
       status: "unassigned",
     });
 
-    const completed = getCompletedSlackTasks();
-    const inProgress = getInProgressSlackTasks();
+    const completed = await getCompletedSlackTasks();
+    const inProgress = await getInProgressSlackTasks();
     // Just verify the query doesn't error — specific status filtering tested below
     expect(Array.isArray(completed)).toBe(true);
     expect(Array.isArray(inProgress)).toBe(true);
@@ -268,8 +268,8 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
     });
 
     // All tasks with slackChannelId should be visible regardless of source
-    const allCompleted = getCompletedSlackTasks();
-    const allInProgress = getInProgressSlackTasks();
+    const allCompleted = await getCompletedSlackTasks();
+    const allInProgress = await getInProgressSlackTasks();
     // Task is pending, not completed or in_progress, so it won't appear in either
     // But the queries shouldn't filter by source anymore
     expect(Array.isArray(allCompleted)).toBe(true);
@@ -289,8 +289,8 @@ describe("watcher query scope — getCompletedSlackTasks / getInProgressSlackTas
       source: "mcp",
     });
 
-    const completed = getCompletedSlackTasks();
-    const inProgress = getInProgressSlackTasks();
+    const completed = await getCompletedSlackTasks();
+    const inProgress = await getInProgressSlackTasks();
 
     // None of the returned tasks should have null slackChannelId
     for (const task of completed) {

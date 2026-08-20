@@ -83,7 +83,7 @@ describe("Linear Outbound Sync", () => {
     expect(arg.body).toContain("All done!");
 
     // Verify sync record updated
-    const updated = getTrackerSync("linear", "task", "outbound-task-completed");
+    const updated = await getTrackerSync("linear", "task", "outbound-task-completed");
     expect(updated!.lastSyncOrigin).toBe("swarm");
   });
 
@@ -123,7 +123,7 @@ describe("Linear Outbound Sync", () => {
   });
 
   test("loop prevention: skips if lastSyncOrigin is external and recent", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-loop",
@@ -148,7 +148,7 @@ describe("Linear Outbound Sync", () => {
   });
 
   test("allows sync when lastSyncOrigin is external but old", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-old-external",
@@ -173,7 +173,7 @@ describe("Linear Outbound Sync", () => {
   });
 
   test("allows sync when lastSyncOrigin is swarm (not external)", async () => {
-    const sync = createTrackerSync({
+    const sync = await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "outbound-task-swarm-origin",

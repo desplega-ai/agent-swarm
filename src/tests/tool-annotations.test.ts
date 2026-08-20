@@ -10,7 +10,7 @@ const TEST_DB_PATH = "./test-tool-annotations.sqlite";
  * Access registered tools from the MCP server.
  * _registeredTools is private, so we cast through `any`.
  */
-function getRegisteredTools(server: ReturnType<typeof createServer>) {
+function getRegisteredTools(server: Awaited<ReturnType<typeof createServer>>) {
   const tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
     ._registeredTools;
   return tools;
@@ -29,7 +29,7 @@ type RegisteredTool = {
 };
 
 describe("Tool Annotations & Classification", () => {
-  let server: ReturnType<typeof createServer>;
+  let server: Awaited<ReturnType<typeof createServer>>;
   let tools: Record<string, RegisteredTool>;
 
   beforeAll(async () => {
@@ -43,7 +43,7 @@ describe("Tool Annotations & Classification", () => {
     initDb(TEST_DB_PATH);
     // Tier classification (core vs deferred) spans every tool, including ones
     // behind default-disabled capabilities — build the full-surface server.
-    server = createServer({ fullSurface: true });
+    server = await createServer({ fullSurface: true });
     tools = getRegisteredTools(server);
   });
 

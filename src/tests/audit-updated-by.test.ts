@@ -75,7 +75,7 @@ beforeAll(async () => {
   agentId = agent.id;
 
   // Create a real user in the users table (requestedByUserId is a FK)
-  const user = createUser({ name: "Audit Test Human", email: "human@example.com" });
+  const user = await createUser({ name: "Audit Test Human", email: "human@example.com" });
   humanUserId = user.id;
 
   // Create a task with a human requester
@@ -229,7 +229,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-wf-test", version: "1.0.0" });
     registerUpdateWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-wf-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -243,7 +243,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -251,7 +251,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-wf-test-2", version: "1.0.0" });
     registerUpdateWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-wf-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -268,7 +268,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -278,7 +278,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patch-test", version: "1.0.0" });
     registerPatchWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patch-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -295,7 +295,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -303,7 +303,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patch-test-2", version: "1.0.0" });
     registerPatchWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patch-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -323,7 +323,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -331,8 +331,8 @@ describe("patch-workflow MCP tool — updated_by column", () => {
 // ─── Trusted audit-actor resolution (anti-spoofing) ──────────────────────────
 
 describe("resolveTaskAuditUserId — source-task ownership gate", () => {
-  test("returns the task requester when the source task is owned by the caller", () => {
-    expect(resolveTaskAuditUserId(sourceTaskId, agentId)).toBe(humanUserId);
+  test("returns the task requester when the source task is owned by the caller", async () => {
+    expect(await resolveTaskAuditUserId(sourceTaskId, agentId)).toBe(humanUserId);
   });
 
   test("returns null when the source task belongs to a different agent (no spoofing)", async () => {
@@ -347,20 +347,20 @@ describe("resolveTaskAuditUserId — source-task ownership gate", () => {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
-    expect(resolveTaskAuditUserId(foreignTask.id, agentId)).toBeNull();
+    expect(await resolveTaskAuditUserId(foreignTask.id, agentId)).toBeNull();
   });
 
-  test("returns null when no source task id is present", () => {
-    expect(resolveTaskAuditUserId(undefined, agentId)).toBeNull();
+  test("returns null when no source task id is present", async () => {
+    expect(await resolveTaskAuditUserId(undefined, agentId)).toBeNull();
   });
 
-  test("returns null when the caller agent id is missing", () => {
-    expect(resolveTaskAuditUserId(sourceTaskId, undefined)).toBeNull();
+  test("returns null when the caller agent id is missing", async () => {
+    expect(await resolveTaskAuditUserId(sourceTaskId, undefined)).toBeNull();
   });
 
   test("returns null when the owned source task has no human requester", async () => {
     const autoTask = await createTaskExtended("automation only", { agentId });
-    expect(resolveTaskAuditUserId(autoTask.id, agentId)).toBeNull();
+    expect(await resolveTaskAuditUserId(autoTask.id, agentId)).toBeNull();
   });
 });
 
@@ -375,17 +375,17 @@ describe("resolveHttpAuditUserId — trusted request context", () => {
     return req;
   }
 
-  test("prefers the authenticated request user over the source-task header", () => {
-    const user = createUser({ name: "Auth User", email: `auth-${Date.now()}@example.com` });
+  test("prefers the authenticated request user over the source-task header", async () => {
+    const user = await createUser({ name: "Auth User", email: `auth-${Date.now()}@example.com` });
     const req = makeReq(sourceTaskId);
     setRequestAuth(req, { kind: "user", userId: user.id, user });
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(user.id);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(user.id);
   });
 
-  test("falls back to the ownership-validated source task when not user-authenticated", () => {
+  test("falls back to the ownership-validated source task when not user-authenticated", async () => {
     const req = makeReq(sourceTaskId);
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
   test("ignores a source task the caller does not own", async () => {
@@ -400,7 +400,7 @@ describe("resolveHttpAuditUserId — trusted request context", () => {
     });
     const req = makeReq(foreignTask.id);
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBeNull();
+    expect(await resolveHttpAuditUserId(req, agentId)).toBeNull();
   });
 });
 
@@ -528,7 +528,7 @@ describe("HTTP create paths — created_by column", () => {
     );
     expect(status).toBe(201);
     expect(json.id).toBeDefined();
-    const created = getWorkflow(json.id as string);
+    const created = await getWorkflow(json.id as string);
     expect(created?.createdBy).toBe(humanUserId);
   });
 
@@ -548,7 +548,7 @@ describe("HTTP create paths — created_by column", () => {
       foreignTask.id,
     );
     expect(status).toBe(201);
-    const created = getWorkflow(json.id as string);
+    const created = await getWorkflow(json.id as string);
     expect(created?.createdBy).toBeUndefined();
   });
 });
@@ -560,7 +560,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -574,7 +574,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -582,7 +582,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test-2", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -599,7 +599,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 
@@ -607,7 +607,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test-3", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-foreign-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -633,7 +633,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     // updated_by must be unchanged — the foreign task's requester is not trusted.
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
