@@ -9,7 +9,7 @@ import {
   updateWorkflow,
 } from "../be/db";
 import type { Workflow } from "../types";
-import { snapshotWorkflow } from "../workflows/version";
+import { snapshotAndUpdateWorkflow, snapshotWorkflow } from "../workflows/version";
 
 const TEST_DB_PATH = "./test-workflow-versions.sqlite";
 
@@ -204,5 +204,37 @@ describe("version history workflow (snapshot before update)", () => {
     const v2 = versions.find((v) => v.version === 2)!;
     expect(v2.snapshot.description).toBe("first update");
     expect(v2.snapshot.definition.nodes[0]!.config.template).toBe("v2");
+  });
+});
+
+describe("snapshotAndUpdateWorkflow (codex PR #1204 review, thread 3826157056)", () => {
+  test("concurrent full updates allocate distinct versions and both keep a history row", async () => {
+    const workflow = await makeWorkflow("concurrent-update-workflow");
+
+    // Pre-fix, both flows read maxVersion outside any transaction, allocated
+    // the same version, and the loser's insert hit the unique index: on the
+    // HTTP path the collision was swallowed and the update committed with no
+    // snapshot preserved.
+    const [a, b] = await Promise.all([
+      snapshotAndUpdateWorkflow(workflow.id, { description: "update A" }),
+      snapshotAndUpdateWorkflow(workflow.id, { description: "update B" }),
+    ]);
+
+    expect(a.workflow).not.toBeNull();
+    expect(b.workflow).not.toBeNull();
+    expect(a.version.version).not.toBe(b.version.version);
+    expect([a.version.version, b.version.version].sort()).toEqual([1, 2]);
+
+    const versions = await getWorkflowVersions(workflow.id);
+    expect(versions.length).toBe(2);
+    // The second snapshot captured the first committed update, whichever won.
+    const second = versions.find((v) => v.version === 2)!;
+    expect(["update A", "update B"]).toContain(second.snapshot.description);
+  });
+
+  test("snapshotOptional: false rolls the update back when the snapshot fails", async () => {
+    await expect(
+      snapshotAndUpdateWorkflow(crypto.randomUUID(), { description: "never lands" }),
+    ).rejects.toThrow("cannot create snapshot");
   });
 });

@@ -9532,19 +9532,20 @@ function emitWorkflowTerminalTelemetry(run: WorkflowRun): void {
 
   // afterCommit (not queueMicrotask): under an async client transaction,
   // microtasks drain before COMMIT, so the verify read below could observe
-  // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK.
-  getDbClient().afterCommit(() => {
-    void (async () => {
-      const latest = await getWorkflowRun(run.id);
-      if (!latest || latest.status !== run.status) return;
-      const steps = await getWorkflowRunStepsByRunId(run.id);
-      telemetry.workflow(run.status, {
-        workflowId: run.workflowId,
-        durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
-        stepsCompleted: steps.filter((step) => step.status === "completed").length,
-        stepsFailed: steps.filter((step) => step.status === "failed").length,
-      });
-    })();
+  // uncommitted state. afterCommit runs strictly post-COMMIT/ROLLBACK. The
+  // async hook is passed directly (no detached void-IIFE) so a rejected read
+  // (e.g. DB closed mid-shutdown) is contained by the scheduler instead of
+  // crashing the process as an unhandled rejection.
+  getDbClient().afterCommit(async () => {
+    const latest = await getWorkflowRun(run.id);
+    if (!latest || latest.status !== run.status) return;
+    const steps = await getWorkflowRunStepsByRunId(run.id);
+    telemetry.workflow(run.status, {
+      workflowId: run.workflowId,
+      durationMs: run.startedAt ? Date.now() - new Date(run.startedAt).getTime() : undefined,
+      stepsCompleted: steps.filter((step) => step.status === "completed").length,
+      stepsFailed: steps.filter((step) => step.status === "failed").length,
+    });
   });
 }
 

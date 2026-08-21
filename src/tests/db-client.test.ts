@@ -245,6 +245,46 @@ describe("db-client transactions", () => {
     expect(result.changes).toBe(1);
   });
 
+  test("async afterCommit hook rejection is contained, not an unhandled rejection", async () => {
+    // Codex PR #1204 review, thread 3826157060: a rejecting async hook (e.g.
+    // a post-commit telemetry read against a closing DB) must not crash the
+    // process. Pre-fix, the scheduler discarded the hook's promise and the
+    // rejection went unhandled.
+    const ran: string[] = [];
+    const done = new Promise<void>((resolve) => {
+      client.afterCommit(async () => {
+        ran.push("rejector");
+        await Promise.resolve();
+        throw new Error("post-commit read failed");
+      });
+      client.afterCommit(() => {
+        ran.push("survivor");
+        resolve();
+      });
+    });
+    await done;
+    // Let the rejected hook promise settle through the containment path.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(ran).toEqual(["rejector", "survivor"]);
+    const result = await client.run("INSERT INTO items (name) VALUES (?)", ["after-async-hook"]);
+    expect(result.changes).toBe(1);
+  });
+
+  test("async afterCommit hook inside a transaction observes committed state", async () => {
+    let seen: string[] | null = null;
+    const done = new Promise<void>((resolve) => {
+      void client.transaction(async (tx) => {
+        await tx.run("INSERT INTO items (name) VALUES (?)", ["async-hook-commit"]);
+        client.afterCommit(async () => {
+          seen = (await names()).filter((n) => n === "async-hook-commit");
+          resolve();
+        });
+      });
+    });
+    await done;
+    expect(seen).toEqual(["async-hook-commit"]);
+  });
+
   test("sequential nested transactions under one outer commit independently", async () => {
     // Regression guard for monotonic savepoint naming: distinct sequential
     // savepoints must still release cleanly and roll back independently.

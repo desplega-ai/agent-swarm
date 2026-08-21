@@ -45,8 +45,11 @@ export interface DbClient extends DbExecutor {
    * Nested-savepoint caveat: hooks queue on the outermost transaction, so a
    * hook registered inside a savepoint that rolls back still fires when the
    * outer transaction commits (matches the pre-seam microtask behaviour).
+   *
+   * An async hook is fire-and-forget: its completion is not awaited, but a
+   * rejection is contained and logged, never an unhandled rejection.
    */
-  afterCommit(fn: () => void): void;
+  afterCommit(fn: () => void | Promise<void>): void;
 }
 
 const LOCK_WATCHDOG_MS = 30_000;
@@ -94,7 +97,7 @@ type TxContext = {
   /** Set once the outermost transaction commits or rolls back. */
   closed: boolean;
   /** Hooks to run after COMMIT; dropped on ROLLBACK. */
-  afterCommit: (() => void)[];
+  afterCommit: (() => void | Promise<void>)[];
 };
 
 const txContext = new AsyncLocalStorage<TxContext>();
@@ -153,7 +156,7 @@ class BunSqliteClient implements DbClient {
     }
   }
 
-  afterCommit(fn: () => void): void {
+  afterCommit(fn: () => void | Promise<void>): void {
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) {
       // Inside a transaction: run only if it commits; dropped on rollback.
@@ -163,15 +166,21 @@ class BunSqliteClient implements DbClient {
     this.scheduleHook(fn);
   }
 
-  private scheduleHook(fn: () => void): void {
+  private scheduleHook(fn: () => void | Promise<void>): void {
     // Queueing behind the FIFO lock keeps hooks ordered after already-queued
     // operations. The hook runs outside the lock so its own client calls
-    // re-acquire normally. A hook that throws synchronously must not become
-    // an unhandled rejection (and must not look like a lock failure).
+    // re-acquire normally. A hook that throws synchronously or rejects
+    // asynchronously must not become an unhandled rejection (which would
+    // crash the process) and must not look like a lock failure.
     void this.lock.acquire().then((release) => {
       release();
       try {
-        fn();
+        const result = fn();
+        if (result && typeof result.then === "function") {
+          result.then(undefined, (err) => {
+            console.error("[db-client] afterCommit hook rejected:", err);
+          });
+        }
       } catch (err) {
         console.error("[db-client] afterCommit hook threw:", err);
       }

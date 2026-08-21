@@ -13,7 +13,7 @@ import {
   listWorkflowRuns,
   listWorkflowRunsPage,
   listWorkflows,
-  updateWorkflow,
+  type updateWorkflow,
   withFavoriteFlags,
 } from "../be/db";
 import {
@@ -38,7 +38,7 @@ import { validateJsonSchema } from "../workflows/json-schema-validator";
 import { patchWorkflowDefinition } from "../workflows/patch-definition";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
-import { snapshotWorkflow } from "../workflows/version";
+import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
@@ -705,13 +705,6 @@ export async function handleWorkflows(
       }
     }
 
-    // Create version snapshot before applying update
-    try {
-      await snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update — log and continue
-    }
-
     const updatedBy2 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     let key: string | undefined;
     if (body.key !== undefined) {
@@ -725,20 +718,27 @@ export async function handleWorkflows(
         throw error;
       }
     }
-    const workflow = await updateWorkflow(id, {
-      key,
-      name: body.name,
-      description: body.description,
-      definition: body.definition,
-      triggers: body.triggers,
-      cooldown: body.cooldown === null ? null : body.cooldown,
-      input: body.input === null ? null : body.input,
-      triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
-      dir: body.dir === null ? null : body.dir,
-      vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
-      enabled: body.enabled,
-      updatedBy: updatedBy2,
-    });
+    // Snapshot + update in one transaction: concurrent full updates would
+    // otherwise allocate the same version, and the loser's edit would commit
+    // with no history row. Snapshot failure still does not block the update.
+    const { workflow } = await snapshotAndUpdateWorkflow(
+      id,
+      {
+        key,
+        name: body.name,
+        description: body.description,
+        definition: body.definition,
+        triggers: body.triggers,
+        cooldown: body.cooldown === null ? null : body.cooldown,
+        input: body.input === null ? null : body.input,
+        triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
+        dir: body.dir === null ? null : body.dir,
+        vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
+        enabled: body.enabled,
+        updatedBy: updatedBy2,
+      },
+      { changedByAgentId: myAgentId, snapshotOptional: true },
+    );
     if (!workflow) {
       res.writeHead(404);
       res.end();
