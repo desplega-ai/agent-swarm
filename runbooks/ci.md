@@ -94,6 +94,7 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 11. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
 12. **Bun version pin drift.** You bumped `packageManager` in `package.json` (or one Dockerfile) without the others. `bun run check:bun-version` lists every pin that disagrees: `Dockerfile`, `Dockerfile.worker` (builder `FROM` + the runtime `bun.sh/install` pin), `apps/evals/Dockerfile`. CI installs whatever `packageManager` says (`setup-bun` with `bun-version-file: package.json`), so the pin IS the CI version.
 13. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
+14. **Test spawnSync boundary violation.** A test called `Bun.spawnSync` / `spawnSync` / `execSync` / `execFileSync` (`scripts/check-test-spawn-sync.sh`). A blocked event loop cannot time a hung child out. Use `runChild()` / `expectChildOk()` from `src/tests/test-proc.ts` and pass `CHILD_PROCESS_TEST_BUDGET_MS` as the test's timeout argument.
 
 ## Bun version
 

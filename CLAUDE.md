@@ -303,6 +303,7 @@ bun run tsc:check
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
 bun run check:bun-version             # Dockerfile oven/bun tags == package.json packageManager
 bash scripts/check-db-boundary.sh
+bash scripts/check-test-spawn-sync.sh # tests must use runChild(), never Bun.spawnSync
 bash scripts/check-audit-columns.sh   # new tables need created_by/updated_by or a .non-audit-tables entry
 bun run check:dep-graph
 ```
