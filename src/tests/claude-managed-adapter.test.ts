@@ -1166,12 +1166,10 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
     }
   }, 10_000);
 
-  // Timing-sensitive by design: the adapter fires checkToolLoop without
-  // awaiting it, and each call is a read-modify-write of a /tmp history file
-  // behind a `mkdir -p` subprocess. Under `bun test --parallel` on a loaded
-  // runner those calls overlap and lose updates, so the repeat count can fall
-  // short of the threshold. The gap between events is wide and the test
-  // retries instead of relying on a global retry.
+  // The adapter fires checkToolLoop without awaiting it. checkToolLoop
+  // serializes calls per session key (src/hooks/tool-loop-detection.ts), so
+  // back-to-back tool_use events cannot overlap the history read-modify-write
+  // and the repeat count is exact regardless of runner load.
   test(
     "repeated identical tool_use events trigger checkToolLoop block → session aborts",
     async () => {
@@ -1190,8 +1188,8 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
       let abortObserved = false;
       const spy = makeFakeClient({
         streamEvents: async function* () {
-          // Yield 20 identical tool_use events with tiny gaps — well above
-          // the critical threshold.
+          // Yield 20 identical tool_use events back to back — well above the
+          // critical threshold (15).
           for (let i = 0; i < 20; i++) {
             if (abortObserved) {
               throw Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -1203,10 +1201,17 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
               name: "stuck_tool",
               input: { same: "args" },
             };
-            // Let the async checkToolLoop finish before the next event so the
-            // history read-modify-write does not overlap (see comment above).
-            await new Promise((r) => setTimeout(r, 100));
+            await new Promise((r) => setTimeout(r, 1));
           }
+          // A real SDK stream throws AbortError when the adapter aborts. The
+          // fake has to do that itself, so hold the stream open until the test
+          // observes the block (bounded by the outer poll window) instead of
+          // racing a fixed gap against the detector's file I/O.
+          const deadline = Date.now() + 10_000;
+          while (!abortObserved && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 5));
+          }
+          throw Object.assign(new Error("aborted"), { name: "AbortError" });
         },
       });
 
@@ -1243,9 +1248,8 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
       }
 
       const result = await session.waitForCompletion();
-      // Either the loop detector aborted (errorCategory cancelled) or the
-      // stream completed all 20 events naturally — but the warning should
-      // have surfaced in the emitted events.
+      // The detector must have blocked (the stream stays open until it does),
+      // and the abort must have propagated into the session result.
       const blockedWarning = emitted.find(
         (e) =>
           e.type === "raw_stderr" &&
@@ -1256,7 +1260,7 @@ describe("ClaudeManagedAdapter (Phase 5) — cancellation + tool-loop detection"
       // After the block fires, abort propagates → cancelled result.
       expect(result.isError).toBe(true);
     },
-    { timeout: 30_000, retry: 2 },
+    { timeout: 30_000 },
   );
 });
 
