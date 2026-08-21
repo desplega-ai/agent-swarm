@@ -16,6 +16,7 @@ import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { mcpOverflowNamespace } from "../kv-overflow";
 import { slackContextKey as buildSlackContextKey } from "../tasks/context-key";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-http.sqlite";
 const API_KEY = "test-kv-key";
@@ -28,13 +29,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -64,7 +58,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 
   const a = await createAgent({ name: "kv-test-a", isLead: false, status: "idle" });
   const b = await createAgent({ name: "kv-test-b", isLead: false, status: "idle" });

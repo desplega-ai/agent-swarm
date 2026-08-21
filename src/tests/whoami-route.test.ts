@@ -21,6 +21,7 @@ import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-whoami-route.sqlite";
 const API_KEY = "test-api-key";
@@ -45,13 +46,6 @@ function createTestServer(): Server {
   });
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 function cleanupDb() {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -68,7 +62,7 @@ describe("GET /api/whoami", () => {
     cleanupDb();
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(() => {

@@ -13,6 +13,7 @@ import { handleMcp } from "../http/mcp";
 import { getBasePrompt } from "../prompts/base-prompt";
 import { createServer } from "../server";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-only-gating.sqlite";
 const SCRIPT_TOOL_NAMES = [
@@ -36,19 +37,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("no port");
-  return address.port;
 }
 
 function createTestServer(): Server {
@@ -189,7 +177,7 @@ beforeAll(async () => {
   closeDb();
   initDb(TEST_DB_PATH);
   server = createTestServer();
-  baseUrl = `http://127.0.0.1:${await listen(server)}`;
+  baseUrl = `http://127.0.0.1:${await listenOnFreePort(server, "127.0.0.1")}`;
 });
 
 afterAll(async () => {

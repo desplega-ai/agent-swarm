@@ -21,6 +21,7 @@ import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { formatAttachmentsBlockForSlack } from "../slack/blocks";
 import { attachmentContentDisposition } from "../utils/content-disposition";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
 const TEST_FS_DIR = "./test-fs-routes-data";
@@ -34,13 +35,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -74,7 +68,7 @@ beforeAll(async () => {
 
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 
   const agent = await createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
   agentId = agent.id;

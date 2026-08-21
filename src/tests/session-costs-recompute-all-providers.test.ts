@@ -14,6 +14,7 @@ import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-recompute-all-providers.sqlite";
 const API_KEY = "test-recompute-all";
@@ -26,13 +27,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -59,7 +53,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   testAgent = await createAgent({ name: "recompute-all-test", isLead: false, status: "idle" });
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

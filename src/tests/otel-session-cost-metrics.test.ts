@@ -22,6 +22,7 @@ import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { SessionCostMetric } from "../otel";
 import { _injectCountersForTests, recordSessionCost as recordSessionCostImpl } from "../otel-impl";
+import { listenOnFreePort } from "./test-net";
 
 const driftCounterAddSpy = mock((..._args: unknown[]) => {});
 const driftCounter = { add: driftCounterAddSpy } as unknown as Counter;
@@ -166,13 +167,6 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const myAgentId = req.headers["x-agent-id"] as string | undefined;
@@ -197,7 +191,7 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   agentId = (await createAgent({ name: "otel-metrics-test", isLead: false, status: "idle" })).id;
   server = createTestServer();
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

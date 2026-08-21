@@ -24,6 +24,7 @@ import { type IdentityActor, mintToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleMcpUser } from "../http/mcp-user";
 import { handlePoll } from "../http/poll";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-budget-user-scope.sqlite";
 const NOW = new Date("2026-04-28T15:30:00.000Z");
@@ -98,19 +99,6 @@ async function insertUserTaskSpend(
     cost.id,
   ]);
   return { task, cost };
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createMcpUserTestServer(): Server {
@@ -302,7 +290,7 @@ describe("user budget scope", () => {
 
   test("/mcp-user task is refused at worker admission when user budget is spent", async () => {
     const server = createMcpUserTestServer();
-    const port = await listen(server);
+    const port = await listenOnFreePort(server, "127.0.0.1");
     try {
       const lead = await createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
       const worker = await createAgent({
