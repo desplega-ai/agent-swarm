@@ -24,6 +24,10 @@ import { BODY_TOO_LARGE, enforceContentLengthCap, jsonError } from "./utils";
 
 const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
+// Upload wall-clock past which the provider round-trip is worth a log line.
+// Attachment stalls were invisible before: this path had no timing at all.
+const SLOW_UPLOAD_LOG_MS = 3_000;
+
 const taskParams = z.object({ taskId: z.uuid() });
 const attachmentParams = z.object({ taskId: z.uuid(), attachmentId: z.uuid() });
 
@@ -350,13 +354,29 @@ async function sendUpload(
   const contentType = singleHeader(req, "content-type") ?? "application/octet-stream";
   const scope = { taskId, name: query.name };
   let uploaded: FileObject;
+  const uploadStartedAt = performance.now();
   try {
     uploaded = await provider.upload(scope, body, {
       contentType,
       sizeBytes: body.byteLength,
       message: `Upload ${query.name} for task ${taskId}`,
     });
+    const elapsedMs = performance.now() - uploadStartedAt;
+    if (elapsedMs >= SLOW_UPLOAD_LOG_MS) {
+      console.warn(
+        scrubSecrets(
+          `[fs] slow upload provider=${provider.id} task=${taskId} bytes=${body.byteLength} elapsedMs=${Math.round(elapsedMs)}`,
+        ),
+      );
+    }
   } catch (error) {
+    if (error instanceof FilesError && error.code === "Timeout") {
+      console.warn(
+        scrubSecrets(
+          `[fs] upload timed out provider=${provider.id} task=${taskId} bytes=${body.byteLength} elapsedMs=${Math.round(performance.now() - uploadStartedAt)}`,
+        ),
+      );
+    }
     return sendProviderError(res, error);
   }
 
@@ -590,9 +610,11 @@ function sendProviderError(res: ServerResponse, error: unknown): true {
           ? 409
           : normalized.code === "ReadOnly"
             ? 501
-            : normalized.status && normalized.status >= 400
-              ? normalized.status
-              : 500;
+            : normalized.code === "Timeout"
+              ? 504
+              : normalized.status && normalized.status >= 400
+                ? normalized.status
+                : 500;
   jsonError(res, normalized.message, status);
   return true;
 }
