@@ -1514,6 +1514,9 @@ export const ScheduledTaskSchema = z
     lastRunAt: z.iso.datetime().optional(),
     nextRunAt: z.iso.datetime().optional(),
     createdByAgentId: z.string().optional(),
+    // Set only by `defer-task`: the task this schedule wakes up to continue.
+    // Passed through as the created task's `parentTaskId`.
+    parentTaskId: z.string().optional(),
     timezone: z.string().default("UTC"),
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),

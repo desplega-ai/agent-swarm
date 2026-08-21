@@ -41,6 +41,10 @@ The template is the whole task the agent receives. It must state:
 
 Tasks created by a schedule are automatic tasks. Their completed output is not stored as memory unless the agent calls `store-progress` with `persistMemory: true`.
 
+## Check back later
+
+A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt` and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.
+
 ## Secrets
 
 A `taskTemplate` and `scriptArgs` are stored as plain text and replayed on every run. They must not contain a token, password, or key. Call the external API from a script through a registered connection or a credential binding instead. See the `swarm-scripts` skill, section Secrets.

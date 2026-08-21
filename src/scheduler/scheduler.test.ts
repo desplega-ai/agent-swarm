@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createScheduledTask, initDb } from "../be/db";
-import { calculateNextRun } from "./scheduler";
+import { closeDb, createAgent, createScheduledTask, createTaskExtended, initDb } from "../be/db";
+import { calculateNextRun, createStandaloneScheduleTask } from "./scheduler";
 
 const TEST_DB_PATH = "./test-scheduler.sqlite";
 
@@ -149,5 +149,52 @@ describe("calculateNextRun", () => {
 
     // Next Monday is Jan 19, 2026
     expect(nextRun).toBe("2026-01-19T09:00:00.000Z");
+  });
+});
+
+describe("createStandaloneScheduleTask", () => {
+  test("passes the schedule's parentTaskId through to the created task", () => {
+    const agent = createAgent({
+      name: "Deferred Wake-up Worker",
+      description: "Agent that owns the deferred task",
+      role: "worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+      capabilities: [],
+    });
+    const parent = createTaskExtended("original work that needed time", {
+      agentId: agent.id,
+      source: "mcp",
+    });
+
+    const schedule = createScheduledTask({
+      name: "test-deferred-parent",
+      taskTemplate: `Resume task ${parent.id}: the deploy should be green now`,
+      scheduleType: "one_time",
+      nextRunAt: new Date(Date.now() + 60_000).toISOString(),
+      targetAgentId: agent.id,
+      createdByAgentId: agent.id,
+      taskType: "deferred",
+      tags: ["deferred"],
+      parentTaskId: parent.id,
+    });
+
+    const task = createStandaloneScheduleTask(schedule);
+    expect(task.parentTaskId).toBe(parent.id);
+    expect(task.taskType).toBe("deferred");
+    expect(task.tags).toContain("deferred");
+  });
+
+  test("a schedule without parentTaskId creates a parentless task", () => {
+    const schedule = createScheduledTask({
+      name: "test-no-parent",
+      taskTemplate: "Ordinary scheduled work",
+      cronExpression: "0 9 * * *",
+      timezone: "UTC",
+    });
+
+    const task = createStandaloneScheduleTask(schedule);
+    expect(task.parentTaskId).toBeFalsy();
   });
 });

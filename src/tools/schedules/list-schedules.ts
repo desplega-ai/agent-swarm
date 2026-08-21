@@ -22,6 +22,7 @@ const scheduleRowShape = {
   lastRunAt: z.string().optional(),
   nextRunAt: z.string().optional(),
   createdByAgentId: z.string().optional(),
+  parentTaskId: z.string().optional(),
   timezone: z.string().optional(),
   consecutiveErrors: z.number().optional(),
   lastErrorAt: z.string().optional(),

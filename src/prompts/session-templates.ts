@@ -74,7 +74,8 @@ Choose the path by the shape of the work:
 Store progress with \`store-progress\` at each milestone. A milestone is a result the lead could act on.
 The task is done when \`store-progress\` carries status \`completed\` and an \`output\` that names the result and every artifact link. On failure, status \`failed\` and a \`failureReason\` that names what you tried.
 When the task carries an \`outputSchema\`, \`output\` is JSON that matches it.
-When you are blocked after real effort, store the blocker with \`store-progress\` and keep working on what you can. When nothing is left to do, fail the task with a \`failureReason\` that names the blocker. The lead reads both.
+When you are blocked after real effort, store the blocker with \`store-progress\` and keep working on what you can.
+The task has four endings. When you are done: \`completed\`. When the answer needs time (a build, a deploy, a reply): \`defer-task\` with when and what to check. When a person must decide: \`request-human-input\`. When nothing else is possible: \`failed\` with the blocker.
 `,
   variables: [],
   category: "system",

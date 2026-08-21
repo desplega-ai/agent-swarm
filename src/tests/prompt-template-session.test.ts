@@ -215,6 +215,14 @@ describe("Session templates: MUST pointers", () => {
     );
   });
 
+  test("the worker contract names the four task endings", () => {
+    const result = resolveTemplate("system.agent.worker", {});
+    expect(result.text).toContain("The task has four endings.");
+    for (const ending of ["`completed`", "`defer-task`", "`request-human-input`", "`failed`"]) {
+      expect(result.text).toContain(ending);
+    }
+  });
+
   test("the lead contract names the delegation tools", () => {
     const result = resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain(
