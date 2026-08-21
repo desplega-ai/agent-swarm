@@ -3,8 +3,6 @@ title: Multi-runtime agents
 description: Run several worker processes for one logical Agent Swarm agent with shared liveness, capacity, and workspace state
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
-
 Multi-runtime mode lets several worker processes serve one logical agent. Each
 process gets its own runtime identity and liveness record, while the workers
 still share the agent's task policy and queue identity.
@@ -71,14 +69,11 @@ traffic from the runtime, including the polling loop, refreshes `last_seen_at`.
 - Expiry prevents new work from being dispatched to the dead process. It does
   not delete active sessions or decide that in-flight work failed. Session and
   task remediation uses the separate heartbeat crash-recovery paths.
-
-<Callout type="warn" title="Offered-task recovery is still being tracked">
-  Issue [#1190](https://github.com/desplega-ai/agent-swarm/issues/1190) is still
-  open. Until it lands, a task already offered to an agent can remain in the
-  `offered` state when that agent's last runtime expires. A worker with the
-  same agent ID can recover the offer by registering again and polling; a
-  permanently dead agent may require manual recovery.
-</Callout>
+- A task still in the `offered` state when the offeree goes offline — because
+  its last runtime expired or closed — is released back to `unassigned` by the
+  same heartbeat sweep, so it can be re-offered or auto-assigned to another
+  eligible agent in that same tick
+  ([#1207](https://github.com/desplega-ai/agent-swarm/pull/1207)).
 
 ## Shared workspace state
 
