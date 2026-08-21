@@ -78,7 +78,7 @@ Deploys the [agent-fs](https://github.com/desplega-ai/agent-fs) HTTP service alo
 agentFs:
   enabled: true
   image:
-    tag: 0.13.0
+    tag: 0.13.1
   bucket: my-agent-fs-bucket
   # Optional. When blank, the API boot seeder registers a service user with
   # agent-fs and stores the generated bootstrap key in encrypted swarm_config.
