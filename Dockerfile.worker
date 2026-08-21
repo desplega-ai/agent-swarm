@@ -112,7 +112,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.235
+ARG CLAUDE_CODE_VERSION=2.1.238
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -230,6 +230,7 @@ RUN mkdir -p /home/worker/.claude/commands /home/worker/.claude/agents \
     && echo '{"hasCompletedOnboarding":true,"bypassPermissionsModeAccepted":true}' > /home/worker/.claude.json \
     && echo '{ \
   "permissions": { "allow": ["mcp__agent-swarm__*", "mcp__context-mode__*"], "deny": ["AskUserQuestion", "NotebookEdit", "EnterPlanMode", "ExitPlanMode", "Artifact", "Workflow", "ReportFindings"] }, \
+  "outputStyle": "Concise", \
   "disableBundledSkills": true, \
   "disableRemoteControl": true, \
   "disableClaudeAiConnectors": true, \
