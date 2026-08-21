@@ -230,11 +230,12 @@ describe("Session templates: MUST pointers", () => {
     );
   });
 
-  test("the lead contract names the renamed desplega commands", () => {
+  test("the lead contract names the desplega skills, not slash commands", () => {
     const result = resolveTemplate("system.agent.lead", {});
-    expect(result.text).toContain("/researching");
-    expect(result.text).toContain("/planning");
-    expect(result.text).toContain("/implementing");
+    expect(result.text).toContain("`researching` skill");
+    expect(result.text).toContain("`planning` skill");
+    expect(result.text).toContain("`implementing` skill");
+    expect(result.text).not.toContain("/researching");
   });
 });
 

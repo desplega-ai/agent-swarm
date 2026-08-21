@@ -2595,6 +2595,8 @@ interface Trigger {
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
   requestedBy?: {
+    /** `users.id`; absent for the UNKNOWN-identity sentinel (Slack-only requester). */
+    id?: string;
     name: string;
     email?: string;
     role?: string;
@@ -2863,8 +2865,12 @@ async function buildPromptForTrigger(
 
       // Include requesting user info if available from the poll trigger
       const requestedBy = trigger.requestedBy;
+      const requesterDetails = [
+        requestedBy?.email,
+        requestedBy?.id ? `user ${requestedBy.id}` : undefined,
+      ].filter(Boolean);
       const requestedBySection = requestedBy
-        ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
+        ? `\n\nRequested by: ${requestedBy.name}${requesterDetails.length > 0 ? ` (${requesterDetails.join(", ")})` : ""}`
         : "";
 
       const attachmentsSection = buildAttachmentsSection(trigger.taskId, taskObj?.attachments);
