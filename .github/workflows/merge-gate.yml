@@ -431,11 +431,14 @@ jobs:
           echo "${{ steps.restore.outputs.cache-matched-key || 'none' }}" > .bun-test-timings/snapshot-key.txt
           ls -la .bun-test-timings
 
+      # include-hidden-files: upload-artifact treats every path under a
+      # dot-directory as hidden and would upload nothing from .bun-test-timings.
       - name: Hand the snapshot to the shards
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: timings-snapshot
           path: .bun-test-timings
+          include-hidden-files: true
           retention-days: 1
 
   test:
