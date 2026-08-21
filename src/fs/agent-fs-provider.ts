@@ -291,14 +291,19 @@ export class AgentFsProvider implements FileStorageProvider {
   ): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const signal = init.signal
+      ? AbortSignal.any([init.signal, controller.signal])
+      : controller.signal;
     try {
-      return await this.fetchImpl(url, { ...init, signal: controller.signal });
+      return await this.fetchImpl(url, { ...init, signal });
     } catch (error) {
       if (
         error instanceof Error &&
         (error.name === "AbortError" || error.name === "TimeoutError")
       ) {
-        throw new FilesError("Timeout", `agent-fs did not respond within ${timeoutMs} ms`);
+        throw new FilesError("Timeout", `agent-fs did not respond within ${timeoutMs} ms`, {
+          cause: error,
+        });
       }
       throw error;
     } finally {

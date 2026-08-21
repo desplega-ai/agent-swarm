@@ -30,7 +30,6 @@ export async function uploadComposeAttachments({
     while (next < files.length) {
       const file = files[next];
       next += 1;
-      if (!file) continue;
       try {
         await uploadTaskAttachment({ taskId, file, intent: "user-upload" });
         uploaded += 1;
