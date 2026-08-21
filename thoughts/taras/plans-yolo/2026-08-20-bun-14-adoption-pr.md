@@ -18,7 +18,7 @@ The repo pins Bun 1.4.0 everywhere (`packageManager`, three Dockerfiles plus the
 - "6 hard-coded 3013 binds" from the research doc do not exist: every spawned `src/http.ts` sets `PORT`, and 3013 appears in tests only inside URL strings. Scope for ports = every fixed or random literal port in `src/tests` (52 files). (assumed, verified by grep)
 - `process.pid % 1000` and `Math.random()` port variants also move to `getFreePort()` / `port: 0`. (assumed)
 - Lockfile stays `lockfileVersion: 1`: Bun 1.4.0 rewrites an existing v1 lockfile as v1 (verified with `bun add` + `bun remove`); forcing v2 means deleting the lockfile and re-resolving versions. (verified)
-- `test-timings.json` generated locally on macOS with Bun 1.4.0 (no global retry); relative durations drive shard balance. Refresh path documented. (assumed)
+- Timings: first landed as a committed `test-timings.json` (macOS numbers); Taras chose the cache-based pattern from Bun's docs instead (actions/cache restore-keys + per-shard `--update-timings` + a `save-timings` merge job). Nothing committed, Linux numbers, self-refreshing. (asked)
 - Preload cache key covers migrations, `db.ts`, `seed-prompt-templates.ts`, `preload.ts`, the prompt registry JSON, and `Bun.version`, because `initDb` bakes the prompt registry into the template. Cache hit must also warm the encryption-key cache (one test depended on that side effect). (verified by a failing test)
 - `bun dedupe --check` NOT added to the gate: it fails today (31 duplicates) and `bun dedupe` would bump Biome 2.3.10 -> 2.4.5, zod, openai. Documented in `runbooks/ci.md` as a deliberate separate PR. (assumed)
 - Per-test `{ retry }`: none of the plan's candidates needed it (watchdog = deterministic macOS-only failure; watermark = real ms race, fixed). Linux CI later surfaced one genuinely racy test (`claude-managed-adapter` tool-loop, fire-and-forget `/tmp` read-modify-write) which got `{ timeout: 30_000, retry: 2 }` plus a wider event gap; the other CI flakes were budget/window bumps. (verified on CI)
@@ -33,7 +33,7 @@ The repo pins Bun 1.4.0 everywhere (`packageManager`, three Dockerfiles plus the
 - [x] 2. Ports: every fixed literal port in `src/tests` -> `getFreePort()` / `port: 0` (52 files)
 - [x] 3. Preload template cache keyed by content hash, atomic write, kill switch env
 - [x] 4. Boot deadline 15s -> 60s in the 9 `waitForServer` helpers
-- [x] 5. CI: 2 shards x `--parallel=4 --shard=N/2 --timings=test-timings.json` in merge-gate.yml and ci.yml; timings committed; ci-timings total 2
+- [x] 5. CI: 2 shards x `--parallel=4 --shard=N/2` in merge-gate.yml and ci.yml, `--timings` from the actions cache + `save-timings` job; ci-timings total 2
 - [x] 6. prek: one `test` hook via `scripts/pre-push-tests.sh` (`--changed=<merge-base>` or full run); `; true` dropped; `bun-version` hook
 - [x] 7. Retry: global `retry = 3` removed; seed-scripts catalog test timeout 30s; watermark ms race fixed
 - [x] 8. Runtime: `--no-orphans` in `buildSandboxedCommand` (+ test); worker bytecode build; artifact `stop(true)`; `bun pm licenses` release artifact; `bun audit fix` + dedupe notes in ci.md

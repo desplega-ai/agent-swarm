@@ -21,10 +21,10 @@ bun run test:root                                      # all unit tests, one pro
 bun run test:root -- src/tests/<file>.test.ts          # one file
 bun run test:root -- --watch src/tests/<file>.test.ts
 bun run test:root -- --parallel=4 --changed=$(git merge-base origin/main HEAD)   # only files affected by this branch
-bun run test:root -- --parallel=4 --shard=1/2 --timings=test-timings.json        # exactly what CI shard 1 runs
+bun run test:root -- --parallel=4 --shard=1/2                                    # CI shard 1 (CI also passes restored --timings files)
 ```
 
-`--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M --timings=test-timings.json` balances the committed per-file durations across shards; refresh the file with `bun run test:root -- --parallel=4 --update-timings --timings=test-timings.json` and commit it when the suite drifts.
+`--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
 
 Conventions:
 

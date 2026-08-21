@@ -77,7 +77,7 @@ jobs:
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
-          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|test-timings\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
+          TEST=$(match '^(src/|scripts/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|apps/(ui|templates-ui|evals)/package\.json$)')
 
           # pi-skills freshness: generator inputs + outputs.
           PI_SKILLS=$(match '^(plugin/commands/|plugin/pi-skills/|plugin/build-pi-skills\.ts$)')
@@ -418,25 +418,51 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Per-file test durations from the last run that saved them (main's cache
+      # is readable from PR runs via restore-keys; nothing on the very first run,
+      # in which case --shard splits by file count). Both shards must read the
+      # SAME set of files for the split to add up, which the shared restore key
+      # guarantees; each shard then writes only its own durations to next/N.json
+      # and the save-timings job merges them into the next cache entry. Pattern
+      # from Bun's docs (docs/test/parallel, "Balancing with --timings").
+      - name: Restore test timings
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
+          restore-keys: bun-test-timings-
+
       - name: Run tests
         id: tests
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
         # the lint-and-typecheck job). --parallel=4 runs each test file in its own
-        # worker process (implies --isolate), 4 at a time per runner; the committed
-        # test-timings.json balances files across the 2 shards by duration. Refresh
-        # it with `bun test --parallel=4 --update-timings --timings=test-timings.json`.
+        # worker process (implies --isolate), 4 at a time per runner; the restored
+        # per-file durations balance files across the 2 shards by total time.
         # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
         # bunfig.toml no longer sets a global retry.
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 --timings=test-timings.json
+          mkdir -p .bun-test-timings/next
+          # shellcheck disable=SC2046
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Upload this shard's test timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: .bun-test-timings/next/${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
       # Each shard reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
@@ -472,6 +498,27 @@ jobs:
                         shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
+
+  # Merge the per-shard durations into one cache entry for the next run. Only
+  # after a fully green test matrix, so a crashed shard never poisons the split.
+  save-timings:
+    name: Save test timings
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download per-shard timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-timings-*
+          path: .bun-test-timings
+          merge-multiple: true
+
+      - name: Save merged timings
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check
