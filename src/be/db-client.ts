@@ -159,6 +159,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** 0.5x-1.5x jitter so concurrent retriers cannot phase-lock with a periodic holder. */
+function jittered(ms: number): number {
+  return Math.max(1, Math.round(ms * (0.5 + Math.random())));
+}
+
 function isSqliteBusy(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const code = (err as { code?: unknown }).code;
@@ -200,17 +205,23 @@ class BunSqliteClient implements DbClient {
     const readOnly = opts?.readOnly === true;
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
-      const attempt = await this.runTransactionAttempt(fn, readOnly);
-      if (attempt.ok) return attempt.value;
       const backoff = this.busyRetry.backoffMs[attemptIndex];
-      if (backoff === undefined || sleptMs + backoff > this.busyRetry.maxWaitMs) {
-        throw attempt.busyBegin;
-      }
+      const canRetryAfter = backoff !== undefined && sleptMs + backoff <= this.busyRetry.maxWaitMs;
+      // The FINAL attempt camps on the ambient busy_timeout instead of the
+      // short spin: a lone writer sampling 100ms windows can stay phase-locked
+      // with a periodic external holder and miss every release gap (measured:
+      // 3 of 6 writes lost at 1 writer under a 6s/500ms locker). One long
+      // synchronous spin per request, only after every polite attempt failed,
+      // acquires the lock the instant the holder releases.
+      const attempt = await this.runTransactionAttempt(fn, readOnly, !canRetryAfter);
+      if (attempt.ok) return attempt.value;
+      if (!canRetryAfter || backoff === undefined) throw attempt.busyBegin;
       sleptMs += backoff;
       // The FIFO lock is NOT held here: nothing began, so other DB work
       // (reads especially) proceeds while this writer waits out the external
-      // lock holder.
-      await sleep(backoff);
+      // lock holder. Jitter desynchronizes concurrent retriers from each
+      // other and from periodic holders.
+      await sleep(jittered(backoff));
     }
   }
 
@@ -222,6 +233,7 @@ class BunSqliteClient implements DbClient {
   private async runTransactionAttempt<T>(
     fn: (tx: DbExecutor) => Promise<T>,
     readOnly: boolean,
+    campOnAmbientTimeout = false,
   ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
     const ctx: TxContext = { closed: false, afterCommit: [] };
@@ -240,7 +252,13 @@ class BunSqliteClient implements DbClient {
           // instead of on an arbitrary statement mid-callback where it is
           // not. The short spin keeps the driver's synchronous busy wait off
           // the event loop; the real waiting is the caller's async backoff.
-          this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"));
+          // The final attempt camps on the ambient busy_timeout instead (see
+          // transaction()).
+          if (campOnAmbientTimeout) {
+            db.run("BEGIN IMMEDIATE");
+          } else {
+            this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"));
+          }
         } catch (err) {
           if (isSqliteBusy(err)) return { ok: false, busyBegin: err };
           throw err;
@@ -340,23 +358,28 @@ class BunSqliteClient implements DbClient {
     }
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
+      const next = this.busyRetry.backoffMs[attemptIndex];
+      const canRetryAfter = next !== undefined && sleptMs + next <= this.busyRetry.maxWaitMs;
       const release = await this.lock.acquire();
       let backoff = 0;
       try {
-        // A top-level single statement is atomic, so a repeat on BUSY is exact.
-        return this.shortSpin(this.getDatabase(), () => op(this.getDatabase()));
+        // A top-level single statement is atomic, so a repeat on BUSY is
+        // exact. The final attempt camps on the ambient busy_timeout so a
+        // lone writer cannot stay phase-locked with a periodic holder (see
+        // transaction()).
+        return canRetryAfter
+          ? this.shortSpin(this.getDatabase(), () => op(this.getDatabase()))
+          : op(this.getDatabase());
       } catch (err) {
-        if (!isSqliteBusy(err)) throw err;
-        const next = this.busyRetry.backoffMs[attemptIndex];
-        if (next === undefined || sleptMs + next > this.busyRetry.maxWaitMs) throw err;
+        if (!isSqliteBusy(err) || !canRetryAfter || next === undefined) throw err;
         backoff = next;
         sleptMs += next;
       } finally {
         release();
       }
       // Lock released: queued reads flow while this statement waits out the
-      // external lock holder.
-      await sleep(backoff);
+      // external lock holder. Jitter desynchronizes concurrent retriers.
+      await sleep(jittered(backoff));
     }
   }
 
