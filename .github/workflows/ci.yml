@@ -278,8 +278,48 @@ jobs:
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
+  # Resolve "the latest timings snapshot" ONCE per run and hand the same files
+  # to both shards as an artifact. The primary key never exists at restore time
+  # (save-timings creates it at the end of this run), so every restore goes
+  # through the prefix fallback, and that resolves to the newest matching cache
+  # at the moment of the call. If each shard restored on its own, a save landing
+  # between the two calls would give them different snapshots; --shard assigns
+  # files from the durations it is given, so the two shards would split two
+  # different lists (one file in both, another in neither) and the run would
+  # stay green. Pattern from Bun's docs (docs/test/parallel, "Balancing with
+  # --timings"); nothing on the very first run, when --shard splits by count.
+  restore-timings:
+    name: Restore test timings
+    runs-on: ubuntu-latest
+    # No checkout. Cache restore and artifact upload use the runner token.
+    permissions: {}
+    steps:
+      - name: Restore test timings
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
+          restore-keys: bun-test-timings-
+
+      # The artifact must exist even on a cache miss (download-artifact fails on
+      # a missing name). The marker also records which snapshot this run used.
+      - name: Record the resolved snapshot
+        run: |
+          mkdir -p .bun-test-timings
+          echo "${{ steps.restore.outputs.cache-matched-key || 'none' }}" > .bun-test-timings/snapshot-key.txt
+          ls -la .bun-test-timings
+
+      - name: Hand the snapshot to the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
+          retention-days: 1
+
   test:
     name: Run Tests (${{ matrix.shard }}/2)
+    needs: restore-timings
     runs-on: ubuntu-latest
     # Checkout only. Cache + artifact steps use the runner token, and the
     # ci-timings report uses its own secret, so GITHUB_TOKEN needs nothing else.
@@ -302,19 +342,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Per-file test durations from the last run that saved them (main's cache
-      # is readable from PR runs via restore-keys; nothing on the very first run,
-      # in which case --shard splits by file count). Both shards must read the
-      # SAME set of files for the split to add up, which the shared restore key
-      # guarantees; each shard then writes only its own durations to next/N.json
-      # and the save-timings job merges them into the next cache entry. Pattern
-      # from Bun's docs (docs/test/parallel, "Balancing with --timings").
-      - name: Restore test timings
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # The per-file durations resolved once by restore-timings (see that job for
+      # why both shards must read the SAME files). Each shard writes only its own
+      # durations to next/N.json; save-timings merges them into the next cache.
+      - name: Download test timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: timings-snapshot
           path: .bun-test-timings
-          key: bun-test-timings-${{ github.run_id }}
-          restore-keys: bun-test-timings-
 
       - name: Run tests
         id: tests
@@ -329,6 +364,7 @@ jobs:
           start=$(date +%s%3N)
           set +e
           mkdir -p .bun-test-timings/next
+          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
           # shellcheck disable=SC2046
           bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
             --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \

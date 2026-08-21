@@ -260,3 +260,11 @@ The first two Merge Gate runs each failed shard 1/2 on tests my macOS runs never
 
 These are the flakes the global `retry = 3` used to hide. `--parallel=4` on a 4-vCPU runner is the honest load test for them; if a third class shows up, dropping to `--parallel=3` is the cheap lever.
 
+
+### PR review round (CodeQL + Codex, 2026-08-21)
+
+- **CodeQL `missing-workflow-permissions`** on the jobs this PR touched. No job in `ci.yml` or `merge-gate.yml` declared `permissions:` before. Scoped the four touched jobs (`test`: `contents: read`; `save-timings`: `{}`). The sweep over the other 13 jobs is #1224.
+- **Codex P1, real**: both shards restored the timings cache independently through the `bun-test-timings-` prefix fallback (the `run_id` primary key never exists at restore time). A save landing between the two restores gives the shards different snapshots, and `--shard` assigns files from the durations it is given, so the two shards would split two different lists while the run stays green. The workflow comment that claimed "the shared restore key guarantees" the same files was wrong. Fix: a `restore-timings` job resolves the snapshot once and uploads it as the `timings-snapshot` artifact (with a `snapshot-key.txt` marker so the artifact exists on a miss and the run logs which snapshot it used); both shards download that. Listed in the merge gate's `needs` so a failed restore cannot skip the matrix silently.
+- **Codex P2, declined**: move `withBunNoOrphans` above the win32 early return in `buildSandboxedCommand`. Bun's `ParentDeathWatchdog.rs` is `#[cfg(unix)]` throughout (Linux `PR_SET_PDEATHSIG`, macOS kqueue `NOTE_EXIT`); every non-unix branch returns `None` / `false`, so the flag is inert on Windows. The win32 path is already the explicitly unsandboxed fallback and the API that spawns the runtime ships as a Linux image.
+
+Follow-up issues from the handoff: #1220 (tool-loop lost-update race), #1221 (fold the 25 local `listen()` helpers), #1222 (`bun dedupe`), #1223 (API binary `--asset` / `--bytecode`), #1224 (workflow permissions sweep).
