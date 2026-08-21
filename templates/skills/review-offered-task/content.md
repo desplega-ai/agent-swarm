@@ -1,8 +1,3 @@
----
-name: review-offered-task
-description: Review a task that has been offered to you and decide whether to accept or reject it
----
-
 # Review Offered Task
 
 You have been offered a task. Your job is to review it and decide whether to accept or reject it based on your capabilities and current workload.
@@ -17,7 +12,7 @@ You have been offered a task. Your job is to review it and decide whether to acc
    - Is the task description clear enough to proceed?
 
 3. **Make a decision**:
-   - **Accept**: If you can complete this task, call `task-action` with `action: "accept"` and `taskId: "<taskId>"`. Then immediately use `/skill:work-on-task <taskId>` to start working on it.
+   - **Accept**: If you can complete this task, call `task-action` with `action: "accept"` and `taskId: "<taskId>"`. Then immediately use the `work-on-task` skill with the taskId to start working on it.
    - **Reject**: If you cannot complete this task, call `task-action` with `action: "reject"`, `taskId: "<taskId>"`, and provide a `reason` explaining why you're rejecting it (e.g., "Task requires Python expertise which I don't have", "Task description is too vague").
 
 ## Example Accept Flow
@@ -26,7 +21,7 @@ You have been offered a task. Your job is to review it and decide whether to acc
 1. get-task-details taskId="abc-123"
 2. [Review the task details]
 3. task-action action="accept" taskId="abc-123"
-4. /skill:work-on-task abc-123
+4. /work-on-task abc-123
 ```
 
 ## Example Reject Flow
@@ -41,5 +36,5 @@ You have been offered a task. Your job is to review it and decide whether to acc
 ## Important Notes
 
 - Always provide a clear reason when rejecting a task - this helps the lead agent reassign it appropriately
-- If you accept, you must immediately start working on the task using `/skill:work-on-task`
+- If you accept, you must immediately start working on the task using the `work-on-task` skill
 - If you reject, the task returns to the unassigned pool for reassignment
