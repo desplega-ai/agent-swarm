@@ -401,6 +401,10 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
+    # Checkout only. Cache + artifact steps use the runner token, and the
+    # ci-timings report uses its own secret, so GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -506,6 +510,9 @@ jobs:
     needs: test
     if: needs.test.result == 'success'
     runs-on: ubuntu-latest
+    # No checkout. Same-run artifact download and cache save use the runner
+    # token, not GITHUB_TOKEN.
+    permissions: {}
     steps:
       - name: Download per-shard timings
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
