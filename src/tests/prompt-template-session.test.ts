@@ -215,6 +215,13 @@ describe("Session templates: MUST pointers", () => {
     );
   });
 
+  test("the lead contract names the delegation tools", () => {
+    const result = resolveTemplate("system.agent.lead", {});
+    expect(result.text).toContain(
+      "Delegate with `send-task`. Read a child's result with `get-task-details`.",
+    );
+  });
+
   test("the lead contract names the renamed desplega commands", () => {
     const result = resolveTemplate("system.agent.lead", {});
     expect(result.text).toContain("/researching");
