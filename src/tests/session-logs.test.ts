@@ -10,9 +10,9 @@ import {
   getTaskById,
   initDb,
 } from "../be/db";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-logs.sqlite";
-const TEST_PORT = 13014;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -103,7 +103,7 @@ function createTestServer(): Server {
 
 describe("Session Logs API", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     // Clean up any existing test database
@@ -118,12 +118,9 @@ describe("Session Logs API", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {

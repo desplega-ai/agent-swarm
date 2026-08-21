@@ -89,7 +89,7 @@ describe("seed-scripts catalog", () => {
       if (!tc.ok) failures.push(`${s.name}: typecheck — ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  }, 10_000);
+  }, 60_000); // typechecks every seed script; 9.7 s on a loaded 4-core CI runner under --parallel=4
 
   test("every catalog script exposes a documented default export", () => {
     for (const s of SEED_SCRIPTS) {
@@ -166,7 +166,7 @@ describe("seed-scripts catalog", () => {
       expect(row?.isScratch).toBe(false);
       expect(row?.typeChecked).toBe(true);
     }
-  });
+  }, 30_000); // typechecks every seed script with tsc; slow under --parallel load
 
   test("re-seeding is idempotent — pristine, unchanged scripts are skipped", async () => {
     const result = await runSeeder(scriptsSeeder, { quiet: true });
@@ -963,7 +963,7 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
       if (!tc.ok) failures.push(`${s.name}: ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  });
+  }, 60_000); // typechecks every catalog script; ~10 s on a loaded 4-core CI runner under --parallel=4
 
   test("typecheck fails when zod is not staged — the production gap, now guarded", async () => {
     // An empty SCRIPT_TYPES_DIR simulates the compiled binary BEFORE this fix:

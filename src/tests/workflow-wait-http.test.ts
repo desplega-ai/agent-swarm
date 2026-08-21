@@ -18,9 +18,9 @@ import { workflowEventBus } from "../workflows/event-bus";
 import type { ExecutorDependencies } from "../workflows/executors/base";
 import { createExecutorRegistry } from "../workflows/executors/registry";
 import { _resetWaitBusSubscriptionsForTests, initWaitBusSubscriptions } from "../workflows/resume";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-wait-http.sqlite";
-const TEST_PORT = 13041;
 
 const deps: ExecutorDependencies = {
   db: db as typeof import("../be/db"),
@@ -40,6 +40,7 @@ async function makeWorkflow(name: string, def: WorkflowDefinition): Promise<Work
 }
 
 let server: Server;
+let baseUrl = "";
 
 beforeAll(async () => {
   try {
@@ -56,7 +57,8 @@ beforeAll(async () => {
       res.end("Not Found");
     }
   });
-  await new Promise<void>((r) => server.listen(TEST_PORT, () => r()));
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://localhost:${port}`;
 });
 
 afterAll(async () => {
@@ -75,8 +77,6 @@ afterAll(async () => {
 afterEach(() => {
   _resetWaitBusSubscriptionsForTests();
 });
-
-const baseUrl = `http://localhost:${TEST_PORT}`;
 
 async function waitFor(pred: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const t0 = Date.now();

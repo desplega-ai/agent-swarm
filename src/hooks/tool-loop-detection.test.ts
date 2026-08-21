@@ -275,4 +275,53 @@ describe("tool-loop-detection", () => {
       }
     });
   });
+
+  describe("concurrent calls for one session (fire-and-forget callers)", () => {
+    // Regression for the lost-update race: claude-managed-adapter and
+    // swarm-events-shared call checkToolLoop without awaiting, so consecutive
+    // tool_use events overlap. Each call is a read-modify-write of the history
+    // file; unserialized, every overlapping call reads the same short history,
+    // the last write wins, and no call ever reaches the threshold.
+    test("15 identical calls fired without awaiting: the 15th is blocked, in order", async () => {
+      const calls = Array.from({ length: 15 }, () =>
+        checkToolLoop(SESSION_KEY, "stuck_tool", { same: "args" }),
+      );
+      const results = await Promise.all(calls);
+      // Calls 1..14 are at most a warning; the 15th (REPEAT_CRITICAL_THRESHOLD)
+      // must be the critical block, which proves both serialization and order.
+      for (let i = 0; i < 14; i++) {
+        expect(results[i]?.blocked).toBe(false);
+      }
+      expect(results[14]?.blocked).toBe(true);
+      expect(results[14]?.severity).toBe("critical");
+      expect(results[14]?.reason).toContain("15 times");
+    });
+
+    test("two sessions do not serialize against each other", async () => {
+      const OTHER = `${SESSION_KEY}-other`;
+      await clearToolHistory(OTHER);
+      try {
+        const mixed = await Promise.all([
+          ...Array.from({ length: 8 }, () => checkToolLoop(SESSION_KEY, "Read", { a: 1 })),
+          ...Array.from({ length: 8 }, () => checkToolLoop(OTHER, "Read", { a: 1 })),
+        ]);
+        // Each session independently reaches exactly the warning threshold (8).
+        expect(mixed[7]?.severity).toBe("warning");
+        expect(mixed[15]?.severity).toBe("warning");
+        expect(mixed.every((r) => !r.blocked)).toBe(true);
+      } finally {
+        await clearToolHistory(OTHER);
+      }
+    });
+
+    test("a failed call does not wedge the session queue", async () => {
+      // A rejected link must not stop later calls for the same key.
+      // Force a rejection by passing input that JSON.stringify cannot handle.
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      await expect(checkToolLoop(SESSION_KEY, "Read", cyclic)).rejects.toThrow();
+      const next = await checkToolLoop(SESSION_KEY, "Read", { ok: true });
+      expect(next.blocked).toBe(false);
+    });
+  });
 });

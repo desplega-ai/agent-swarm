@@ -9,9 +9,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import * as devinApi from "../providers/devin-api";
+import { listenOnFreePort } from "./test-net";
 
-const TEST_PORT = 13050;
-const TEST_BASE_URL = `http://localhost:${TEST_PORT}`;
+let TEST_BASE_URL = "";
 const ORG_ID = "org-test-123";
 const API_KEY = "cog_test_key";
 
@@ -135,12 +135,10 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
 }
 
 beforeAll(async () => {
+  server = createServer(handler);
+  const port = await listenOnFreePort(server);
+  TEST_BASE_URL = `http://localhost:${port}`;
   process.env.DEVIN_API_BASE_URL = TEST_BASE_URL;
-
-  await new Promise<void>((resolve) => {
-    server = createServer(handler);
-    server.listen(TEST_PORT, () => resolve());
-  });
 });
 
 afterAll(() => {
@@ -331,8 +329,8 @@ describe("devin-api: base URL override", () => {
     // override is working — but let's be explicit about it.
     lastRequest = null;
     await devinApi.getSession(ORG_ID, API_KEY, "ses-url-test");
-    // The request reached our mock server on TEST_PORT, which only happens
-    // if the base URL was overridden from the default https://api.devin.ai.
+    // The request reached our mock server's OS-assigned port, which only
+    // happens if the base URL was overridden from the default https://api.devin.ai.
     expect(lastRequest).not.toBeNull();
     expect(lastRequest!.url).toBe(`/v3/organizations/${ORG_ID}/sessions/ses-url-test`);
   });

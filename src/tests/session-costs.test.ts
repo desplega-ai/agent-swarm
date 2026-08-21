@@ -25,9 +25,9 @@ import {
   UNATTRIBUTED_USER_ID,
 } from "../be/db";
 import type { SessionCost } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-costs.sqlite";
-const TEST_PORT = 13016;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -183,7 +183,7 @@ function createTestServer(): Server {
 
 describe("Session Costs API", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
   let testAgent: { id: string };
 
   beforeAll(async () => {
@@ -206,12 +206,9 @@ describe("Session Costs API", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {

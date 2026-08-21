@@ -15,10 +15,11 @@ import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = 19111;
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-memory-rate-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const API_KEY = "test-key";
 
 let serverProc: Subprocess;
@@ -62,20 +63,6 @@ async function api(
   return { status: res.status, body };
 }
 
-async function waitForServer(url: string, timeoutMs = 15000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {
-      // not ready
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
-
 function makeMemory(name: string, agentId = agentA): Promise<{ id: string }> {
   return store.store({
     agentId,
@@ -104,6 +91,9 @@ async function readPosterior(id: string): Promise<{ alpha: number; beta: number 
 }
 
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
+
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(TEST_DB_PATH + suffix);
@@ -154,7 +144,7 @@ beforeAll(async () => {
   await getDbClient().run(insertTaskSql, [taskB, agentA, "task B", now, now]);
 
   store = new SqliteMemoryStore();
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   closeDb();

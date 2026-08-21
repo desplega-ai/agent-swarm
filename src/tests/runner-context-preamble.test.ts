@@ -7,9 +7,9 @@ import {
   fetchTaskContextForPreamble,
   type TaskContextForPreamble,
 } from "../commands/context-preamble";
+import { listenOnFreePort } from "./test-net";
 
-const TEST_PORT = 19091;
-const API_URL = `http://localhost:${TEST_PORT}`;
+let API_URL = "";
 const API_KEY = "test-key";
 
 // In-memory task store for the mock server
@@ -37,7 +37,8 @@ beforeAll(async () => {
     res.end();
   });
 
-  await new Promise<void>((resolve) => server.listen(TEST_PORT, resolve));
+  const port = await listenOnFreePort(server);
+  API_URL = `http://localhost:${port}`;
 });
 
 afterAll(() => {

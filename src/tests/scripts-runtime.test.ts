@@ -285,9 +285,13 @@ describe("runScript", () => {
     const output = await runScript({
       agentId: "agent-1",
       resources,
+      // Bun >= 1.4 injects BUN_FEATURE_FLAG_NO_ORPHANS=1 into the harness in
+      // response to its own --no-orphans flag (so nested Bun children inherit
+      // it); Bun 1.3 does not. That one runtime-owned key is excluded so the
+      // rest of the comparison stays exact and any other injection still fails.
       source: `
         export default async () => ({
-          keys: Object.keys(process.env).sort(),
+          keys: Object.keys(process.env).filter((k) => k !== "BUN_FEATURE_FLAG_NO_ORPHANS").sort(),
           apiKey: process.env.API_KEY,
           agentSwarmApiKey: process.env.AGENT_SWARM_API_KEY,
         });

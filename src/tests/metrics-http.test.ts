@@ -11,10 +11,10 @@ import { closeDb, getMetricVersions, initDb } from "../be/db";
 import { handleMetrics } from "../http/metrics";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { Metric } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-metrics-http.sqlite";
-const TEST_PORT = 13083;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 
 type MetricRunResponse = {
   widgets: Array<{
@@ -58,7 +58,8 @@ describe("Metrics HTTP API", () => {
     }
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    await new Promise<void>((resolve) => server.listen(TEST_PORT, () => resolve()));
+    const port = await listenOnFreePort(server);
+    BASE = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

@@ -31,7 +31,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -198,6 +198,10 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      # Dockerfile `FROM oven/bun:<tag>` pins must equal package.json packageManager.
+      - name: Check Bun version pins
+        run: bun run check:bun-version
+
       # Main must report the same series used as PR baselines.
       # See agent-fs docs/ci-timings.md; reporting is best-effort and never blocks CI.
       - name: Report check timings to ci-timings
@@ -274,13 +278,60 @@ jobs:
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
-  test:
-    name: Run Tests (${{ matrix.shard }}/4)
+  # Resolve "the latest timings snapshot" ONCE per run and hand the same files
+  # to both shards as an artifact. The primary key never exists at restore time
+  # (save-timings creates it at the end of this run), so every restore goes
+  # through the prefix fallback, and that resolves to the newest matching cache
+  # at the moment of the call. If each shard restored on its own, a save landing
+  # between the two calls would give them different snapshots; --shard assigns
+  # files from the durations it is given, so the two shards would split two
+  # different lists (one file in both, another in neither) and the run would
+  # stay green. Pattern from Bun's docs (docs/test/parallel, "Balancing with
+  # --timings"); nothing on the very first run, when --shard splits by count.
+  restore-timings:
+    name: Restore test timings
     runs-on: ubuntu-latest
+    # No checkout. Cache restore and artifact upload use the runner token.
+    permissions: {}
+    steps:
+      - name: Restore test timings
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
+          restore-keys: bun-test-timings-
+
+      # The artifact must exist even on a cache miss (download-artifact fails on
+      # a missing name). The marker also records which snapshot this run used.
+      - name: Record the resolved snapshot
+        run: |
+          mkdir -p .bun-test-timings
+          echo "${{ steps.restore.outputs.cache-matched-key || 'none' }}" > .bun-test-timings/snapshot-key.txt
+          ls -la .bun-test-timings
+
+      # include-hidden-files: upload-artifact treats every path under a
+      # dot-directory as hidden and would upload nothing from .bun-test-timings.
+      - name: Hand the snapshot to the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
+          include-hidden-files: true
+          retention-days: 1
+
+  test:
+    name: Run Tests (${{ matrix.shard }}/2)
+    needs: restore-timings
+    runs-on: ubuntu-latest
+    # Checkout only. Cache + artifact steps use the runner token, and the
+    # ci-timings report uses its own secret, so GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -289,27 +340,52 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The per-file durations resolved once by restore-timings (see that job for
+      # why both shards must read the SAME files). Each shard writes only its own
+      # durations to next/N.json; save-timings merges them into the next cache.
+      - name: Download test timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
+
       - name: Run tests
         id: tests
         # apps/evals/ excluded from the root run via bunfig.toml pathIgnorePatterns
-        # (separate bun package with its own deps + CI test step). Sharded 4-way to
-        # match merge-gate.yml's partitioning so ci-timings PR-vs-main wall-clock
-        # comparisons are apples-to-apples (each shard gets its own runner because
-        # these tests start servers, subprocesses, and SQLite workers).
+        # (separate bun package with its own deps + CI test step). 2 shards x
+        # --parallel=4 to match merge-gate.yml's partitioning so ci-timings
+        # PR-vs-main wall-clock comparisons are apples-to-apples. --parallel runs
+        # each test file in its own worker process (implies --isolate); the
+        # restored per-file durations balance files across shards by total time.
+        # Main's save-timings cache is what PR runs restore from.
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --timeout 10000 --shard=${{ matrix.shard }}/4
+          mkdir -p .bun-test-timings/next
+          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
+          # shellcheck disable=SC2046
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Upload this shard's test timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: .bun-test-timings/next/${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
       # Each shard reports independently; main provides the baseline for PR
       # comparisons. See agent-fs docs/ci-timings.md.
@@ -342,6 +418,31 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
+
+  # Merge the per-shard durations into one cache entry for the next run (and
+  # for PR runs, which restore main's entry via restore-keys). Only after a
+  # fully green test matrix, so a crashed shard never poisons the split.
+  save-timings:
+    name: Save test timings
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    # No checkout. Same-run artifact download and cache save use the runner
+    # token, not GITHUB_TOKEN.
+    permissions: {}
+    steps:
+      - name: Download per-shard timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-timings-*
+          path: .bun-test-timings
+          merge-multiple: true
+
+      - name: Save merged timings
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}

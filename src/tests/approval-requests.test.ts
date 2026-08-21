@@ -22,9 +22,9 @@ import { type ApprovalQuestion, missingRequiredResponseIds } from "../http/appro
 import type { ExecutorMeta } from "../types";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { HumanInTheLoopExecutor } from "../workflows/executors/human-in-the-loop";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-approval-requests.sqlite";
-const TEST_PORT = 13031;
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ function createTestServer(): Server {
 
 describe("Approval Requests", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     try {
@@ -183,9 +183,8 @@ describe("Approval Requests", () => {
     } catch {}
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

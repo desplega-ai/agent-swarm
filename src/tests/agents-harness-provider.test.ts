@@ -28,9 +28,9 @@ import {
   upsertSwarmConfig,
 } from "../be/db";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-agents-harness-provider.sqlite";
-const TEST_PORT = 13059 + (process.pid % 1000);
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -63,15 +63,14 @@ function makeTestServer(): Server {
 }
 
 let server: Server;
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = makeTestServer();
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://localhost:${port}`;
 });
 
 afterAll(async () => {
