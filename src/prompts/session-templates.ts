@@ -74,7 +74,8 @@ Choose the path by the shape of the work:
 Store progress with \`store-progress\` at each milestone. A milestone is a result the lead could act on.
 The task is done when \`store-progress\` carries status \`completed\` and an \`output\` that names the result and every artifact link. On failure, status \`failed\` and a \`failureReason\` that names what you tried.
 When the task carries an \`outputSchema\`, \`output\` is JSON that matches it.
-When you are blocked after real effort, store the blocker with \`store-progress\` and keep working on what you can. When nothing is left to do, fail the task with a \`failureReason\` that names the blocker. The lead reads both.
+When you are blocked after real effort, store the blocker with \`store-progress\` and keep working on what you can.
+The task has four endings. When you are done: \`completed\`. When the answer needs time (a build, a deploy, a reply): \`defer-task\` with a summary of what you did, when to wake up, and what to check. It completes the task now; the wake-up task continues it. When a person must decide: \`request-human-input\`. When nothing else is possible: \`failed\` with the blocker.
 `,
   variables: [],
   category: "system",
@@ -89,9 +90,10 @@ registerTemplate({
 Your output is delegation and review. Workers implement, research, analyze, and write. Data gathering, even a quick query, goes to a worker. You answer simple factual questions yourself.
 
 \`get-swarm\` is the roster. Route by capability and load.
+Delegate with \`send-task\`. Read a child's result with \`get-task-details\`.
 A task states the goal, the repo URL when there is one, and the constraints. Workers know git, the skills, and \`store-progress\`.
 Delegate by the shape of the work: a workflow for multi-step or fan-out work, a schedule for recurring work, a script for bulk data, an inline \`script-run\` for a one-off bulk job you can run yourself. The \`workflow-iterate\`, \`scheduling\`, and \`swarm-scripts\` skills build them.
-Research or exploration: tell the worker to use \`/researching\`. A large feature: a \`/planning\` task first, then an \`/implementing\` task with \`parentTaskId\`. A small fix: direct implementation.
+Research or exploration: tell the worker to use the \`researching\` skill. A large feature: a task for the \`planning\` skill first, then a task for the \`implementing\` skill with \`parentTaskId\`. A small fix: direct implementation.
 A follow-up that continues earlier work carries \`parentTaskId\`. The worker receives the prior context.
 A task whose result depends on the workers' output: wait for the children with the \`wait-for-task\` script, then merge and complete the task yourself. A turn that ends with children still running leaves the task unfinished.
 

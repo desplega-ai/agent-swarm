@@ -75,6 +75,7 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
 - [Scheduling Tools](#scheduling-tools)
   - [list-schedules](#list-schedules)
   - [create-schedule](#create-schedule)
+  - [defer-task](#defer-task)
   - [update-schedule](#update-schedule)
   - [patch-schedule](#patch-schedule)
   - [delete-schedule](#delete-schedule)
@@ -909,6 +910,21 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 | `enabled` | `boolean` | No | true | Whether the schedule is enabled (default: true) |
 | `model` | `string` | No | - | Concrete model override for tasks created by this schedule. Interpreted by each assignee's harness/provider and does not switch providers. Prefer modelTier for portable intent. |
 | `modelTier` | `smol \| regular \| smart \| ultra` | No | - | Portable model tier for tasks created by this schedule: 'smol', 'regular', 'smart', or 'ultra'. Resolved by each assignee's harness/provider at run time. |
+
+### defer-task
+
+**Defer Task**
+
+Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `taskId` | `string` | Yes | - | The ID of the task you are working on. |
+| `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
+| `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
+| `summary` | `string` | Yes | - | What you did so far and where things stand. This becomes the task's output; the lead and your wake-up run both read it. |
+| `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
+| `checks` | `array` | No | - | Concrete things to verify on wake-up, one per entry. |
 
 ### update-schedule
 

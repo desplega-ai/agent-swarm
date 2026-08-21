@@ -26,6 +26,7 @@ import { registerCreateMetricTool } from "./tools/create-metric";
 import { registerCreatePageTool } from "./tools/create-page";
 import { registerCredentialBindingsTool } from "./tools/credential-bindings";
 import { registerDbQueryTool } from "./tools/db-query";
+import { registerDeferTaskTool } from "./tools/defer-task";
 import { registerDeleteChannelTool } from "./tools/delete-channel";
 import { registerDeletePageTool } from "./tools/delete-page";
 import { registerGetMetricsTool } from "./tools/get-metrics";
@@ -415,6 +416,7 @@ export async function createServer(opts: { scriptsOnly?: boolean; fullSurface?: 
   if (hasCapability("scheduling")) {
     registerListSchedulesTool(server);
     registerCreateScheduleTool(server);
+    registerDeferTaskTool(server);
     registerUpdateScheduleTool(server);
     registerPatchScheduleTool(server);
     registerDeleteScheduleTool(server);

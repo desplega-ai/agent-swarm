@@ -551,6 +551,8 @@ describe("script connections", () => {
       // 136 alters agent_tasks, which this migration-112-only fixture only creates partially.
       markMigrationApplied(database, "136_task_requester_provenance.sql");
       markMigrationApplied(database, "137_memory_retrieval_composite_index.sql");
+      // 138 alters scheduled_tasks, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "138_scheduled_tasks_parent_task.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

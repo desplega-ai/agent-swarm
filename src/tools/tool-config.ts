@@ -22,6 +22,7 @@ export const CORE_TOOLS = new Set([
   "task-action", // claim/release/accept/reject
   "send-task", // delegate subtasks
   "get-tasks", // list/filter tasks
+  "defer-task", // complete now, wake up later to continue
 
   // Memory (used at session start)
   "memory-search", // recall relevant context

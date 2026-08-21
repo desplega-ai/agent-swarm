@@ -64,6 +64,10 @@ export async function createStandaloneScheduleTask(
     source: "schedule",
     requestedByUserId: schedule.createdBy,
     contextKey: scheduleContextKey({ scheduleId: schedule.id }),
+    // Set only by `defer-task`. An explicit parent wins over the sibling-awareness
+    // auto-wiring (see withSiblingAwareness in src/tasks/sibling-awareness.ts), so
+    // the wake-up run continues the deferred task rather than a random sibling.
+    parentTaskId: schedule.parentTaskId,
   });
 }
 

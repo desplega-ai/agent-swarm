@@ -1514,6 +1514,9 @@ export const ScheduledTaskSchema = z
     lastRunAt: z.iso.datetime().optional(),
     nextRunAt: z.iso.datetime().optional(),
     createdByAgentId: z.string().optional(),
+    // Set only by `defer-task`: the task this schedule wakes up to continue.
+    // Passed through as the created task's `parentTaskId`.
+    parentTaskId: z.string().optional(),
     timezone: z.string().default("UTC"),
     consecutiveErrors: z.number().int().min(0).default(0),
     lastErrorAt: z.iso.datetime().optional(),
@@ -1603,6 +1606,21 @@ export const RepoGuidelinesSchema = z
   .openapi("RepoGuidelines");
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
+
+/** Upper bound per guideline list. The repository prompt section renders every
+ * entry outside the bootstrap budget, so the cap lives at the write boundary. */
+export const REPO_GUIDELINES_MAX_ENTRIES = 50;
+
+/** Write-side guidelines schema: same shape, bounded lists. Reads keep the
+ * unbounded `RepoGuidelinesSchema` so an older row never fails a response. */
+export const RepoGuidelinesInputSchema = z
+  .object({
+    prChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    mergeChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    allowMerge: z.boolean().optional().default(false),
+    review: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+  })
+  .openapi("RepoGuidelinesInput");
 
 export const RepoHooksSchema = z
   .object({

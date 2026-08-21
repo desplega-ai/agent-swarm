@@ -114,6 +114,7 @@ export interface SwarmSdk {
   task_list(args?: Record<string, unknown>): Promise<unknown>;
   task_get(args: { taskId: string }): Promise<unknown>;
   task_storeProgress(args: Record<string, unknown>): Promise<unknown>;
+  task_defer(args: { taskId: string; delayMs?: number; runAt?: string; summary: string; note: string; checks?: string[] }): Promise<unknown>;
   task_poll(args?: Record<string, unknown>): Promise<unknown>;
   // --- kv ---
   kv_get<T = unknown>(args: { key: string; namespace?: string }): Promise<KvSdkResponse<KvEntry<T>>>;

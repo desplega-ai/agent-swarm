@@ -10314,6 +10314,7 @@ export interface paths {
                                 taskId: string;
                                 task: components["schemas"]["AgentTask"];
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
@@ -10334,6 +10335,7 @@ export interface paths {
                                     }[];
                                 };
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
@@ -10736,7 +10738,7 @@ export interface paths {
                         defaultBranch?: string;
                         autoClone?: boolean;
                         hooks?: components["schemas"]["RepoHooks"] | null;
-                        guidelines?: components["schemas"]["RepoGuidelines"];
+                        guidelines?: components["schemas"]["RepoGuidelinesInput"];
                     };
                 };
             };
@@ -10867,7 +10869,7 @@ export interface paths {
                         defaultBranch?: string;
                         autoClone?: boolean;
                         hooks?: components["schemas"]["RepoHooks"];
-                        guidelines?: components["schemas"]["RepoGuidelines"];
+                        guidelines?: components["schemas"]["RepoGuidelinesInput"];
                     };
                 };
             };
@@ -10975,6 +10977,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11032,6 +11035,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11145,6 +11149,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -11258,6 +11263,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -11371,6 +11377,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -11489,6 +11496,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -11666,6 +11674,7 @@ export interface paths {
                             /** Format: date-time */
                             nextRunAt?: string;
                             createdByAgentId?: string;
+                            parentTaskId?: string;
                             /** @default UTC */
                             timezone: string;
                             /** @default 0 */
@@ -14596,6 +14605,7 @@ export interface paths {
                                 /** Format: date-time */
                                 nextRunAt?: string;
                                 createdByAgentId?: string;
+                                parentTaskId?: string;
                                 /** @default UTC */
                                 timezone: string;
                                 /** @default 0 */
@@ -20231,6 +20241,13 @@ export interface components {
             enabled: boolean;
         };
         RepoGuidelines: {
+            prChecks: string[];
+            mergeChecks: string[];
+            /** @default false */
+            allowMerge: boolean;
+            review: string[];
+        } | null;
+        RepoGuidelinesInput: {
             prChecks: string[];
             mergeChecks: string[];
             /** @default false */

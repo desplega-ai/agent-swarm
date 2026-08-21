@@ -225,6 +225,9 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  *    src/tasks/worker-follow-up.ts after a task completes/fails or needs
  *    re-delegation; they inherit the parent's vcsRepo/branch context via
  *    createTaskExtended's parentTaskId inheritance (src/be/db.ts).
+ *  - "deferred": the wake-up task a `defer-task` schedule creates
+ *    (src/tools/defer-task.ts) — it carries the deferred task as its
+ *    `parentTaskId` and resumes that work on the same clone.
  *  - "agentmail-reply": AgentMail follow-up on an EXISTING thread
  *    (src/agentmail/handlers.ts) — always carries `parentTaskId` pointing at
  *    the task it's continuing (as opposed to "agentmail-message", which fires
@@ -236,6 +239,10 @@ async function listSwarmAutostashes(clonePath: string, role: string): Promise<Sw
  */
 const CONTINUATION_TASK_TYPES = new Set([
   "resume",
+  // "deferred": a `defer-task` wake-up continues the parent's work on the same
+  // clone. The parent is already `completed`, so the parent-status check alone
+  // would read this as a first kickoff and hard-reset the clone.
+  "deferred",
   "follow-up",
   "reroute-decision",
   "agentmail-reply",
@@ -2588,6 +2595,8 @@ interface Trigger {
   }>;
   cursorUpdates?: Array<{ channelId: string; ts: string }>; // Deferred cursor commits for channel_activity
   requestedBy?: {
+    /** `users.id`; absent for the UNKNOWN-identity sentinel (Slack-only requester). */
+    id?: string;
     name: string;
     email?: string;
     role?: string;
@@ -2856,8 +2865,12 @@ async function buildPromptForTrigger(
 
       // Include requesting user info if available from the poll trigger
       const requestedBy = trigger.requestedBy;
+      const requesterDetails = [
+        requestedBy?.email,
+        requestedBy?.id ? `user ${requestedBy.id}` : undefined,
+      ].filter(Boolean);
       const requestedBySection = requestedBy
-        ? `\n\nRequested by: ${requestedBy.name}${requestedBy.email ? ` (${requestedBy.email})` : ""}`
+        ? `\n\nRequested by: ${requestedBy.name}${requesterDetails.length > 0 ? ` (${requesterDetails.join(", ")})` : ""}`
         : "";
 
       const attachmentsSection = buildAttachmentsSection(trigger.taskId, taskObj?.attachments);

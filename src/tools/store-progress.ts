@@ -7,24 +7,18 @@ import {
   getAgentById,
   getDbClient,
   getResolvedConfig,
-  getSessionLogsByTaskId,
   getTaskById,
   insertTaskAttachment,
   updateAgentStatusFromCapacity,
   updateTaskProgress,
 } from "@/be/db";
-import { getEmbeddingProvider, getMemoryStore } from "@/be/memory";
-import { getRetrievalsForTask } from "@/be/memory/raters/retrieval";
-import { runServerRaters } from "@/be/memory/raters/run-server-raters";
-import { shouldPersistTaskCompletionMemory } from "@/memory/automatic-task-gate";
+import { runTaskTerminalEffects } from "@/tasks/task-terminal-effects";
 import {
   getTaskOutputValidationError,
   guardTerminalTaskResultWrite,
 } from "@/tasks/terminal-result-guard";
-import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { AgentTaskStatusSchema, AttachmentInputSchema, isTerminalTaskStatus } from "@/types";
-import { scrubSecrets } from "../utils/secret-scrubber";
 
 // Phase 11: the `cost` / `costData` field was removed from this tool's input
 // schema. Adapters (claude/codex/pi/opencode/devin/claude-managed) are the
@@ -345,145 +339,20 @@ export const registerStoreProgressTool = (server: McpServer) => {
         !("wasNoOp" in result && result.wasNoOp) &&
         !("wasForcedOverwrite" in result && result.wasForcedOverwrite);
 
-      // Index completed and failed tasks as memory (async, non-blocking).
-      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate
-      // memory entries / vector index pollution.
-      // Automatic/recurring tasks are noisy by default; require explicit opt-in.
-      if (
-        shouldRunTerminalSideEffects &&
-        shouldPersistTaskCompletionMemory(result.task, persistMemory)
-      ) {
-        (async () => {
-          try {
-            const taskContent =
-              status === "completed"
-                ? `Task: ${result.task!.task}\n\nOutput:\n${output || "(no output)"}`
-                : `Task: ${result.task!.task}\n\nFailure reason:\n${failureReason || "No reason provided"}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
-
-            // Skip indexing if there's truly no content
-            if (taskContent.length < 30) return;
-
-            const store = getMemoryStore();
-            const provider = getEmbeddingProvider();
-
-            const memory = await store.store({
-              agentId: requestInfo.agentId ?? null,
-              content: taskContent,
-              name: `Task: ${result.task!.task.slice(0, 80)}`,
-              scope: "agent",
-              source: "task_completion",
-              sourceTaskId: taskId,
-            });
-            const embedding = await provider.embed(taskContent);
-            if (embedding) {
-              await store.updateEmbedding(memory.id, embedding, provider.name);
-            }
-
-            // Auto-promote high-value completions to swarm memory (P3)
-            const shouldShareWithSwarm =
-              status === "completed" &&
-              (result.task!.taskType === "research" ||
-                result.task!.tags?.includes("knowledge") ||
-                result.task!.tags?.includes("shared"));
-
-            if (shouldShareWithSwarm) {
-              try {
-                const swarmMemory = await store.store({
-                  agentId: requestInfo.agentId ?? null,
-                  scope: "swarm",
-                  name: `Shared: ${result.task!.task.slice(0, 80)}`,
-                  content: `Task completed by agent ${requestInfo.agentId}:\n\n${taskContent}`,
-                  source: "task_completion",
-                  sourceTaskId: taskId,
-                });
-                const swarmEmbedding = await provider.embed(taskContent);
-                if (swarmEmbedding) {
-                  await store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
-                }
-              } catch {
-                // Non-blocking — swarm memory promotion failure is not critical
-              }
-            }
-          } catch {
-            // Non-blocking — task completion memory failure should not affect task status
-          }
-        })().catch((err) =>
-          console.error(
-            "[store-progress] task completion memory write failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
-      }
-
-      if (shouldRunTerminalSideEffects) {
-        // Memory rater v1.5 — fire server-side raters on task completion.
-        // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §5
-        //
-        // Read `memory_retrieval` rows for this task + concatenated session_logs
-        // and hand both to `runServerRaters`, which iterates the allow-listed
-        // server raters (currently just `implicit-citation`), stamps source,
-        // applies the configured weight multiplier, and persists via
-        // `applyRating`. The orchestration is extracted so it can be unit-tested
-        // with stub raters (see `src/tests/run-server-raters.test.ts`).
-        //
-        // Fire-and-forget: rater failure must NEVER affect task status.
-        (async () => {
-          try {
-            const retrievals = await getRetrievalsForTask(taskId);
-            if (retrievals.length === 0) return;
-
-            const retrievedMemoryIds = retrievals.map((r) => r.memoryId);
-            const logs = await getSessionLogsByTaskId(taskId);
-            const evidence = logs.map((l) => l.content).join("\n");
-
-            await runServerRaters({
-              taskId,
-              agentId: requestInfo.agentId ?? "",
-              retrievedMemoryIds,
-              evidence,
-            });
-          } catch (err) {
-            console.error(
-              "[store-progress] server-rater fire failed:",
-              err instanceof Error ? err.message : String(err),
-            );
-          }
-        })().catch((err) =>
-          console.error(
-            "[store-progress] server rater run failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
-      }
-
-      // Create follow-up task for the lead when a worker task finishes.
-      // This replaces the old poll-based tasks_finished trigger which was unreliable.
-      // Skip for workflow-managed tasks — the workflow engine handles sequencing via resume.ts.
-      // Skip on no-op (idempotent re-call on terminal task) to avoid duplicate follow-ups.
-      if (
-        status &&
-        result.success &&
-        result.task &&
-        !result.task.workflowRunId &&
-        !("wasNoOp" in result && result.wasNoOp) &&
-        !("wasForcedOverwrite" in result && result.wasForcedOverwrite)
-      ) {
-        try {
-          const followUp = await createWorkerTaskFollowUp({
-            task: result.task,
-            status,
-            output,
-            failureReason,
-          });
-          if (followUp) {
-            console.log(
-              `[store-progress] Created follow-up task ${followUp.id.slice(0, 8)} for ${status} task ${taskId.slice(0, 8)}`,
-            );
-          }
-        } catch (err) {
-          // Non-blocking — follow-up task creation failure should not affect the store-progress response
-          console.warn(`[store-progress] Failed to create follow-up task: ${err}`);
-        }
+      // Post-commit terminal side effects (completion memory, server raters,
+      // lead follow-up). Shared with `defer-task` — see
+      // src/tasks/task-terminal-effects.ts. Skipped on no-op (idempotent
+      // re-call on a terminal task) and on forced text-only overwrites, so a
+      // replay never duplicates memories or follow-up tasks.
+      if (shouldRunTerminalSideEffects && status) {
+        await runTaskTerminalEffects({
+          task: result.task!,
+          status,
+          output,
+          failureReason,
+          agentId: requestInfo.agentId,
+          persistMemory,
+        });
       }
 
       const { success, message } = result;
