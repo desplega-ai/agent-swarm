@@ -284,6 +284,7 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
     usersBackfilled: 0,
   };
 
+  // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
   db.transaction(() => {
     for (const role of BUILTIN_ROLES) {
       const grantsAll = role.grantsAll ? 1 : 0;
@@ -344,7 +345,7 @@ export function ensureRbacSeedsSynced(opts?: { quiet?: boolean }): RbacSeedSyncS
     // management, zero roles becomes a deliberate deny-all posture and this
     // auto-attach MUST be removed. Keep the CLI as the explicit operator tool.
     stats.usersBackfilled += backfillDefaultRoleForZeroRoleUsers.run(DEFAULT_ROLE_ID).changes;
-  })();
+  }).immediate();
 
   if (!opts?.quiet) {
     console.log(
