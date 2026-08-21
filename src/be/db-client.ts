@@ -102,11 +102,39 @@ type TxContext = {
 
 const txContext = new AsyncLocalStorage<TxContext>();
 
+/**
+ * Cross-process SQLITE_BUSY retry posture (litestream checkpoints, CLI access
+ * on the same file). bun:sqlite's own `busy_timeout` handles the wait while
+ * the driver call runs; these retries kick in after it gives up, and the
+ * backoff between attempts sleeps asynchronously, so the event loop breathes
+ * between driver calls. Retries happen only where a repeat is exact:
+ * top-level single statements, BEGIN IMMEDIATE (nothing ran yet), and COMMIT
+ * (the transaction stays intact on a BUSY commit). Statements inside an open
+ * transaction are never retried.
+ */
+export type BusyRetryOptions = {
+  /** Ceiling on the summed async backoff (driver-level busy_timeout spins are extra). */
+  maxWaitMs: number;
+  /** Per-retry sleep; the attempt count is bounded by this array's length + 1. */
+  backoffMs: number[];
+};
+
+const DEFAULT_BUSY_RETRY: BusyRetryOptions = { maxWaitMs: 10_000, backoffMs: [50, 100, 250] };
+
+function isSqliteBusy(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === "string" && code.startsWith("SQLITE_BUSY");
+}
+
 class BunSqliteClient implements DbClient {
   private readonly lock = new FifoLock();
   private savepointSeq = 0;
 
-  constructor(private readonly getDatabase: () => Database) {}
+  constructor(
+    private readonly getDatabase: () => Database,
+    private readonly busyRetry: BusyRetryOptions = DEFAULT_BUSY_RETRY,
+  ) {}
 
   query<T>(sql: string, params: DbParam[] = []): Promise<T[]> {
     return this.execute((db) => db.query<T, DbParam[]>(sql).all(...params));
@@ -135,10 +163,15 @@ class BunSqliteClient implements DbClient {
     try {
       const db = this.getDatabase();
       const tx = this.boundExecutor(ctx);
-      db.run("BEGIN");
+      // IMMEDIATE takes the write lock at BEGIN: a cross-process BUSY then
+      // surfaces here, where a retry is exact (nothing ran yet), instead of
+      // on an arbitrary statement mid-callback where it is not.
+      await this.withBusyRetry(() => db.run("BEGIN IMMEDIATE"));
       began = true;
       const result = await txContext.run(ctx, () => fn(tx));
-      db.run("COMMIT");
+      // A BUSY COMMIT leaves the transaction open and intact, so a repeat is
+      // exact here too.
+      await this.withBusyRetry(() => db.run("COMMIT"));
       for (const hook of ctx.afterCommit) this.scheduleHook(hook);
       return result;
     } catch (err) {
@@ -222,9 +255,31 @@ class BunSqliteClient implements DbClient {
     }
     const release = await this.lock.acquire();
     try {
-      return op(this.getDatabase());
+      // A top-level single statement is atomic, so a repeat on BUSY is exact.
+      return await this.withBusyRetry(() => op(this.getDatabase()));
     } finally {
       release();
+    }
+  }
+
+  /**
+   * Run `attempt` with async backoff on SQLITE_BUSY. The caller must ensure
+   * a repeat is exact (nothing partially applied by a failed attempt). Runs
+   * while the FIFO lock is held: queued in-process operations stay ordered
+   * behind the retrying one, and the loop stays free during the sleeps.
+   */
+  private async withBusyRetry<T>(attempt: () => T): Promise<T> {
+    let sleptMs = 0;
+    for (let attemptIndex = 0; ; attemptIndex++) {
+      try {
+        return attempt();
+      } catch (err) {
+        if (!isSqliteBusy(err)) throw err;
+        const backoff = this.busyRetry.backoffMs[attemptIndex];
+        if (backoff === undefined || sleptMs + backoff > this.busyRetry.maxWaitMs) throw err;
+        sleptMs += backoff;
+        await new Promise((resolve) => setTimeout(resolve, backoff));
+      }
     }
   }
 
@@ -257,8 +312,12 @@ class BunSqliteClient implements DbClient {
 /**
  * Wrap a lazily-resolved bun:sqlite handle in the async DbClient seam.
  * `getDatabase` is invoked per operation so close/reopen cycles (tests) are
- * transparent to holders of the client.
+ * transparent to holders of the client. `busyRetry` overrides the
+ * cross-process SQLITE_BUSY retry posture (tests use tiny values).
  */
-export function createBunSqliteClient(getDatabase: () => Database): DbClient {
-  return new BunSqliteClient(getDatabase);
+export function createBunSqliteClient(
+  getDatabase: () => Database,
+  busyRetry?: BusyRetryOptions,
+): DbClient {
+  return new BunSqliteClient(getDatabase, busyRetry);
 }
