@@ -56,10 +56,9 @@ describe("route handle respond()", () => {
 
   test("invalid payload throws a schema-violation error under bun test (NODE_ENV=test)", () => {
     const captured: Captured = {};
-    expect(() =>
-      // biome-ignore lint/suspicious/noExplicitAny: deliberately violating the compile-time contract
-      testRoute.respond(fakeRes(captured), 200, { name: 42 } as any),
-    ).toThrow(/Response schema violation: GET \/api\/__respond-contract-test 200/);
+    expect(() => testRoute.respond(fakeRes(captured), 200, { name: 42 } as any)).toThrow(
+      /Response schema violation: GET \/api\/__respond-contract-test 200/,
+    );
     // Nothing was written — the throw happens before writeHead.
     expect(captured.status).toBeUndefined();
   });
