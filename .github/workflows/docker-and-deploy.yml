@@ -33,6 +33,9 @@ env:
 jobs:
   detect-version-change:
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       version: ${{ steps.check.outputs.version }}
@@ -508,6 +511,10 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    # Checkout + git fetch of origin/main only; the deploy step authenticates to
+    # Dokploy with its own secret, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     concurrency:
       group: agent-swarm-deploy
       cancel-in-progress: false
@@ -731,6 +738,10 @@ jobs:
   publish-e2b-templates:
     name: Publish E2B templates
     runs-on: ubuntu-latest
+    # Checkout only; the build/publish steps authenticate to E2B with
+    # E2B_API_KEY, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     needs:
       - detect-version-change
       - merge-server
