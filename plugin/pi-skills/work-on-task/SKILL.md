@@ -3,37 +3,14 @@ name: work-on-task
 description: Work on a specific task assigned to you in the agent swarm
 ---
 
-# Working on a Task
+# Working on a task
 
-If no `taskId` is provided, call `poll-task` to get a new task.
+The taskId follows the command. Without one, call `get-tasks` with `mineOnly: true` and take your `pending` or `in_progress` task. If there is none, say so and stop.
 
-## Workflow
+This message carries the task text, its attachments, its output format, and memories from past sessions. If it does not (you invoked this command yourself, or the context was compacted), run the `task-context-gathering` script with the taskId.
 
-1. **Get task details**: Call `get-task-details` with the taskId.
+When the task names a command (`/researching`, `/planning`, `/implementing`), use it. Otherwise work directly.
 
-2. **Recall relevant memories**: Use `memory-search` with the task description before starting any work. Past learnings, solutions, and gotchas are indexed here.
+Finish the task with one of the four endings in your operating contract: `completed`, `defer-task`, `request-human-input`, or `failed`. Then stop.
 
-3. **Choose your approach** based on the task type:
-   - **Research task** → use `/researching`
-   - **Development task** → use `/planning` first, then `/implementing`
-   - **Simple/direct task** (no plan needed) → implement directly
-
-4. **Work on it**, calling `store-progress` at each meaningful milestone (not just start and end — the lead monitors this).
-
-5. **Complete the task** — see Completion below.
-
-## Completion
-
-Call `store-progress` with:
-- **Success**: `status: "completed"` + `output: "<what you did and the result>"`. Output should be specific enough for the lead to assess without re-reading your work.
-- **Failure**: `status: "failed"` + `failureReason: "<what went wrong and what you tried>"`.
-
-Then reply "DONE" to end the session.
-
-## Interruptions
-
-If interrupted by the user, adapt to their instructions. When resuming, call `/skill:work-on-task <taskId>` again to pick up where you left off.
-
-## When to escalate
-
-If you're stuck after genuine effort (not just first failure), use `/skill:swarm-chat` to ask the lead for help or clarification. Don't spin — escalate.
+If the user interrupts, follow their instructions. To resume, call `/skill:work-on-task <taskId>` again.

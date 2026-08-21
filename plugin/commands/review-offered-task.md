@@ -35,7 +35,7 @@ You have been offered a task. Your job is to review it and decide whether to acc
 1. get-task-details taskId="abc-123"
 2. [Review the task details]
 3. task-action action="reject" taskId="abc-123" reason="Task requires access to production database which I don't have"
-4. Reply "DONE" to end the session
+4. Stop
 ```
 
 ## Important Notes
