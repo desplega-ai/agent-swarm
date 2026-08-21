@@ -30,8 +30,11 @@ export type IdentityResolution =
   | { status: "unknown"; kind: string; externalId: string };
 
 /** Reverse lookup by `(kind, externalId)` — e.g. `resolveIdentity('slack', 'U016H7XKZGS')`. */
-export function resolveIdentity(kind: string, externalId: string): IdentityResolution {
-  const user = findUserByExternalId(kind, externalId);
+export async function resolveIdentity(
+  kind: string,
+  externalId: string,
+): Promise<IdentityResolution> {
+  const user = await findUserByExternalId(kind, externalId);
   if (!user) {
     return { status: "unknown", kind, externalId };
   }
@@ -50,8 +53,8 @@ export function resolveIdentity(kind: string, externalId: string): IdentityResol
  * attribute, not an external-id kind — rendered with `kind: "email"` so
  * `renderIdentity` produces a consistent pair form regardless of provider.
  */
-export function resolveIdentityByEmail(email: string): IdentityResolution {
-  const user = findUserByEmail(email);
+export async function resolveIdentityByEmail(email: string): Promise<IdentityResolution> {
+  const user = await findUserByEmail(email);
   if (!user) {
     return { status: "unknown", kind: "email", externalId: email };
   }

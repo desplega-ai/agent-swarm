@@ -108,7 +108,7 @@ function createTestRegistry(): ExecutorRegistry {
 
 let workflowCounter = 0;
 
-function makeWorkflow(def: WorkflowDefinition): Workflow {
+function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
   workflowCounter++;
   return createWorkflow({
     name: `test-val-port-routing-${workflowCounter}-${Date.now()}`,
@@ -177,10 +177,10 @@ describe("Validation Port Routing", () => {
   }
 
   test("validation passes → only 'pass' port successor is created", async () => {
-    const workflow = makeWorkflow(makePortRoutingWorkflow(true));
+    const workflow = await makeWorkflow(makePortRoutingWorkflow(true));
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     // "check" should be completed, "on-pass" should exist, "on-fail" should NOT
@@ -188,15 +188,15 @@ describe("Validation Port Routing", () => {
     expect(nodeIds).toContain("on-pass");
     expect(nodeIds).not.toContain("on-fail");
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 
   test("validation fails (mustPass: false) → only 'fail' port successor is created", async () => {
-    const workflow = makeWorkflow(makePortRoutingWorkflow(false));
+    const workflow = await makeWorkflow(makePortRoutingWorkflow(false));
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     // "check" should be completed, "on-fail" should exist, "on-pass" should NOT
@@ -204,12 +204,12 @@ describe("Validation Port Routing", () => {
     expect(nodeIds).toContain("on-fail");
     expect(nodeIds).not.toContain("on-pass");
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 
   test("string-based next is unaffected by validation port routing", async () => {
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "check",
@@ -233,18 +233,18 @@ describe("Validation Port Routing", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     expect(nodeIds).toContain("check");
     expect(nodeIds).toContain("successor");
 
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     expect(run!.status).toBe("completed");
   });
 
   test("property-match node resolves fields through node.inputs aliases", async () => {
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "review-step",
@@ -275,7 +275,7 @@ describe("Validation Port Routing", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     expect(nodeIds).toContain("check");
@@ -284,7 +284,7 @@ describe("Validation Port Routing", () => {
   });
 
   test("property-match node keeps raw context path fallback with node.inputs present", async () => {
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "review-step",
@@ -315,7 +315,7 @@ describe("Validation Port Routing", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     expect(nodeIds).toContain("on-pass");
@@ -323,7 +323,7 @@ describe("Validation Port Routing", () => {
   });
 
   test("property-match handles DES-294 review.taskOutput.verdict alias shape", async () => {
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "review-step",
@@ -354,7 +354,7 @@ describe("Validation Port Routing", () => {
     });
 
     const runId = await startWorkflowExecution(workflow, {}, registry);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
 
     expect(nodeIds).toContain("continue-flow");
@@ -362,7 +362,7 @@ describe("Validation Port Routing", () => {
   });
 
   test("property-match validation resolves fields through node.inputs aliases", async () => {
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "check",
@@ -391,9 +391,9 @@ describe("Validation Port Routing", () => {
       { review: { taskOutput: { verdict: "continue" } } },
       registry,
     );
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const nodeIds = steps.map((s) => s.nodeId);
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
 
     expect(run!.status).toBe("completed");
     expect(nodeIds).toContain("check");

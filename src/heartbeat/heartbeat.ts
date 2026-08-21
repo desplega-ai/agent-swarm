@@ -10,7 +10,7 @@ import {
   getActiveSessionForTask,
   getActiveTaskCount,
   getAllAgents,
-  getDb,
+  getDbClient,
   getIdleWorkersWithCapacity,
   getLeadAgent,
   getPendingSteeringForTask,
@@ -231,13 +231,13 @@ export interface HeartbeatFindings {
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
-let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void) | null = null;
+let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 
 /** Tasks auto-failed during the reboot sweep, consumed by boot triage */
 let rebootAffectedTasks: Array<{ original: AgentTask; retryTaskId: string | null }> = [];
 
 export function setBeforeHeartbeatSupersedeForTests(
-  hook: ((task: AgentTask) => void) | null,
+  hook: ((task: AgentTask) => void | Promise<void>) | null,
 ): void {
   beforeHeartbeatSupersedeForTests = hook;
 }
@@ -250,9 +250,9 @@ export function setBeforeHeartbeatSupersedeForTests(
  * Quick check to determine if a full triage sweep is needed.
  * Returns true if something looks actionable, false to bail early.
  */
-export function preflightGate(): boolean {
-  const stats = getTaskStats();
-  const agents = getAllAgents();
+export async function preflightGate(): Promise<boolean> {
+  const stats = await getTaskStats();
+  const agents = await getAllAgents();
 
   const hasInProgressTasks = stats.in_progress > 0;
   const hasUnassignedTasks = stats.unassigned > 0;
@@ -302,23 +302,23 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // 0. Retire runtimes that stopped pinging, before anything reasons about
   // which workers are alive — otherwise auto-assignment below can hand a task
   // to an agent this same sweep is about to mark offline, stranding it.
-  findings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
+  findings.staleCleanup.staleRuntimes = (await expireStaleRuntimeInstances()).expired;
 
   // 0.5. Release offers pinned to an agent that just went offline (or was
   // already deleted) back to the pool, before auto-assignment runs — an
   // offer stuck on a dead offeree is otherwise invisible to
   // autoAssignPoolTasks (unassigned-only) and to the offeree's own
   // accept/reject path (nobody left to reach it). See #1190.
-  findings.staleCleanup.staleOfferedTasks = releaseStaleOfferedTasksForOfflineAgents();
+  findings.staleCleanup.staleOfferedTasks = await releaseStaleOfferedTasksForOfflineAgents();
 
   // 1. Detect and remediate stalled tasks (tiered: auto-fail dead workers)
-  detectAndRemediateStalledTasks(findings);
+  await detectAndRemediateStalledTasks(findings);
 
   // 2. Check and fix worker health
-  checkWorkerHealth(findings);
+  await checkWorkerHealth(findings);
 
   // 3. Auto-assign pool tasks to idle workers
-  autoAssignPoolTasks(findings);
+  await autoAssignPoolTasks(findings);
 
   // 4. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
@@ -334,19 +334,21 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
  * - Stale session heartbeat → worker likely crashed → auto-fail (15 min threshold)
  * - Fresh session heartbeat → worker alive but task stale → escalate to lead (30 min threshold)
  */
-function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
+async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Promise<void> {
   // Use the shortest threshold to catch all potentially stalled tasks
-  const candidates = getStalledInProgressTasks(stallThresholdNoSessionMin());
+  const candidates = await getStalledInProgressTasks(stallThresholdNoSessionMin());
 
   for (const task of candidates) {
     if (!task.agentId) continue; // Unassigned tasks can't be stalled
 
-    const session = getActiveSessionForTask(task.id);
+    const session = await getActiveSessionForTask(task.id);
     const taskAgeMs = Date.now() - new Date(task.lastUpdatedAt).getTime();
     const sessionHeartbeatAgeMs = session
       ? Date.now() - new Date(session.lastHeartbeatAt).getTime()
       : null;
-    const pendingSteering = hasPendingSteering(task.id) ? getPendingSteeringForTask(task.id) : [];
+    const pendingSteering = (await hasPendingSteering(task.id))
+      ? await getPendingSteeringForTask(task.id)
+      : [];
     const newestPendingSteeringAt = pendingSteering.reduce<number>(
       (latest, message) => Math.max(latest, new Date(message.createdAt).getTime()),
       0,
@@ -363,7 +365,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
     if (!session) {
       // Case A: No active session — worker is dead
       if (taskAgeMs >= stallThresholdNoSessionMin() * 60 * 1000) {
-        remediateCrashedWorkerTask(findings, task, {
+        await remediateCrashedWorkerTask(findings, task, {
           supersedeReason:
             "Auto-superseded by heartbeat: worker session not found (no active session for task)",
           legacyFailReason:
@@ -378,7 +380,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
         if (taskAgeMs >= stallThresholdStaleHeartbeatMin() * 60 * 1000) {
-          remediateCrashedWorkerTask(findings, task, {
+          await remediateCrashedWorkerTask(findings, task, {
             supersedeReason:
               "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
             legacyFailReason:
@@ -407,7 +409,7 @@ function detectAndRemediateStalledTasks(findings: HeartbeatFindings): void {
  *   - a non-terminal child already exists — a prior sweep already created a resume,
  *   - `createResumeFollowUp` returns `workflow-skip` — workflow engine owns retries.
  */
-function remediateCrashedWorkerTask(
+async function remediateCrashedWorkerTask(
   findings: HeartbeatFindings,
   task: AgentTask,
   opts: {
@@ -416,7 +418,7 @@ function remediateCrashedWorkerTask(
     shortLabel: string;
     cleanupActiveSession?: boolean;
   },
-): void {
+): Promise<void> {
   if (!task.agentId) return; // Type guard — caller already checked.
 
   const skipAutoResume = SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "");
@@ -431,68 +433,69 @@ function remediateCrashedWorkerTask(
   // any child task) because `send-task` auto-defaults `parentTaskId` to the
   // caller's current task, so a crashed worker with delegated subtasks
   // would otherwise be incorrectly skipped (PR #594 review).
-  const alreadyResumed = !skipAutoResume && !isWorkflowStep && hasNonTerminalResumeChild(task.id);
+  const alreadyResumed =
+    !skipAutoResume && !isWorkflowStep && (await hasNonTerminalResumeChild(task.id));
 
   if (isWorkflowStep) {
-    const failed = failTask(task.id, "superseded_workflow_task");
+    const failed = await failTask(task.id, "superseded_workflow_task");
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
         reason: "superseded_workflow_task",
       });
-      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
       console.log(
         `[Heartbeat] Workflow-step task ${task.id.slice(0, 8)} failed — engine will handle retry (${opts.shortLabel})`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
 
   if (skipAutoResume || alreadyResumed) {
-    const failed = failTask(task.id, opts.legacyFailReason);
+    const failed = await failTask(task.id, opts.legacyFailReason);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
         reason: opts.legacyFailReason,
       });
-      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
       console.log(
         `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${opts.shortLabel} (${
           skipAutoResume ? "skipRetry taskType" : "resume already exists"
         })`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
 
   const nextResumeGeneration = getNextResumeGeneration(task);
   if (nextResumeGeneration > maxResumeGenerations()) {
-    const failed = failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
+    const failed = await failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
         reason: RESUME_BUDGET_EXHAUSTED_REASON,
       });
-      if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+      if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
       console.warn(
         `[Heartbeat] Auto-failed task ${task.id.slice(0, 8)} — ${RESUME_BUDGET_EXHAUSTED_REASON} (${opts.shortLabel})`,
       );
-      const remaining = getActiveTaskCount(task.agentId);
-      if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
+      const remaining = await getActiveTaskCount(task.agentId);
+      if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
     }
     return;
   }
 
-  beforeHeartbeatSupersedeForTests?.(task);
+  await beforeHeartbeatSupersedeForTests?.(task);
 
-  const superseded = supersedeTask(task.id, {
+  const superseded = await supersedeTask(task.id, {
     reason: opts.supersedeReason,
     resumeTaskId: null,
   });
@@ -501,7 +504,7 @@ function remediateCrashedWorkerTask(
   }
 
   try {
-    promotePendingSteeringForTask(
+    await promotePendingSteeringForTask(
       task.id,
       "Task was crash-recovered before steering was delivered",
     );
@@ -512,10 +515,10 @@ function remediateCrashedWorkerTask(
     );
   }
 
-  const resume = createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
+  const resume = await createResumeFollowUp({ parentId: task.id, reason: "crash_recovery" });
 
   if (resume.kind === "created") {
-    backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
+    await backfillSupersedeTaskResumeTaskId(task.id, resume.task.id);
 
     findings.autoResumedTasks.push({
       taskId: task.id,
@@ -542,7 +545,7 @@ function remediateCrashedWorkerTask(
       resume.kind === "skipped"
         ? `resume_creation_skipped_${resume.reason}`
         : "resume_creation_skipped_workflow";
-    const failed = failTask(task.id, reason);
+    const failed = await failTask(task.id, reason);
     if (failed) {
       findings.autoFailedTasks.push({
         taskId: task.id,
@@ -557,10 +560,10 @@ function remediateCrashedWorkerTask(
     );
   }
 
-  if (opts.cleanupActiveSession) deleteActiveSession(task.id);
+  if (opts.cleanupActiveSession) await deleteActiveSession(task.id);
 
-  const remaining = getActiveTaskCount(task.agentId);
-  if (remaining === 0) restoreAgentIdleAfterRemediation(task.agentId);
+  const remaining = await getActiveTaskCount(task.agentId);
+  if (remaining === 0) await restoreAgentIdleAfterRemediation(task.agentId);
 }
 
 /**
@@ -600,7 +603,7 @@ export async function runRebootSweep(): Promise<void> {
     rebootAffectedTasks = [];
 
     // Get ALL in_progress tasks (threshold=0 means cutoff=now, effectively all)
-    const allInProgress = getStalledInProgressTasks(0);
+    const allInProgress = await getStalledInProgressTasks(0);
     if (allInProgress.length === 0) {
       console.log("[Heartbeat] Reboot sweep: no in-progress tasks found");
       return;
@@ -622,7 +625,7 @@ export async function runRebootSweep(): Promise<void> {
         continue;
       }
 
-      const session = getActiveSessionForTask(task.id);
+      const session = await getActiveSessionForTask(task.id);
       if (session) {
         if (bootEpoch === null) {
           // Legacy fallback: session exists → skip (pre-fix behavior, never more aggressive)
@@ -637,15 +640,15 @@ export async function runRebootSweep(): Promise<void> {
       }
 
       // Clean up pre-boot stale session before failing (if it existed)
-      if (session) deleteActiveSession(task.id);
+      if (session) await deleteActiveSession(task.id);
 
       // Auto-fail the task
-      const failed = failTask(task.id, reason);
+      const failed = await failTask(task.id, reason);
       if (!failed) continue;
 
       // Fix agent status
-      if (getActiveTaskCount(task.agentId) === 0) {
-        restoreAgentIdleAfterRemediation(task.agentId);
+      if ((await getActiveTaskCount(task.agentId)) === 0) {
+        await restoreAgentIdleAfterRemediation(task.agentId);
       }
 
       // Don't retry system-generated heartbeat tasks
@@ -658,14 +661,13 @@ export async function runRebootSweep(): Promise<void> {
       let retryTaskId: string | null = null;
 
       // Guard: only retry if parent doesn't already have a retry child
-      const existingRetry = getDb()
-        .prepare<{ id: string }, [string]>(
-          `SELECT id FROM agent_tasks
+      const existingRetry = await getDbClient().get<{ id: string }>(
+        `SELECT id FROM agent_tasks
            WHERE parentTaskId = ?
              AND status NOT IN ('completed', 'failed', 'cancelled')
            LIMIT 1`,
-        )
-        .get(task.id);
+        [task.id],
+      );
 
       if (!existingRetry) {
         try {
@@ -678,9 +680,9 @@ export async function runRebootSweep(): Promise<void> {
           // the pool-fallback leg (agent gone/offline/at-capacity) — so that
           // leg is still role/capability-gated instead of role-blind.
           let preferredAgentId: string | undefined;
-          const candidate = getPinCandidateAgent(task.agentId);
+          const candidate = await getPinCandidateAgent(task.agentId);
           if (candidate) {
-            const activeCount = getActiveTaskCount(candidate.id);
+            const activeCount = await getActiveTaskCount(candidate.id);
             const hasCap = activeCount < (candidate.maxTasks ?? 1);
             if (hasCap) {
               preferredAgentId = candidate.id;
@@ -694,14 +696,14 @@ export async function runRebootSweep(): Promise<void> {
           const tags = ["reboot-retry", "auto-generated"];
           if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
 
-          const retryTask = createTaskExtended(task.task, {
+          const retryTask = await createTaskExtended(task.task, {
             parentTaskId: task.id,
             agentId: preferredAgentId,
             tags,
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
-            routingAffinity: buildRoutingAffinityFromAgent(task.agentId) ?? undefined,
+            routingAffinity: (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined,
           });
           retryTaskId = retryTask.id;
           console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
@@ -731,21 +733,21 @@ export function getRebootAffectedTasks() {
  * - busy with 0 active tasks → fix to idle
  * - idle with active tasks → fix to busy
  */
-function checkWorkerHealth(findings: HeartbeatFindings): void {
-  const agents = getAllAgents().filter((a) => a.status !== "offline");
+async function checkWorkerHealth(findings: HeartbeatFindings): Promise<void> {
+  const agents = (await getAllAgents()).filter((a) => a.status !== "offline");
 
   for (const agent of agents) {
-    const activeCount = getActiveTaskCount(agent.id);
+    const activeCount = await getActiveTaskCount(agent.id);
 
     if (agent.status === "busy" && activeCount === 0) {
-      updateAgentStatus(agent.id, "idle");
+      await updateAgentStatus(agent.id, "idle");
       findings.workerHealthFixes.push({
         agentId: agent.id,
         oldStatus: "busy",
         newStatus: "idle",
       });
     } else if (agent.status === "idle" && activeCount > 0) {
-      updateAgentStatus(agent.id, "busy");
+      await updateAgentStatus(agent.id, "busy");
       findings.workerHealthFixes.push({
         agentId: agent.id,
         oldStatus: "idle",
@@ -777,8 +779,8 @@ function checkWorkerHealth(findings: HeartbeatFindings): void {
  * `MAX_AUTO_ASSIGN_PER_SWEEP` tasks or exhausted the pool (capped at
  * `POOL_SCAN_CAP` rows scanned).
  */
-function autoAssignPoolTasks(findings: HeartbeatFindings): void {
-  getDb().transaction(() => {
+async function autoAssignPoolTasks(findings: HeartbeatFindings): Promise<void> {
+  await getDbClient().transaction(async () => {
     // Skip idle workers whose accumulated empty-poll count has hit the gate;
     // assigning to them would just have them exit on their next poll. Filter on
     // the rows already returned (emptyPollCount is populated) rather than
@@ -792,8 +794,8 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     // the flag off this is inert: legacy workers stop refreshing their
     // retained rows, and filtering on them would park tasks on healthy agents.
     const multiRuntime = isMultiRuntimeEnabled();
-    const withLiveRuntime = multiRuntime ? agentsWithLiveRuntime() : null;
-    const idleWorkers = getIdleWorkersWithCapacity().filter(
+    const withLiveRuntime = multiRuntime ? await agentsWithLiveRuntime() : null;
+    const idleWorkers = (await getIdleWorkersWithCapacity()).filter(
       (w) =>
         (w.emptyPollCount ?? 0) < MAX_EMPTY_POLLS &&
         (withLiveRuntime === null || withLiveRuntime.has(w.id)),
@@ -801,14 +803,13 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     if (idleWorkers.length === 0) return;
 
     const reservedByWorker = new Map<string, number>();
-    const reservedForWorker = (agentId: string): number => {
+    const reservedForWorker = async (agentId: string): Promise<number> => {
       const cached = reservedByWorker.get(agentId);
       if (cached !== undefined) return cached;
-      const row = getDb()
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
-        )
-        .get(agentId);
+      const row = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE agentId = ? AND status IN ('pending', 'in_progress')",
+        [agentId],
+      );
       const reserved = row?.count ?? 0;
       reservedByWorker.set(agentId, reserved);
       return reserved;
@@ -818,21 +819,28 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
     let offset = 0;
 
     while (assignedCount < maxAutoAssignPerSweep() && offset < POOL_SCAN_CAP) {
-      const batch = getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
+      const batch = await getUnassignedPoolTasks(POOL_SCAN_BATCH_SIZE, offset);
       if (batch.length === 0) break;
 
       for (const task of batch) {
         if (assignedCount >= maxAutoAssignPerSweep()) break;
 
-        const worker = idleWorkers.find(
-          (w) => reservedForWorker(w.id) < (w.maxTasks ?? 1) && isAgentEligibleForTask(w, task),
-        );
+        let worker: (typeof idleWorkers)[number] | undefined;
+        for (const w of idleWorkers) {
+          if (
+            (await reservedForWorker(w.id)) < (w.maxTasks ?? 1) &&
+            isAgentEligibleForTask(w, task)
+          ) {
+            worker = w;
+            break;
+          }
+        }
         if (!worker) continue; // No eligible worker with capacity this sweep — leave queued.
 
-        const assigned = assignUnassignedTaskPending(task.id, worker.id);
+        const assigned = await assignUnassignedTaskPending(task.id, worker.id);
         if (assigned) {
           findings.autoAssigned.push({ taskId: task.id, agentId: worker.id });
-          reservedByWorker.set(worker.id, reservedForWorker(worker.id) + 1);
+          reservedByWorker.set(worker.id, (await reservedForWorker(worker.id)) + 1);
           assignedCount++;
         }
       }
@@ -840,7 +848,7 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
       offset += batch.length;
       if (batch.length < POOL_SCAN_BATCH_SIZE) break; // Exhausted the pool.
     }
-  })();
+  });
 }
 
 /**
@@ -856,11 +864,11 @@ function autoAssignPoolTasks(findings: HeartbeatFindings): void {
  * cleanup-only preflight-bail path and the first post-reboot sweep — and a
  * pending pin is reaped even when the system otherwise looks idle.
  */
-function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
+async function escalateUnreclaimedResumes(findings: HeartbeatFindings): Promise<void> {
   // Grace 0 = reaper disabled (rollback switch).
   if (HEARTBEAT_RESUME_PIN_GRACE_MIN <= 0) return;
 
-  const stale = getStalePinnedResumes(HEARTBEAT_RESUME_PIN_GRACE_MIN);
+  const stale = await getStalePinnedResumes(HEARTBEAT_RESUME_PIN_GRACE_MIN);
   if (stale.length === 0) return;
 
   // A non-offline Lead is required to re-delegate. Without one (none registered,
@@ -869,7 +877,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
   // can't poll it (which would strand the work). The budget-exhaustion path below
   // is independent of the Lead and still runs. `getLeadAgent` already prefers a
   // non-offline lead, so this also guards the createRerouteDecisionTask assignment.
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   const hasLead = lead != null && lead.status !== "offline";
 
   for (const resume of stale) {
@@ -880,7 +888,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
     // flapping task could loop forever). Terminalize and stop. Atomic, so we
     // never kill a resume the agent just reclaimed in the gap.
     if (getResumeGeneration(resume) >= maxResumeGenerations()) {
-      const failed = failPendingResumeIfUnclaimed(
+      const failed = await failPendingResumeIfUnclaimed(
         resume.id,
         "failed",
         RESUME_BUDGET_EXHAUSTED_REASON,
@@ -895,7 +903,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
 
     if (!hasLead) continue; // No lead → leave the pin pending; nothing to escalate to.
 
-    const original = getTaskById(resume.parentTaskId);
+    const original = await getTaskById(resume.parentTaskId);
     if (!original) continue; // Parent gone — nothing to escalate against.
 
     // Escalate atomically: terminalize the pin + repoint the tracker link
@@ -911,15 +919,15 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
     //    cancel so the pin is retried next sweep instead of being stranded.
     let escalation: { decisionTaskId: string } | null = null;
     try {
-      escalation = getDb().transaction(() => {
-        const terminalized = failPendingResumeIfUnclaimed(
+      escalation = await getDbClient().transaction(async () => {
+        const terminalized = await failPendingResumeIfUnclaimed(
           resume.id,
           "cancelled",
           "pin_unreclaimed_escalated",
         );
         if (!terminalized) return null; // reclaimed in the gap — no writes made
-        repointTrackerSyncBySwarmId(resume.id, original.id);
-        const decision = createRerouteDecisionTask({
+        await repointTrackerSyncBySwarmId(resume.id, original.id);
+        const decision = await createRerouteDecisionTask({
           original,
           staleResume: resume,
           reason: "crash_recovery",
@@ -929,7 +937,7 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
           throw new Error(`reroute-decision not created: ${decision.reason}`);
         }
         return { decisionTaskId: decision.task.id };
-      })();
+      });
     } catch (err) {
       console.warn(
         `[Heartbeat] Reroute escalation rolled back for resume ${resume.id.slice(0, 8)} — ${
@@ -965,23 +973,23 @@ function escalateUnreclaimedResumes(findings: HeartbeatFindings): void {
  * non-terminal-`reroute-decision`-child check `createPoolStarvationDecisionTask`
  * shares with `createRerouteDecisionTask`.
  */
-function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
+async function escalateStarvedPoolTasks(findings: HeartbeatFindings): Promise<void> {
   if (!isPoolAffinityEnforcementEnabled()) return;
 
   const cutoff = new Date(Date.now() - POOL_AFFINITY_ESCALATION_MIN * 60 * 1000).toISOString();
-  const candidates = getStaleUnassignedAffinityTasks(cutoff);
+  const candidates = await getStaleUnassignedAffinityTasks(cutoff);
   if (candidates.length === 0) return;
 
   // Lead-owned targets never actually claim pool work (getIdleWorkersWithCapacity
   // already excludes them), so exclude them here too — otherwise a Lead whose
   // role happens to match would falsely suppress escalation forever.
-  const registeredAgents = getAllAgents().filter((a) => !a.isLead);
+  const registeredAgents = (await getAllAgents()).filter((a) => !a.isLead);
 
   for (const task of candidates) {
     const hasEligibleAgent = registeredAgents.some((agent) => isAgentEligibleForTask(agent, task));
     if (hasEligibleAgent) continue; // Someone (any status) matches — keep queued.
 
-    const decision = createPoolStarvationDecisionTask({ original: task });
+    const decision = await createPoolStarvationDecisionTask({ original: task });
     if (decision.kind === "created") {
       findings.escalatedReroutes.push({
         originalTaskId: task.id,
@@ -999,31 +1007,31 @@ function escalateStarvedPoolTasks(findings: HeartbeatFindings): void {
  * process is serving it. Recovery still runs for the task; the agent just
  * must not be advertised as available when nothing can poll for it.
  */
-function restoreAgentIdleAfterRemediation(agentId: string): void {
-  if (isMultiRuntimeEnabled() && countActiveRuntimeInstancesForAgent(agentId) === 0) return;
-  updateAgentStatus(agentId, "idle");
+async function restoreAgentIdleAfterRemediation(agentId: string): Promise<void> {
+  if (isMultiRuntimeEnabled() && (await countActiveRuntimeInstancesForAgent(agentId)) === 0) return;
+  await updateAgentStatus(agentId, "idle");
 }
 
 /**
  * Call existing stale resource cleanup functions.
  */
 async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void> {
-  findings.staleCleanup.sessions = cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
-  findings.staleCleanup.reviewingTasks = releaseStaleReviewingTasks(
+  findings.staleCleanup.sessions = await cleanupStaleSessions(STALE_CLEANUP_THRESHOLD_MINUTES);
+  findings.staleCleanup.reviewingTasks = await releaseStaleReviewingTasks(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.mentionProcessing = releaseStaleMentionProcessing(
+  findings.staleCleanup.mentionProcessing = await releaseStaleMentionProcessing(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
-  findings.staleCleanup.inboxProcessing = releaseStaleProcessingInbox(
+  findings.staleCleanup.inboxProcessing = await releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
   // DES-523 Phase 3: escalate pinned crash-recovery resumes that were never
   // reclaimed within the grace window to a Lead re-delegation decision.
-  escalateUnreclaimedResumes(findings);
+  await escalateUnreclaimedResumes(findings);
   // Routing-affinity Phase 3: escalate affinity-tagged pool tasks that have
   // zero eligible registered agents to a Lead re-delegation decision.
-  escalateStarvedPoolTasks(findings);
+  await escalateStarvedPoolTasks(findings);
   try {
     findings.staleCleanup.workflowRuns = await recoverIncompleteRuns(getExecutorRegistry());
   } catch {
@@ -1082,14 +1090,14 @@ export function isEffectivelyEmpty(content: string): boolean {
 /**
  * Gather current system status as a markdown string for the lead's checklist task.
  */
-export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string {
-  const stats = getTaskStats();
-  const stalledTasks = getStalledInProgressTasks(stallThresholdMinutes());
-  const agents = getAllAgents();
-  const idleWorkers = getIdleWorkersWithCapacity();
-  const poolTasks = getUnassignedPoolTasks(10);
-  const recentCompleted = getRecentCompletedCount(24);
-  const recentFailedCount = getRecentFailedCount(24);
+export async function gatherSystemStatus(options?: { isBootTriage?: boolean }): Promise<string> {
+  const stats = await getTaskStats();
+  const stalledTasks = await getStalledInProgressTasks(stallThresholdMinutes());
+  const agents = await getAllAgents();
+  const idleWorkers = await getIdleWorkersWithCapacity();
+  const poolTasks = await getUnassignedPoolTasks(10);
+  const recentCompleted = await getRecentCompletedCount(24);
+  const recentFailedCount = await getRecentFailedCount(24);
 
   const sections: string[] = [];
 
@@ -1114,7 +1122,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
   }
 
   // Recent failures with reasons and pattern detection (last 6 hours)
-  const recentFailures = getRecentFailedTasks(6);
+  const recentFailures = await getRecentFailedTasks(6);
   if (recentFailures.length > 0) {
     sections.push("");
     sections.push("## Recent Failures (last 6h) [auto-generated]");
@@ -1211,7 +1219,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
     const orphanedTasks: AgentTask[] = [];
 
     for (const status of ["pending", "offered"] as const) {
-      const tasks = getTasksByStatus(status);
+      const tasks = await getTasksByStatus(status);
 
       for (const task of tasks) {
         // 'pending' tasks carry their holder in agentId; 'offered' tasks have
@@ -1253,7 +1261,7 @@ export function gatherSystemStatus(options?: { isBootTriage?: boolean }): string
  * Check HEARTBEAT.md content and create a checklist task for the lead if needed.
  */
 export async function checkHeartbeatChecklist(): Promise<void> {
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   if (!lead) return;
 
   const heartbeatMd = lead.heartbeatMd;
@@ -1262,18 +1270,17 @@ export async function checkHeartbeatChecklist(): Promise<void> {
   if (isEffectivelyEmpty(heartbeatMd)) return;
 
   // Dedup: skip if lead already has an active heartbeat-checklist task
-  const existing = getDb()
-    .prepare<{ id: string }, [string]>(
-      `SELECT id FROM agent_tasks
+  const existing = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'heartbeat-checklist'
          AND status NOT IN ('completed', 'failed', 'cancelled')
        LIMIT 1`,
-    )
-    .get(lead.id);
+    [lead.id],
+  );
   if (existing) return;
 
-  const systemStatus = gatherSystemStatus();
+  const systemStatus = await gatherSystemStatus();
 
   const result = resolveTemplate("heartbeat.checklist", {
     system_status: systemStatus,
@@ -1282,7 +1289,7 @@ export async function checkHeartbeatChecklist(): Promise<void> {
 
   if (result.skipped) return;
 
-  createTaskExtended(result.text, {
+  await createTaskExtended(result.text, {
     agentId: lead.id,
     taskType: "heartbeat-checklist",
     tags: ["checklist", "auto-generated"],
@@ -1307,7 +1314,7 @@ export async function runHeartbeatSweep(): Promise<void> {
 
   try {
     // Tier 1: Preflight gate
-    if (!preflightGate()) {
+    if (!(await preflightGate())) {
       const cleanupOnlyFindings: HeartbeatFindings = {
         stalledTasks: [],
         autoFailedTasks: [],
@@ -1329,14 +1336,16 @@ export async function runHeartbeatSweep(): Promise<void> {
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
       // stopped pinging is exactly the case the preflight gate sees as
       // "nothing actionable", and it would otherwise stay available forever.
-      cleanupOnlyFindings.staleCleanup.staleRuntimes = expireStaleRuntimeInstances().expired;
+      cleanupOnlyFindings.staleCleanup.staleRuntimes = (
+        await expireStaleRuntimeInstances()
+      ).expired;
       // preflightGate() already sends any tick with `stats.offered > 0` down
       // the full codeLevelTriage() path, so this cleanup-only branch only
       // runs with zero offered tasks in play — call it anyway so a task
       // offered and its offeree deleted/closed in the same idle window isn't
       // left waiting for the next actionable tick.
       cleanupOnlyFindings.staleCleanup.staleOfferedTasks =
-        releaseStaleOfferedTasksForOfflineAgents();
+        await releaseStaleOfferedTasksForOfflineAgents();
       await cleanupStaleResources(cleanupOnlyFindings);
       logFindings(cleanupOnlyFindings);
       return; // Nothing actionable — bail early
@@ -1464,24 +1473,23 @@ export function stopHeartbeat(): void {
  * Uses the same HEARTBEAT.md content but with reboot-specific context prepended.
  */
 export async function createBootTriageTask(): Promise<void> {
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
   if (!lead) return;
 
   const heartbeatMd = lead.heartbeatMd ?? "";
 
   // Dedup: skip if lead already has an active boot-triage task
-  const existing = getDb()
-    .prepare<{ id: string }, [string]>(
-      `SELECT id FROM agent_tasks
+  const existing = await getDbClient().get<{ id: string }>(
+    `SELECT id FROM agent_tasks
        WHERE agentId = ?
          AND taskType = 'boot-triage'
          AND status NOT IN ('completed', 'failed', 'cancelled')
        LIMIT 1`,
-    )
-    .get(lead.id);
+    [lead.id],
+  );
   if (existing) return;
 
-  const systemStatus = gatherSystemStatus({ isBootTriage: true });
+  const systemStatus = await gatherSystemStatus({ isBootTriage: true });
 
   const result = resolveTemplate("heartbeat.boot-triage", {
     system_status: systemStatus,
@@ -1492,7 +1500,7 @@ export async function createBootTriageTask(): Promise<void> {
 
   if (result.skipped) return;
 
-  createTaskExtended(result.text, {
+  await createTaskExtended(result.text, {
     agentId: lead.id,
     taskType: "boot-triage",
     tags: ["boot", "triage", "auto-generated"],

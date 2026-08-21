@@ -27,7 +27,7 @@ export const registerSkillUninstallTool = (server: McpServer) => {
       const targetAgentId = args.agentId ?? requestInfo.agentId;
 
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",
@@ -45,7 +45,7 @@ export const registerSkillUninstallTool = (server: McpServer) => {
         }
       }
 
-      const removed = uninstallSkill(targetAgentId, args.skillId);
+      const removed = await uninstallSkill(targetAgentId, args.skillId);
       const message = removed ? "Skill uninstalled." : "Skill was not installed for this agent.";
       return removed
         ? toolOk(message, { data: { yourAgentId: requestInfo.agentId } })

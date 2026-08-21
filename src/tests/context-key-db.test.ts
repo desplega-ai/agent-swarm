@@ -5,7 +5,7 @@ import {
   completeTask,
   createAgent,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getInProgressTasksByContextKey,
   initDb,
 } from "../be/db";
@@ -29,8 +29,8 @@ afterAll(() => {
 });
 
 describe("contextKey persistence + lookup", () => {
-  test("createTaskExtended persists contextKey and getInProgressTasksByContextKey returns it", () => {
-    const agent = createAgent({
+  test("createTaskExtended persists contextKey and getInProgressTasksByContextKey returns it", async () => {
+    const agent = await createAgent({
       name: "ctx-key-agent-1",
       isLead: false,
       status: "idle",
@@ -38,16 +38,16 @@ describe("contextKey persistence + lookup", () => {
     });
 
     const key = slackContextKey({ channelId: "C_TEST_1", threadTs: "1700000000.000001" });
-    const task = createTaskExtended("Hello", { agentId: agent.id, contextKey: key });
+    const task = await createTaskExtended("Hello", { agentId: agent.id, contextKey: key });
 
     expect(task.contextKey).toBe(key);
 
-    const siblings = getInProgressTasksByContextKey(key);
+    const siblings = await getInProgressTasksByContextKey(key);
     expect(siblings.map((t) => t.id)).toContain(task.id);
   });
 
-  test("getInProgressTasksByContextKey excludes terminal tasks", () => {
-    const agent = createAgent({
+  test("getInProgressTasksByContextKey excludes terminal tasks", async () => {
+    const agent = await createAgent({
       name: "ctx-key-agent-2",
       isLead: false,
       status: "idle",
@@ -55,24 +55,27 @@ describe("contextKey persistence + lookup", () => {
     });
 
     const key = slackContextKey({ channelId: "C_TEST_2", threadTs: "1700000000.000002" });
-    const done = createTaskExtended("Done task", { agentId: agent.id, contextKey: key });
-    const pending = createTaskExtended("Pending task", { agentId: agent.id, contextKey: key });
+    const done = await createTaskExtended("Done task", { agentId: agent.id, contextKey: key });
+    const pending = await createTaskExtended("Pending task", {
+      agentId: agent.id,
+      contextKey: key,
+    });
 
-    completeTask(done.id, "ok");
+    await completeTask(done.id, "ok");
 
-    const siblings = getInProgressTasksByContextKey(key);
+    const siblings = await getInProgressTasksByContextKey(key);
     const ids = siblings.map((t) => t.id);
     expect(ids).toContain(pending.id);
     expect(ids).not.toContain(done.id);
   });
 
-  test("getInProgressTasksByContextKey returns empty for unknown key", () => {
-    const results = getInProgressTasksByContextKey("task:slack:C_NONE:0");
+  test("getInProgressTasksByContextKey returns empty for unknown key", async () => {
+    const results = await getInProgressTasksByContextKey("task:slack:C_NONE:0");
     expect(results).toEqual([]);
   });
 
-  test("child task inherits contextKey from parent", () => {
-    const agent = createAgent({
+  test("child task inherits contextKey from parent", async () => {
+    const agent = await createAgent({
       name: "ctx-key-agent-3",
       isLead: false,
       status: "idle",
@@ -80,14 +83,14 @@ describe("contextKey persistence + lookup", () => {
     });
 
     const key = slackContextKey({ channelId: "C_TEST_3", threadTs: "1700000000.000003" });
-    const parent = createTaskExtended("Parent", { agentId: agent.id, contextKey: key });
-    const child = createTaskExtended("Child", { agentId: agent.id, parentTaskId: parent.id });
+    const parent = await createTaskExtended("Parent", { agentId: agent.id, contextKey: key });
+    const child = await createTaskExtended("Child", { agentId: agent.id, parentTaskId: parent.id });
 
     expect(child.contextKey).toBe(key);
   });
 
-  test("createTaskExtended skips duplicate active Linear tracker contextKey", () => {
-    const agent = createAgent({
+  test("createTaskExtended skips duplicate active Linear tracker contextKey", async () => {
+    const agent = await createAgent({
       name: "ctx-key-agent-linear-active",
       isLead: false,
       status: "idle",
@@ -95,21 +98,25 @@ describe("contextKey persistence + lookup", () => {
     });
 
     const key = linearContextKey({ issueIdentifier: "DES-201" });
-    const first = createTaskExtended("First Linear task", { agentId: agent.id, contextKey: key });
-    const second = createTaskExtended("Duplicate Linear task", {
+    const first = await createTaskExtended("First Linear task", {
+      agentId: agent.id,
+      contextKey: key,
+    });
+    const second = await createTaskExtended("Duplicate Linear task", {
       agentId: agent.id,
       contextKey: key,
     });
 
     expect(second.id).toBe(first.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
-    expect(count.count).toBe(1);
+    const count = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    );
+    expect(count?.count).toBe(1);
   });
 
-  test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", () => {
-    const agent = createAgent({
+  test("createTaskExtended skips duplicate Linear tracker contextKey with linked PR", async () => {
+    const agent = await createAgent({
       name: "ctx-key-agent-linear-pr",
       isLead: false,
       status: "idle",
@@ -117,7 +124,7 @@ describe("contextKey persistence + lookup", () => {
     });
 
     const key = linearContextKey({ issueIdentifier: "DES-202" });
-    const first = createTaskExtended("Completed Linear task with PR", {
+    const first = await createTaskExtended("Completed Linear task with PR", {
       agentId: agent.id,
       contextKey: key,
       vcsProvider: "github",
@@ -125,17 +132,18 @@ describe("contextKey persistence + lookup", () => {
       vcsNumber: 875,
       vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/875",
     });
-    completeTask(first.id, "PR opened");
+    await completeTask(first.id, "PR opened");
 
-    const second = createTaskExtended("Duplicate Linear task after PR", {
+    const second = await createTaskExtended("Duplicate Linear task after PR", {
       agentId: agent.id,
       contextKey: key,
     });
 
     expect(second.id).toBe(first.id);
-    const count = getDb()
-      .query("SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?")
-      .get(key) as { count: number };
-    expect(count.count).toBe(1);
+    const count = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks WHERE contextKey = ?",
+      [key],
+    );
+    expect(count?.count).toBe(1);
   });
 });

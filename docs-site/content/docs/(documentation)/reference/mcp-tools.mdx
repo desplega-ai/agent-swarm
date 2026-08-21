@@ -293,6 +293,32 @@ Post a new top-level message to a Slack channel and return its `ts` so the calle
 | `message` | string | Yes | Message content |
 | `blocks` | array | No | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
 
+### slack-create-channel
+
+Create a public or private Slack channel. The supplied name is normalized to Slack's channel-name rules. Requires lead privileges.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Desired channel name |
+| `isPrivate` | boolean | No | Create a private channel (default: `false`) |
+
+### slack-invite-to-channel
+
+Invite up to 100 workspace users to a Slack channel. Users who are already members are treated as a successful no-op. Requires lead privileges.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channelId` | string | Yes | Slack channel ID |
+| `userIds` | array | Yes | Slack user IDs to invite (1–100) |
+
+### slack-archive-channel
+
+Archive a Slack channel. Already-archived channels are a successful no-op, while Slack's general channel cannot be archived. Requires lead privileges.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `channelId` | string | Yes | Slack channel ID to archive |
+
 ### slack-list-channels
 
 List Slack channels the bot is a member of.

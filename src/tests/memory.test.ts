@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { chunkContent } from "../be/chunking";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../be/embedding";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
@@ -25,8 +25,8 @@ describe("Memory System", () => {
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
 
-    createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
+    await createAgent({ id: agentA, name: "Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "Agent B", isLead: true, status: "idle" });
   });
 
   afterAll(async () => {
@@ -207,8 +207,8 @@ describe("Memory System", () => {
   // ==========================================================================
 
   describe("store.store (createMemory)", () => {
-    test("creates a memory with all fields", () => {
-      const memory = store.store({
+    test("creates a memory with all fields", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "Test Memory",
@@ -236,8 +236,8 @@ describe("Memory System", () => {
       expect(memory.accessedAt).toBeDefined();
     });
 
-    test("creates with minimal fields", () => {
-      const memory = store.store({
+    test("creates with minimal fields", async () => {
+      const memory = await store.store({
         agentId: null,
         scope: "swarm",
         name: "Minimal",
@@ -256,8 +256,8 @@ describe("Memory System", () => {
   });
 
   describe("store.get (getMemoryById)", () => {
-    test("returns existing memory", () => {
-      const created = store.store({
+    test("returns existing memory", async () => {
+      const created = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "Findable",
@@ -265,19 +265,19 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const found = store.get(created.id);
+      const found = await store.get(created.id);
       expect(found).not.toBeNull();
       expect(found!.id).toBe(created.id);
       expect(found!.name).toBe("Findable");
     });
 
-    test("returns null for non-existent ID", () => {
-      const found = store.get("00000000-0000-0000-0000-000000000000");
+    test("returns null for non-existent ID", async () => {
+      const found = await store.get("00000000-0000-0000-0000-000000000000");
       expect(found).toBeNull();
     });
 
-    test("updates accessedAt on retrieval", () => {
-      const created = store.store({
+    test("updates accessedAt on retrieval", async () => {
+      const created = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "Access Test",
@@ -291,7 +291,7 @@ describe("Memory System", () => {
         /* spin */
       }
 
-      const found = store.get(created.id);
+      const found = await store.get(created.id);
       expect(found).not.toBeNull();
       // accessedAt should be updated (may or may not differ depending on timing)
       expect(found!.accessedAt).toBeDefined();
@@ -299,8 +299,8 @@ describe("Memory System", () => {
   });
 
   describe("store.updateEmbedding", () => {
-    test("stores and retrieves embedding BLOB", () => {
-      const memory = store.store({
+    test("stores and retrieves embedding BLOB", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "Embedding Test",
@@ -309,12 +309,13 @@ describe("Memory System", () => {
       });
 
       const embedding = new Float32Array([0.1, 0.2, 0.3, -0.5]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Read back the raw row to check embedding
-      const row = getDb()
-        .prepare("SELECT embedding FROM agent_memory WHERE id = ?")
-        .get(memory.id) as { embedding: Buffer | null };
+      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
+        "SELECT embedding FROM agent_memory WHERE id = ?",
+        [memory.id],
+      ))!;
       expect(row.embedding).not.toBeNull();
 
       const restored = deserializeEmbedding(row.embedding!);
@@ -328,14 +329,14 @@ describe("Memory System", () => {
     const searchAgentId = "cccc0000-0000-4000-8000-000000000003";
     const searchAgentId2 = "dddd0000-0000-4000-8000-000000000004";
 
-    beforeAll(() => {
-      createAgent({
+    beforeAll(async () => {
+      await createAgent({
         id: searchAgentId,
         name: "Search Agent",
         isLead: false,
         status: "idle",
       });
-      createAgent({
+      await createAgent({
         id: searchAgentId2,
         name: "Search Agent 2",
         isLead: false,
@@ -345,39 +346,39 @@ describe("Memory System", () => {
       // Create memories with known embeddings (all share a baseline component
       // so pairwise cosine similarity stays above the MIN_SIMILARITY floor).
       // Memory 1: agent scope for searchAgentId
-      const m1 = store.store({
+      const m1 = await store.store({
         agentId: searchAgentId,
         scope: "agent",
         name: "Agent Memory 1",
         content: "Agent-scoped content",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([1, 0.3, 0.3]), "test-model");
+      await store.updateEmbedding(m1.id, new Float32Array([1, 0.3, 0.3]), "test-model");
 
       // Memory 2: swarm scope
-      const m2 = store.store({
+      const m2 = await store.store({
         agentId: searchAgentId,
         scope: "swarm",
         name: "Swarm Memory 1",
         content: "Swarm-scoped content",
         source: "file_index",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0.3, 1, 0.3]), "test-model");
+      await store.updateEmbedding(m2.id, new Float32Array([0.3, 1, 0.3]), "test-model");
 
       // Memory 3: agent scope for OTHER agent
-      const m3 = store.store({
+      const m3 = await store.store({
         agentId: searchAgentId2,
         scope: "agent",
         name: "Other Agent Memory",
         content: "Other agent's private memory",
         source: "manual",
       });
-      store.updateEmbedding(m3.id, new Float32Array([0.3, 0.3, 1]), "test-model");
+      await store.updateEmbedding(m3.id, new Float32Array([0.3, 0.3, 1]), "test-model");
     });
 
-    test("worker sees own agent-scoped + swarm memories", () => {
+    test("worker sees own agent-scoped + swarm memories", async () => {
       const query = new Float32Array([1, 0.3, 0.3]); // closest to Memory 1
-      const results = store.search(query, searchAgentId, { isLead: false });
+      const results = await store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
       expect(names).toContain("Agent Memory 1");
@@ -385,17 +386,17 @@ describe("Memory System", () => {
       expect(names).not.toContain("Other Agent Memory");
     });
 
-    test("worker does not see other agent's agent-scoped memories", () => {
+    test("worker does not see other agent's agent-scoped memories", async () => {
       const query = new Float32Array([0.3, 0.3, 1]); // closest to Memory 3
-      const results = store.search(query, searchAgentId, { isLead: false });
+      const results = await store.search(query, searchAgentId, { isLead: false });
       const names = results.map((r) => r.name);
 
       expect(names).not.toContain("Other Agent Memory");
     });
 
-    test("lead sees ALL memories across agents", () => {
+    test("lead sees ALL memories across agents", async () => {
       const query = new Float32Array([0.3, 0.3, 1]); // closest to Memory 3
-      const results = store.search(query, searchAgentId, { isLead: true });
+      const results = await store.search(query, searchAgentId, { isLead: true });
       const names = results.map((r) => r.name);
 
       expect(names).toContain("Other Agent Memory");
@@ -403,9 +404,9 @@ describe("Memory System", () => {
       expect(names).toContain("Swarm Memory 1");
     });
 
-    test("results sorted by similarity (highest first)", () => {
+    test("results sorted by similarity (highest first)", async () => {
       const query = new Float32Array([1, 0.3, 0.3]); // closest to Memory 1's embedding
-      const results = store.search(query, searchAgentId, { isLead: true });
+      const results = await store.search(query, searchAgentId, { isLead: true });
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].name).toBe("Agent Memory 1");
@@ -417,13 +418,13 @@ describe("Memory System", () => {
       }
     });
 
-    test("scope filter works", () => {
+    test("scope filter works", async () => {
       const query = new Float32Array([1, 1, 1]);
-      const agentOnly = store.search(query, searchAgentId, {
+      const agentOnly = await store.search(query, searchAgentId, {
         scope: "agent",
         isLead: false,
       });
-      const swarmOnly = store.search(query, searchAgentId, {
+      const swarmOnly = await store.search(query, searchAgentId, {
         scope: "swarm",
         isLead: false,
       });
@@ -436,9 +437,9 @@ describe("Memory System", () => {
       }
     });
 
-    test("source filter works", () => {
+    test("source filter works", async () => {
       const query = new Float32Array([1, 1, 1]);
-      const results = store.search(query, searchAgentId, {
+      const results = await store.search(query, searchAgentId, {
         source: "file_index",
         isLead: true,
       });
@@ -448,9 +449,9 @@ describe("Memory System", () => {
       }
     });
 
-    test("limit works", () => {
+    test("limit works", async () => {
       const query = new Float32Array([1, 1, 1]);
-      const results = store.search(query, searchAgentId, {
+      const results = await store.search(query, searchAgentId, {
         limit: 1,
         isLead: true,
       });
@@ -459,12 +460,12 @@ describe("Memory System", () => {
   });
 
   describe("store.list (listMemoriesByAgent)", () => {
-    test("lists agent memories with pagination", () => {
+    test("lists agent memories with pagination", async () => {
       const listAgent = "eeee0000-0000-4000-8000-000000000005";
-      createAgent({ id: listAgent, name: "List Agent", isLead: false, status: "idle" });
+      await createAgent({ id: listAgent, name: "List Agent", isLead: false, status: "idle" });
 
       for (let i = 0; i < 5; i++) {
-        store.store({
+        await store.store({
           agentId: listAgent,
           scope: "agent",
           name: `List Memory ${i}`,
@@ -473,18 +474,18 @@ describe("Memory System", () => {
         });
       }
 
-      const page1 = store.list(listAgent, { scope: "agent", limit: 3, offset: 0 });
+      const page1 = await store.list(listAgent, { scope: "agent", limit: 3, offset: 0 });
       expect(page1.length).toBe(3);
 
-      const page2 = store.list(listAgent, { scope: "agent", limit: 3, offset: 3 });
+      const page2 = await store.list(listAgent, { scope: "agent", limit: 3, offset: 3 });
       expect(page2.length).toBe(2);
     });
 
-    test("counts memories with the same filters used by list", () => {
+    test("counts memories with the same filters used by list", async () => {
       const countAgent = "eeee0000-0000-4000-8000-000000000105";
-      createAgent({ id: countAgent, name: "Count Agent", isLead: false, status: "idle" });
+      await createAgent({ id: countAgent, name: "Count Agent", isLead: false, status: "idle" });
 
-      store.store({
+      await store.store({
         agentId: countAgent,
         scope: "agent",
         name: "Count match 1",
@@ -492,7 +493,7 @@ describe("Memory System", () => {
         source: "file_index",
         sourcePath: "/workspace/src/MemoryPage.tsx",
       });
-      store.store({
+      await store.store({
         agentId: countAgent,
         scope: "swarm",
         name: "Count match 2",
@@ -500,7 +501,7 @@ describe("Memory System", () => {
         source: "file_index",
         sourcePath: "/workspace/SRC/memory-page.tsx",
       });
-      store.store({
+      await store.store({
         agentId: countAgent,
         scope: "agent",
         name: "Wrong source",
@@ -508,7 +509,7 @@ describe("Memory System", () => {
         source: "manual",
         sourcePath: "/workspace/src/MemoryPage.tsx",
       });
-      store.store({
+      await store.store({
         agentId: agentA,
         scope: "agent",
         name: "Wrong owner",
@@ -525,16 +526,16 @@ describe("Memory System", () => {
         sourcePath: "src/memory",
       };
 
-      expect(store.count("", filters)).toBe(2);
-      expect(store.list("", { ...filters, limit: 1, offset: 0 })).toHaveLength(1);
-      expect(store.list("", { ...filters, limit: 1, offset: 1 })).toHaveLength(1);
-      expect(store.list("", { ...filters, limit: 1, offset: 2 })).toHaveLength(0);
+      expect(await store.count("", filters)).toBe(2);
+      expect(await store.list("", { ...filters, limit: 1, offset: 0 })).toHaveLength(1);
+      expect(await store.list("", { ...filters, limit: 1, offset: 1 })).toHaveLength(1);
+      expect(await store.list("", { ...filters, limit: 1, offset: 2 })).toHaveLength(0);
     });
   });
 
   describe("store.delete (deleteMemory)", () => {
-    test("deletes existing memory", () => {
-      const memory = store.store({
+    test("deletes existing memory", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "To Delete",
@@ -542,26 +543,26 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const deleted = store.delete(memory.id);
+      const deleted = await store.delete(memory.id);
       expect(deleted).toBe(true);
 
-      const found = store.get(memory.id);
+      const found = await store.get(memory.id);
       expect(found).toBeNull();
     });
 
-    test("returns false for non-existent memory", () => {
-      const deleted = store.delete("00000000-0000-0000-0000-000000000000");
+    test("returns false for non-existent memory", async () => {
+      const deleted = await store.delete("00000000-0000-0000-0000-000000000000");
       expect(deleted).toBe(false);
     });
   });
 
   describe("store.deleteBySourcePath (deleteMemoriesBySourcePath)", () => {
-    test("deletes all chunks for a source path", () => {
+    test("deletes all chunks for a source path", async () => {
       const path = "/workspace/personal/memory/to-reindex.md";
 
       // Create multiple chunks
       for (let i = 0; i < 3; i++) {
-        store.store({
+        await store.store({
           agentId: agentA,
           scope: "agent",
           name: "Reindex Test",
@@ -573,35 +574,35 @@ describe("Memory System", () => {
         });
       }
 
-      const deleted = store.deleteBySourcePath(path, agentA);
+      const deleted = await store.deleteBySourcePath(path, agentA);
       expect(deleted).toBe(3);
 
       // Verify they're gone
-      const remaining = store.list(agentA).filter((m) => m.sourcePath === path);
+      const remaining = (await store.list(agentA)).filter((m) => m.sourcePath === path);
       expect(remaining.length).toBe(0);
     });
   });
 
   describe("store.getStats (getMemoryStats)", () => {
-    test("returns correct stats", () => {
+    test("returns correct stats", async () => {
       const statsAgent = "ffff0000-0000-4000-8000-000000000006";
-      createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
+      await createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
 
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "Stat 1",
         content: "Content",
         source: "manual",
       });
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "swarm",
         name: "Stat 2",
         content: "Content",
         source: "file_index",
       });
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "Stat 3",
@@ -609,7 +610,7 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const stats = store.getStats(statsAgent);
+      const stats = await store.getStats(statsAgent);
       expect(stats.total).toBe(3);
       expect(stats.bySource.manual).toBe(2);
       expect(stats.bySource.file_index).toBe(1);
@@ -627,11 +628,11 @@ describe("Memory System", () => {
   describe("memory ingestion (API logic)", () => {
     const ingestAgent = "1111aaaa-0000-4000-8000-000000000007";
 
-    beforeAll(() => {
-      createAgent({ id: ingestAgent, name: "Ingest Agent", isLead: false, status: "idle" });
+    beforeAll(async () => {
+      await createAgent({ id: ingestAgent, name: "Ingest Agent", isLead: false, status: "idle" });
     });
 
-    test("creates memory records from content", () => {
+    test("creates memory records from content", async () => {
       const chunks = chunkContent("Short but sufficient content for a single chunk test memory.");
       // Simulate API: if chunks are empty, create a single memory
       const finalChunks =
@@ -646,7 +647,7 @@ describe("Memory System", () => {
               },
             ];
 
-      const memories = store.storeBatch(
+      const memories = await store.storeBatch(
         finalChunks.map((chunk) => ({
           agentId: ingestAgent,
           content: chunk.content,
@@ -660,17 +661,17 @@ describe("Memory System", () => {
       );
 
       expect(memories.length).toBe(1);
-      const memory = store.get(memories[0]!.id);
+      const memory = await store.get(memories[0]!.id);
       expect(memory).not.toBeNull();
       expect(memory!.source).toBe("file_index");
       expect(memory!.sourcePath).toBe("/workspace/personal/memory/ingest-test.md");
     });
 
-    test("dedup: re-indexing same sourcePath replaces old chunks", () => {
+    test("dedup: re-indexing same sourcePath replaces old chunks", async () => {
       const path = "/workspace/personal/memory/dedup-test.md";
 
       // First indexing
-      const m1 = store.store({
+      const m1 = await store.store({
         agentId: ingestAgent,
         content: "Original content",
         name: "dedup-test",
@@ -680,8 +681,8 @@ describe("Memory System", () => {
       });
 
       // Re-index: delete old + create new
-      store.deleteBySourcePath(path, ingestAgent);
-      store.store({
+      await store.deleteBySourcePath(path, ingestAgent);
+      await store.store({
         agentId: ingestAgent,
         content: "Updated content",
         name: "dedup-test",
@@ -691,25 +692,25 @@ describe("Memory System", () => {
       });
 
       // Old memory should be gone
-      expect(store.get(m1.id)).toBeNull();
+      expect(await store.get(m1.id)).toBeNull();
 
       // New memory should exist
-      const memories = store
-        .list(ingestAgent, { scope: "agent" })
-        .filter((m) => m.sourcePath === path);
+      const memories = (await store.list(ingestAgent, { scope: "agent" })).filter(
+        (m) => m.sourcePath === path,
+      );
       expect(memories.length).toBe(1);
       expect(memories[0]!.content).toBe("Updated content");
     });
 
-    test("large content creates multiple chunk records", () => {
+    test("large content creates multiple chunk records", async () => {
       const path = "/workspace/personal/memory/chunked-test.md";
       const longContent = "A ".repeat(3000); // ~6000 chars, well over MAX_CHUNK_SIZE
 
       const chunks = chunkContent(longContent);
       expect(chunks.length).toBeGreaterThan(1);
 
-      store.deleteBySourcePath(path, ingestAgent);
-      store.storeBatch(
+      await store.deleteBySourcePath(path, ingestAgent);
+      await store.storeBatch(
         chunks.map((chunk) => ({
           agentId: ingestAgent,
           content: chunk.content,
@@ -722,9 +723,9 @@ describe("Memory System", () => {
         })),
       );
 
-      const memories = store
-        .list(ingestAgent, { scope: "agent" })
-        .filter((m) => m.sourcePath === path);
+      const memories = (await store.list(ingestAgent, { scope: "agent" })).filter(
+        (m) => m.sourcePath === path,
+      );
       expect(memories.length).toBe(chunks.length);
       // Verify chunk metadata
       for (const m of memories) {
@@ -732,8 +733,8 @@ describe("Memory System", () => {
       }
     });
 
-    test("memory created without embedding has null embedding in DB", () => {
-      const memory = store.store({
+    test("memory created without embedding has null embedding in DB", async () => {
+      const memory = await store.store({
         agentId: ingestAgent,
         content: "No embedding needed",
         name: "no-embed",
@@ -741,14 +742,15 @@ describe("Memory System", () => {
         source: "manual",
       });
 
-      const row = getDb()
-        .prepare("SELECT embedding FROM agent_memory WHERE id = ?")
-        .get(memory.id) as { embedding: Buffer | null };
+      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
+        "SELECT embedding FROM agent_memory WHERE id = ?",
+        [memory.id],
+      ))!;
       expect(row.embedding).toBeNull();
     });
 
-    test("store.updateEmbedding stores and retrieves correctly", () => {
-      const memory = store.store({
+    test("store.updateEmbedding stores and retrieves correctly", async () => {
+      const memory = await store.store({
         agentId: ingestAgent,
         content: "Embed me",
         name: "embed-update",
@@ -757,11 +759,12 @@ describe("Memory System", () => {
       });
 
       const embedding = new Float32Array([0.5, -0.3, 0.8]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
-      const row = getDb()
-        .prepare("SELECT embedding FROM agent_memory WHERE id = ?")
-        .get(memory.id) as { embedding: Buffer | null };
+      const row = (await getDbClient().get<{ embedding: Buffer | null }>(
+        "SELECT embedding FROM agent_memory WHERE id = ?",
+        [memory.id],
+      ))!;
       expect(row.embedding).not.toBeNull();
 
       const restored = deserializeEmbedding(row.embedding!);

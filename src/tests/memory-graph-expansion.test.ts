@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { expandCandidatesWithGraph } from "../be/memory/graph-expansion";
 import { storeLinks } from "../be/memory/link-resolver";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
@@ -37,19 +37,17 @@ function asCandidate(
   };
 }
 
-function insertLink(
+async function insertLink(
   fromMemoryId: string,
   targetId: string,
   opts: { strength?: number; sourceText?: string } = {},
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO memory_link
+  await getDbClient().run(
+    `INSERT INTO memory_link
          (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
        VALUES (?, ?, 'wikilink', 'memory', ?, ?, 'wikilink', ?, NULL, ?, ?)`,
-    )
-    .run(
+    [
       crypto.randomUUID(),
       fromMemoryId,
       targetId,
@@ -57,7 +55,8 @@ function insertLink(
       opts.sourceText ?? `[[${targetId}]]`,
       now,
       now,
-    );
+    ],
+  );
 }
 
 describe("memory graph expansion", () => {
@@ -73,15 +72,19 @@ describe("memory graph expansion", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Graph Test Agent", isLead: false, status: "idle" });
-    createAgent({ id: otherAgentId, name: "Other Graph Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Graph Test Agent", isLead: false, status: "idle" });
+    await createAgent({
+      id: otherAgentId,
+      name: "Other Graph Agent",
+      isLead: false,
+      status: "idle",
+    });
     const nowIso = new Date().toISOString();
-    getDb()
-      .prepare(
-        `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+    await getDbClient().run(
+      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
          VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
-      )
-      .run(taskId, agentId, "graph expansion provenance task", nowIso, nowIso);
+      [taskId, agentId, "graph expansion provenance task", nowIso, nowIso],
+    );
     store = new SqliteMemoryStore();
   });
 
@@ -96,16 +99,16 @@ describe("memory graph expansion", () => {
     }
   });
 
-  test("linked memory surfaces in results it would not reach by similarity alone", () => {
+  test("linked memory surfaces in results it would not reach by similarity alone", async () => {
     // B first so A's wikilink resolves to B's id at storeLinks time.
-    const memoryB = store.store({
+    const memoryB = await store.store({
       agentId,
       scope: "agent",
       name: "graph-beta-note",
       content: "Completely unrelated lexical territory: sourdough hydration ratios.",
       source: "manual",
     });
-    const memoryA = store.store({
+    const memoryA = await store.store({
       agentId,
       scope: "agent",
       name: "graph-alpha-note",
@@ -113,15 +116,15 @@ describe("memory graph expansion", () => {
       source: "manual",
     });
     // A is semantically near the query vector; B is orthogonal (cosine 0 → below MIN_SIMILARITY).
-    store.updateEmbedding(memoryA.id, vector(0), "test");
-    store.updateEmbedding(memoryB.id, vector(1), "test");
-    storeLinks(memoryA.id, agentId, memoryA.content);
+    await store.updateEmbedding(memoryA.id, vector(0), "test");
+    await store.updateEmbedding(memoryB.id, vector(1), "test");
+    await storeLinks(memoryA.id, agentId, memoryA.content);
 
-    const candidates = store.search(vector(0), agentId, { scope: "all", limit: 10 });
+    const candidates = await store.search(vector(0), agentId, { scope: "all", limit: 10 });
     expect(candidates.some((c) => c.id === memoryA.id)).toBe(true);
     expect(candidates.some((c) => c.id === memoryB.id)).toBe(false);
 
-    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const expanded = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     const neighbor = expanded.find((c) => c.id === memoryB.id);
     expect(neighbor).toBeDefined();
     expect(neighbor!.retrievalSource).toBe("graph");
@@ -134,57 +137,56 @@ describe("memory graph expansion", () => {
     expect(ranked.some((r) => r.id === memoryB.id && r.retrievalSource === "graph")).toBe(true);
   });
 
-  test("unresolved wikilink targets are skipped", () => {
-    const memory = store.store({
+  test("unresolved wikilink targets are skipped", async () => {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name: "graph-dangling-note",
       content: "References a memory that does not exist: [[Ghost Memory Nobody Wrote]].",
       source: "manual",
     });
-    storeLinks(memory.id, agentId, memory.content);
+    await storeLinks(memory.id, agentId, memory.content);
 
     // The link row exists, but its targetId is still the raw name text.
-    const linkRows = getDb()
-      .prepare<{ targetId: string }, [string]>(
-        "SELECT targetId FROM memory_link WHERE from_memory_id = ?",
-      )
-      .all(memory.id);
+    const linkRows = await getDbClient().query<{ targetId: string }>(
+      "SELECT targetId FROM memory_link WHERE from_memory_id = ?",
+      [memory.id],
+    );
     expect(linkRows).toHaveLength(1);
     expect(linkRows[0]!.targetId).toBe("Ghost Memory Nobody Wrote");
 
     const candidates = [asCandidate(memory, 0.9, { retrievalSource: "vec" })];
-    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const expanded = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     expect(expanded.map((c) => c.id)).toEqual([memory.id]);
   });
 
-  test("cross-agent agent-scoped neighbor is not leaked (ACL), swarm-scoped is visible", () => {
-    const parent = store.store({
+  test("cross-agent agent-scoped neighbor is not leaked (ACL), swarm-scoped is visible", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-acl-parent",
       content: "Parent memory for ACL checks.",
       source: "manual",
     });
-    const secret = store.store({
+    const secret = await store.store({
       agentId: otherAgentId,
       scope: "agent",
       name: "graph-acl-secret",
       content: "Another agent's private memory.",
       source: "manual",
     });
-    const shared = store.store({
+    const shared = await store.store({
       agentId: otherAgentId,
       scope: "swarm",
       name: "graph-acl-shared",
       content: "Another agent's swarm-shared memory.",
       source: "manual",
     });
-    insertLink(parent.id, secret.id);
-    insertLink(parent.id, shared.id);
+    await insertLink(parent.id, secret.id);
+    await insertLink(parent.id, shared.id);
 
     const candidates = [asCandidate(parent, 0.8, { retrievalSource: "vec" })];
-    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const expanded = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
 
     expect(expanded.some((c) => c.id === secret.id)).toBe(false);
     const sharedNeighbor = expanded.find((c) => c.id === shared.id);
@@ -192,29 +194,29 @@ describe("memory graph expansion", () => {
     expect(sharedNeighbor!.retrievalSource).toBe("graph");
   });
 
-  test("flag off returns the input candidates unchanged (byte-identical)", () => {
-    const parent = store.store({
+  test("flag off returns the input candidates unchanged (byte-identical)", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-flagoff-parent",
       content: "Parent for flag-off test.",
       source: "manual",
     });
-    const neighbor = store.store({
+    const neighbor = await store.store({
       agentId,
       scope: "agent",
       name: "graph-flagoff-neighbor",
       content: "Neighbor that must NOT appear when the flag is off.",
       source: "manual",
     });
-    insertLink(parent.id, neighbor.id);
+    await insertLink(parent.id, neighbor.id);
 
     const candidates = [asCandidate(parent, 0.9, { retrievalSource: "vec" })];
     const snapshot = JSON.stringify(candidates);
 
     process.env.MEMORY_GRAPH_EXPANSION = "0";
     try {
-      const result = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+      const result = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
       expect(result).toBe(candidates); // same reference — nothing touched
       expect(JSON.stringify(result)).toBe(snapshot);
     } finally {
@@ -222,33 +224,33 @@ describe("memory graph expansion", () => {
     }
 
     // Sanity: with the flag back on, the same input DOES gain the neighbor.
-    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const expanded = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     expect(expanded.some((c) => c.id === neighbor.id)).toBe(true);
   });
 
-  test("dedupe keeps the higher-scored entry", () => {
-    const parent = store.store({
+  test("dedupe keeps the higher-scored entry", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-dedupe-parent",
       content: "Parent for dedupe test.",
       source: "manual",
     });
-    const neighbor = store.store({
+    const neighbor = await store.store({
       agentId,
       scope: "agent",
       name: "graph-dedupe-neighbor",
       content: "Neighbor also present organically.",
       source: "manual",
     });
-    insertLink(parent.id, neighbor.id);
+    await insertLink(parent.id, neighbor.id);
 
     // Graph-derived score (0.9 × 1.0 × 0.7 = 0.63) beats the weak organic hit (0.1).
     const weakOrganic = [
       asCandidate(parent, 0.9, { retrievalSource: "vec" }),
       asCandidate(neighbor, 0.1, { retrievalSource: "vec" }),
     ];
-    const expandedWeak = expandCandidatesWithGraph(weakOrganic, agentId, { scope: "all" });
+    const expandedWeak = await expandCandidatesWithGraph(weakOrganic, agentId, { scope: "all" });
     expect(expandedWeak).toHaveLength(2);
     const replaced = expandedWeak.find((c) => c.id === neighbor.id)!;
     expect(replaced.retrievalSource).toBe("graph");
@@ -259,36 +261,38 @@ describe("memory graph expansion", () => {
       asCandidate(parent, 0.2, { retrievalSource: "vec" }),
       asCandidate(neighbor, 0.9, { retrievalSource: "vec" }),
     ];
-    const expandedStrong = expandCandidatesWithGraph(strongOrganic, agentId, { scope: "all" });
+    const expandedStrong = await expandCandidatesWithGraph(strongOrganic, agentId, {
+      scope: "all",
+    });
     expect(expandedStrong).toHaveLength(2);
     const kept = expandedStrong.find((c) => c.id === neighbor.id)!;
     expect(kept.retrievalSource).toBe("vec");
     expect(kept.similarity).toBeCloseTo(0.9, 6);
   });
 
-  test("memory_retrieval rows carry retrievalSource='graph'", () => {
-    const parent = store.store({
+  test("memory_retrieval rows carry retrievalSource='graph'", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-provenance-parent",
       content: "Parent for provenance test.",
       source: "manual",
     });
-    const neighbor = store.store({
+    const neighbor = await store.store({
       agentId,
       scope: "agent",
       name: "graph-provenance-neighbor",
       content: "Neighbor whose retrieval row must say graph.",
       source: "manual",
     });
-    insertLink(parent.id, neighbor.id);
+    await insertLink(parent.id, neighbor.id);
 
     // Mirror the call-site seam: search-shaped candidates → expand → rerank → record.
     const candidates = [asCandidate(parent, 0.9, { retrievalSource: "vec" })];
-    const ranked = rerank(expandCandidatesWithGraph(candidates, agentId, { scope: "all" }), {
+    const ranked = rerank(await expandCandidatesWithGraph(candidates, agentId, { scope: "all" }), {
       limit: 10,
     });
-    recordRetrievals(
+    await recordRetrievals(
       taskId,
       agentId,
       ranked.map((r) => ({
@@ -300,17 +304,16 @@ describe("memory graph expansion", () => {
       { intent: "graph provenance test", eventType: "search" },
     );
 
-    const rows = getDb()
-      .prepare<{ memoryId: string; retrievalSource: string | null }, [string]>(
-        "SELECT memoryId, retrievalSource FROM memory_retrieval WHERE taskId = ?",
-      )
-      .all(taskId);
+    const rows = await getDbClient().query<{ memoryId: string; retrievalSource: string | null }>(
+      "SELECT memoryId, retrievalSource FROM memory_retrieval WHERE taskId = ?",
+      [taskId],
+    );
     expect(rows.find((r) => r.memoryId === neighbor.id)?.retrievalSource).toBe("graph");
     expect(rows.find((r) => r.memoryId === parent.id)?.retrievalSource).toBe("vec");
   });
 
-  test("damping and cap are respected", () => {
-    const parent = store.store({
+  test("damping and cap are respected", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-capdamp-parent",
@@ -320,7 +323,7 @@ describe("memory graph expansion", () => {
     const strengths = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3];
     const neighborIds: string[] = [];
     for (const [i, strength] of strengths.entries()) {
-      const neighbor = store.store({
+      const neighbor = await store.store({
         agentId,
         scope: "agent",
         name: `graph-capdamp-neighbor-${i}`,
@@ -328,13 +331,13 @@ describe("memory graph expansion", () => {
         source: "manual",
       });
       neighborIds.push(neighbor.id);
-      insertLink(parent.id, neighbor.id, { strength });
+      await insertLink(parent.id, neighbor.id, { strength });
     }
 
     const candidates = [asCandidate(parent, 0.8, { retrievalSource: "vec" })];
 
     // Custom damping: similarity = parentSim × strength × damping.
-    const damped = expandCandidatesWithGraph(candidates, agentId, {
+    const damped = await expandCandidatesWithGraph(candidates, agentId, {
       scope: "all",
       damping: 0.5,
       cap: 1,
@@ -344,63 +347,63 @@ describe("memory graph expansion", () => {
     expect(top.similarity).toBeCloseTo(0.8 * 0.9 * 0.5, 6);
 
     // Cap 3 → exactly three additions, and they are the top-3 by derived score.
-    const capped = expandCandidatesWithGraph(candidates, agentId, { scope: "all", cap: 3 });
+    const capped = await expandCandidatesWithGraph(candidates, agentId, { scope: "all", cap: 3 });
     expect(capped).toHaveLength(4);
     const addedIds = capped.slice(1).map((c) => c.id);
     expect(new Set(addedIds)).toEqual(new Set(neighborIds.slice(0, 3)));
 
     // Default cap (5) → five additions out of seven linked neighbors.
-    const defaulted = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const defaulted = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     expect(defaulted).toHaveLength(6);
   });
 
-  test("source filter is preserved — off-filter neighbors are not added", () => {
-    const parent = store.store({
+  test("source filter is preserved — off-filter neighbors are not added", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-srcfilter-parent",
       content: "Parent with manual source.",
       source: "manual",
     });
-    const offFilterNeighbor = store.store({
+    const offFilterNeighbor = await store.store({
       agentId,
       scope: "agent",
       name: "graph-srcfilter-neighbor",
       content: "Neighbor with task_completion source.",
       source: "task_completion",
     });
-    insertLink(parent.id, offFilterNeighbor.id);
+    await insertLink(parent.id, offFilterNeighbor.id);
 
     const candidates = [asCandidate(parent, 0.8, { retrievalSource: "vec" })];
 
     // A source-filtered search must not gain off-filter rows via the graph.
-    const filtered = expandCandidatesWithGraph(candidates, agentId, {
+    const filtered = await expandCandidatesWithGraph(candidates, agentId, {
       scope: "all",
       source: "manual",
     });
     expect(filtered.some((c) => c.id === offFilterNeighbor.id)).toBe(false);
 
     // Without the filter the neighbor is reachable.
-    const unfiltered = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const unfiltered = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     expect(unfiltered.some((c) => c.id === offFilterNeighbor.id)).toBe(true);
   });
 
-  test("neighbor score derives from the parent's raw (pre-decay) similarity", () => {
-    const parent = store.store({
+  test("neighbor score derives from the parent's raw (pre-decay) similarity", async () => {
+    const parent = await store.store({
       agentId,
       scope: "agent",
       name: "graph-rawsim-parent",
       content: "Parent whose search similarity already embeds recency decay.",
       source: "manual",
     });
-    const neighbor = store.store({
+    const neighbor = await store.store({
       agentId,
       scope: "agent",
       name: "graph-rawsim-neighbor",
       content: "Neighbor for the raw-similarity derivation test.",
       source: "manual",
     });
-    insertLink(parent.id, neighbor.id, { strength: 1.0 });
+    await insertLink(parent.id, neighbor.id, { strength: 1.0 });
 
     // fts/hybrid arms ship similarity = rawSimilarity × parentDecay with
     // recencyDecayApplied: true. The neighbor must derive from the RAW value —
@@ -412,7 +415,7 @@ describe("memory graph expansion", () => {
         retrievalSource: "fts",
       }),
     ];
-    const expanded = expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
+    const expanded = await expandCandidatesWithGraph(candidates, agentId, { scope: "all" });
     const added = expanded.find((c) => c.id === neighbor.id);
     expect(added).toBeDefined();
     expect(added!.similarity).toBeCloseTo(1.0 * 1.0 * 0.7, 6);

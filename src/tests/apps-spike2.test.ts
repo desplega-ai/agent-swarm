@@ -11,7 +11,7 @@ import appSeed from "../../scripts/dev/ideas-app.seed.json";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
 import { createAppRow } from "../apps/row-store";
 import { getApp } from "../apps/store";
-import { closeDb, createAgent, getDb, initDb, upsertKv } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, upsertKv } from "../be/db";
 import { deleteScript, upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleApps } from "../http/apps";
@@ -75,8 +75,8 @@ const baseDefinition = {
   defaultPage: "main",
 };
 
-function normalizedBaseDefinition() {
-  const parsed = parseAppDefinition(baseDefinition);
+async function normalizedBaseDefinition() {
+  const parsed = await parseAppDefinition(baseDefinition);
   if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
   return parsed.definition;
 }
@@ -150,8 +150,8 @@ function registeredTools(
     ._registeredTools;
 }
 
-function expectIssue(definition: unknown, expectedPath: string): void {
-  const parsed = parseAppDefinition(definition);
+async function expectIssue(definition: unknown, expectedPath: string): Promise<void> {
+  const parsed = await parseAppDefinition(definition);
   expect(parsed.success).toBe(false);
   if (parsed.success) return;
   expect(parsed.issues.some((issue) => issue.path.includes(expectedPath))).toBe(true);
@@ -170,8 +170,8 @@ beforeAll(async () => {
   }
   initDb(TEST_DB_PATH);
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
-  createAgent({ id: AGENT_ID, name: "apps-spike2-worker", isLead: false, status: "idle" });
-  createAgent({ id: LEAD_ID, name: "apps-spike2-lead", isLead: true, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-spike2-worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "apps-spike2-lead", isLead: true, status: "idle" });
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -179,10 +179,10 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps%'");
-  getDb().run("DELETE FROM agent_tasks");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps%'");
+  await getDbClient().run("DELETE FROM agent_tasks");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -200,8 +200,8 @@ afterAll(async () => {
 });
 
 describe("app definition patches", () => {
-  test("does not alias stored or patch values and rejects unsafe keys", () => {
-    const stored = structuredClone(normalizedBaseDefinition());
+  test("does not alias stored or patch values and rejects unsafe keys", async () => {
+    const stored = structuredClone(await normalizedBaseDefinition());
     const patch = {
       pages: {
         main: {
@@ -226,7 +226,7 @@ describe("app definition patches", () => {
     }
 
     const unsafe = applyAppDefinitionPatch(
-      normalizedBaseDefinition(),
+      await normalizedBaseDefinition(),
       JSON.parse(
         '{"pages":{"main":{"elements":{"__proto__":{"type":"Heading","props":{"text":"Nope"}}}}}}',
       ),
@@ -341,7 +341,7 @@ describe("app definition patches", () => {
 
   test("rejects an invalid patched result without writing", async () => {
     const appId = await createApp();
-    const before = getApp(appId)!;
+    const before = (await getApp(appId))!;
     const result = await request<{ error: string; issues: Array<{ path: string }> }>(
       `/api/apps/${appId}`,
       {
@@ -352,72 +352,74 @@ describe("app definition patches", () => {
     expect(result.status).toBe(400);
     expect(result.body.error).toBe("invalid app definition");
     expect(result.body.issues.some((issue) => issue.path.startsWith("pages.main."))).toBe(true);
-    expect(getApp(appId)).toEqual(before);
+    expect(await getApp(appId)).toEqual(before);
   });
 });
 
 describe("server page validation", () => {
-  test("accepts the committed ideas-app seed page verbatim", () => {
-    expect(parseAppDefinition(appSeed).success).toBe(true);
+  test("accepts the committed ideas-app seed page verbatim", async () => {
+    expect((await parseAppDefinition(appSeed)).success).toBe(true);
   });
 
-  test("accepts the real Bookmarks definition with Table aliases", () => {
-    expect(parseAppDefinition(bookmarksDefinition).success).toBe(true);
+  test("accepts the real Bookmarks definition with Table aliases", async () => {
+    expect((await parseAppDefinition(bookmarksDefinition)).success).toBe(true);
   });
 
-  test("accepts layout components and Table UI search and filters", () => {
+  test("accepts layout components and Table UI search and filters", async () => {
     expect(
-      parseAppDefinition({
-        ...baseDefinition,
-        pages: {
-          main: {
-            root: "root",
-            elements: {
-              root: {
-                type: "Stack",
-                props: { gap: "lg", padding: "md" },
-                children: ["split"],
-              },
-              split: {
-                type: "Split",
-                props: { ratio: "1-2" },
-                children: ["filters", "tabs"],
-              },
-              filters: {
-                type: "Stack",
-                props: { gap: "sm" },
-                children: ["search", "statusFilter"],
-              },
-              search: { type: "SearchInput", props: { id: "ideaSearch", label: "Search" } },
-              statusFilter: {
-                type: "Select",
-                props: { id: "status", options: ["open", "done"], label: "Status" },
-              },
-              tabs: {
-                type: "Tabs",
-                props: { id: "view", tabs: [{ key: "ideas" }, { key: "about" }] },
-                children: ["table", "about"],
-              },
-              table: {
-                type: "Table",
-                props: {
-                  data: { $state: "/queries/allIdeas/data" },
-                  columns: [{ key: "title" }, { key: "status" }],
-                  search: { $state: "/ui/ideaSearch/value" },
-                  filters: { status: { $state: "/ui/status/value" } },
+      (
+        await parseAppDefinition({
+          ...baseDefinition,
+          pages: {
+            main: {
+              root: "root",
+              elements: {
+                root: {
+                  type: "Stack",
+                  props: { gap: "lg", padding: "md" },
+                  children: ["split"],
                 },
+                split: {
+                  type: "Split",
+                  props: { ratio: "1-2" },
+                  children: ["filters", "tabs"],
+                },
+                filters: {
+                  type: "Stack",
+                  props: { gap: "sm" },
+                  children: ["search", "statusFilter"],
+                },
+                search: { type: "SearchInput", props: { id: "ideaSearch", label: "Search" } },
+                statusFilter: {
+                  type: "Select",
+                  props: { id: "status", options: ["open", "done"], label: "Status" },
+                },
+                tabs: {
+                  type: "Tabs",
+                  props: { id: "view", tabs: [{ key: "ideas" }, { key: "about" }] },
+                  children: ["table", "about"],
+                },
+                table: {
+                  type: "Table",
+                  props: {
+                    data: { $state: "/queries/allIdeas/data" },
+                    columns: [{ key: "title" }, { key: "status" }],
+                    search: { $state: "/ui/ideaSearch/value" },
+                    filters: { status: { $state: "/ui/status/value" } },
+                  },
+                },
+                about: { type: "Markdown", props: { content: "## About ideas" } },
               },
-              about: { type: "Markdown", props: { content: "## About ideas" } },
             },
           },
-        },
-        defaultPage: "main",
-      }).success,
+          defaultPage: "main",
+        })
+      ).success,
     ).toBe(true);
   });
 
-  test("validates UI control state roots", () => {
-    const unknown = parseAppDefinition({
+  test("validates UI control state roots", async () => {
+    const unknown = await parseAppDefinition({
       ...baseDefinition,
       pages: {
         main: {
@@ -443,7 +445,7 @@ describe("server page validation", () => {
       });
     }
 
-    const formIdIsNotUi = parseAppDefinition({
+    const formIdIsNotUi = await parseAppDefinition({
       ...baseDefinition,
       pages: {
         main: {
@@ -472,52 +474,56 @@ describe("server page validation", () => {
     }
 
     expect(
-      parseAppDefinition({
-        ...baseDefinition,
-        pages: {
-          main: {
-            root: "root",
-            elements: {
-              root: { type: "Stack", props: {}, children: ["tabs", "selectedTab"] },
-              tabs: {
-                type: "Tabs",
-                props: { id: "view", tabs: [{ key: "all" }] },
-                children: ["tabContent"],
+      (
+        await parseAppDefinition({
+          ...baseDefinition,
+          pages: {
+            main: {
+              root: "root",
+              elements: {
+                root: { type: "Stack", props: {}, children: ["tabs", "selectedTab"] },
+                tabs: {
+                  type: "Tabs",
+                  props: { id: "view", tabs: [{ key: "all" }] },
+                  children: ["tabContent"],
+                },
+                tabContent: { type: "Text", props: { content: "All ideas" } },
+                selectedTab: { type: "Text", props: { content: { $state: "/ui/view/tab" } } },
               },
-              tabContent: { type: "Text", props: { content: "All ideas" } },
-              selectedTab: { type: "Text", props: { content: { $state: "/ui/view/tab" } } },
             },
           },
-        },
-        defaultPage: "main",
-      }).success,
+          defaultPage: "main",
+        })
+      ).success,
     ).toBe(true);
   });
 
-  test("accepts omitted optional props and a single element action binding", () => {
+  test("accepts omitted optional props and a single element action binding", async () => {
     expect(
-      parseAppDefinition({
-        ...baseDefinition,
-        pages: {
-          main: {
-            root: "root",
-            elements: {
-              root: { type: "Container", children: ["button"] },
-              button: {
-                type: "Button",
-                props: { label: "Refresh" },
-                on: { press: { action: "app.refresh", params: {} } },
+      (
+        await parseAppDefinition({
+          ...baseDefinition,
+          pages: {
+            main: {
+              root: "root",
+              elements: {
+                root: { type: "Container", children: ["button"] },
+                button: {
+                  type: "Button",
+                  props: { label: "Refresh" },
+                  on: { press: { action: "app.refresh", params: {} } },
+                },
               },
             },
           },
-        },
-        defaultPage: "main",
-      }).success,
+          defaultPage: "main",
+        })
+      ).success,
     ).toBe(true);
   });
 
-  test("reports missing required props without an object-type error", () => {
-    const parsed = parseAppDefinition({
+  test("reports missing required props without an object-type error", async () => {
+    const parsed = await parseAppDefinition({
       ...baseDefinition,
       pages: { main: { root: "root", elements: { root: { type: "Heading" } } } },
       defaultPage: "main",
@@ -534,7 +540,7 @@ describe("server page validation", () => {
     }
   });
 
-  test("reports action-chain mistakes once", () => {
+  test("reports action-chain mistakes once", async () => {
     const cases = [
       {
         path: "pages.main.elements.root.props.onSubmit.0.action",
@@ -560,7 +566,7 @@ describe("server page validation", () => {
     ];
 
     for (const testCase of cases) {
-      const parsed = parseAppDefinition({
+      const parsed = await parseAppDefinition({
         ...baseDefinition,
         pages: { main: { root: "root", elements: { root: testCase.element } } },
         defaultPage: "main",
@@ -572,8 +578,8 @@ describe("server page validation", () => {
     }
   });
 
-  test("validates action script references and task agent ids at write time", () => {
-    expectIssue(
+  test("validates action script references and task agent ids at write time", async () => {
+    await expectIssue(
       {
         ...baseDefinition,
         actions: {
@@ -584,14 +590,14 @@ describe("server page validation", () => {
     );
     // Agent ids come verbatim from X-Agent-ID at registration and may be
     // non-UUID custom stable ids — only empty is rejected.
-    const custom = parseAppDefinition({
+    const custom = await parseAppDefinition({
       ...baseDefinition,
       actions: {
         assign: { kind: "task", prompt: "Do it", agentId: "custom-stable-agent" },
       },
     });
     expect(custom.success).toBe(true);
-    expectIssue(
+    await expectIssue(
       {
         ...baseDefinition,
         actions: {
@@ -602,7 +608,7 @@ describe("server page validation", () => {
     );
   });
 
-  test("reports every required structural, binding, and action-chain rejection class", () => {
+  test("reports every required structural, binding, and action-chain rejection class", async () => {
     const cases: Array<{ path: string; definition: unknown }> = [
       {
         path: "pages.main.elements.root.extra",
@@ -865,7 +871,7 @@ describe("server page validation", () => {
       },
     ];
 
-    for (const item of cases) expectIssue(item.definition, item.path);
+    for (const item of cases) await expectIssue(item.definition, item.path);
   });
 });
 
@@ -907,7 +913,7 @@ describe("reserved apps KV namespace", () => {
       expect(result.structuredContent.message).toMatch(/reserved for swarm apps/);
     }
 
-    upsertKv({ namespace, key: "debug", value: "visible", valueType: "string" });
+    await upsertKv({ namespace, key: "debug", value: "visible", valueType: "string" });
     const getResult = (await tools["kv-get"]!.handler(
       { namespace, key: "debug" },
       toolMeta(),
@@ -921,7 +927,7 @@ describe("reserved apps KV namespace", () => {
     expect(listResult.structuredContent.success).toBe(true);
     expect(listResult.structuredContent.entries.some((entry) => entry.key === "debug")).toBe(true);
 
-    const parsed = parseAppDefinition(baseDefinition);
+    const parsed = await parseAppDefinition(baseDefinition);
     if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
     const row = await createAppRow(appId, "idea", parsed.definition.models.idea!, {
       title: "Still works",
@@ -965,7 +971,9 @@ describe("custom app actions", () => {
     expect(result.body.stdout).toBeString();
     expect(result.body.durationMs).toBeGreaterThanOrEqual(0);
 
-    expect(deleteScript({ name: saved.script.name, scope: "agent", scopeId: AGENT_ID })).toBe(true);
+    expect(await deleteScript({ name: saved.script.name, scope: "agent", scopeId: AGENT_ID })).toBe(
+      true,
+    );
     const stale = await request<{ error: string; issues: Array<{ path: string }> }>(
       `/api/apps/${appId}/actions/calculate`,
       { method: "POST", body: JSON.stringify({ input: { add: 4 } }) },
@@ -1037,7 +1045,7 @@ describe("custom app actions", () => {
       );
       expect(patched.status).toBe(200);
     } finally {
-      deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
+      await deleteScript({ name: foreign.script.name, scope: "agent", scopeId: OTHER_AGENT_ID });
     }
   });
 
@@ -1090,7 +1098,7 @@ describe("app MCP iteration tools", () => {
     expect(fetched.structuredContent.success).toBe(true);
     expect(fetched.structuredContent.app.id).toBe(appId);
     expect(fetched.structuredContent.app.definition).toEqual({
-      ...normalizedBaseDefinition(),
+      ...(await normalizedBaseDefinition()),
       schemaVersion: 1,
     });
     expect(fetched.structuredContent.app.definition).toMatchObject({
@@ -1115,14 +1123,13 @@ describe("app MCP iteration tools", () => {
     expect(patched.structuredContent.success).toBe(true);
     expect(patched.structuredContent.app.name).toBe("Patched by MCP");
     expect(patched.structuredContent).toMatchObject({ appId, url: `/apps/${appId}` });
-    const snapshot = getDb()
-      .query(
-        "SELECT snapshot, changedByAgentId FROM app_versions WHERE appId = ? ORDER BY version DESC LIMIT 1",
-      )
-      .get(appId) as { snapshot: string; changedByAgentId: string };
-    expect(snapshot.changedByAgentId).toBe(AGENT_ID);
-    expect(JSON.parse(snapshot.snapshot).definition).toEqual({
-      ...normalizedBaseDefinition(),
+    const snapshot = await getDbClient().get<{ snapshot: string; changedByAgentId: string }>(
+      "SELECT snapshot, changedByAgentId FROM app_versions WHERE appId = ? ORDER BY version DESC LIMIT 1",
+      [appId],
+    );
+    expect(snapshot!.changedByAgentId).toBe(AGENT_ID);
+    expect(JSON.parse(snapshot!.snapshot).definition).toEqual({
+      ...(await normalizedBaseDefinition()),
       schemaVersion: 1,
     });
 
@@ -1143,8 +1150,8 @@ describe("app MCP iteration tools", () => {
   test("fails closed when app-patch cannot snapshot", async () => {
     const appId = await createApp();
     const tools = registeredTools([registerAppPatchTool]);
-    const before = getApp(appId);
-    getDb().run(`
+    const before = await getApp(appId);
+    await getDbClient().run(`
       CREATE TRIGGER fail_mcp_app_snapshot
       BEFORE INSERT ON app_versions
       BEGIN SELECT RAISE(FAIL, 'snapshot intentionally failed'); END;
@@ -1154,22 +1161,23 @@ describe("app MCP iteration tools", () => {
       { appId, name: "must not persist", description: "must not persist" },
       toolMeta(),
     )) as StructuredResult<{ success: boolean; message: string }>;
-    getDb().run("DROP TRIGGER fail_mcp_app_snapshot");
+    await getDbClient().run("DROP TRIGGER fail_mcp_app_snapshot");
 
     expect(patched.isError).toBe(true);
     expect(patched.structuredContent.success).toBe(false);
     expect(patched.structuredContent.message).toStartWith("Failed to snapshot app");
-    expect(getApp(appId)).toEqual(before);
+    expect(await getApp(appId)).toEqual(before);
     expect(
-      getDb().query("SELECT COUNT(*) AS count FROM app_versions WHERE appId = ?").get(appId) as {
-        count: number;
-      },
+      await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM app_versions WHERE appId = ?",
+        [appId],
+      ),
     ).toEqual({ count: 0 });
   });
 });
 
 describe("page-validator guards", () => {
-  test("cross-checks busyWith against declared actions and reserves $-prefixed form field names", () => {
+  test("cross-checks busyWith against declared actions and reserves $-prefixed form field names", async () => {
     const withButton = (busyWith: string) =>
       parseAppDefinition({
         ...baseDefinition,
@@ -1191,7 +1199,7 @@ describe("page-validator guards", () => {
 
     // A typo'd busyWith watches a slot nothing writes — rejected like an
     // unknown app.action name.
-    const typo = withButton("notfy");
+    const typo = await withButton("notfy");
     expect(typo.success).toBe(false);
     if (!typo.success) {
       expect(typo.issues).toContainEqual({
@@ -1199,11 +1207,11 @@ describe("page-validator guards", () => {
         message: 'unknown app action "notfy"',
       });
     }
-    expect(withButton("notify").success).toBe(true);
+    expect((await withButton("notify")).success).toBe(true);
 
     // `$`-prefixed form field names collide with reserved runtime slots
     // (`/forms/<id>/$error` carries the inline mutate failure).
-    const reservedField = parseAppDefinition({
+    const reservedField = await parseAppDefinition({
       ...baseDefinition,
       pages: {
         main: {

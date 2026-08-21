@@ -45,21 +45,21 @@ describe("finalizeSwarmToolResult", () => {
     }
   });
 
-  test("ok result: text = message, structuredContent has success + message, isError false", () => {
-    const result = finalizeSwarmToolResult("some-tool", { ok: true, message: "All good." });
+  test("ok result: text = message, structuredContent has success + message, isError false", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", { ok: true, message: "All good." });
     expect(result.isError).toBe(false);
     expect(result.content).toEqual([{ type: "text", text: "All good." }]);
     expect(result.structuredContent).toEqual({ success: true, message: "All good." });
   });
 
-  test("error result: isError true, success false", () => {
-    const result = finalizeSwarmToolResult("some-tool", { ok: false, message: "It broke." });
+  test("error result: isError true, success false", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", { ok: false, message: "It broke." });
     expect(result.isError).toBe(true);
     expect(result.structuredContent).toMatchObject({ success: false, message: "It broke." });
   });
 
-  test("details and nudge compose into BOTH channels identically", () => {
-    const result = finalizeSwarmToolResult("some-tool", {
+  test("details and nudge compose into BOTH channels identically", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", {
       ok: false,
       message: "It broke.",
       details: "line 1: kaboom",
@@ -77,17 +77,17 @@ describe("finalizeSwarmToolResult", () => {
     });
   });
 
-  test("structuredContent is ALWAYS present (opencode SDK client throws otherwise)", () => {
+  test("structuredContent is ALWAYS present (opencode SDK client throws otherwise)", async () => {
     for (const outcome of [
       { ok: true, message: "yes" },
       { ok: false, message: "no" },
     ] satisfies SwarmToolResult[]) {
-      expect(finalizeSwarmToolResult("t", outcome).structuredContent).toBeDefined();
+      expect((await finalizeSwarmToolResult("t", outcome)).structuredContent).toBeDefined();
     }
   });
 
-  test("data spreads into structuredContent but cannot clobber the envelope", () => {
-    const result = finalizeSwarmToolResult("some-tool", {
+  test("data spreads into structuredContent but cannot clobber the envelope", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Saved.",
       data: { count: 3, success: "spoofed", message: "spoofed" },
@@ -95,12 +95,12 @@ describe("finalizeSwarmToolResult", () => {
     expect(result.structuredContent).toMatchObject({ count: 3, success: true, message: "Saved." });
   });
 
-  test("empty message gets a loud non-empty fallback (never a blank text channel)", () => {
+  test("empty message gets a loud non-empty fallback (never a blank text channel)", async () => {
     for (const [ok, marker] of [
       [true, "succeeded"],
       [false, "failed"],
     ] as const) {
-      const result = finalizeSwarmToolResult("some-tool", { ok, message: "  " });
+      const result = await finalizeSwarmToolResult("some-tool", { ok, message: "  " });
       const text = (result.content?.[0] as { text: string }).text;
       expect(text.trim().length).toBeGreaterThan(0);
       expect(text).toContain(marker);
@@ -110,10 +110,10 @@ describe("finalizeSwarmToolResult", () => {
     }
   });
 
-  test("secrets are scrubbed from message, details, and data at the egress point", () => {
+  test("secrets are scrubbed from message, details, and data at the egress point", async () => {
     registerVolatileSecret("sk-super-secret-token-123", "TEST_TOKEN");
     try {
-      const result = finalizeSwarmToolResult("some-tool", {
+      const result = await finalizeSwarmToolResult("some-tool", {
         ok: false,
         message: "Auth failed with sk-super-secret-token-123",
         details: "header was sk-super-secret-token-123",
@@ -126,10 +126,10 @@ describe("finalizeSwarmToolResult", () => {
     }
   });
 
-  test("allowSecretEgress skips scrubbing for deliberate credential reveals only", () => {
+  test("allowSecretEgress skips scrubbing for deliberate credential reveals only", async () => {
     registerVolatileSecret("xsk_reveal_me_once_456", "TEST_REVEAL");
     try {
-      const revealed = finalizeSwarmToolResult("script-apis", {
+      const revealed = await finalizeSwarmToolResult("script-apis", {
         ok: true,
         message: "Endpoint created.",
         details: "Bearer token (shown once — save it now): xsk_reveal_me_once_456",
@@ -138,7 +138,7 @@ describe("finalizeSwarmToolResult", () => {
       });
       expect(JSON.stringify(revealed)).toContain("xsk_reveal_me_once_456");
 
-      const scrubbed = finalizeSwarmToolResult("some-tool", {
+      const scrubbed = await finalizeSwarmToolResult("some-tool", {
         ok: true,
         message: "leaky xsk_reveal_me_once_456",
       });
@@ -148,8 +148,8 @@ describe("finalizeSwarmToolResult", () => {
     }
   });
 
-  test("NUDGES map: failed script-run gets the authoring-contract nudge in both channels", () => {
-    const result = finalizeSwarmToolResult("script-run", {
+  test("NUDGES map: failed script-run gets the authoring-contract nudge in both channels", async () => {
+    const result = await finalizeSwarmToolResult("script-run", {
       ok: false,
       message: "Script run failed: TypeError: ctx.api is undefined",
     });
@@ -158,8 +158,8 @@ describe("finalizeSwarmToolResult", () => {
     expect((result.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_AUTHORING_NUDGE);
   });
 
-  test("NUDGES map: timed-out script-run prioritizes durable orchestration", () => {
-    const result = finalizeSwarmToolResult("script-run", {
+  test("NUDGES map: timed-out script-run prioritizes durable orchestration", async () => {
+    const result = await finalizeSwarmToolResult("script-run", {
       ok: false,
       message: "Script run failed: timeout",
       data: { status: 200, data: { error: "timeout", durationMs: 30_001 } },
@@ -170,7 +170,7 @@ describe("finalizeSwarmToolResult", () => {
     expect((result.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_RUN_TIMEOUT_NUDGE);
   });
 
-  test("NUDGES map: workflow timeout steer fires strictly above the named threshold", () => {
+  test("NUDGES map: workflow timeout steer fires strictly above the named threshold", async () => {
     for (const [toolName, node] of [
       [
         "create-workflow",
@@ -189,7 +189,7 @@ describe("finalizeSwarmToolResult", () => {
         },
       ],
     ] as const) {
-      const result = finalizeSwarmToolResult(toolName, {
+      const result = await finalizeSwarmToolResult(toolName, {
         ok: true,
         message: "Workflow saved.",
         data: { longScriptTimeoutHint: findLongScriptTimeoutHint([node]) },
@@ -199,7 +199,7 @@ describe("finalizeSwarmToolResult", () => {
       );
     }
 
-    const atThreshold = finalizeSwarmToolResult("patch-workflow", {
+    const atThreshold = await finalizeSwarmToolResult("patch-workflow", {
       ok: true,
       message: "Workflow saved.",
       data: {
@@ -214,7 +214,7 @@ describe("finalizeSwarmToolResult", () => {
     });
     expect((atThreshold.structuredContent as { nudge?: string }).nudge).toBeUndefined();
 
-    const belowThreshold = finalizeSwarmToolResult("patch-workflow-node", {
+    const belowThreshold = await finalizeSwarmToolResult("patch-workflow-node", {
       ok: true,
       message: "Workflow saved.",
       data: {
@@ -234,32 +234,32 @@ describe("finalizeSwarmToolResult", () => {
     expect((belowThreshold.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
-  test("NUDGES map: lookup/transport failures get no authoring nudge", () => {
+  test("NUDGES map: lookup/transport failures get no authoring nudge", async () => {
     // A missing run ID / transport error is not an authoring problem — the
     // (args, ctx) steer would distract from the reported error.
-    const notFound = finalizeSwarmToolResult("get-script-run", {
+    const notFound = await finalizeSwarmToolResult("get-script-run", {
       ok: false,
       message: "Scripts API request failed with 404",
     });
     expect((notFound.structuredContent as { nudge?: string }).nudge).toBeUndefined();
 
-    const typecheck = finalizeSwarmToolResult("script-upsert", {
+    const typecheck = await finalizeSwarmToolResult("script-upsert", {
       ok: false,
       message: "Typecheck failed: TS2345 …",
     });
     expect((typecheck.structuredContent as { nudge?: string }).nudge).toBe(SCRIPT_AUTHORING_NUDGE);
   });
 
-  test("NUDGES map: empty script-search points at seeded examples; non-empty does not", () => {
+  test("NUDGES map: empty script-search points at seeded examples; non-empty does not", async () => {
     // Real proxyScriptsApi shape: data = { status, data: <parsed HTTP body> }.
-    const empty = finalizeSwarmToolResult("script-search", {
+    const empty = await finalizeSwarmToolResult("script-search", {
       ok: true,
       message: "Found 0 script(s).",
       data: { status: 200, data: { results: [] } },
     });
     expect((empty.structuredContent as { nudge?: string }).nudge).toContain("seeded");
 
-    const nonEmpty = finalizeSwarmToolResult("script-search", {
+    const nonEmpty = await finalizeSwarmToolResult("script-search", {
       ok: true,
       message: "Found 1 script(s).",
       data: { status: 200, data: { results: [{ name: "x" }] } },
@@ -267,8 +267,8 @@ describe("finalizeSwarmToolResult", () => {
     expect((nonEmpty.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
-  test("NUDGES map: app-get steers to the callable surface only when one exists", () => {
-    const withSurface = finalizeSwarmToolResult("app-get", {
+  test("NUDGES map: app-get steers to the callable surface only when one exists", async () => {
+    const withSurface = await finalizeSwarmToolResult("app-get", {
       ok: true,
       message: 'App "PM Inbox" (a1).',
       data: {
@@ -285,22 +285,22 @@ describe("finalizeSwarmToolResult", () => {
       "callable surface",
     );
 
-    const bare = finalizeSwarmToolResult("app-get", {
+    const bare = await finalizeSwarmToolResult("app-get", {
       ok: true,
       message: 'App "Bare" (a2).',
       data: { app: { definition: { models: {} } } },
     });
     expect((bare.structuredContent as { nudge?: string }).nudge).toBeUndefined();
 
-    const failed = finalizeSwarmToolResult("app-get", {
+    const failed = await finalizeSwarmToolResult("app-get", {
       ok: false,
       message: "App a3 not found.",
     });
     expect((failed.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
-  test("NUDGES map: memory-search rating steer fires only when a result carries a rateHint", () => {
-    const withHint = finalizeSwarmToolResult("memory-search", {
+  test("NUDGES map: memory-search rating steer fires only when a result carries a rateHint", async () => {
+    const withHint = await finalizeSwarmToolResult("memory-search", {
       ok: true,
       message: "Found 2 memories.",
       data: {
@@ -309,7 +309,7 @@ describe("finalizeSwarmToolResult", () => {
     });
     expect((withHint.structuredContent as { nudge?: string }).nudge).toContain("memory_rate");
 
-    const withoutHint = finalizeSwarmToolResult("memory-search", {
+    const withoutHint = await finalizeSwarmToolResult("memory-search", {
       ok: true,
       message: "Found 1 memories.",
       data: { results: [{ id: "a" }] },
@@ -317,8 +317,8 @@ describe("finalizeSwarmToolResult", () => {
     expect((withoutHint.structuredContent as { nudge?: string }).nudge).toBeUndefined();
   });
 
-  test("data with no details auto-renders into the text channel (completeness guarantee)", () => {
-    const result = finalizeSwarmToolResult("some-tool", {
+  test("data with no details auto-renders into the text channel (completeness guarantee)", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Saved.",
       data: { taskId: "t-1", status: "in_progress" },
@@ -330,7 +330,7 @@ describe("finalizeSwarmToolResult", () => {
     expect((result.structuredContent as { details?: string }).details).toBeUndefined();
 
     // Explicit details suppress the fallback (curated rendering wins).
-    const curated = finalizeSwarmToolResult("some-tool", {
+    const curated = await finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Saved.",
       details: "- t-1: in_progress",
@@ -341,9 +341,9 @@ describe("finalizeSwarmToolResult", () => {
     expect(curatedText).not.toContain('"taskId"');
   });
 
-  test("oversized JSON spills the full payload and emits a bounded omission on BOTH channels", () => {
+  test("oversized JSON spills the full payload and emits a bounded omission on BOTH channels", async () => {
     const blob = "x".repeat(50_000);
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "some-tool",
       {
         ok: true,
@@ -394,15 +394,15 @@ describe("finalizeSwarmToolResult", () => {
       MCP_RESULT_WIRE_LIMIT_BYTES,
     );
 
-    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
     expect(stored?.valueType).toBe("string");
     expect(JSON.parse(String(stored?.value)).outcome.data.blob).toBe(blob);
     expect((stored?.expiresAt ?? 0) - Date.now()).toBeGreaterThan(MCP_OVERFLOW_TTL_MS - 60_000);
   });
 
-  test("script-SDK origin receives the full payload without the model-context ceiling", () => {
+  test("script-SDK origin receives the full payload without the model-context ceiling", async () => {
     const blob = "x".repeat(50_000);
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "some-tool",
       {
         ok: true,
@@ -419,13 +419,13 @@ describe("finalizeSwarmToolResult", () => {
     );
   });
 
-  test("oversized arrays keep a non-empty prefix and a truthful surviving count", () => {
+  test("oversized arrays keep a non-empty prefix and a truthful surviving count", async () => {
     const messages = Array.from({ length: 20 }, (_, index) => ({
       ts: String(index),
       text: `message-${index}:${"x".repeat(900)}`,
     }));
     const details = messages.map((message) => message.text).join("\n\n");
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "slack-read",
       {
         ok: true,
@@ -455,15 +455,15 @@ describe("finalizeSwarmToolResult", () => {
     );
 
     const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
-    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: { data: { messages: typeof messages } };
     };
     expect(canonical.outcome.data.messages).toEqual(messages);
   });
 
-  test("an oversized scalar sibling cannot make ctx-control drop an array key", () => {
-    const result = finalizeSwarmToolResult(
+  test("an oversized scalar sibling cannot make ctx-control drop an array key", async () => {
+    const result = await finalizeSwarmToolResult(
       "some-tool",
       {
         ok: true,
@@ -490,9 +490,9 @@ describe("finalizeSwarmToolResult", () => {
     );
   });
 
-  test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", () => {
+  test("oversized prose keeps a readable prefix + marker + resolvable pointer on both channels", async () => {
     const blob = "x".repeat(50_000);
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "some-tool",
       {
         ok: true,
@@ -535,8 +535,8 @@ describe("finalizeSwarmToolResult", () => {
     expect(structured.details).toContain(retrieval);
   });
 
-  test("oversized results without an agent identity never spill to the flat namespace", () => {
-    const result = finalizeSwarmToolResult("anonymous-tool", {
+  test("oversized results without an agent identity never spill to the flat namespace", async () => {
+    const result = await finalizeSwarmToolResult("anonymous-tool", {
       ok: true,
       message: "Large anonymous result.",
       data: { blob: "x".repeat(30_000) },
@@ -553,9 +553,9 @@ describe("finalizeSwarmToolResult", () => {
     expect(text).not.toContain("kv://mcp:overflow/");
   });
 
-  test("details-only overflow is retained in KV and never points at 'not retained'", () => {
+  test("details-only overflow is retained in KV and never points at 'not retained'", async () => {
     const details = `details-only:${"z".repeat(30_000)}`;
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "details-only-tool",
       {
         ok: true,
@@ -569,16 +569,16 @@ describe("finalizeSwarmToolResult", () => {
     };
     expect(structured.truncation.fullValueAt).not.toContain("not retained");
     const key = structured.truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
-    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
     expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
     expect((result.content?.[0] as { text: string }).text).toContain(
       structured.truncation.retrieval,
     );
   });
 
-  test("spilled non-ASCII payload survives the KV round trip byte-completely", () => {
+  test("spilled non-ASCII payload survives the KV round trip byte-completely", async () => {
     const details = `prefix-${"🙂é漢".repeat(5_000)}-suffix`;
-    const result = finalizeSwarmToolResult(
+    const result = await finalizeSwarmToolResult(
       "unicode-tool",
       {
         ok: true,
@@ -597,14 +597,14 @@ describe("finalizeSwarmToolResult", () => {
     );
     expect(truncation.retrieval).toContain("ctx.swarm.kv_get");
     const key = truncation.fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
-    const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+    const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
     expect(JSON.parse(String(stored?.value)).outcome.details).toBe(details);
   });
 
-  test("ctx-control persists only scrubbed overflow content", () => {
+  test("ctx-control persists only scrubbed overflow content", async () => {
     registerVolatileSecret("sk-overflow-secret-789", "OVERFLOW_TEST");
     try {
-      const result = finalizeSwarmToolResult(
+      const result = await finalizeSwarmToolResult(
         "secret-overflow",
         {
           ok: true,
@@ -619,7 +619,7 @@ describe("finalizeSwarmToolResult", () => {
         }
       ).truncation.fullValueAt;
       const key = fullValueAt.replace(`kv://${TEST_OVERFLOW_NAMESPACE}/`, "");
-      const stored = getKv(TEST_OVERFLOW_NAMESPACE, key);
+      const stored = await getKv(TEST_OVERFLOW_NAMESPACE, key);
       expect(String(stored?.value)).not.toContain("sk-overflow-secret-789");
       expect(String(stored?.value)).toContain("[REDACTED:OVERFLOW_TEST]");
     } finally {
@@ -627,8 +627,8 @@ describe("finalizeSwarmToolResult", () => {
     }
   });
 
-  test("whitespace-only details fall back to a rendered data preview", () => {
-    const result = finalizeSwarmToolResult("some-tool", {
+  test("whitespace-only details fall back to a rendered data preview", async () => {
+    const result = await finalizeSwarmToolResult("some-tool", {
       ok: true,
       message: "Saved.",
       details: " \n\t ",
@@ -640,8 +640,8 @@ describe("finalizeSwarmToolResult", () => {
     expect((result.structuredContent as { details?: string }).details).toBeUndefined();
   });
 
-  test("an explicit tool-provided nudge wins over the central map", () => {
-    const result = finalizeSwarmToolResult("script-run", {
+  test("an explicit tool-provided nudge wins over the central map", async () => {
+    const result = await finalizeSwarmToolResult("script-run", {
       ok: false,
       message: "failed",
       nudge: "Custom nudge.",
@@ -741,7 +741,7 @@ describe("registered tool output schemas", () => {
       }
     }
     initDb(TEST_DB_PATH);
-    const server = createServer({ fullSurface: true });
+    const server = await createServer({ fullSurface: true });
     tools = (server as unknown as { _registeredTools: Record<string, RegisteredTool> })
       ._registeredTools;
   });
@@ -757,7 +757,7 @@ describe("registered tool output schemas", () => {
     }
   });
 
-  test("every declared output schema is loose, unpinned, and envelope-compatible", () => {
+  test("every declared output schema is loose, unpinned, and envelope-compatible", async () => {
     const failures: string[] = [];
     for (const [name, tool] of Object.entries(tools)) {
       if (!tool.outputSchema) continue;

@@ -102,9 +102,14 @@ beforeAll(async () => {
   closeDb();
   initDb(TEST_DB_PATH);
 
-  createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Charact Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
+  await createAgent({
+    id: OTHER_WORKER_ID,
+    name: "Charact Other Worker",
+    isLead: false,
+    status: "idle",
+  });
 
   server = new McpServer({ name: "test-rbac-charact-skills", version: "1.0.0" });
   registerSkillCreateTool(server);
@@ -153,7 +158,7 @@ describe("skill tool gates (characterization)", () => {
 
   // skill-install.ts:40 — cross-agent install requires lead
   test("worker cannot install a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-install-deny",
       description: "d",
       content: skillMd("charact-install-deny"),
@@ -178,7 +183,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("lead can install a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-install-allow",
       description: "d",
       content: skillMd("charact-install-allow"),
@@ -240,7 +245,7 @@ describe("skill tool gates (characterization)", () => {
   });
 
   test("lead can uninstall a skill for another agent", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-uninstall-allow",
       description: "d",
       content: skillMd("charact-uninstall-allow"),
@@ -248,7 +253,7 @@ describe("skill tool gates (characterization)", () => {
       scope: "agent",
       ownerAgentId: LEAD_ID,
     });
-    installSkill(OTHER_WORKER_ID, skill.id);
+    await installSkill(OTHER_WORKER_ID, skill.id);
 
     const result = await callTool("skill-uninstall", LEAD_ID, {
       skillId: skill.id,
@@ -262,7 +267,7 @@ describe("skill tool gates (characterization)", () => {
 
   // skill-delete.ts:46 — delete requires owner OR lead
   test("worker cannot delete a skill they don't own", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-deny",
       description: "d",
       content: skillMd("charact-delete-deny"),
@@ -284,11 +289,11 @@ describe("skill tool gates (characterization)", () => {
       "Only the owning agent or lead can delete this skill.",
     );
     // DB not mutated
-    expect(getSkillById(skill.id)).not.toBeNull();
+    expect(await getSkillById(skill.id)).not.toBeNull();
   });
 
   test("owner can delete their own skill", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-owner",
       description: "d",
       content: skillMd("charact-delete-owner"),
@@ -301,11 +306,11 @@ describe("skill tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getSkillById(skill.id)).toBeNull();
+    expect(await getSkillById(skill.id)).toBeNull();
   });
 
   test("lead can delete another agent's skill", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "charact-delete-lead",
       description: "d",
       content: skillMd("charact-delete-lead"),
@@ -318,7 +323,7 @@ describe("skill tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getSkillById(skill.id)).toBeNull();
+    expect(await getSkillById(skill.id)).toBeNull();
   });
 });
 
@@ -393,7 +398,7 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can install an MCP server for another agent", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-install-allow",
       transport: "stdio",
       scope: "agent",
@@ -431,14 +436,14 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can uninstall an MCP server for another agent", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-uninstall-allow",
       transport: "stdio",
       scope: "agent",
       ownerAgentId: LEAD_ID,
       command: "echo",
     });
-    installMcpServer(OTHER_WORKER_ID, mcpServer.id);
+    await installMcpServer(OTHER_WORKER_ID, mcpServer.id);
 
     const result = await callTool("mcp-server-uninstall", LEAD_ID, {
       mcpServerId: mcpServer.id,
@@ -452,7 +457,7 @@ describe("mcp-server tool gates (characterization)", () => {
 
   // mcp-server-delete.ts:43 — delete requires owner OR lead
   test("worker cannot delete an MCP server they don't own", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-delete-deny",
       transport: "stdio",
       scope: "agent",
@@ -473,11 +478,11 @@ describe("mcp-server tool gates (characterization)", () => {
       "Only the owning agent or lead can delete this MCP server.",
     );
     // DB not mutated
-    expect(getMcpServerById(mcpServer.id)).not.toBeNull();
+    expect(await getMcpServerById(mcpServer.id)).not.toBeNull();
   });
 
   test("lead can delete another agent's MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-delete-lead",
       transport: "stdio",
       scope: "agent",
@@ -489,12 +494,12 @@ describe("mcp-server tool gates (characterization)", () => {
 
     expect(result.isError).toBe(false);
     expect(result.structuredContent.success).toBe(true);
-    expect(getMcpServerById(mcpServer.id)).toBeNull();
+    expect(await getMcpServerById(mcpServer.id)).toBeNull();
   });
 
   // mcp-server-update.ts:62 — update requires owner OR lead
   test("worker cannot update an MCP server they don't own", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-deny",
       transport: "stdio",
       scope: "agent",
@@ -518,11 +523,11 @@ describe("mcp-server tool gates (characterization)", () => {
       "Only the owning agent or lead can update this MCP server.",
     );
     // DB not mutated
-    expect(getMcpServerById(mcpServer.id)?.name).toBe("charact-mcp-update-deny");
+    expect((await getMcpServerById(mcpServer.id))?.name).toBe("charact-mcp-update-deny");
   });
 
   test("owner can update their own MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-owner",
       transport: "stdio",
       scope: "agent",
@@ -540,7 +545,7 @@ describe("mcp-server tool gates (characterization)", () => {
   });
 
   test("lead can update another agent's MCP server", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "charact-mcp-update-lead",
       transport: "stdio",
       scope: "agent",

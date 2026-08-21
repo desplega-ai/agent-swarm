@@ -24,14 +24,14 @@ import { createWorkerTaskFollowUp } from "@/tasks/worker-follow-up";
 import type { AgentTask } from "@/types";
 import { scrubSecrets } from "@/utils/secret-scrubber";
 
-export function runTaskTerminalEffects(args: {
+export async function runTaskTerminalEffects(args: {
   task: AgentTask;
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
   agentId?: string;
   persistMemory?: boolean;
-}): void {
+}): Promise<void> {
   const { task, status, output, failureReason, agentId, persistMemory } = args;
   const taskId = task.id;
 
@@ -51,7 +51,7 @@ export function runTaskTerminalEffects(args: {
         const store = getMemoryStore();
         const provider = getEmbeddingProvider();
 
-        const memory = store.store({
+        const memory = await store.store({
           agentId: agentId ?? null,
           content: taskContent,
           name: `Task: ${task.task.slice(0, 80)}`,
@@ -61,7 +61,7 @@ export function runTaskTerminalEffects(args: {
         });
         const embedding = await provider.embed(taskContent);
         if (embedding) {
-          store.updateEmbedding(memory.id, embedding, provider.name);
+          await store.updateEmbedding(memory.id, embedding, provider.name);
         }
 
         // Auto-promote high-value completions to swarm memory (P3)
@@ -73,7 +73,7 @@ export function runTaskTerminalEffects(args: {
 
         if (shouldShareWithSwarm) {
           try {
-            const swarmMemory = store.store({
+            const swarmMemory = await store.store({
               agentId: agentId ?? null,
               scope: "swarm",
               name: `Shared: ${task.task.slice(0, 80)}`,
@@ -83,7 +83,7 @@ export function runTaskTerminalEffects(args: {
             });
             const swarmEmbedding = await provider.embed(taskContent);
             if (swarmEmbedding) {
-              store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
+              await store.updateEmbedding(swarmMemory.id, swarmEmbedding, provider.name);
             }
           } catch {
             // Non-blocking — swarm memory promotion failure is not critical
@@ -113,11 +113,11 @@ export function runTaskTerminalEffects(args: {
   // Fire-and-forget: rater failure must NEVER affect task status.
   (async () => {
     try {
-      const retrievals = getRetrievalsForTask(taskId);
+      const retrievals = await getRetrievalsForTask(taskId);
       if (retrievals.length === 0) return;
 
       const retrievedMemoryIds = retrievals.map((r) => r.memoryId);
-      const logs = getSessionLogsByTaskId(taskId);
+      const logs = await getSessionLogsByTaskId(taskId);
       const evidence = logs.map((l) => l.content).join("\n");
 
       await runServerRaters({
@@ -144,7 +144,7 @@ export function runTaskTerminalEffects(args: {
   // Skip for workflow-managed tasks — the workflow engine handles sequencing via resume.ts.
   if (!task.workflowRunId) {
     try {
-      const followUp = createWorkerTaskFollowUp({ task, status, output, failureReason });
+      const followUp = await createWorkerTaskFollowUp({ task, status, output, failureReason });
       if (followUp) {
         console.log(
           `[task-terminal-effects] Created follow-up task ${followUp.id.slice(0, 8)} for ${status} task ${taskId.slice(0, 8)}`,

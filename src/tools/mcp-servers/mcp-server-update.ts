@@ -41,13 +41,13 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getMcpServerById(args.id);
+        const existing = await getMcpServerById(args.id);
         if (!existing) {
           return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         // Only owner or lead can update
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",
@@ -78,7 +78,7 @@ export const registerMcpServerUpdateTool = (server: McpServer) => {
           updates.extraAuthorizeParams = args.extraAuthorizeParams;
         if (args.isEnabled !== undefined) updates.isEnabled = args.isEnabled;
 
-        const updated = updateMcpServer(args.id, updates);
+        const updated = await updateMcpServer(args.id, updates);
         if (!updated) {
           return toolErr("Update failed.", { data: { yourAgentId: requestInfo.agentId } });
         }

@@ -6,7 +6,14 @@ import {
   type ServerResponse,
 } from "node:http";
 import { createApp } from "../apps/store";
-import { closeDb, createAgent, createTaskExtended, createUser, getDb, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDbClient,
+  initDb,
+} from "../be/db";
 import { insertScript } from "../be/scripts/db";
 import { handleAssets } from "../http/assets";
 import { handlePages } from "../http/pages";
@@ -71,14 +78,18 @@ async function api(
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "asset-api-worker", isLead: false, status: "idle" }).id;
-  secondAgentId = createAgent({ name: "asset-api-worker-2", isLead: false, status: "idle" }).id;
-  userId = createUser({ name: "Asset API User", email: "asset-api@example.com" }).id;
-  secondUserId = createUser({ name: "Other Asset User", email: "asset-api-2@example.com" }).id;
-  sourceTaskId = createTaskExtended("trusted source", {
-    agentId,
-    requestedByUserId: userId,
-  }).id;
+  agentId = (await createAgent({ name: "asset-api-worker", isLead: false, status: "idle" })).id;
+  secondAgentId = (await createAgent({ name: "asset-api-worker-2", isLead: false, status: "idle" }))
+    .id;
+  userId = (await createUser({ name: "Asset API User", email: "asset-api@example.com" })).id;
+  secondUserId = (await createUser({ name: "Other Asset User", email: "asset-api-2@example.com" }))
+    .id;
+  sourceTaskId = (
+    await createTaskExtended("trusted source", {
+      agentId,
+      requestedByUserId: userId,
+    })
+  ).id;
 
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -148,11 +159,11 @@ describe("asset namespace REST contract", () => {
     expect(page.status).toBe(201);
     expect(page.body.key).toBe("shared/team/");
 
-    const app = createApp({
+    const app = await createApp({
       name: "Namespaced app",
       definition: { models: {}, pages: {}, defaultPage: "main" } as never,
     });
-    const script = insertScript({
+    const script = await insertScript({
       name: `namespaced-script-${Date.now()}`,
       scope: "agent",
       scopeId: agentId,
@@ -207,11 +218,10 @@ describe("asset namespace REST contract", () => {
       ]),
     );
     expect(
-      getDb()
-        .prepare<{ entity_type: string }, [string, string]>(
-          "SELECT entity_type FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
-        )
-        .all(app.id, script.id),
+      await getDbClient().query<{ entity_type: string }>(
+        "SELECT entity_type FROM asset_key_history WHERE entity_id IN (?, ?) ORDER BY entity_type",
+        [app.id, script.id],
+      ),
     ).toEqual([{ entity_type: "app" }, { entity_type: "script" }]);
     expect(JSON.stringify(aggregate.body)).not.toContain("namespaced task");
     expect(JSON.stringify(aggregate.body)).not.toContain("private content omitted");

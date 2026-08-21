@@ -9,7 +9,7 @@ import {
   findRecentCancelledTaskInThread,
   getActiveTaskCount,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskById,
   hasCapacity,
 } from "@/be/db";
@@ -170,17 +170,17 @@ const TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES = new Set([
  * original → R1 (pin) → R1 → original (reaper) → original → R2 (here). No-op for
  * non-resume tasks or when the parent has no tracker_sync rows.
  */
-function transferTrackerSyncToResumeChild(args: {
+async function transferTrackerSyncToResumeChild(args: {
   parentTaskId?: string;
   taskType?: string;
   child: AgentTask;
-}): void {
+}): Promise<void> {
   if (args.taskType !== "resume" || !args.parentTaskId) return;
 
-  const parent = getTaskById(args.parentTaskId);
+  const parent = await getTaskById(args.parentTaskId);
   if (!parent || !TRACKER_OWNERSHIP_TRANSFER_PARENT_STATUSES.has(parent.status)) return;
 
-  const repointed = repointTrackerSyncBySwarmId(parent.id, args.child.id);
+  const repointed = await repointTrackerSyncBySwarmId(parent.id, args.child.id);
   if (repointed > 0) {
     console.log(
       `[send-task] Repointed ${repointed} tracker_sync row(s) from terminal parent ${parent.id.slice(0, 8)} to resume child ${args.child.id.slice(0, 8)}`,
@@ -237,7 +237,9 @@ export async function sendTaskHandler(
 
   // Auto-default parentTaskId to caller's current task for tree tracking
   const effectiveParentTaskId = parentTaskId ?? sourceTaskId;
-  const effectiveParentTask = effectiveParentTaskId ? getTaskById(effectiveParentTaskId) : null;
+  const effectiveParentTask = effectiveParentTaskId
+    ? await getTaskById(effectiveParentTaskId)
+    : null;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -271,9 +273,9 @@ export async function sendTaskHandler(
   let assetKey: string | undefined;
   try {
     const trustedUserId =
-      ctx.kind === "user" ? ctx.userId : resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
+      ctx.kind === "user" ? ctx.userId : await resolveTaskAuditUserId(sourceTaskId, creatorAgentId);
     const requestedKey = key ?? effectiveParentTask?.key;
-    assetKey = requestedKey ? authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
+    assetKey = requestedKey ? await authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
   } catch (error) {
     const message =
       error instanceof AssetKeyAuthorizationError
@@ -292,81 +294,116 @@ export async function sendTaskHandler(
     }
   }
 
-  const existingTrackerWork = findExistingLinearTrackerContextWork(effectiveParentTask?.contextKey);
-  if (existingTrackerWork) {
-    const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
-    console.log(`[send-task] ${msg}`);
-    return toolOk(msg, {
-      data: { yourAgentId: creatorAgentId, task: existingTrackerWork.task },
-    });
-  }
-
-  // Dedup guard: check for similar recent tasks
-  if (!allowDuplicate && creatorAgentId) {
-    const duplicate = findDuplicateTask({
-      taskDescription: task,
-      creatorAgentId,
-      targetAgentId: effectiveAgentId ?? undefined,
-    });
-    if (duplicate) {
-      const msg = `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`;
-      return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
+  // The three dedup guards are pure reads, so they run twice: once here as a
+  // fast path (keeping this tool's existing early-exit responses), and once
+  // inside the write transaction below, where the check is authoritative.
+  // Every read in this handler releases the FIFO lock, so two concurrent
+  // send-task calls with the same creator and text otherwise both pass the
+  // guards and both create a task (no UNIQUE index arbitrates them).
+  const evaluateDedupGuards = async (): Promise<{
+    ok: boolean;
+    message: string;
+    task?: AgentTask;
+  } | null> => {
+    const existingTrackerWork = await findExistingLinearTrackerContextWork(
+      effectiveParentTask?.contextKey,
+    );
+    if (existingTrackerWork) {
+      const msg = `Skipped: Linear tracker contextKey ${effectiveParentTask?.contextKey} already has ${existingTrackerWork.reason === "active_task" ? "active task" : "linked open PR"} ${existingTrackerWork.task.id.slice(0, 8)}.`;
+      console.log(`[send-task] ${msg}`);
+      return { ok: true, message: msg, task: existingTrackerWork.task };
     }
-  }
 
-  // Guard: prevent re-delegation from follow-up tasks
-  // When the source task is a "follow-up" (worker completed/failed notification),
-  // check if there are completed tasks in the same Slack thread recently.
-  // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
-  //
-  // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
-  // status='cancelled', or status='failed' with failureReason containing
-  // "cancelled"), bypass the guard. A cancellation means the work was
-  // interrupted — re-dispatch is the correct response, not a deduped no-op.
-  // Without this bypass, a cancelled worker permanently jams the thread
-  // against re-delegation when an earlier completed sibling exists.
-  //
-  // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
-  // supersede) is intentionally NOT in this guard — a resume IS the legitimate
-  // re-dispatch and bypassing the check is correct. Do not add "resume" here.
-  if (sourceTaskId) {
-    const sourceTask = getTaskById(sourceTaskId);
-    if (
-      sourceTask?.taskType === "follow-up" &&
-      sourceTask.slackThreadTs &&
-      sourceTask.slackChannelId
-    ) {
-      const recentCompleted = findCompletedTaskInThread(
-        sourceTask.slackChannelId,
-        sourceTask.slackThreadTs,
-        2880, // 48 hours in minutes
-      );
-      if (recentCompleted) {
-        const recentCancelled = findRecentCancelledTaskInThread(
-          sourceTask.slackChannelId,
-          sourceTask.slackThreadTs,
-          2880,
-        );
-        const cancelledMoreRecent =
-          recentCancelled &&
-          new Date(recentCancelled.lastUpdatedAt).getTime() >
-            new Date(recentCompleted.lastUpdatedAt).getTime();
-        if (!cancelledMoreRecent) {
-          const msg = `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`;
-          return toolErr(msg, { data: { yourAgentId: creatorAgentId } });
-        }
-        // else: fall through — the cancellation is more recent than the
-        // completion, so re-delegation is legitimate.
+    // Dedup guard: check for similar recent tasks
+    if (!allowDuplicate && creatorAgentId) {
+      const duplicate = await findDuplicateTask({
+        taskDescription: task,
+        creatorAgentId,
+        targetAgentId: effectiveAgentId ?? undefined,
+      });
+      if (duplicate) {
+        return {
+          ok: false,
+          message: `Duplicate task detected (matches task ${duplicate.task.id.slice(0, 8)}, ${duplicate.reason}). Skipping. Use allowDuplicate: true to override.`,
+        };
       }
     }
+
+    // Guard: prevent re-delegation from follow-up tasks
+    // When the source task is a "follow-up" (worker completed/failed notification),
+    // check if there are completed tasks in the same Slack thread recently.
+    // This prevents the cycle: worker completes → follow-up → Lead re-delegates → repeat.
+    //
+    // Exception: if a MORE RECENT task in the same thread was cancelled (exit 130,
+    // status='cancelled', or status='failed' with failureReason containing
+    // "cancelled"), bypass the guard. A cancellation means the work was
+    // interrupted — re-dispatch is the correct response, not a deduped no-op.
+    // Without this bypass, a cancelled worker permanently jams the thread
+    // against re-delegation when an earlier completed sibling exists.
+    //
+    // NOTE: `taskType === "resume"` (created by createResumeFollowUp on
+    // supersede) is intentionally NOT in this guard — a resume IS the legitimate
+    // re-dispatch and bypassing the check is correct. Do not add "resume" here.
+    if (sourceTaskId) {
+      const sourceTask = await getTaskById(sourceTaskId);
+      if (
+        sourceTask?.taskType === "follow-up" &&
+        sourceTask.slackThreadTs &&
+        sourceTask.slackChannelId
+      ) {
+        const recentCompleted = await findCompletedTaskInThread(
+          sourceTask.slackChannelId,
+          sourceTask.slackThreadTs,
+          2880, // 48 hours in minutes
+        );
+        if (recentCompleted) {
+          const recentCancelled = await findRecentCancelledTaskInThread(
+            sourceTask.slackChannelId,
+            sourceTask.slackThreadTs,
+            2880,
+          );
+          const cancelledMoreRecent =
+            recentCancelled &&
+            new Date(recentCancelled.lastUpdatedAt).getTime() >
+              new Date(recentCompleted.lastUpdatedAt).getTime();
+          if (!cancelledMoreRecent) {
+            return {
+              ok: false,
+              message: `Blocked: re-delegation from follow-up task in a thread that already has completed work (task ${recentCompleted.id.slice(0, 8)}). The original request was already handled.`,
+            };
+          }
+          // else: fall through — the cancellation is more recent than the
+          // completion, so re-delegation is legitimate.
+        }
+      }
+    }
+
+    return null;
+  };
+
+  const guard = await evaluateDedupGuards();
+  if (guard) {
+    const guardData = {
+      yourAgentId: creatorAgentId,
+      ...(guard.task ? { task: guard.task } : {}),
+    };
+    return guard.ok
+      ? toolOk(guard.message, { data: guardData })
+      : toolErr(guard.message, { data: guardData });
   }
 
-  const txn = getDb().transaction(() => {
+  const result = await getDbClient().transaction(async () => {
+    // Authoritative re-check: the reads above are separated from the INSERT by
+    // the whole handler, so only a guard inside this transaction can see a
+    // concurrent send-task's committed task.
+    const raced = await evaluateDedupGuards();
+    if (raced) return { success: raced.ok, message: raced.message, task: raced.task };
+
     const finalTags = tags;
 
     // If no agentId (and no auto-routed agentId), create an unassigned task for the pool
     if (!effectiveAgentId) {
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         key: assetKey,
         creatorAgentId,
         requestedByUserId,
@@ -394,7 +431,7 @@ export async function sendTaskHandler(
           ? { capabilities: requiredCapabilities }
           : undefined,
       });
-      transferTrackerSyncToResumeChild({
+      await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
@@ -407,7 +444,7 @@ export async function sendTaskHandler(
       };
     }
 
-    const agent = getAgentById(effectiveAgentId);
+    const agent = await getAgentById(effectiveAgentId);
 
     if (!agent) {
       return {
@@ -424,8 +461,8 @@ export async function sendTaskHandler(
     }
 
     // For direct assignment (not offer), check if agent has capacity
-    if (!offerMode && !hasCapacity(effectiveAgentId)) {
-      const activeCount = getActiveTaskCount(effectiveAgentId);
+    if (!offerMode && !(await hasCapacity(effectiveAgentId))) {
+      const activeCount = await getActiveTaskCount(effectiveAgentId);
       return {
         success: false,
         message: `Agent "${agent.name}" is at capacity (${activeCount}/${agent.maxTasks ?? 1} tasks). Use offerMode: true to offer the task instead, or wait for a task to complete.`,
@@ -434,7 +471,7 @@ export async function sendTaskHandler(
 
     if (offerMode) {
       // Offer the task to the agent (they must accept/reject)
-      const newTask = createTaskExtended(task, {
+      const newTask = await createTaskExtended(task, {
         key: assetKey,
         offeredTo: effectiveAgentId,
         creatorAgentId,
@@ -456,7 +493,7 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
       });
-      transferTrackerSyncToResumeChild({
+      await transferTrackerSyncToResumeChild({
         parentTaskId: effectiveParentTaskId,
         taskType,
         child: newTask,
@@ -470,7 +507,7 @@ export async function sendTaskHandler(
     }
 
     // Direct assignment
-    const newTask = createTaskExtended(task, {
+    const newTask = await createTaskExtended(task, {
       key: assetKey,
       agentId: effectiveAgentId,
       creatorAgentId,
@@ -492,7 +529,7 @@ export async function sendTaskHandler(
       overrideSlackContext,
       followUpConfig,
     });
-    transferTrackerSyncToResumeChild({
+    await transferTrackerSyncToResumeChild({
       parentTaskId: effectiveParentTaskId,
       taskType,
       child: newTask,
@@ -505,7 +542,6 @@ export async function sendTaskHandler(
     };
   });
 
-  const result = txn();
   const data = {
     yourAgentId: creatorAgentId,
     task: result.task,

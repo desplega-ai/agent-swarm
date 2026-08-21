@@ -5,7 +5,7 @@ import {
   createSkill,
   deleteSkill,
   deleteSkillFile,
-  getDb,
+  getDbClient,
   getSkillFile,
   initDb,
   listSkillFileManifest,
@@ -30,10 +30,11 @@ describe("skill_files storage", () => {
     initDb(TEST_DB_PATH);
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM skill_files");
-    getDb().run("DELETE FROM skills");
-    const skill = createSkill({
+  beforeEach(async () => {
+    const db = getDbClient();
+    await db.run("DELETE FROM skill_files");
+    await db.run("DELETE FROM skills");
+    const skill = await createSkill({
       name: `file-skill-${crypto.randomUUID()}`,
       description: "Skill with bundled files",
       content: "---\nname: file-skill\ndescription: Skill with bundled files\n---\n\nBody.",
@@ -49,27 +50,23 @@ describe("skill_files storage", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("migration creates skill_files on a fresh DB", () => {
-    const table = getDb()
-      .prepare<{ name: string }, []>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'skill_files'",
-      )
-      .get();
+  test("migration creates skill_files on a fresh DB", async () => {
+    const table = await getDbClient().get<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'skill_files'",
+    );
     expect(table?.name).toBe("skill_files");
 
-    const migration = getDb()
-      .prepare<{ version: number; name: string }, []>(
-        "SELECT version, name FROM _migrations WHERE version = 87",
-      )
-      .get();
+    const migration = await getDbClient().get<{ version: number; name: string }>(
+      "SELECT version, name FROM _migrations WHERE version = 87",
+    );
     expect(migration?.name).toBe("087_skill_files");
   });
 
-  test("re-opening an existing DB keeps skill_files available", () => {
+  test("re-opening an existing DB keeps skill_files available", async () => {
     closeDb();
     initDb(TEST_DB_PATH);
 
-    const columns = getDb().prepare<{ name: string }, []>("PRAGMA table_info(skill_files)").all();
+    const columns = await getDbClient().query<{ name: string }>("PRAGMA table_info(skill_files)");
     expect(columns.map((column) => column.name)).toEqual([
       "id",
       "skillId",
@@ -85,12 +82,13 @@ describe("skill_files storage", () => {
     ]);
   });
 
-  test("upserts, lists manifest without content, fetches, and deletes files", () => {
-    const beforeVersion = getDb()
-      .prepare<{ version: number }, [string]>("SELECT version FROM skills WHERE id = ?")
-      .get(skillId)!.version;
+  test("upserts, lists manifest without content, fetches, and deletes files", async () => {
+    const beforeVersion = (await getDbClient().get<{ version: number }>(
+      "SELECT version FROM skills WHERE id = ?",
+      [skillId],
+    ))!.version;
 
-    const file = upsertSkillFile(skillId, {
+    const file = await upsertSkillFile(skillId, {
       path: "references/guide.md",
       content: "# Guide",
       mimeType: "text/markdown",
@@ -98,23 +96,24 @@ describe("skill_files storage", () => {
     expect(file.path).toBe("references/guide.md");
     expect(file.size).toBe(Buffer.byteLength("# Guide"));
 
-    const manifest = listSkillFileManifest(skillId);
+    const manifest = await listSkillFileManifest(skillId);
     expect(manifest).toHaveLength(1);
     expect(manifest[0]).not.toHaveProperty("content");
 
-    expect(getSkillFile(skillId, "references/guide.md")?.content).toBe("# Guide");
+    expect((await getSkillFile(skillId, "references/guide.md"))?.content).toBe("# Guide");
 
-    const afterVersion = getDb()
-      .prepare<{ version: number }, [string]>("SELECT version FROM skills WHERE id = ?")
-      .get(skillId)!.version;
+    const afterVersion = (await getDbClient().get<{ version: number }>(
+      "SELECT version FROM skills WHERE id = ?",
+      [skillId],
+    ))!.version;
     expect(afterVersion).toBeGreaterThan(beforeVersion);
 
-    expect(deleteSkillFile(skillId, "references/guide.md")).toBe(true);
-    expect(getSkillFile(skillId, "references/guide.md")).toBeNull();
+    expect(await deleteSkillFile(skillId, "references/guide.md")).toBe(true);
+    expect(await getSkillFile(skillId, "references/guide.md")).toBeNull();
   });
 
-  test("bulk upsert enforces path normalization and stores binary placeholders", () => {
-    const files = upsertSkillFiles(skillId, [
+  test("bulk upsert enforces path normalization and stores binary placeholders", async () => {
+    const files = await upsertSkillFiles(skillId, [
       {
         path: "references//nested.md",
         content: "nested",
@@ -129,23 +128,23 @@ describe("skill_files storage", () => {
     ]);
 
     expect(files.map((file) => file.path)).toEqual(["references/nested.md", "assets/logo.png"]);
-    const binary = getSkillFile(skillId, "assets/logo.png");
+    const binary = await getSkillFile(skillId, "assets/logo.png");
     expect(binary?.isBinary).toBe(true);
     expect(binary?.content).toBe("[binary file - not synced]");
   });
 
-  test("rejects traversal and SKILL.md rows", () => {
+  test("rejects traversal and SKILL.md rows", async () => {
     expect(() => normalizeSkillFilePath("../secret.md")).toThrow("traversal");
-    expect(() =>
+    await expect(
       upsertSkillFile(skillId, {
         path: "SKILL.md",
         content: "nope",
       }),
-    ).toThrow("SKILL.md");
+    ).rejects.toThrow("SKILL.md");
   });
 
-  test("deleting a skill cascades bundled files", () => {
-    const skill = createSkill({
+  test("deleting a skill cascades bundled files", async () => {
+    const skill = await createSkill({
       name: "cascade-file-skill",
       description: "Cascade test",
       content: "---\nname: cascade-file-skill\ndescription: Cascade test\n---\n\nBody.",
@@ -153,10 +152,10 @@ describe("skill_files storage", () => {
       scope: "agent",
       isComplex: true,
     });
-    upsertSkillFile(skill.id, { path: "references/a.md", content: "a" });
+    await upsertSkillFile(skill.id, { path: "references/a.md", content: "a" });
 
-    expect(listSkillFileManifest(skill.id)).toHaveLength(1);
-    expect(deleteSkill(skill.id)).toBe(true);
-    expect(listSkillFileManifest(skill.id)).toHaveLength(0);
+    expect(await listSkillFileManifest(skill.id)).toHaveLength(1);
+    expect(await deleteSkill(skill.id)).toBe(true);
+    expect(await listSkillFileManifest(skill.id)).toHaveLength(0);
   });
 });

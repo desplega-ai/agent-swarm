@@ -10,7 +10,7 @@
  *
  * Server-side only.
  */
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 
 const USEFULNESS_FLOOR = 1.0;
 const USEFULNESS_CEILING = 2.0;
@@ -32,24 +32,30 @@ export type MemoryEdgeRow = {
  * shape as a memory with no edges, since neither case has anything useful
  * to surface to the caller.
  */
-export function listEdgesForAgent(agentId: string, memoryId: string): MemoryEdgeRow[] {
-  const db = getDb();
-  const memory = db
-    .prepare<{ scope: string; agentId: string | null }, [string]>(
-      "SELECT scope, agentId FROM agent_memory WHERE id = ?",
-    )
-    .get(memoryId);
+export async function listEdgesForAgent(
+  agentId: string,
+  memoryId: string,
+): Promise<MemoryEdgeRow[]> {
+  const client = getDbClient();
+  const memory = await client.get<{ scope: string; agentId: string | null }>(
+    "SELECT scope, agentId FROM agent_memory WHERE id = ?",
+    [memoryId],
+  );
   if (!memory) return [];
   if (memory.scope !== "swarm" && memory.agentId !== agentId) return [];
 
-  const rows = db
-    .prepare<{ to_id: string; alpha: number; beta: number; createdAt: string }, [string]>(
-      `SELECT to_id, alpha, beta, createdAt
+  const rows = await client.query<{
+    to_id: string;
+    alpha: number;
+    beta: number;
+    createdAt: string;
+  }>(
+    `SELECT to_id, alpha, beta, createdAt
          FROM agent_memory_edge
         WHERE from_id = ? AND type = 'references-source'
         ORDER BY createdAt DESC`,
-    )
-    .all(memoryId);
+    [memoryId],
+  );
 
   return rows.map((row) => ({
     to: row.to_id,

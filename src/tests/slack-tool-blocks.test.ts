@@ -69,17 +69,19 @@ beforeAll(async () => {
   await removeDbFiles();
   process.env.APP_URL = "https://app.agent-swarm.dev";
   initDb(TEST_DB_PATH);
-  leadId = createAgent({ name: "Lead Blocks", isLead: true, status: "idle" }).id;
-  workerId = createAgent({ name: "Researcher Blocks", isLead: false, status: "idle" }).id;
+  leadId = (await createAgent({ name: "Lead Blocks", isLead: true, status: "idle" })).id;
+  workerId = (await createAgent({ name: "Researcher Blocks", isLead: false, status: "idle" })).id;
   contextKey = slackContextKey({ channelId: "C_BLOCKS", threadTs: "300.1" });
-  taskId = createTaskExtended("test blocks", {
-    agentId: workerId,
-    source: "slack",
-    slackChannelId: "C_BLOCKS",
-    slackThreadTs: "300.1",
-    contextKey,
-  }).id;
-  recordSlackMessage({
+  taskId = (
+    await createTaskExtended("test blocks", {
+      agentId: workerId,
+      source: "slack",
+      slackChannelId: "C_BLOCKS",
+      slackThreadTs: "300.1",
+      contextKey,
+    })
+  ).id;
+  await recordSlackMessage({
     contextKey,
     channelId: "C_BLOCKS",
     threadTs: "300.1",
@@ -156,7 +158,7 @@ describe("Slack tool Block Kit support", () => {
     });
     expect(payload).toMatchObject({ unfurl_links: false, unfurl_media: false });
     expect(JSON.stringify(payload.blocks)).not.toContain("↑ tree");
-    expect(getSlackMessageByChannelTs("C_BLOCKS", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackMessageByChannelTs("C_BLOCKS", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("slack-post preserves supplied blocks end to end and records agent provenance", async () => {
@@ -181,14 +183,14 @@ describe("Slack tool Block Kit support", () => {
       unfurl_media: false,
     });
     expect(mockChatPostMessage.mock.calls[0]![0].blocks).toEqual(supplied);
-    expect(getSlackTreeMessage(contextKey)?.kind).toBe("tree");
-    expect(getSlackMessageByChannelTs("C_DIRECT", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackTreeMessage(contextKey))?.kind).toBe("tree");
+    expect((await getSlackMessageByChannelTs("C_DIRECT", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("slack-reply does not append provenance when the task thread has no v2 tree", async () => {
     const tools = buildTools();
     const noTreeContextKey = slackContextKey({ channelId: "C_NO_REPLY_TREE", threadTs: "400.1" });
-    const noTreeTask = createTaskExtended("reply without tree", {
+    const noTreeTask = await createTaskExtended("reply without tree", {
       agentId: workerId,
       source: "slack",
       slackChannelId: "C_NO_REPLY_TREE",
@@ -221,7 +223,7 @@ describe("Slack tool Block Kit support", () => {
   test("slack-post does not append provenance when the source task thread has no v2 tree", async () => {
     const tools = buildTools();
     const noTreeContextKey = slackContextKey({ channelId: "C_NO_POST_TREE", threadTs: "500.1" });
-    const noTreeTask = createTaskExtended("post without tree", {
+    const noTreeTask = await createTaskExtended("post without tree", {
       agentId: leadId,
       source: "slack",
       slackChannelId: "C_NO_POST_TREE",
@@ -278,7 +280,7 @@ describe("Slack tool Block Kit support", () => {
       unfurl_links: false,
       unfurl_media: false,
     });
-    expect(getSlackMessageByChannelTs("C_START", lastPostedTs)?.kind).toBe("agent");
+    expect((await getSlackMessageByChannelTs("C_START", lastPostedTs))?.kind).toBe("agent");
   });
 
   test("rejects 50 supplied blocks when the task provenance footer would exceed Slack's cap", async () => {

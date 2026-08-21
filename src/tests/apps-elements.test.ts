@@ -7,7 +7,7 @@ import {
 } from "node:http";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
 import { getApp } from "../apps/store";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -139,10 +139,11 @@ function fanoutDefinition(fanout: number, levels = 8) {
   };
 }
 
-function replaceStoredDefinition(appId: string, definition: unknown): void {
-  getDb()
-    .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-    .run(JSON.stringify(definition), appId);
+async function replaceStoredDefinition(appId: string, definition: unknown): Promise<void> {
+  await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+    JSON.stringify(definition),
+    appId,
+  ]);
 }
 
 async function deleteTestDatabase(): Promise<void> {
@@ -194,8 +195,8 @@ async function createApp(
   return { status: result.status, id: result.body.app?.id, issues: result.body.issues };
 }
 
-function expectParseIssue(definition: unknown, message: string): void {
-  const parsed = parseAppDefinition(definition);
+async function expectParseIssue(definition: unknown, message: string): Promise<void> {
+  const parsed = await parseAppDefinition(definition);
   expect(parsed.success).toBe(false);
   if (parsed.success) return;
   expect(parsed.issues.some((entry) => entry.message.includes(message))).toBe(true);
@@ -204,7 +205,7 @@ function expectParseIssue(definition: unknown, message: string): void {
 beforeAll(async () => {
   await deleteTestDatabase();
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-elements-worker", isLead: false, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-elements-worker", isLead: false, status: "idle" });
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -212,9 +213,9 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -224,24 +225,24 @@ afterAll(async () => {
 });
 
 describe("reusable app elements", () => {
-  test("validates pure and bound modes against their allowed state and action surfaces", () => {
+  test("validates pure and bound modes against their allowed state and action surfaces", async () => {
     const valid = {
       ...baseDefinition(),
       elements: { pureCard: pureElement(), recentNotes: boundElement() },
     };
-    expect(parseAppDefinition(valid).success).toBe(true);
+    expect((await parseAppDefinition(valid)).success).toBe(true);
 
     const escapedPure = structuredClone(valid);
     escapedPure.elements.pureCard.elements.label.props.content = {
       $state: "/queries/allNotes/data",
     };
-    expectParseIssue(escapedPure, "pure element state reference");
+    await expectParseIssue(escapedPure, "pure element state reference");
 
     const actingPure = structuredClone(valid);
     actingPure.elements.pureCard.elements.label.on = {
       press: { action: "app.action", params: { name: "archive" } },
     };
-    expectParseIssue(actingPure, "pure elements cannot invoke actions");
+    await expectParseIssue(actingPure, "pure elements cannot invoke actions");
 
     const sdkPure = structuredClone(valid);
     sdkPure.elements.pureCard.elements.label.on = {
@@ -250,11 +251,11 @@ describe("reusable app elements", () => {
         params: { sdk: "createTask", args: { description: "not allowed" } },
       },
     };
-    expectParseIssue(sdkPure, "pure elements cannot invoke actions");
+    await expectParseIssue(sdkPure, "pure elements cannot invoke actions");
 
     const missingBoundQuery = structuredClone(valid);
     missingBoundQuery.elements.recentNotes = boundElement("missing");
-    expectParseIssue(missingBoundQuery, 'unknown query "missing"');
+    await expectParseIssue(missingBoundQuery, 'unknown query "missing"');
 
     const repeatedPure = structuredClone(valid);
     repeatedPure.elements.pureCard.props.items = { kind: "string" };
@@ -262,17 +263,17 @@ describe("reusable app elements", () => {
       items: { $state: "/props/items" },
     };
     repeatedPure.elements.pureCard.elements.label.props.content = { $item: "label" };
-    expect(parseAppDefinition(repeatedPure).success).toBe(true);
+    expect((await parseAppDefinition(repeatedPure)).success).toBe(true);
 
     const unscopedRepeatBinding = structuredClone(valid);
     unscopedRepeatBinding.elements.pureCard.elements.label.props.content = { $item: "label" };
-    expectParseIssue(unscopedRepeatBinding, "only allowed inside a repeated element");
+    await expectParseIssue(unscopedRepeatBinding, "only allowed inside a repeated element");
 
     const cyclicRepeatBindings = structuredClone(valid);
     cyclicRepeatBindings.elements.pureCard.elements.root.props.gap = { $index: true };
     cyclicRepeatBindings.elements.pureCard.elements.label.props.content = { $item: "label" };
     cyclicRepeatBindings.elements.pureCard.elements.label.children = ["root"];
-    const cyclicResult = parseAppDefinition(cyclicRepeatBindings);
+    const cyclicResult = await parseAppDefinition(cyclicRepeatBindings);
     expect(cyclicResult.success).toBe(false);
     if (!cyclicResult.success) {
       expect(cyclicResult.issues.some((entry) => entry.message.includes("cycle references"))).toBe(
@@ -293,22 +294,22 @@ describe("reusable app elements", () => {
     requiredNavigation.elements.recentNotes.elements.table.on = {
       select: { action: "app.navigate", params: { page: "detail" } },
     };
-    expectParseIssue(requiredNavigation, 'required param "id" is missing');
+    await expectParseIssue(requiredNavigation, 'required param "id" is missing');
 
     const unknownNavigation = structuredClone(requiredNavigation);
     unknownNavigation.elements.recentNotes.elements.table.on.select.params.page = "missing";
-    expectParseIssue(unknownNavigation, 'unknown page "missing"');
+    await expectParseIssue(unknownNavigation, 'unknown page "missing"');
 
     const privateNavigation = structuredClone(valid);
     privateNavigation.pages.detail = structuredClone(emptyPage);
     privateNavigation.elements.recentNotes.elements.table.on = {
       select: { action: "app.navigate", params: { page: "detail" } },
     };
-    expect(parseAppDefinition(privateNavigation).success).toBe(true);
+    expect((await parseAppDefinition(privateNavigation)).success).toBe(true);
 
     const exportedNavigation = structuredClone(privateNavigation);
     exportedNavigation.elements.recentNotes.export = true;
-    expectParseIssue(exportedNavigation, "exported bound elements cannot use app.navigate");
+    await expectParseIssue(exportedNavigation, "exported bound elements cannot use app.navigate");
   });
 
   test("enforces ElementSlot cardinality and ElementRef child-slot contracts", async () => {
@@ -326,13 +327,13 @@ describe("reusable app elements", () => {
         },
       },
     };
-    expectParseIssue(twoSlots, "at most one ElementSlot");
+    await expectParseIssue(twoSlots, "at most one ElementSlot");
 
     const pageSlot = {
       ...baseDefinition(),
       pages: { main: { root: "slot", elements: { slot: { type: "ElementSlot", props: {} } } } },
     };
-    expectParseIssue(pageSlot, "only allowed inside a pure reusable element");
+    await expectParseIssue(pageSlot, "only allowed inside a pure reusable element");
 
     const boundSlot = {
       ...baseDefinition(),
@@ -344,7 +345,7 @@ describe("reusable app elements", () => {
         },
       },
     };
-    expectParseIssue(boundSlot, "only allowed inside a pure reusable element");
+    await expectParseIssue(boundSlot, "only allowed inside a pure reusable element");
 
     const nonLeafSlot = {
       ...baseDefinition(),
@@ -359,7 +360,7 @@ describe("reusable app elements", () => {
         },
       },
     };
-    const nonLeafResult = parseAppDefinition(nonLeafSlot);
+    const nonLeafResult = await parseAppDefinition(nonLeafSlot);
     expect(nonLeafResult.success).toBe(false);
     if (!nonLeafResult.success) {
       expect(
@@ -373,7 +374,7 @@ describe("reusable app elements", () => {
     const emptyChildrenSlot = structuredClone(nonLeafSlot);
     emptyChildrenSlot.elements.bad.elements.slot.children = [];
     delete emptyChildrenSlot.elements.bad.elements.child;
-    const emptyChildrenResult = parseAppDefinition(emptyChildrenSlot);
+    const emptyChildrenResult = await parseAppDefinition(emptyChildrenSlot);
     expect(emptyChildrenResult.success).toBe(true);
 
     const targetDefinition = {
@@ -412,11 +413,11 @@ describe("reusable app elements", () => {
       elements: { card: pureElement() },
       pages: { main: refPage(undefined, "card", { label: "same app" }) },
     };
-    expect(parseAppDefinition(sameApp).success).toBe(true);
+    expect((await parseAppDefinition(sameApp)).success).toBe(true);
 
     const missing = structuredClone(sameApp);
     missing.pages.main.elements.ref.props.element = "missing";
-    const missingResult = parseAppDefinition(missing);
+    const missingResult = await parseAppDefinition(missing);
     expect(missingResult.success).toBe(false);
     if (!missingResult.success) {
       const missingIssue = missingResult.issues.find((entry) =>
@@ -430,13 +431,13 @@ describe("reusable app elements", () => {
       pages: { main: { elements: { ref: { props: { element: unknown } } } } };
     };
     dynamicElement.pages.main.elements.ref.props.element = { $state: "/ui/element/value" };
-    expectParseIssue(dynamicElement, "element and app must be literal strings");
+    await expectParseIssue(dynamicElement, "element and app must be literal strings");
 
     const dynamicApp = structuredClone(sameApp) as unknown as {
       pages: { main: { elements: { ref: { props: { app?: unknown } } } } };
     };
     dynamicApp.pages.main.elements.ref.props.app = { $state: "/ui/app/value" };
-    expectParseIssue(dynamicApp, "element and app must be literal strings");
+    await expectParseIssue(dynamicApp, "element and app must be literal strings");
 
     const validBinding = {
       ...baseDefinition(),
@@ -445,7 +446,7 @@ describe("reusable app elements", () => {
         main: refPage(undefined, "card", { label: { $state: "/queries/allNotes/data" } }),
       },
     };
-    expect(parseAppDefinition(validBinding).success).toBe(true);
+    expect((await parseAppDefinition(validBinding)).success).toBe(true);
 
     for (const malformed of [
       { $bogus: "ignored" },
@@ -456,7 +457,7 @@ describe("reusable app elements", () => {
       { $item: "label", extra: true },
       { $index: true, extra: true },
     ]) {
-      expectParseIssue(
+      await expectParseIssue(
         {
           ...baseDefinition(),
           elements: { card: pureElement() },
@@ -571,7 +572,7 @@ describe("reusable app elements", () => {
     expect(propRemovalBlocked.body.issues[0]?.message).toContain("removed props: tone");
   });
 
-  test("rejects recursive references and reference chains deeper than five", () => {
+  test("rejects recursive references and reference chains deeper than five", async () => {
     const cyclic = {
       ...baseDefinition(),
       elements: {
@@ -592,7 +593,7 @@ describe("reusable app elements", () => {
       },
       pages: { main: refPage(undefined, "first") },
     };
-    const cyclicResult = parseAppDefinition(cyclic);
+    const cyclicResult = await parseAppDefinition(cyclic);
     expect(cyclicResult.success).toBe(false);
     if (!cyclicResult.success) {
       const cycleIssue = cyclicResult.issues.find((entry) =>
@@ -624,15 +625,15 @@ describe("reusable app elements", () => {
               },
             };
     }
-    expectParseIssue(
+    await expectParseIssue(
       { ...baseDefinition(), elements, pages: { main: refPage(undefined, "level1") } },
       "maximum depth of 5",
     );
   });
 
-  test("bounds reference expansion work and caps reusable element node maps", () => {
+  test("bounds reference expansion work and caps reusable element node maps", async () => {
     const startedAt = performance.now();
-    const fanout = parseAppDefinition(fanoutDefinition(8));
+    const fanout = await parseAppDefinition(fanoutDefinition(8));
     const durationMs = performance.now() - startedAt;
     expect(durationMs).toBeLessThan(1_000);
     expect(fanout.success).toBe(false);
@@ -664,10 +665,10 @@ describe("reusable app elements", () => {
         },
       },
     };
-    expectParseIssue(tooManyNodes, "must contain at most 150 nodes");
+    await expectParseIssue(tooManyNodes, "must contain at most 150 nodes");
   });
 
-  test("validates enum prop declarations, defaults, and consumer values", () => {
+  test("validates enum prop declarations, defaults, and consumer values", async () => {
     const enumElement = pureElement();
     enumElement.props = {
       label: { kind: "enum", required: true, enum: ["info", "warning"], default: "info" },
@@ -677,19 +678,19 @@ describe("reusable app elements", () => {
       elements: { badge: enumElement },
       pages: { main: refPage(undefined, "badge", { label: "warning" }) },
     };
-    expect(parseAppDefinition(valid).success).toBe(true);
+    expect((await parseAppDefinition(valid)).success).toBe(true);
 
     const missingValues = structuredClone(valid);
     delete missingValues.elements.badge.props.label.enum;
-    expectParseIssue(missingValues, "enum values are required");
+    await expectParseIssue(missingValues, "enum values are required");
 
     const badDefault = structuredClone(valid);
     badDefault.elements.badge.props.label.default = "danger";
-    expectParseIssue(badDefault, "default must be a valid enum value");
+    await expectParseIssue(badDefault, "default must be a valid enum value");
 
     const badConsumer = structuredClone(valid);
     badConsumer.pages.main.elements.ref.props.props.label = "danger";
-    expectParseIssue(badConsumer, "must be a enum value or a binding");
+    await expectParseIssue(badConsumer, "must be a enum value or a binding");
   });
 
   test("rejects genuine cross-app reference cycles and chains deeper than five", async () => {
@@ -705,11 +706,11 @@ describe("reusable app elements", () => {
     const second = await createApp(secondDefinition, "Cross cycle second");
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
-    replaceStoredDefinition(first.id!, {
+    await replaceStoredDefinition(first.id!, {
       ...firstDefinition,
       elements: { first: exportedRefElement(second.id!, "second") },
     });
-    replaceStoredDefinition(second.id!, {
+    await replaceStoredDefinition(second.id!, {
       ...secondDefinition,
       elements: { second: exportedRefElement(first.id!, "first") },
     });
@@ -724,7 +725,7 @@ describe("reusable app elements", () => {
       ),
     ).toBe(true);
 
-    getDb().run("DELETE FROM apps");
+    await getDbClient().run("DELETE FROM apps");
     const definitions: ReturnType<typeof baseDefinition>[] = [];
     const appIds: string[] = [];
     for (let index = 0; index < 6; index += 1) {
@@ -740,7 +741,7 @@ describe("reusable app elements", () => {
     }
     for (let index = 0; index < 5; index += 1) {
       const name = `level${index + 1}`;
-      replaceStoredDefinition(appIds[index]!, {
+      await replaceStoredDefinition(appIds[index]!, {
         ...definitions[index],
         elements: {
           [name]: exportedRefElement(appIds[index + 1]!, `level${index + 2}`),
@@ -757,7 +758,7 @@ describe("reusable app elements", () => {
     );
   });
 
-  test("treats reusable element definitions and their node entries atomically", () => {
+  test("treats reusable element definitions and their node entries atomically", async () => {
     const storedDefinition = {
       ...baseDefinition(),
       elements: { card: pureElement() },
@@ -766,7 +767,7 @@ describe("reusable app elements", () => {
       content: { $state: "/props/label" },
       tone: "muted",
     };
-    const storedResult = parseAppDefinition(storedDefinition);
+    const storedResult = await parseAppDefinition(storedDefinition);
     expect(storedResult.success).toBe(true);
     if (!storedResult.success) return;
 
@@ -906,21 +907,24 @@ describe("reusable app elements", () => {
         },
       },
     };
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run(JSON.stringify(rawDefinition), rawConsumer.id!);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      JSON.stringify(rawDefinition),
+      rawConsumer.id!,
+    ]);
 
     const unscannable = await createApp(baseDefinition(), "Unscannable Consumer");
     expect(unscannable.status).toBe(201);
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run(`not-json "element" "card" ${library.id}`, unscannable.id!);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      `not-json "element" "card" ${library.id}`,
+      unscannable.id!,
+    ]);
 
     const unrelatedGarbage = await createApp(baseDefinition(), "Unrelated garbage");
     expect(unrelatedGarbage.status).toBe(201);
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run("not-json without a possible element reference", unrelatedGarbage.id!);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      "not-json without a possible element reference",
+      unrelatedGarbage.id!,
+    ]);
 
     const blocked = await request<{ issues: Array<{ path: string; message: string }> }>(
       `/api/apps/${library.id}`,
@@ -962,12 +966,12 @@ describe("reusable app elements", () => {
     );
     expect(consumer.status).toBe(201);
 
-    replaceStoredDefinition(library.id!, {
+    await replaceStoredDefinition(library.id!, {
       elements: libraryDefinition.elements,
       pages: libraryDefinition.pages,
       defaultPage: libraryDefinition.defaultPage,
     });
-    expect(getApp(library.id!)?.definitionError).toBeDefined();
+    expect((await getApp(library.id!))?.definitionError).toBeDefined();
 
     const repairWithoutExport = await request<{ issues: Array<{ message: string }> }>(
       `/api/apps/${library.id}`,
@@ -989,9 +993,10 @@ describe("reusable app elements", () => {
     expect(library.status).toBe(201);
     const garbage = await createApp(baseDefinition(), "Unrelated malformed app");
     expect(garbage.status).toBe(201);
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run("not-json without target markers", garbage.id!);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      "not-json without target markers",
+      garbage.id!,
+    ]);
 
     const removed = await request(`/api/apps/${library.id}`, {
       method: "PATCH",
@@ -1030,7 +1035,7 @@ describe("reusable app elements", () => {
         },
       },
     };
-    replaceStoredDefinition(consumer.id!, invalidConsumer);
+    await replaceStoredDefinition(consumer.id!, invalidConsumer);
 
     const removed = await request(`/api/apps/${library.id}`, {
       method: "PATCH",
@@ -1047,7 +1052,7 @@ describe("reusable app elements", () => {
     expect(library.status).toBe(201);
     const consumer = await createApp(baseDefinition(), "Action-arg non-consumer");
     expect(consumer.status).toBe(201);
-    replaceStoredDefinition(consumer.id!, {
+    await replaceStoredDefinition(consumer.id!, {
       ...baseDefinition(),
       actions: {
         fake: {

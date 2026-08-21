@@ -83,9 +83,12 @@ function createTestRegistry(): ExecutorRegistry {
 let workflowCounter = 0;
 const createdWorkflowIds: string[] = [];
 
-function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): Workflow {
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides?: Partial<Workflow>,
+): Promise<Workflow> {
   workflowCounter++;
-  const workflow = createWorkflow({
+  const workflow = await createWorkflow({
     name: overrides?.name || `test-async-${workflowCounter}-${Date.now()}`,
     definition: def,
   });
@@ -96,19 +99,24 @@ function makeWorkflow(def: WorkflowDefinition, overrides?: Partial<Workflow>): W
 // ─── Setup / Teardown ────────────────────────────────────────
 
 let registry: ExecutorRegistry;
+let teardownResumeListener: (() => void) | undefined;
 
 beforeAll(() => {
   initDb(TEST_DB_PATH);
   registry = createTestRegistry();
   // Wire up resume listener
-  setupWorkflowResumeListener(workflowEventBus, registry);
+  teardownResumeListener = setupWorkflowResumeListener(workflowEventBus, registry);
 });
 
 afterAll(async () => {
+  // Detach from the process-wide singleton bus: `bun test` runs every file in
+  // one process, and a leaked resume listener claims waiting steps in LATER
+  // files' databases with this file's registry (shard-order foreach failures).
+  teardownResumeListener?.();
   // Cleanup workflows
   for (const id of createdWorkflowIds) {
     try {
-      deleteWorkflow(id);
+      await deleteWorkflow(id);
     } catch {}
   }
   closeDb();
@@ -122,7 +130,7 @@ afterAll(async () => {
 describe("Workflow Async v2 (Phase 4)", () => {
   describe("Agent-Task Executor", () => {
     test("creates a task with correct fields (source, workflowRunId, etc.)", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -133,18 +141,18 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, { test: true }, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run).toBeTruthy();
       expect(run!.status).toBe("waiting");
 
       // Verify step was created and is waiting
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(1);
       expect(steps[0]!.status).toBe("waiting");
       expect(steps[0]!.nodeType).toBe("agent-task");
 
       // Verify a task was created in agent_tasks
-      const task = getTaskByWorkflowRunStepId(steps[0]!.id);
+      const task = await getTaskByWorkflowRunStepId(steps[0]!.id);
       expect(task).toBeTruthy();
       expect(task!.source).toBe("workflow");
       expect(task!.workflowRunId).toBe(runId);
@@ -153,8 +161,8 @@ describe("Workflow Async v2 (Phase 4)", () => {
     });
 
     test("persists the requester on the run and attributes the root task", async () => {
-      const user = createUser({ name: "Workflow Requester" });
-      const workflow = makeWorkflow({
+      const user = await createUser({ name: "Workflow Requester" });
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -167,16 +175,16 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const runId = await startWorkflowExecution(workflow, { test: true }, registry, {
         requestedByUserId: user.id,
       });
-      const steps = getWorkflowRunStepsByRunId(runId);
-      const task = getTaskByWorkflowRunStepId(steps[0]!.id);
+      const steps = await getWorkflowRunStepsByRunId(runId);
+      const task = await getTaskByWorkflowRunStepId(steps[0]!.id);
 
-      expect(getWorkflowRun(runId)?.createdBy).toBe(user.id);
+      expect((await getWorkflowRun(runId))?.createdBy).toBe(user.id);
       expect(task).toBeTruthy();
       expect(task!.requestedByUserId).toBe(user.id);
     });
 
     test("workflow pauses at waiting when hitting async executor", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           { id: "s1", type: "echo", config: { message: "prep" }, next: "task1" },
           {
@@ -189,11 +197,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("waiting");
 
       // Echo step should be completed, task step should be waiting
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps).toHaveLength(2);
       const echoStep = steps.find((s) => s.nodeId === "s1");
       const taskStep = steps.find((s) => s.nodeId === "task1");
@@ -201,12 +209,12 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(taskStep!.status).toBe("waiting");
 
       // The task description should have interpolated context
-      const task = getTaskByWorkflowRunStepId(taskStep!.id);
+      const task = await getTaskByWorkflowRunStepId(taskStep!.id);
       expect(task!.task).toBe("Work: prep");
     });
 
     test("resume from task completion continues the workflow", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -223,12 +231,12 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      expect(getWorkflowRun(runId)!.status).toBe("waiting");
+      expect((await getWorkflowRun(runId))!.status).toBe("waiting");
 
       // Find the task
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
 
       // Simulate task completion via event bus
       workflowEventBus.emit("task.completed", {
@@ -242,19 +250,19 @@ describe("Workflow Async v2 (Phase 4)", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Workflow should be completed now
-      const updatedRun = getWorkflowRun(runId);
+      const updatedRun = await getWorkflowRun(runId);
       expect(updatedRun!.status).toBe("completed");
 
       // Both steps should be completed (task1 + done)
-      const updatedSteps = getWorkflowRunStepsByRunId(runId);
+      const updatedSteps = await getWorkflowRunStepsByRunId(runId);
       expect(updatedSteps).toHaveLength(2);
       const completedSteps = updatedSteps.filter((s) => s.status === "completed");
       expect(completedSteps).toHaveLength(2);
     });
 
     test("resume rehydrates requester attribution from the workflow run", async () => {
-      const user = createUser({ name: "Resumed Workflow Requester" });
-      const workflow = makeWorkflow({
+      const user = await createUser({ name: "Resumed Workflow Requester" });
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -273,8 +281,10 @@ describe("Workflow Async v2 (Phase 4)", () => {
       const runId = await startWorkflowExecution(workflow, {}, registry, {
         requestedByUserId: user.id,
       });
-      const firstStep = getWorkflowRunStepsByRunId(runId).find((step) => step.nodeId === "task1")!;
-      const firstTask = getTaskByWorkflowRunStepId(firstStep.id)!;
+      const firstStep = (await getWorkflowRunStepsByRunId(runId)).find(
+        (step) => step.nodeId === "task1",
+      )!;
+      const firstTask = (await getTaskByWorkflowRunStepId(firstStep.id))!;
 
       workflowEventBus.emit("task.completed", {
         taskId: firstTask.id,
@@ -284,13 +294,15 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const secondStep = getWorkflowRunStepsByRunId(runId).find((step) => step.nodeId === "task2");
+      const secondStep = (await getWorkflowRunStepsByRunId(runId)).find(
+        (step) => step.nodeId === "task2",
+      );
       expect(secondStep).toBeDefined();
-      expect(getTaskByWorkflowRunStepId(secondStep!.id)?.requestedByUserId).toBe(user.id);
+      expect((await getTaskByWorkflowRunStepId(secondStep!.id))?.requestedByUserId).toBe(user.id);
     });
 
     test("resume from task failure marks run as failed", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -307,11 +319,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      expect(getWorkflowRun(runId)!.status).toBe("waiting");
+      expect((await getWorkflowRun(runId))!.status).toBe("waiting");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
 
       // Simulate task failure
       workflowEventBus.emit("task.failed", {
@@ -323,13 +335,13 @@ describe("Workflow Async v2 (Phase 4)", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const updatedRun = getWorkflowRun(runId);
+      const updatedRun = await getWorkflowRun(runId);
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("Agent could not complete");
     });
 
     test("resume from task cancellation marks run as failed", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -340,11 +352,11 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      expect(getWorkflowRun(runId)!.status).toBe("waiting");
+      expect((await getWorkflowRun(runId))!.status).toBe("waiting");
 
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
 
       workflowEventBus.emit("task.cancelled", {
         taskId: task.id,
@@ -354,13 +366,13 @@ describe("Workflow Async v2 (Phase 4)", () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10));
 
-      const updatedRun = getWorkflowRun(runId);
+      const updatedRun = await getWorkflowRun(runId);
       expect(updatedRun!.status).toBe("failed");
       expect(updatedRun!.error).toContain("cancelled");
     });
 
     test("idempotency: no duplicate task created on re-execution", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -371,9 +383,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
 
       // Re-run the executor for the same step (simulates recovery/retry)
       const executor = new AgentTaskExecutor(mockDeps);
@@ -394,14 +406,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect((result as Record<string, unknown>).correlationId).toBe(task.id);
 
       // Verify only one task exists for this step
-      const taskAgain = getTaskByWorkflowRunStepId(taskStep.id);
+      const taskAgain = await getTaskByWorkflowRunStepId(taskStep.id);
       expect(taskAgain!.id).toBe(task.id);
     });
   });
 
   describe("Agent-Task Executor config", () => {
     test("interpolates template with context", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           { id: "s1", type: "echo", config: { message: "hello" }, next: "task1" },
           {
@@ -414,14 +426,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
       expect(task.task).toBe("Process: hello");
     });
 
     test("passes priority and tags to created task", async () => {
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "task1",
@@ -436,9 +448,9 @@ describe("Workflow Async v2 (Phase 4)", () => {
       });
 
       const runId = await startWorkflowExecution(workflow, {}, registry);
-      const steps = getWorkflowRunStepsByRunId(runId);
+      const steps = await getWorkflowRunStepsByRunId(runId);
       const taskStep = steps.find((s) => s.nodeId === "task1")!;
-      const task = getTaskByWorkflowRunStepId(taskStep.id)!;
+      const task = (await getTaskByWorkflowRunStepId(taskStep.id))!;
       expect(task.priority).toBe(80);
       expect(task.tags).toEqual(["workflow", "test"]);
     });
@@ -453,7 +465,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       localRegistry.register(new EchoExecutor(localDeps));
       localRegistry.register(new AgentTaskExecutor(localDeps));
       setupWorkflowResumeListener(localBus, localRegistry);
-      const workflow = makeWorkflow({
+      const workflow = await makeWorkflow({
         nodes: [
           {
             id: "start",
@@ -491,7 +503,7 @@ describe("Workflow Async v2 (Phase 4)", () => {
       // Start the workflow — echo "start" completes, 3 agent-tasks created
       const runId = await startWorkflowExecution(workflow, {}, localRegistry);
 
-      let steps = getWorkflowRunStepsByRunId(runId);
+      let steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps.filter((s) => s.nodeId === "start")).toHaveLength(1);
       expect(steps.filter((s) => s.nodeId === "start")[0]!.status).toBe("completed");
 
@@ -506,10 +518,10 @@ describe("Workflow Async v2 (Phase 4)", () => {
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-a
-      const taskA = getTaskByWorkflowRunStepId(
+      const taskA = (await getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-a")!.id,
-      )!;
-      completeTask(taskA.id, "output-a");
+      ))!;
+      await completeTask(taskA.id, "output-a");
       localBus.emit("task.completed", {
         taskId: taskA.id,
         output: "output-a",
@@ -519,14 +531,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // After A completes — merge should NOT have been created yet (B, C still pending)
-      steps = getWorkflowRunStepsByRunId(runId);
+      steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-b
-      const taskB = getTaskByWorkflowRunStepId(
+      const taskB = (await getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-b")!.id,
-      )!;
-      completeTask(taskB.id, "output-b");
+      ))!;
+      await completeTask(taskB.id, "output-b");
       localBus.emit("task.completed", {
         taskId: taskB.id,
         output: "output-b",
@@ -536,14 +548,14 @@ describe("Workflow Async v2 (Phase 4)", () => {
       await new Promise((r) => setTimeout(r, 10));
 
       // After B completes — merge STILL should not exist (C still pending)
-      steps = getWorkflowRunStepsByRunId(runId);
+      steps = await getWorkflowRunStepsByRunId(runId);
       expect(steps.filter((s) => s.nodeId === "merge")).toHaveLength(0);
 
       // Complete review-c
-      const taskC = getTaskByWorkflowRunStepId(
+      const taskC = (await getTaskByWorkflowRunStepId(
         reviewSteps.find((s) => s.nodeId === "review-c")!.id,
-      )!;
-      completeTask(taskC.id, "output-c");
+      ))!;
+      await completeTask(taskC.id, "output-c");
       localBus.emit("task.completed", {
         taskId: taskC.id,
         output: "output-c",
@@ -556,13 +568,13 @@ describe("Workflow Async v2 (Phase 4)", () => {
       // Allow extra time for serialized queue processing
       await new Promise((r) => setTimeout(r, 10));
 
-      steps = getWorkflowRunStepsByRunId(runId);
+      steps = await getWorkflowRunStepsByRunId(runId);
       const mergeSteps = steps.filter((s) => s.nodeId === "merge");
       expect(mergeSteps).toHaveLength(1);
       expect(mergeSteps[0]!.status).toBe("completed");
 
       // Workflow run should be completed
-      const run = getWorkflowRun(runId)!;
+      const run = (await getWorkflowRun(runId))!;
       expect(run.status).toBe("completed");
     });
   });

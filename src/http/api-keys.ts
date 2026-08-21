@@ -273,7 +273,7 @@ export async function handleApiKeys(
 
     const { keyType, keySuffix, keyIndex, taskId, scope, scopeId } = parsed.body;
     try {
-      recordKeyUsage(keyType, keySuffix, keyIndex, taskId ?? null, scope, scopeId ?? null);
+      await recordKeyUsage(keyType, keySuffix, keyIndex, taskId ?? null, scope, scopeId ?? null);
       reportUsage.respond(res, 200, { success: true, message: "Key usage recorded" });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to record usage", 500);
@@ -288,7 +288,14 @@ export async function handleApiKeys(
 
     const { keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId } = parsed.body;
     try {
-      markKeyRateLimited(keyType, keySuffix, keyIndex, rateLimitedUntil, scope, scopeId ?? null);
+      await markKeyRateLimited(
+        keyType,
+        keySuffix,
+        keyIndex,
+        rateLimitedUntil,
+        scope,
+        scopeId ?? null,
+      );
       reportRateLimit.respond(res, 200, {
         success: true,
         message: `Key ...${keySuffix} marked as rate-limited until ${rateLimitedUntil}`,
@@ -306,7 +313,14 @@ export async function handleApiKeys(
 
     const { keyType, keySuffix, keyIndex, windows, scope, scopeId } = parsed.body;
     try {
-      recordKeyRateLimitWindows(keyType, keySuffix, keyIndex, windows, scope, scopeId ?? null);
+      await recordKeyRateLimitWindows(
+        keyType,
+        keySuffix,
+        keyIndex,
+        windows,
+        scope,
+        scopeId ?? null,
+      );
       reportRateLimitWindows.respond(res, 200, {
         success: true,
         message: `Rate-limit windows recorded for ...${keySuffix}`,
@@ -328,7 +342,7 @@ export async function handleApiKeys(
 
     const { keyType, totalKeys, scope, scopeId } = parsed.query;
     try {
-      const indices = getAvailableKeyIndices(keyType, totalKeys, scope, scopeId ?? null);
+      const indices = await getAvailableKeyIndices(keyType, totalKeys, scope, scopeId ?? null);
       getAvailable.respond(res, 200, { success: true, availableIndices: indices, totalKeys });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get available keys", 500);
@@ -343,7 +357,7 @@ export async function handleApiKeys(
 
     const { keyType } = parsed.query;
     try {
-      const costs = getKeyCostSummary(keyType);
+      const costs = await getKeyCostSummary(keyType);
       getCosts.respond(res, 200, { success: true, costs });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key costs", 500);
@@ -358,7 +372,7 @@ export async function handleApiKeys(
 
     const { keyType, scope, scopeId } = parsed.query;
     try {
-      const statuses = getKeyStatuses(keyType, scope, scopeId ?? null);
+      const statuses = await getKeyStatuses(keyType, scope, scopeId ?? null);
       listStatuses.respond(res, 200, { success: true, keys: statuses });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to get key statuses", 500);
@@ -376,7 +390,7 @@ export async function handleApiKeys(
       // Empty string is treated as "clear the label" so the dashboard's
       // contenteditable can submit "" without sending an explicit null.
       const value = name === "" ? null : name;
-      const updated = setApiKeyName(keyType, keySuffix, value, scope, scopeId ?? null);
+      const updated = await setApiKeyName(keyType, keySuffix, value, scope, scopeId ?? null);
       if (!updated) {
         jsonError(res, `No key matching ${keyType} ...${keySuffix}`, 404);
         return true;
@@ -395,7 +409,7 @@ export async function handleApiKeys(
 
     const { keyType, keySuffix, scope, scopeId } = parsed.body;
     try {
-      const cleared = clearKeyRateLimit(keyType, keySuffix, scope, scopeId ?? null);
+      const cleared = await clearKeyRateLimit(keyType, keySuffix, scope, scopeId ?? null);
       clearRateLimitRoute.respond(res, 200, {
         success: true,
         cleared,

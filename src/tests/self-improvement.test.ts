@@ -38,9 +38,9 @@ describe("Self-Improvement Mechanisms", () => {
     initDb(TEST_DB_PATH);
     store = new SqliteMemoryStore();
 
-    createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
-    createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
+    await createAgent({ id: leadId, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: workerId, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: otherWorkerId, name: "Other Worker", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -59,19 +59,19 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("store-progress memory indexing", () => {
-    test("completed task creates agent-scoped memory with output", () => {
-      const task = createTaskExtended("Test task for completion", {
+    test("completed task creates agent-scoped memory with output", async () => {
+      const task = await createTaskExtended("Test task for completion", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
       });
 
       const output = "Successfully completed the task with great results";
-      completeTask(task.id, output);
+      await completeTask(task.id, output);
 
       // Simulate what store-progress does: create memory for completed task
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output}`;
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -88,15 +88,15 @@ describe("Self-Improvement Mechanisms", () => {
       expect(memory.content).not.toContain("undefined");
     });
 
-    test("completed task with undefined output uses fallback", () => {
-      const task = createTaskExtended("Task without output", {
+    test("completed task with undefined output uses fallback", async () => {
+      const task = await createTaskExtended("Task without output", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
       });
 
       const output: string | undefined = undefined;
-      completeTask(task.id, output);
+      await completeTask(task.id, output);
 
       // Simulate store-progress logic with undefined guard
       const taskContent = `Task: ${task.task}\n\nOutput:\n${output || "(no output)"}`;
@@ -105,19 +105,19 @@ describe("Self-Improvement Mechanisms", () => {
       expect(taskContent).not.toContain("undefined");
     });
 
-    test("failed task creates memory with failure reason", () => {
-      const task = createTaskExtended("Task that will fail", {
+    test("failed task creates memory with failure reason", async () => {
+      const task = await createTaskExtended("Task that will fail", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
       });
 
       const failureReason = "Could not connect to external API";
-      failTask(task.id, failureReason);
+      await failTask(task.id, failureReason);
 
       // Simulate store-progress failed task memory creation
       const taskContent = `Task: ${task.task}\n\nFailure reason:\n${failureReason}\n\nThis task failed. Learn from this to avoid repeating the mistake.`;
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         content: taskContent,
         name: `Task: ${task.task.slice(0, 80)}`,
@@ -149,8 +149,8 @@ describe("Self-Improvement Mechanisms", () => {
       // In store-progress, this would return early without creating memory
     });
 
-    test("manual task completions persist memory by default", () => {
-      const task = createTaskExtended("Manual implementation task", {
+    test("manual task completions persist memory by default", async () => {
+      const task = await createTaskExtended("Manual implementation task", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -161,8 +161,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(true);
     });
 
-    test("scheduled task completions skip memory by default", () => {
-      const task = createTaskExtended("Run heartbeat checklist", {
+    test("scheduled task completions skip memory by default", async () => {
+      const task = await createTaskExtended("Run heartbeat checklist", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -174,8 +174,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("heartbeat checklist completions skip memory without schedule tags", () => {
-      const task = createTaskExtended("Run heartbeat checklist", {
+    test("heartbeat checklist completions skip memory without schedule tags", async () => {
+      const task = await createTaskExtended("Run heartbeat checklist", {
         agentId: workerId,
         source: "mcp",
         priority: 60,
@@ -188,8 +188,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("boot triage completions skip memory by default", () => {
-      const task = createTaskExtended("Triage reboot-interrupted work", {
+    test("boot triage completions skip memory by default", async () => {
+      const task = await createTaskExtended("Triage reboot-interrupted work", {
         agentId: workerId,
         source: "mcp",
         priority: 80,
@@ -201,15 +201,15 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(task)).toBe(false);
     });
 
-    test("monitor and digest completions skip memory by default", () => {
-      const monitorTask = createTaskExtended("Check Claude Code changelog", {
+    test("monitor and digest completions skip memory by default", async () => {
+      const monitorTask = await createTaskExtended("Check Claude Code changelog", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
         taskType: "monitoring",
         tags: ["health", "schedule:claude-code-changelog-monitor"],
       });
-      const digestTask = createTaskExtended("Compile daily blocker digest", {
+      const digestTask = await createTaskExtended("Compile daily blocker digest", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -222,8 +222,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldPersistTaskCompletionMemory(digestTask)).toBe(false);
     });
 
-    test("scheduled task completions can opt in to memory persistence", () => {
-      const task = createTaskExtended("Daily digest found reusable incident pattern", {
+    test("scheduled task completions can opt in to memory persistence", async () => {
+      const task = await createTaskExtended("Daily digest found reusable incident pattern", {
         agentId: workerId,
         source: "schedule",
         priority: 50,
@@ -239,15 +239,15 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("swarm memory auto-promotion", () => {
-    test("research task type promotes to swarm scope", () => {
-      const task = createTaskExtended("Research best practices for testing", {
+    test("research task type promotes to swarm scope", async () => {
+      const task = await createTaskExtended("Research best practices for testing", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
         taskType: "research",
       });
 
-      completeTask(task.id, "Found several useful patterns");
+      await completeTask(task.id, "Found several useful patterns");
 
       // Simulate the shouldShareWithSwarm logic
       const shouldShareWithSwarm =
@@ -258,7 +258,7 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
 
       // Verify swarm memory can be created
-      const swarmMemory = store.store({
+      const swarmMemory = await store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Shared: ${task.task.slice(0, 80)}`,
@@ -271,8 +271,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(swarmMemory.source).toBe("task_completion");
     });
 
-    test("knowledge-tagged task promotes to swarm scope", () => {
-      const task = createTaskExtended("Document API conventions", {
+    test("knowledge-tagged task promotes to swarm scope", async () => {
+      const task = await createTaskExtended("Document API conventions", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -287,8 +287,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("shared-tagged task promotes to swarm scope", () => {
-      const task = createTaskExtended("Build shared utility", {
+    test("shared-tagged task promotes to swarm scope", async () => {
+      const task = await createTaskExtended("Build shared utility", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -303,8 +303,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(true);
     });
 
-    test("regular task does NOT promote to swarm scope", () => {
-      const task = createTaskExtended("Fix a typo", {
+    test("regular task does NOT promote to swarm scope", async () => {
+      const task = await createTaskExtended("Fix a typo", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -320,8 +320,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(shouldShareWithSwarm).toBe(false);
     });
 
-    test("failed task does NOT promote to swarm scope", () => {
-      const task = createTaskExtended("Research something", {
+    test("failed task does NOT promote to swarm scope", async () => {
+      const task = await createTaskExtended("Research something", {
         agentId: workerId,
         source: "mcp",
         priority: 50,
@@ -345,8 +345,8 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("inject-learning tool logic", () => {
-    test("lead agent can inject learning into worker memory (swarm-scoped)", () => {
-      const callerAgent = getAgentById(leadId);
+    test("lead agent can inject learning into worker memory (swarm-scoped)", async () => {
+      const callerAgent = await getAgentById(leadId);
       expect(callerAgent).not.toBeNull();
       expect(callerAgent!.isLead).toBe(true);
 
@@ -354,7 +354,7 @@ describe("Self-Improvement Mechanisms", () => {
       const learning = "Always run lint before committing";
       const content = `[Lead Feedback — ${category}]\n\n${learning}`;
 
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "swarm",
         name: `Lead feedback: ${category} — ${learning.slice(0, 60)}`,
@@ -368,8 +368,8 @@ describe("Self-Improvement Mechanisms", () => {
       expect(memory.content).toContain(learning);
     });
 
-    test("non-lead agent is rejected", () => {
-      const callerAgent = getAgentById(workerId);
+    test("non-lead agent is rejected", async () => {
+      const callerAgent = await getAgentById(workerId);
       expect(callerAgent).not.toBeNull();
       expect(callerAgent!.isLead).toBe(false);
 
@@ -378,10 +378,10 @@ describe("Self-Improvement Mechanisms", () => {
       expect(canInject).toBe(false);
     });
 
-    test("injected learning is visible to target worker in memory search", () => {
+    test("injected learning is visible to target worker in memory search", async () => {
       // Create memory with embedding for searchability
       const content = "[Lead Feedback — mistake-pattern]\n\nNever force-push to main branch";
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: mistake-pattern — Never force-push to main branch",
@@ -390,10 +390,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.7, 0.3, 0.0]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Worker can find it via search
-      const results = store.search(new Float32Array([0.7, 0.3, 0.0]), workerId, {
+      const results = await store.search(new Float32Array([0.7, 0.3, 0.0]), workerId, {
         isLead: false,
         scope: "agent",
       });
@@ -403,9 +403,9 @@ describe("Self-Improvement Mechanisms", () => {
       expect(found!.content).toContain("Never force-push");
     });
 
-    test("injected learning is NOT visible to other workers", () => {
+    test("injected learning is NOT visible to other workers", async () => {
       const content = "[Lead Feedback — preference]\n\nUse bun instead of npm";
-      const memory = store.store({
+      const memory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Lead feedback: preference — Use bun instead of npm",
@@ -414,10 +414,10 @@ describe("Self-Improvement Mechanisms", () => {
       });
 
       const embedding = new Float32Array([0.2, 0.8, 0.1]);
-      store.updateEmbedding(memory.id, embedding, "test-model");
+      await store.updateEmbedding(memory.id, embedding, "test-model");
 
       // Other worker should NOT see it
-      const results = store.search(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
+      const results = await store.search(new Float32Array([0.2, 0.8, 0.1]), otherWorkerId, {
         isLead: false,
         scope: "agent",
       });
@@ -441,28 +441,28 @@ describe("Self-Improvement Mechanisms", () => {
   // ==========================================================================
 
   describe("memory search agent ID security", () => {
-    test("agent can only search their own memories (not others)", () => {
+    test("agent can only search their own memories (not others)", async () => {
       // Create private memories for worker and other worker
-      const workerMemory = store.store({
+      const workerMemory = await store.store({
         agentId: workerId,
         scope: "agent",
         name: "Worker Private Secret",
         content: "My secret API key pattern",
         source: "manual",
       });
-      store.updateEmbedding(workerMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(workerMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
-      const otherMemory = store.store({
+      const otherMemory = await store.store({
         agentId: otherWorkerId,
         scope: "agent",
         name: "Other Worker Secret",
         content: "Other agent's private data",
         source: "manual",
       });
-      store.updateEmbedding(otherMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
+      await store.updateEmbedding(otherMemory.id, new Float32Array([0.5, 0.5, 0.0]), "test-model");
 
       // Worker searching with their own ID should see their memory but not other's
-      const workerResults = store.search(new Float32Array([0.5, 0.5, 0.0]), workerId, {
+      const workerResults = await store.search(new Float32Array([0.5, 0.5, 0.0]), workerId, {
         isLead: false,
         scope: "all",
       });

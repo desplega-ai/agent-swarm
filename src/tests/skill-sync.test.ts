@@ -14,10 +14,10 @@ const FAKE_HOME = join(tmpdir(), `skill-sync-test-${process.pid}`);
 describe("syncSkillsToFilesystem", () => {
   let agentId: string;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     initDb(TEST_DB_PATH);
 
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Skill Sync Test Worker",
       description: "Test agent for skill sync",
       role: "worker",
@@ -29,17 +29,17 @@ describe("syncSkillsToFilesystem", () => {
     agentId = agent.id;
 
     // Create and install a simple skill
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "test-skill",
       description: "A test skill",
       content: "---\nname: test-skill\ndescription: A test skill\n---\n\nTest body.",
       type: "personal",
       scope: "agent",
     });
-    installSkill(agentId, skill.id);
+    await installSkill(agentId, skill.id);
 
     // Create a legacy complex skill with no stored files (should be skipped)
-    const complexSkill = createSkill({
+    const complexSkill = await createSkill({
       name: "complex-skill",
       description: "A complex skill",
       content: "---\nname: complex-skill\ndescription: A complex skill\n---\n\nBody.",
@@ -47,9 +47,9 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, complexSkill.id);
+    await installSkill(agentId, complexSkill.id);
 
-    const dbBackedComplexSkill = createSkill({
+    const dbBackedComplexSkill = await createSkill({
       name: "complex-db-skill",
       description: "A DB-backed complex skill",
       content: "---\nname: complex-db-skill\ndescription: A DB-backed complex skill\n---\n\nBody.",
@@ -57,13 +57,13 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, dbBackedComplexSkill.id);
-    upsertSkillFile(dbBackedComplexSkill.id, {
+    await installSkill(agentId, dbBackedComplexSkill.id);
+    await upsertSkillFile(dbBackedComplexSkill.id, {
       path: "references/guide.md",
       content: "# Guide\n\nBundled reference.",
       mimeType: "text/markdown",
     });
-    upsertSkillFile(dbBackedComplexSkill.id, {
+    await upsertSkillFile(dbBackedComplexSkill.id, {
       path: "assets/logo.png",
       content: "[binary file - not synced]",
       mimeType: "image/png",
@@ -82,8 +82,8 @@ describe("syncSkillsToFilesystem", () => {
     await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   });
 
-  test("syncs simple skills to claude directory", () => {
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+  test("syncs simple skills to claude directory", async () => {
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     expect(result.synced).toBeGreaterThanOrEqual(1);
@@ -93,8 +93,8 @@ describe("syncSkillsToFilesystem", () => {
     expect(readFileSync(skillFile, "utf-8")).toContain("Test body.");
   });
 
-  test("syncs simple skills to pi directory", () => {
-    const result = syncSkillsToFilesystem(agentId, "pi", FAKE_HOME);
+  test("syncs simple skills to pi directory", async () => {
+    const result = await syncSkillsToFilesystem(agentId, "pi", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     expect(result.synced).toBeGreaterThanOrEqual(1);
@@ -104,8 +104,8 @@ describe("syncSkillsToFilesystem", () => {
     expect(readFileSync(skillFile, "utf-8")).toContain("Test body.");
   });
 
-  test("syncs simple skills to codex directory", () => {
-    const result = syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
+  test("syncs simple skills to codex directory", async () => {
+    const result = await syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     expect(result.synced).toBeGreaterThanOrEqual(1);
@@ -121,7 +121,7 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(piOnlyFile)).toBe(false);
   });
 
-  test("syncs to all local harness skill trees when harnessType is 'all'", () => {
+  test("syncs to all local harness skill trees when harnessType is 'all'", async () => {
     // Clean up first to get accurate count
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".pi"), { recursive: true, force: true });
@@ -129,7 +129,7 @@ describe("syncSkillsToFilesystem", () => {
     rmSync(join(FAKE_HOME, ".opencode"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".agents"), { recursive: true, force: true });
 
-    const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     expect(result.synced).toBe(10); // 2 DB-backed skills × 5 dirs
@@ -146,10 +146,10 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(agentsFile)).toBe(true);
   });
 
-  test("syncs DB-backed complex skill files and skips binary placeholders", () => {
+  test("syncs DB-backed complex skill files and skips binary placeholders", async () => {
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
 
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
 
@@ -175,10 +175,10 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(binaryFile)).toBe(false);
   });
 
-  test("removes stale bundled files from swarm-managed skill directories", () => {
+  test("removes stale bundled files from swarm-managed skill directories", async () => {
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
 
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
     expect(result.errors).toHaveLength(0);
 
     const skillDir = join(FAKE_HOME, ".claude", "skills", "complex-db-skill");
@@ -190,7 +190,7 @@ describe("syncSkillsToFilesystem", () => {
     writeFileSync(staleFile, "stale");
     writeFileSync(staleBinary, "previous binary payload");
 
-    const nextResult = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const nextResult = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(nextResult.errors).toHaveLength(0);
     expect(nextResult.removed).toBeGreaterThanOrEqual(2);
@@ -199,15 +199,15 @@ describe("syncSkillsToFilesystem", () => {
     expect(readFileSync(currentFile, "utf-8")).toContain("Bundled reference.");
   });
 
-  test("skips legacy complex skills without stored files", () => {
-    const _result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+  test("skips legacy complex skills without stored files", async () => {
+    const _result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     const complexDir = join(FAKE_HOME, ".claude", "skills", "complex-skill");
     expect(existsSync(complexDir)).toBe(false);
   });
 
-  test("continues syncing bundled files after one file write fails", () => {
-    const failSkill = createSkill({
+  test("continues syncing bundled files after one file write fails", async () => {
+    const failSkill = await createSkill({
       name: "complex-fail-safe",
       description: "Complex skill with one blocked file",
       content:
@@ -216,12 +216,12 @@ describe("syncSkillsToFilesystem", () => {
       scope: "global",
       isComplex: true,
     });
-    installSkill(agentId, failSkill.id);
-    upsertSkillFile(failSkill.id, {
+    await installSkill(agentId, failSkill.id);
+    await upsertSkillFile(failSkill.id, {
       path: "references/blocked.md",
       content: "blocked",
     });
-    upsertSkillFile(failSkill.id, {
+    await upsertSkillFile(failSkill.id, {
       path: "references/ok.md",
       content: "ok",
     });
@@ -237,7 +237,7 @@ describe("syncSkillsToFilesystem", () => {
     );
     mkdirSync(blockedTarget, { recursive: true });
 
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(result.errors.some((error) => error.includes("references/blocked.md"))).toBe(true);
     expect(
@@ -250,32 +250,32 @@ describe("syncSkillsToFilesystem", () => {
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
   });
 
-  test("removes stale swarm-managed skill directories", () => {
+  test("removes stale swarm-managed skill directories", async () => {
     // Mark this stale dir as swarm-managed (mirrors what an earlier sync would have done)
     const staleDir = join(FAKE_HOME, ".claude", "skills", "old-removed-skill");
     mkdirSync(staleDir, { recursive: true });
     writeFileSync(join(staleDir, SWARM_MARKER), "");
     expect(existsSync(staleDir)).toBe(true);
 
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(result.removed).toBeGreaterThanOrEqual(1);
     expect(existsSync(staleDir)).toBe(false);
   });
 
-  test("removes stale swarm-managed codex skill directories", () => {
+  test("removes stale swarm-managed codex skill directories", async () => {
     const staleCodexDir = join(FAKE_HOME, ".codex", "skills", "old-codex-skill");
     mkdirSync(staleCodexDir, { recursive: true });
     writeFileSync(join(staleCodexDir, SWARM_MARKER), "");
     expect(existsSync(staleCodexDir)).toBe(true);
 
-    const result = syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
 
     expect(result.removed).toBeGreaterThanOrEqual(1);
     expect(existsSync(staleCodexDir)).toBe(false);
   });
 
-  test("leaves foreign (unmarked) skill directories alone — local-dev safety", () => {
+  test("leaves foreign (unmarked) skill directories alone — local-dev safety", async () => {
     // Simulate a user-installed codex skill in their personal ~/.codex/skills
     // that the swarm did NOT create. The cleanup pass MUST NOT remove it.
     const foreignDir = join(FAKE_HOME, ".codex", "skills", "user-personal-skill");
@@ -284,23 +284,23 @@ describe("syncSkillsToFilesystem", () => {
     // No SWARM_MARKER file → not ours to manage.
     expect(existsSync(foreignDir)).toBe(true);
 
-    syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
+    await syncSkillsToFilesystem(agentId, "codex", FAKE_HOME);
 
     expect(existsSync(foreignDir)).toBe(true);
     expect(readFileSync(join(foreignDir, "SKILL.md"), "utf-8")).toBe("user's own skill — keep me");
   });
 
-  test("written skill directories carry the swarm-managed marker", () => {
+  test("written skill directories carry the swarm-managed marker", async () => {
     // Clean up first
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
 
-    syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     const marker = join(FAKE_HOME, ".claude", "skills", "test-skill", SWARM_MARKER);
     expect(existsSync(marker)).toBe(true);
   });
 
-  test("defaults to 'all' when no harnessType provided", () => {
+  test("defaults to 'all' when no harnessType provided", async () => {
     // Clean up first
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
     rmSync(join(FAKE_HOME, ".pi"), { recursive: true, force: true });
@@ -309,7 +309,7 @@ describe("syncSkillsToFilesystem", () => {
     rmSync(join(FAKE_HOME, ".agents"), { recursive: true, force: true });
 
     // Use 'all' explicitly with homeOverride (default harnessType would use real home)
-    const result = syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "all", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     expect(result.synced).toBeGreaterThanOrEqual(10);
@@ -326,8 +326,8 @@ describe("syncSkillsToFilesystem", () => {
     expect(existsSync(agentsFile)).toBe(true);
   });
 
-  test("returns empty result for agent with no skills", () => {
-    const otherAgent = createAgent({
+  test("returns empty result for agent with no skills", async () => {
+    const otherAgent = await createAgent({
       name: "Empty Agent",
       description: "Agent with no skills",
       role: "worker",
@@ -337,14 +337,14 @@ describe("syncSkillsToFilesystem", () => {
       capabilities: [],
     });
 
-    const result = syncSkillsToFilesystem(otherAgent.id, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(otherAgent.id, "claude", FAKE_HOME);
 
     expect(result.synced).toBe(0);
     expect(result.errors).toHaveLength(0);
   });
 
-  test("sanitizes skill names with special characters", () => {
-    const skill = createSkill({
+  test("sanitizes skill names with special characters", async () => {
+    const skill = await createSkill({
       name: "my/dangerous/../skill",
       description: "Path traversal attempt",
       content:
@@ -352,12 +352,12 @@ describe("syncSkillsToFilesystem", () => {
       type: "personal",
       scope: "agent",
     });
-    installSkill(agentId, skill.id);
+    await installSkill(agentId, skill.id);
 
     // Clean up first
     rmSync(join(FAKE_HOME, ".claude"), { recursive: true, force: true });
 
-    const result = syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
+    const result = await syncSkillsToFilesystem(agentId, "claude", FAKE_HOME);
 
     expect(result.errors).toHaveLength(0);
     const sanitizedDir = join(FAKE_HOME, ".claude", "skills", "my_dangerous____skill");

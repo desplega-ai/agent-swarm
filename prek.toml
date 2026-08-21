@@ -37,14 +37,27 @@ fail_fast = true
 
 [[repos.hooks]]
 id = "test"
-name = "Unit tests (non-blocking; CI is authoritative)"
+name = "Unit tests (bun test --parallel=4, scoped with --changed)"
 language = "system"
-# CI's 4x-sharded test:root is authoritative because local suites bind real ports and are unreliable in shared containers.
-entry = "bash -c 'bun run test:root -- --shard=1/4; bun run test:root -- --shard=2/4; bun run test:root -- --shard=3/4; bun run test:root -- --shard=4/4; true'"
-# CI "test" domain: src/ + scripts tests import + lockfile/tsconfig.
-files = '^(src/|scripts/|package\.json$|bun\.lock|tsconfig\.json$)'
+# scripts/pre-push-tests.sh runs `--changed=<merge-base with origin/main>` and
+# falls back to the full suite when migrations, templates/, bunfig.toml,
+# package.json, or bun.lock changed (those reach every test outside the import
+# graph) or when origin/main is missing. Blocking; CI stays authoritative.
+entry = "bash scripts/pre-push-tests.sh"
+# CI "test" domain: src/ + scripts tests import + lockfile/tsconfig/bunfig + templates.
+files = '^(src/|scripts/|templates/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'
 pass_filenames = false
 stages = ["pre-push"]
+
+[[repos.hooks]]
+id = "bun-version"
+name = "Bun version pins match packageManager"
+language = "system"
+entry = "bun run check:bun-version"
+files = '^(package\.json$|Dockerfile$|Dockerfile\.worker$|apps/evals/Dockerfile$|scripts/check-bun-version\.ts$)'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
 
 [[repos.hooks]]
 id = "db-boundary"

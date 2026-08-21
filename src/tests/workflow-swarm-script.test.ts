@@ -5,7 +5,7 @@ import {
   closeDb,
   createAgent,
   createWorkflow,
-  getDb,
+  getDbClient,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
@@ -81,8 +81,8 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function makeWorkflow(def: WorkflowDefinition): Workflow {
-  const wf = createWorkflow({
+async function makeWorkflow(def: WorkflowDefinition): Promise<Workflow> {
+  const wf = await createWorkflow({
     name: `swarm-script-test-${crypto.randomUUID()}`,
     definition: def,
     createdByAgentId: agentId,
@@ -113,7 +113,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({ name: "workflow-script-agent", isLead: true, status: "idle" });
   agentId = agent.id;
 
   const eventBus = new InProcessEventBus();
@@ -141,12 +141,13 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM workflow_run_steps");
-  getDb().run("DELETE FROM workflow_runs");
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM script_connections");
-  getDb().run("DELETE FROM workflows");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM workflow_run_steps");
+  await client.run("DELETE FROM workflow_runs");
+  await client.run("DELETE FROM scripts");
+  await client.run("DELETE FROM script_connections");
+  await client.run("DELETE FROM workflows");
 });
 
 describe("SwarmScriptExecutor", () => {
@@ -191,12 +192,14 @@ describe("SwarmScriptExecutor", () => {
       true,
     );
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?")
-      .run(old, "scratch-add-one-a1b2c3d4", agentId);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?", [
+      old,
+      "scratch-add-one-a1b2c3d4",
+      agentId,
+    ]);
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "scratch-add-one-a1b2c3d4", args: { value: 6 } },
       context: {},
@@ -213,7 +216,8 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ value: 7 });
     expect(result.output?.scriptName).toBe("scratch-add-one-a1b2c3d4");
     expect(
-      getScript({ name: "scratch-add-one-a1b2c3d4", scope: "agent", scopeId: agentId })?.updatedAt,
+      (await getScript({ name: "scratch-add-one-a1b2c3d4", scope: "agent", scopeId: agentId }))
+        ?.updatedAt,
     ).not.toBe(old);
   });
 
@@ -224,7 +228,7 @@ describe("SwarmScriptExecutor", () => {
     );
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "unresolved-source", args: { payload: "safe-argv-data" } },
       context: { trigger: { payload: "must-not-enter-source" } },
@@ -251,7 +255,7 @@ describe("SwarmScriptExecutor", () => {
     );
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "literal-mustache-source" },
       context: {},
@@ -273,7 +277,7 @@ describe("SwarmScriptExecutor", () => {
       "literal-upstream-name",
       `export default async () => ({ template: "Hello {{customer.name}}" });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         { id: "customer", type: "echo", config: { value: "Ada" }, next: "script" },
         {
@@ -285,8 +289,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -303,7 +307,7 @@ describe("SwarmScriptExecutor", () => {
     );
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "declared-alias-source" },
       context: { upstream: { name: "Ada" } },
@@ -346,7 +350,7 @@ describe("SwarmScriptExecutor", () => {
     );
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "ctx-api-keys" },
       context: {},
@@ -368,7 +372,7 @@ describe("SwarmScriptExecutor", () => {
     await saveScript("versioned", `export default async () => ({ version: "new" });`);
 
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "versioned", pinHash: first.script.contentHash },
       context: {},
@@ -392,7 +396,7 @@ describe("SwarmScriptExecutor", () => {
       "from-input",
       `export default async (args: { value: string }) => ({ seen: args.value });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         { id: "source", type: "echo", config: { value: "mapped-value" }, next: "script" },
         {
@@ -405,8 +409,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, {}, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -415,7 +419,7 @@ describe("SwarmScriptExecutor", () => {
   });
 
   test("exact object token outside swarm-script args is still stringified", async () => {
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "echo",
@@ -426,8 +430,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { payload: { a: 1 } }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const echoStep = steps.find((step) => step.nodeId === "echo");
 
     expect(run?.status).toBe("completed");
@@ -440,7 +444,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-obj",
       `export default async (args: { data: Record<string, unknown> }) => ({ isObject: typeof args.data === "object" && !Array.isArray(args.data), keys: Object.keys(args.data ?? {}) });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -454,8 +458,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { payload: { a: 1, b: 2 } }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -468,7 +472,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-arr",
       `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -482,8 +486,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { list: ["x", "y", "z"] }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -496,7 +500,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-empty-arr",
       `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -510,8 +514,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { empty: [] }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -524,7 +528,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-str",
       `export default async (args: { name: string }) => ({ isString: typeof args.name === "string", value: args.name });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -542,8 +546,8 @@ describe("SwarmScriptExecutor", () => {
       { ruleName: "local-rules/cognitive-complexity" },
       registry,
     );
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -558,7 +562,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-num",
       `export default async (args: { count: number }) => ({ isNumber: typeof args.count === "number", value: args.count });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -572,8 +576,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { maxFiles: 3 }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -586,7 +590,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-bool",
       `export default async (args: { enabled: boolean }) => ({ isBoolean: typeof args.enabled === "boolean", value: args.enabled });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -600,8 +604,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { enabled: false }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -614,7 +618,7 @@ describe("SwarmScriptExecutor", () => {
       "echo-mixed",
       `export default async (args: { label: string }) => ({ isString: typeof args.label === "string", value: args.label });`,
     );
-    const wf = makeWorkflow({
+    const wf = await makeWorkflow({
       nodes: [
         {
           id: "script",
@@ -628,8 +632,8 @@ describe("SwarmScriptExecutor", () => {
     });
 
     const runId = await startWorkflowExecution(wf, { ruleName: "no-explicit-any" }, registry);
-    const run = getWorkflowRun(runId);
-    const steps = getWorkflowRunStepsByRunId(runId);
+    const run = await getWorkflowRun(runId);
+    const steps = await getWorkflowRunStepsByRunId(runId);
     const scriptStep = steps.find((step) => step.nodeId === "script");
 
     expect(run?.status).toBe("completed");
@@ -642,7 +646,7 @@ describe("SwarmScriptExecutor", () => {
   test("fsMode workspace-rw is rejected at config validation with a clear error message", async () => {
     await saveScript("noop", `export default async () => ({ ok: true });`);
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "noop", fsMode: "workspace-rw" },
       context: {},
@@ -675,7 +679,7 @@ describe("SwarmScriptExecutor", () => {
   test("timeoutMs not set — script completes with the default 30s window", async () => {
     await saveScript("quick", `export default async () => ({ done: true });`);
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "quick" },
       context: {},
@@ -698,7 +702,7 @@ describe("SwarmScriptExecutor", () => {
       `export default async () => { await new Promise(r => setTimeout(r, 3000)); return { done: true }; };`,
     );
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "sleeper", timeoutMs: 300 },
       context: {},
@@ -718,7 +722,7 @@ describe("SwarmScriptExecutor", () => {
   test("Failure in the script surfaces as a workflow-node failure", async () => {
     await saveScript("throws", `export default async () => { throw new Error("boom"); };`);
     const executor = new SwarmScriptExecutor(deps);
-    const wf = makeWorkflow({ nodes: [] });
+    const wf = await makeWorkflow({ nodes: [] });
     const result = await executor.run({
       config: { scriptName: "throws" },
       context: {},

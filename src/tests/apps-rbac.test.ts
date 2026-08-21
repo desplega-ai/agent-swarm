@@ -7,7 +7,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createUser, getDb, getTaskById, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, getDbClient, getTaskById, initDb } from "../be/db";
 import { upsertScriptByName } from "../be/scripts/db";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleApps } from "../http/apps";
@@ -56,7 +56,7 @@ function headers(principal: Principal): HeadersInit {
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-    setRequestAuth(req, resolveHttpRequestAuth(req, API_KEY));
+    setRequestAuth(req, await resolveHttpRequestAuth(req, API_KEY));
     res.setHeader("Content-Type", "application/json");
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
@@ -148,11 +148,11 @@ beforeAll(async () => {
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   }
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-rbac-worker", isLead: false, status: "idle" });
-  createAgent({ id: LEAD_ID, name: "apps-rbac-lead", isLead: true, status: "idle" });
-  const user = createUser({ name: "Apps RBAC User" });
+  await createAgent({ id: AGENT_ID, name: "apps-rbac-worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "apps-rbac-lead", isLead: true, status: "idle" });
+  const user = await createUser({ name: "Apps RBAC User" });
   userId = user.id;
-  userToken = mintToken(user.id, "apps-rbac", OPERATOR_ACTOR).plaintext;
+  userToken = (await mintToken(user.id, "apps-rbac", OPERATOR_ACTOR)).plaintext;
   tools = registeredTools();
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
@@ -163,9 +163,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   clearAuditSink();
-  getDb().run("DELETE FROM agent_tasks");
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+  await getDbClient().run("DELETE FROM agent_tasks");
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
   appId = await createFixtureApp();
   clearAuditSink();
 });
@@ -322,7 +322,7 @@ describe("app viewer identity", () => {
       body: JSON.stringify({ input: { note: "user viewer" } }),
     });
     expect(action.status).toBe(200);
-    expect(getTaskById(action.body.taskId)?.requestedByUserId).toBe(userId);
+    expect((await getTaskById(action.body.taskId))?.requestedByUserId).toBe(userId);
 
     const operatorAction = await request<{ taskId: string }>(
       `/api/apps/${appId}/actions/triage`,
@@ -330,7 +330,7 @@ describe("app viewer identity", () => {
       { method: "POST", body: JSON.stringify({ input: { note: "operator viewer" } }) },
     );
     expect(operatorAction.status).toBe(200);
-    expect(getTaskById(operatorAction.body.taskId)?.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(operatorAction.body.taskId))?.requestedByUserId).toBeUndefined();
 
     const agentAction = await request<{ taskId: string }>(
       `/api/apps/${appId}/actions/triage`,
@@ -338,7 +338,7 @@ describe("app viewer identity", () => {
       { method: "POST", body: JSON.stringify({ input: { note: "agent viewer" } }) },
     );
     expect(agentAction.status).toBe(200);
-    expect(getTaskById(agentAction.body.taskId)?.requestedByUserId).toBeUndefined();
+    expect((await getTaskById(agentAction.body.taskId))?.requestedByUserId).toBeUndefined();
   });
 });
 
@@ -377,7 +377,12 @@ describe("user writers and the script ownership gate", () => {
 
   test("a web user cannot wire agent-scoped or catalog scripts; stored paths stay editable", async () => {
     const ownerId = crypto.randomUUID();
-    createAgent({ id: ownerId, name: "apps-rbac-script-owner", isLead: false, status: "idle" });
+    await createAgent({
+      id: ownerId,
+      name: "apps-rbac-script-owner",
+      isLead: false,
+      status: "idle",
+    });
     const foreignId = await saveScript("agent", ownerId);
     const globalId = await saveScript("global", null);
     type Issues = { issues?: Array<{ path: string; message: string }> };

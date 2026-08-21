@@ -5,7 +5,7 @@ import {
   completeTask,
   failTask,
   getAgentById,
-  getDb,
+  getDbClient,
   getResolvedConfig,
   getTaskById,
   insertTaskAttachment,
@@ -117,8 +117,29 @@ export const registerStoreProgressTool = (server: McpServer) => {
         return toolErr('Agent ID not found. The MCP client should define the "X-Agent-ID" header.');
       }
 
-      const txn = getDb().transaction(() => {
-        const agent = getAgentById(requestInfo.agentId ?? "");
+      // Resolve agent-fs default org/drive IDs from swarm config lazily —
+      // only if at least one `agent-fs` row arrives with missing IDs. Resolved
+      // BEFORE the transaction below (which must stay fully synchronous) so the
+      // attachment loop inside it can consume a plain, already-resolved value.
+      // Scope precedence is `getResolvedConfig`'s usual repo > agent > global;
+      // we pass the calling agent's id so agent-scoped overrides win. Defaults
+      // apply only when a row has neither ID: filling one missing ID would
+      // create a mismatched pair and a potentially wrong live-host URL.
+      // Env-var fallback in `constants.ts` remains the secondary path for
+      // self-hosters who deploy without a config DB.
+      let agentFsDefaults: { orgId?: string; driveId?: string } | undefined;
+      if (attachments?.some((a) => a.kind === "agent-fs" && !a.orgId && !a.driveId)) {
+        const configs = await getResolvedConfig(requestInfo.agentId ?? undefined);
+        const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
+        const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
+        agentFsDefaults = {
+          orgId: orgId && orgId.length > 0 ? orgId : undefined,
+          driveId: driveId && driveId.length > 0 ? driveId : undefined,
+        };
+      }
+
+      const result = await getDbClient().transaction(async () => {
+        const agent = await getAgentById(requestInfo.agentId ?? "");
 
         if (!agent) {
           return {
@@ -127,7 +148,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
           };
         }
 
-        const existingTask = getTaskById(taskId);
+        const existingTask = await getTaskById(taskId);
 
         if (!existingTask) {
           return {
@@ -150,37 +171,15 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // attachment writes don't change task state, so they're safe to
         // accept on any status.
         if (attachments && attachments.length > 0) {
-          // Resolve agent-fs default org/drive IDs from swarm config lazily —
-          // only if at least one `agent-fs` row arrives with missing IDs.
-          // Scope precedence is `getResolvedConfig`'s usual repo > agent >
-          // global; we pass the calling agent's id so agent-scoped overrides
-          // win. Defaults apply only when a row has neither ID: filling one
-          // missing ID would create a mismatched pair and a potentially wrong
-          // live-host URL. Env-var fallback in `constants.ts` remains the
-          // secondary path for self-hosters who deploy without a config DB.
-          let agentFsDefaults: { orgId?: string; driveId?: string } | null = null;
-          const resolveAgentFsDefaults = (): { orgId?: string; driveId?: string } => {
-            if (agentFsDefaults !== null) return agentFsDefaults;
-            const configs = getResolvedConfig(requestInfo.agentId ?? undefined);
-            const orgId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_ORG_ID")?.value;
-            const driveId = configs.find((c) => c.key === "AGENT_FS_DEFAULT_DRIVE_ID")?.value;
-            agentFsDefaults = {
-              orgId: orgId && orgId.length > 0 ? orgId : undefined,
-              driveId: driveId && driveId.length > 0 ? driveId : undefined,
-            };
-            return agentFsDefaults;
-          };
-
           for (const a of attachments) {
             let orgId = a.kind === "agent-fs" ? a.orgId : undefined;
             let driveId = a.kind === "agent-fs" ? a.driveId : undefined;
             if (a.kind === "agent-fs" && !orgId && !driveId) {
-              const defaults = resolveAgentFsDefaults();
-              orgId = orgId || defaults.orgId;
-              driveId = driveId || defaults.driveId;
+              orgId = orgId || agentFsDefaults?.orgId;
+              driveId = driveId || agentFsDefaults?.driveId;
             }
 
-            insertTaskAttachment({
+            await insertTaskAttachment({
               taskId,
               agentId: requestInfo.agentId ?? null,
               name: a.name,
@@ -211,7 +210,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
         // A caller may explicitly force a text-only correction; that path returns
         // before every terminal side effect and deliberately leaves all lifecycle
         // fields untouched.
-        const terminalResultGuard = guardTerminalTaskResultWrite(existingTask, {
+        const terminalResultGuard = await guardTerminalTaskResultWrite(existingTask, {
           status,
           output,
           failureReason,
@@ -231,7 +230,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
             Date.now() - new Date(existingTask.lastUpdatedAt).getTime() < 5 * 60 * 1000;
 
           if (!isDuplicate) {
-            const result = updateTaskProgress(taskId, progress);
+            const result = await updateTaskProgress(taskId, progress);
             if (result) updatedTask = result;
           }
         }
@@ -249,63 +248,72 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // Handle status change
         if (status === "completed") {
-          const result = completeTask(taskId, output);
+          const result = await completeTask(taskId, output);
           if (result) {
             updatedTask = result;
 
-            ensure({
-              id: "completed",
-              flow: "task",
-              runId: taskId,
-              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
-              data: {
-                taskId,
-                agentId: existingTask.agentId,
-                previousStatus: existingTask.status,
-                hasOutput: !!output,
-              },
-              validator: (data) => data.previousStatus === "in_progress",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+            // afterCommit: the transaction can still roll back (e.g. a later
+            // capacity update throws) — business-use must not be told the
+            // task completed for a write that never landed.
+            getDbClient().afterCommit(() => {
+              ensure({
+                id: "completed",
+                flow: "task",
+                runId: taskId,
+                depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
+                data: {
+                  taskId,
+                  agentId: existingTask.agentId,
+                  previousStatus: existingTask.status,
+                  hasOutput: !!output,
+                },
+                validator: (data) => data.previousStatus === "in_progress",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+              });
             });
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else if (status === "failed") {
-          const result = failTask(taskId, failureReason ?? "Unknown failure");
+          const result = await failTask(taskId, failureReason ?? "Unknown failure");
           if (result) {
             updatedTask = result;
 
-            ensure({
-              id: "failed",
-              flow: "task",
-              runId: taskId,
-              depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
-              data: {
-                taskId,
-                agentId: existingTask.agentId,
-                previousStatus: existingTask.status,
-                failureReason: failureReason ?? "Unknown failure",
-              },
-              validator: (data) => data.previousStatus === "in_progress",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+            // afterCommit: mirrors the "completed" branch above — dropped if
+            // this transaction rolls back.
+            getDbClient().afterCommit(() => {
+              ensure({
+                id: "failed",
+                flow: "task",
+                runId: taskId,
+                depIds: existingTask.wasPaused ? ["started", "resumed"] : ["started"],
+                data: {
+                  taskId,
+                  agentId: existingTask.agentId,
+                  previousStatus: existingTask.status,
+                  failureReason: failureReason ?? "Unknown failure",
+                },
+                validator: (data) => data.previousStatus === "in_progress",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+              });
             });
 
             if (existingTask.agentId) {
               // Derive status from capacity instead of always setting idle
-              updateAgentStatusFromCapacity(existingTask.agentId);
+              await updateAgentStatusFromCapacity(existingTask.agentId);
             }
           }
         } else {
           // Progress update - ensure status reflects current load
           if (existingTask.agentId) {
-            updateAgentStatusFromCapacity(existingTask.agentId);
+            await updateAgentStatusFromCapacity(existingTask.agentId);
           }
         }
 
@@ -324,8 +332,6 @@ export const registerStoreProgressTool = (server: McpServer) => {
         };
       });
 
-      const result = txn();
-
       const shouldRunTerminalSideEffects =
         (status === "completed" || status === "failed") &&
         result.success &&
@@ -339,7 +345,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
       // re-call on a terminal task) and on forced text-only overwrites, so a
       // replay never duplicates memories or follow-up tasks.
       if (shouldRunTerminalSideEffects && status) {
-        runTaskTerminalEffects({
+        await runTaskTerminalEffects({
           task: result.task!,
           status,
           output,

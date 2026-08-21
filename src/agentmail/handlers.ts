@@ -35,7 +35,7 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
   source: "agentmail",
   envFlag: "ADDITIVE_AGENTMAIL",
   timeoutMs: AGENTMAIL_BUFFER_TIMEOUT_MS,
-  onFlush: (items, contextKey) => {
+  onFlush: async (items, contextKey) => {
     if (items.length === 0) return;
     const first = items[0]!;
     const combinedPreview = items.map((m) => m.preview).join("\n---\n");
@@ -47,7 +47,7 @@ const agentmailBuffer = createIngressBuffer<BufferedAgentMailMessage>({
       preview: `[${items.length} buffered message(s)]\n\n${combinedPreview}`,
     });
     if (followupResult.skipped) return;
-    const task = createTaskWithSiblingAwareness(followupResult.text, {
+    const task = await createTaskWithSiblingAwareness(followupResult.text, {
       agentId: first.agentId,
       source: "agentmail",
       taskType: "agentmail-reply",
@@ -139,8 +139,8 @@ function isDuplicate(eventKey: string): boolean {
 /**
  * Find the lead agent to receive AgentMail messages when no inbox mapping exists
  */
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
   return agents.find((a) => a.isLead) ?? null;
@@ -178,7 +178,7 @@ export async function handleMessageReceived(
   const senderName = extractNameFromField(from);
   let requestedByUserId: string | undefined;
   if (senderEmail) {
-    const { user } = findOrCreateUserByEmail(
+    const { user } = await findOrCreateUserByEmail(
       senderEmail,
       { name: senderName ?? undefined },
       { kind: "system", id: "webhook:agentmail" },
@@ -192,7 +192,7 @@ export async function handleMessageReceived(
   // identifier at all, so it renders the same non-name sentinel shape via
   // the identity primitive rather than echoing the raw header string.
   const senderDisplay = senderEmail
-    ? renderIdentity(resolveIdentityByEmail(senderEmail))
+    ? renderIdentity(await resolveIdentityByEmail(senderEmail))
     : renderIdentity({ status: "unknown", kind: "email", externalId: "unknown" });
   const preview = body.length > 500 ? `${body.substring(0, 500)}...` : body;
 
@@ -207,7 +207,7 @@ export async function handleMessageReceived(
   });
 
   // Check for thread continuity - find existing task for this thread
-  const existingTask = findTaskByAgentMailThread(thread_id);
+  const existingTask = await findTaskByAgentMailThread(thread_id);
   if (existingTask) {
     const contextKey = agentmailContextKey({ threadId: thread_id });
     const siblingInFlight = ACTIVE_TASK_STATUSES.has(existingTask.status);
@@ -247,7 +247,7 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(followupResult.text, {
+    const task = await createTaskWithSiblingAwareness(followupResult.text, {
       agentId: existingTask.agentId,
       source: "agentmail",
       taskType: "agentmail-reply",
@@ -266,10 +266,10 @@ export async function handleMessageReceived(
   }
 
   // Look up agent from inbox mapping
-  const mapping = getAgentMailInboxMapping(inbox_id);
+  const mapping = await getAgentMailInboxMapping(inbox_id);
 
   if (mapping) {
-    const agent = getAgentById(mapping.agentId);
+    const agent = await getAgentById(mapping.agentId);
     if (agent) {
       if (agent.isLead) {
         // Route to lead as task
@@ -286,7 +286,7 @@ export async function handleMessageReceived(
           return { created: false };
         }
 
-        const task = createTaskWithSiblingAwareness(leadResult.text, {
+        const task = await createTaskWithSiblingAwareness(leadResult.text, {
           agentId: agent.id,
           source: "agentmail",
           taskType: "agentmail-message",
@@ -316,7 +316,7 @@ export async function handleMessageReceived(
         return { created: false };
       }
 
-      const task = createTaskWithSiblingAwareness(workerResult.text, {
+      const task = await createTaskWithSiblingAwareness(workerResult.text, {
         agentId: agent.id,
         source: "agentmail",
         taskType: "agentmail-message",
@@ -335,7 +335,7 @@ export async function handleMessageReceived(
   }
 
   // No mapping found - route to lead as task
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   if (lead) {
     const unmappedResult = resolveTemplate("agentmail.email.unmapped", {
       from: senderDisplay,
@@ -350,7 +350,7 @@ export async function handleMessageReceived(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(unmappedResult.text, {
+    const task = await createTaskWithSiblingAwareness(unmappedResult.text, {
       agentId: lead.id,
       source: "agentmail",
       taskType: "agentmail-message",
@@ -380,7 +380,7 @@ export async function handleMessageReceived(
     return { created: false };
   }
 
-  const task = createTaskWithSiblingAwareness(noAgentResult.text, {
+  const task = await createTaskWithSiblingAwareness(noAgentResult.text, {
     source: "agentmail",
     taskType: "agentmail-message",
     agentmailInboxId: inbox_id,

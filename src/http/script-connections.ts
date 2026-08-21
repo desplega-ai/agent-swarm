@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { resolveHttpAuditUserId } from "@/be/audit-user";
 import { normalizeDate } from "@/be/date-utils";
-import { getAgentById, getDb } from "@/be/db";
+import { getAgentById, getDbClient } from "@/be/db";
 import {
   createOAuthApp,
   deleteAuthorizationById,
@@ -30,6 +30,7 @@ import {
   listRelationalCredentialBindings,
   listScriptConnections,
   refreshScriptConnection,
+  ScriptConnectionConflictError,
   type ScriptConnectionKind,
   type ScriptConnectionRecord,
   type ScriptCredentialBindingRecord,
@@ -995,16 +996,16 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function ensureConnectionAdmin(
+async function ensureConnectionAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
   const decision = can({
     principal: {
       kind: "agent",
@@ -1027,18 +1028,18 @@ function ensureConnectionAdmin(
  * {@link ensureConnectionAdmin} but keys on the OAuth-specific verbs so the two
  * surfaces can diverge in a future role-based rollout.
  */
-function ensureVerbAdmin(
+async function ensureVerbAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
   verb: "oauth-app.manage" | "oauth-authorization.manage",
   denyMessage: string,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
 
   const callerAgentId = agentId ?? singleHeader(req, "x-agent-id");
-  const agent = callerAgentId ? getAgentById(callerAgentId) : undefined;
+  const agent = callerAgentId ? await getAgentById(callerAgentId) : undefined;
   const decision = can({
     principal: { kind: "agent", agentId: callerAgentId ?? "", isLead: agent?.isLead ?? false },
     verb,
@@ -1052,12 +1053,12 @@ function ensureVerbAdmin(
   return true;
 }
 
-function ensureOAuthAppAdmin(
+async function ensureOAuthAppAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
-  return ensureVerbAdmin(
+): Promise<boolean> {
+  return await ensureVerbAdmin(
     req,
     res,
     agentId,
@@ -1066,12 +1067,12 @@ function ensureOAuthAppAdmin(
   );
 }
 
-function ensureOAuthAuthorizationAdmin(
+async function ensureOAuthAuthorizationAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   agentId: string | undefined,
-): boolean {
-  return ensureVerbAdmin(
+): Promise<boolean> {
+  return await ensureVerbAdmin(
     req,
     res,
     agentId,
@@ -1080,38 +1081,40 @@ function ensureOAuthAuthorizationAdmin(
   );
 }
 
-function tokenStatusForBinding(
+async function tokenStatusForBinding(
   binding: ScriptCredentialBindingRecord,
-): OAuthBindingTokenStatus | undefined {
+): Promise<OAuthBindingTokenStatus | undefined> {
   if (binding.authKind !== "oauth") return undefined;
   return binding.oauthAuthorizationId
-    ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+    ? await getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
     : "missing";
 }
 
-function decorateBinding(binding: ScriptCredentialBindingRecord): DecoratedBinding {
-  const tokenStatus = tokenStatusForBinding(binding);
+async function decorateBinding(binding: ScriptCredentialBindingRecord): Promise<DecoratedBinding> {
+  const tokenStatus = await tokenStatusForBinding(binding);
   return tokenStatus ? { ...binding, tokenStatus } : binding;
 }
 
-function authSummaryForConnection(
+async function authSummaryForConnection(
   connection: ScriptConnectionRecord,
-): ConnectionAuthSummaryResponse {
+): Promise<ConnectionAuthSummaryResponse> {
   const base = connectionAuthSummary(connection);
   if (connection.authType === "oauth") {
     return {
       ...base,
       status: connection.authAuthorizationId
-        ? getOAuthBindingTokenStatus(connection.authAuthorizationId)
+        ? await getOAuthBindingTokenStatus(connection.authAuthorizationId)
         : "missing",
     };
   }
   return base;
 }
 
-function bindingSummary(binding: ScriptCredentialBindingRecord | undefined): BindingSummary | null {
+async function bindingSummary(
+  binding: ScriptCredentialBindingRecord | undefined,
+): Promise<BindingSummary | null> {
   if (!binding) return null;
-  const tokenStatus = tokenStatusForBinding(binding);
+  const tokenStatus = await tokenStatusForBinding(binding);
   return {
     id: binding.id,
     configKey: binding.configKey,
@@ -1158,8 +1161,8 @@ function parseRecord(value: string | null): Record<string, unknown> | null {
   }
 }
 
-function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail {
-  const decorated = decorateConnections([connection])[0];
+async function connectionDetail(connection: ScriptConnectionRecord): Promise<ConnectionDetail> {
+  const decorated = (await decorateConnections([connection]))[0];
   if (!decorated) throw new Error("Failed to decorate connection detail.");
 
   const runtime = parseRecord(connection.generatedRuntimeJson);
@@ -1254,32 +1257,38 @@ function connectionDetail(connection: ScriptConnectionRecord): ConnectionDetail 
   return detail;
 }
 
-function decorateConnections(connections: ScriptConnectionRecord[]): DecoratedConnection[] {
+async function decorateConnections(
+  connections: ScriptConnectionRecord[],
+): Promise<DecoratedConnection[]> {
   const bindings = new Map(
-    listRelationalCredentialBindings({ includeInactive: true }).map((binding) => [
+    (await listRelationalCredentialBindings({ includeInactive: true })).map((binding) => [
       binding.id,
       binding,
     ]),
   );
-  return connections.map((connection) => {
-    const {
-      openapiSpecJson: _openapiSpecJson,
-      generatedTypes: _generatedTypes,
-      generatedRuntimeJson: _generatedRuntimeJson,
-      ...safeConnection
-    } = connection;
-    return {
-      ...safeConnection,
-      ...runtimeCounts(connection),
-      credentialBinding: bindingSummary(
-        connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
-      ),
-      auth: authSummaryForConnection(connection),
-    };
-  });
+  return Promise.all(
+    connections.map(async (connection) => {
+      const {
+        openapiSpecJson: _openapiSpecJson,
+        generatedTypes: _generatedTypes,
+        generatedRuntimeJson: _generatedRuntimeJson,
+        ...safeConnection
+      } = connection;
+      return {
+        ...safeConnection,
+        ...runtimeCounts(connection),
+        credentialBinding: await bindingSummary(
+          connection.credentialBindingId ? bindings.get(connection.credentialBindingId) : undefined,
+        ),
+        auth: await authSummaryForConnection(connection),
+      };
+    }),
+  );
 }
 
-function listConnections(query: z.infer<typeof listConnectionsQuerySchema>): DecoratedConnection[] {
+function listConnections(
+  query: z.infer<typeof listConnectionsQuerySchema>,
+): Promise<DecoratedConnection[]> {
   const connections = listScriptConnections({
     includeDisabled: true,
     allScopes: true,
@@ -1363,7 +1372,7 @@ function sanitizeAuthorization(authorization: OAuthAuthorization) {
   };
 }
 
-function sanitizeOAuthApp(row: OAuthAppRow) {
+async function sanitizeOAuthApp(row: OAuthAppRow) {
   const extraParamsObject = parseMetadata(row.extraParamsJson);
   const extraParams = Object.fromEntries(
     Object.entries(extraParamsObject).filter(
@@ -1382,29 +1391,29 @@ function sanitizeOAuthApp(row: OAuthAppRow) {
     tokenAuthStyle: row.tokenAuthStyle,
     tokenBodyFormat: row.tokenBodyFormat,
     source: row.source,
-    tokenStatus: row.authorizationId ? getOAuthBindingTokenStatus(row.authorizationId) : "missing",
+    tokenStatus: row.authorizationId
+      ? await getOAuthBindingTokenStatus(row.authorizationId)
+      : "missing",
     expiresAt: row.tokenExpiresAt,
     lastRefreshedAt: normalizeDate(row.tokenUpdatedAt),
-    authorizations: listAuthorizationsForApp(row.id).map(sanitizeAuthorization),
+    authorizations: (await listAuthorizationsForApp(row.id)).map(sanitizeAuthorization),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-function listOAuthApps() {
-  const rows = getDb()
-    .prepare<OAuthAppRow, []>(
-      `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
-              a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
-              z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
-              z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
-       FROM oauth_apps a
-       LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
-       WHERE a.mcpServerId IS NULL
-       ORDER BY a.provider ASC`,
-    )
-    .all();
-  return rows.map(sanitizeOAuthApp);
+async function listOAuthApps() {
+  const rows = await getDbClient().query<OAuthAppRow>(
+    `SELECT a.id, a.provider, a.clientId, a.authorizeUrl, a.tokenUrl, a.redirectUri,
+            a.scopes, a.extraParamsJson, a.tokenAuthStyle, a.tokenBodyFormat, a.source,
+            z.id AS authorizationId, z.expiresAt AS tokenExpiresAt,
+            z.updatedAt AS tokenUpdatedAt, a.createdAt, a.updatedAt
+     FROM oauth_apps a
+     LEFT JOIN oauth_authorizations z ON z.appId = a.id AND z.label = 'default'
+     WHERE a.mcpServerId IS NULL
+     ORDER BY a.provider ASC`,
+  );
+  return Promise.all(rows.map(sanitizeOAuthApp));
 }
 
 /**
@@ -1814,21 +1823,22 @@ function collectOAuthAppDeletionWarnings(app: OAuthApp): string[] {
   return warnings;
 }
 
-function deleteOAuthApp(idOrProvider: string): { deleted: boolean; warnings: string[] } {
+async function deleteOAuthApp(
+  idOrProvider: string,
+): Promise<{ deleted: boolean; warnings: string[] }> {
   // Resolve id first (exact — N apps per provider allowed), then provider slug
   // for old provider-keyed callers. Never touches DCR/MCP apps.
-  const existing = getOAuthAppById(idOrProvider) ?? getOAuthApp(idOrProvider);
+  const existing = (await getOAuthAppById(idOrProvider)) ?? (await getOAuthApp(idOrProvider));
   if (!existing || existing.mcpServerId !== null) return { deleted: false, warnings: [] };
   const warnings = collectOAuthAppDeletionWarnings(existing);
-  const tx = getDb().transaction(() => {
+  await getDbClient().transaction(async (tx) => {
     // Revoke by THIS app's id — not the provider-keyed `deleteOAuthTokens`,
     // which targets the oldest same-provider app and would disconnect a
     // surviving sibling. The app DELETE also CASCADEs its authorizations; this
     // explicit delete keeps the scoping correct regardless of FK enforcement.
-    deleteAuthorizationsForApp(existing.id);
-    getDb().query("DELETE FROM oauth_apps WHERE id = ?").run(existing.id);
+    await deleteAuthorizationsForApp(existing.id);
+    await tx.run("DELETE FROM oauth_apps WHERE id = ?", [existing.id]);
   });
-  tx();
   return { deleted: true, warnings };
 }
 
@@ -1850,7 +1860,7 @@ export async function handleScriptConnections(
   if (listConnectionsRoute.match(req.method, pathSegments)) {
     const parsed = await listConnectionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    listConnectionsRoute.respond(res, 200, { connections: listConnections(parsed.query) });
+    listConnectionsRoute.respond(res, 200, { connections: await listConnections(parsed.query) });
     return true;
   }
 
@@ -1865,14 +1875,14 @@ export async function handleScriptConnections(
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    getConnectionRoute.respond(res, 200, { connection: connectionDetail(connection) });
+    getConnectionRoute.respond(res, 200, { connection: await connectionDetail(connection) });
     return true;
   }
 
   if (upsertConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await upsertConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
 
     try {
       if (
@@ -1884,7 +1894,9 @@ export async function handleScriptConnections(
         jsonError(res, "Provide exactly one OpenAPI spec source.", 400);
         return true;
       }
-      const existingConnection = parsed.body.id ? getScriptConnectionById(parsed.body.id) : null;
+      const existingConnection = parsed.body.id
+        ? await getScriptConnectionById(parsed.body.id)
+        : null;
       const existingOpenapiConnection =
         existingConnection?.kind === "openapi" ? existingConnection : null;
       if (
@@ -1923,7 +1935,7 @@ export async function handleScriptConnections(
               oauthAuthorizationId: parsed.body.oauthAuthorizationId,
               allowedHosts: parsed.body.allowedHosts,
             });
-      const userId = resolveHttpAuditUserId(req, agentId);
+      const userId = await resolveHttpAuditUserId(req, agentId);
       const openapiSpecUrl =
         parsed.body.kind === "openapi" ? parsed.body.openapiSpecUrl : undefined;
       const openapiSpecJson =
@@ -1982,10 +1994,13 @@ export async function handleScriptConnections(
       });
 
       upsertConnectionRoute.respond(res, 200, {
-        connection: decorateConnections([connection])[0]!,
+        connection: (await decorateConnections([connection]))[0]!,
       });
     } catch (err) {
-      jsonError(res, err instanceof Error ? err.message : String(err), 400);
+      // A concurrent writer bumped the row's version between our read and the
+      // write: report the conflict instead of a generic 400.
+      const status = err instanceof ScriptConnectionConflictError ? err.statusCode : 400;
+      jsonError(res, err instanceof Error ? err.message : String(err), status);
     }
     return true;
   }
@@ -1993,11 +2008,11 @@ export async function handleScriptConnections(
   if (refreshConnectionRoute.match(req.method, pathSegments)) {
     const parsed = await refreshConnectionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
     try {
       const refreshed = await refreshHttpConnection(
         parsed.params.id,
-        resolveHttpAuditUserId(req, agentId),
+        await resolveHttpAuditUserId(req, agentId),
         agentId,
       );
       if (!refreshed) {
@@ -2005,7 +2020,7 @@ export async function handleScriptConnections(
         return true;
       }
       refreshConnectionRoute.respond(res, 200, {
-        connection: decorateConnections([refreshed])[0]!,
+        connection: (await decorateConnections([refreshed]))[0]!,
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
@@ -2016,27 +2031,33 @@ export async function handleScriptConnections(
   if (setConnectionEnabledRoute.match(req.method, pathSegments)) {
     const parsed = await setConnectionEnabledRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
-    const updated = setScriptConnectionEnabled(
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
+    const updated = await setScriptConnectionEnabled(
       parsed.params.id,
       parsed.body.enabled,
-      resolveHttpAuditUserId(req, agentId),
+      await resolveHttpAuditUserId(req, agentId),
     );
     if (!updated) {
       jsonError(res, "Script connection not found.", 404);
       return true;
     }
-    setConnectionEnabledRoute.respond(res, 200, { connection: decorateConnections([updated])[0]! });
+    setConnectionEnabledRoute.respond(res, 200, {
+      connection: (await decorateConnections([updated]))[0]!,
+    });
     return true;
   }
 
   if (listCredentialBindingsRoute.match(req.method, pathSegments)) {
     const includeManaged = queryParams.get("includeManaged") === "true";
     listCredentialBindingsRoute.respond(res, 200, {
-      bindings: listRelationalCredentialBindings({
-        includeInactive: true,
-        excludeManaged: !includeManaged,
-      }).map(decorateBinding),
+      bindings: await Promise.all(
+        (
+          await listRelationalCredentialBindings({
+            includeInactive: true,
+            excludeManaged: !includeManaged,
+          })
+        ).map(decorateBinding),
+      ),
     });
     return true;
   }
@@ -2044,7 +2065,7 @@ export async function handleScriptConnections(
   if (upsertCredentialBindingRoute.match(req.method, pathSegments)) {
     const parsed = await upsertCredentialBindingRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConnectionAdmin(req, res, agentId)) return true;
+    if (!(await ensureConnectionAdmin(req, res, agentId))) return true;
 
     try {
       const scope = parsed.body.scope ?? "global";
@@ -2074,7 +2095,7 @@ export async function handleScriptConnections(
         authKind: parsed.body.authKind ?? "config",
         oauthAuthorizationId: parsed.body.oauthAuthorizationId,
       });
-      const binding = upsertCredentialBinding({
+      const binding = await upsertCredentialBinding({
         id: parsed.body.id,
         configKey: nextBinding.configKey,
         allowedHosts: nextBinding.allowedHosts,
@@ -2085,9 +2106,9 @@ export async function handleScriptConnections(
         active: nextBinding.active,
         authKind: nextBinding.authKind,
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
-        userId: resolveHttpAuditUserId(req, agentId),
+        userId: await resolveHttpAuditUserId(req, agentId),
       });
-      upsertCredentialBindingRoute.respond(res, 200, { binding: decorateBinding(binding) });
+      upsertCredentialBindingRoute.respond(res, 200, { binding: await decorateBinding(binding) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);
     }
@@ -2100,14 +2121,14 @@ export async function handleScriptConnections(
   }
 
   if (listOAuthAppsRoute.match(req.method, pathSegments)) {
-    listOAuthAppsRoute.respond(res, 200, { oauthApps: listOAuthApps() });
+    listOAuthAppsRoute.respond(res, 200, { oauthApps: await listOAuthApps() });
     return true;
   }
 
   if (upsertOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await upsertOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     try {
       const body = parsed.body;
@@ -2125,7 +2146,7 @@ export async function handleScriptConnections(
 
       // Edit targets an exact row by id (N apps per provider allowed); provider
       // is immutable on edit. 404 if the id is unknown or an MCP/DCR app.
-      const editing = body.id ? getOAuthAppById(body.id) : null;
+      const editing = body.id ? await getOAuthAppById(body.id) : null;
       if (body.id && (!editing || editing.mcpServerId !== null)) {
         jsonError(res, `OAuth app ${body.id} not found.`, 404);
         return true;
@@ -2202,12 +2223,12 @@ export async function handleScriptConnections(
       // update exactly that row (existence + non-MCP already checked above).
       let savedId: string;
       if (editing) {
-        updateOAuthAppById(editing.id, appData);
+        await updateOAuthAppById(editing.id, appData);
         savedId = editing.id;
       } else {
-        savedId = createOAuthApp(provider, appData);
+        savedId = await createOAuthApp(provider, appData);
       }
-      const app = listOAuthApps().find((row) => row.id === savedId);
+      const app = (await listOAuthApps()).find((row) => row.id === savedId);
       upsertOAuthAppRoute.respond(res, 200, {
         oauthApp: app,
         redirectUri,
@@ -2222,7 +2243,7 @@ export async function handleScriptConnections(
   if (discoverOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await discoverOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
     try {
       const discovered = await discoverOAuthApp(parsed.body.url);
       discoverOAuthAppRoute.respond(res, 200, discovered);
@@ -2235,8 +2256,8 @@ export async function handleScriptConnections(
   if (deleteOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
-    const deletion = deleteOAuthApp(parsed.params.provider);
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
+    const deletion = await deleteOAuthApp(parsed.params.provider);
     if (!deletion.deleted) {
       jsonError(res, `OAuth app ${parsed.params.provider} not found.`, 404);
       return true;
@@ -2251,13 +2272,13 @@ export async function handleScriptConnections(
   if (listAuthorizationsRoute.match(req.method, pathSegments)) {
     const parsed = await listAuthorizationsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const app = getOAuthAppById(parsed.params.id);
+    const app = await getOAuthAppById(parsed.params.id);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `OAuth app ${parsed.params.id} not found.`, 404);
       return true;
     }
     listAuthorizationsRoute.respond(res, 200, {
-      authorizations: listAuthorizationsForApp(app.id).map(sanitizeAuthorization),
+      authorizations: (await listAuthorizationsForApp(app.id)).map(sanitizeAuthorization),
     });
     return true;
   }
@@ -2265,9 +2286,9 @@ export async function handleScriptConnections(
   if (authorizeUrlRoute.match(req.method, pathSegments)) {
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const app = getOAuthAppById(parsed.params.id);
+    const app = await getOAuthAppById(parsed.params.id);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `OAuth app ${parsed.params.id} is not configured.`, 404);
       return true;
@@ -2281,7 +2302,7 @@ export async function handleScriptConnections(
         label,
         flow: "generic",
         ...(parsed.body?.finalRedirect ? { finalRedirect: parsed.body.finalRedirect } : {}),
-        userId: resolveHttpAuditUserId(req, agentId),
+        userId: await resolveHttpAuditUserId(req, agentId),
       });
       authorizeUrlRoute.respond(res, 200, {
         authorizeUrl: result.url,
@@ -2298,19 +2319,19 @@ export async function handleScriptConnections(
   if (deleteAuthorizationRoute.match(req.method, pathSegments)) {
     const parsed = await deleteAuthorizationRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const authorization = getAuthorizationById(parsed.params.id);
+    const authorization = await getAuthorizationById(parsed.params.id);
     if (!authorization) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     let revocationAttempted = false;
     if (app && authorization.accessToken && authorization.status !== "revoked") {
       revocationAttempted = await attemptRemoteRevocation(app, authorization.accessToken);
     }
-    deleteAuthorizationById(authorization.id);
+    await deleteAuthorizationById(authorization.id);
     deleteAuthorizationRoute.respond(res, 200, { deleted: true, revocationAttempted });
     return true;
   }
@@ -2318,14 +2339,14 @@ export async function handleScriptConnections(
   if (refreshAuthorizationRoute.match(req.method, pathSegments)) {
     const parsed = await refreshAuthorizationRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAuthorizationAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAuthorizationAdmin(req, res, agentId))) return true;
 
-    const authorization = getAuthorizationById(parsed.params.id);
+    const authorization = await getAuthorizationById(parsed.params.id);
     if (!authorization) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
@@ -2358,7 +2379,7 @@ export async function handleScriptConnections(
       jsonError(res, `Refresh failed: ${message}`, 502);
       return true;
     }
-    const refreshed = getAuthorizationById(authorization.id);
+    const refreshed = await getAuthorizationById(authorization.id);
     if (!refreshed) {
       jsonError(res, `Authorization ${parsed.params.id} not found.`, 404);
       return true;
@@ -2423,14 +2444,14 @@ export async function handleScriptConnections(
   if (disconnectOAuthAppRoute.match(req.method, pathSegments)) {
     const parsed = await disconnectOAuthAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
-    const app = getOAuthApp(parsed.params.provider);
+    const app = await getOAuthApp(parsed.params.provider);
     if (!app) {
       jsonError(res, `OAuth app ${parsed.params.provider} is not configured.`, 404);
       return true;
     }
-    const tokens = getOAuthTokens(parsed.params.provider);
+    const tokens = await getOAuthTokens(parsed.params.provider);
     if (!tokens) {
       disconnectOAuthAppRoute.respond(res, 200, {
         disconnected: false,
@@ -2439,7 +2460,7 @@ export async function handleScriptConnections(
       return true;
     }
     const revocationAttempted = await attemptRemoteRevocation(app, tokens.accessToken);
-    deleteOAuthTokens(parsed.params.provider);
+    await deleteOAuthTokens(parsed.params.provider);
     disconnectOAuthAppRoute.respond(res, 200, { disconnected: true, revocationAttempted });
     return true;
   }
@@ -2447,14 +2468,14 @@ export async function handleScriptConnections(
   if (refreshOAuthAppTokensRoute.match(req.method, pathSegments)) {
     const parsed = await refreshOAuthAppTokensRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureOAuthAppAdmin(req, res, agentId)) return true;
+    if (!(await ensureOAuthAppAdmin(req, res, agentId))) return true;
 
     const provider = parsed.params.provider;
-    if (!getOAuthApp(provider)) {
+    if (!(await getOAuthApp(provider))) {
       jsonError(res, `OAuth app ${provider} is not configured.`, 404);
       return true;
     }
-    const tokens = getOAuthTokens(provider);
+    const tokens = await getOAuthTokens(provider);
     if (!tokens) {
       jsonError(res, "Nothing to refresh — authorize first.", 400);
       return true;
@@ -2478,8 +2499,8 @@ export async function handleScriptConnections(
 
     refreshOAuthAppTokensRoute.respond(res, 200, {
       refreshed: true,
-      tokenStatus: getOAuthBindingTokenStatus(tokens.id),
-      expiresAt: getOAuthTokens(provider)?.expiresAt ?? null,
+      tokenStatus: await getOAuthBindingTokenStatus(tokens.id),
+      expiresAt: (await getOAuthTokens(provider))?.expiresAt ?? null,
     });
     return true;
   }

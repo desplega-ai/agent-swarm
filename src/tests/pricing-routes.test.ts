@@ -12,7 +12,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, getDb, getLogsByEventType, initDb } from "../be/db";
+import { closeDb, getDbClient, getLogsByEventType, initDb } from "../be/db";
 import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -69,12 +69,12 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
+afterEach(async () => {
+  const client = getDbClient();
   // Remove every non-seed pricing row so each test starts from the migration
   // seed rows (effective_from=0). The seed uses literal 0 for effective_from.
-  db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
-  db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'pricing.%'").run();
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
+  await client.run("DELETE FROM agent_log WHERE eventType LIKE 'pricing.%'");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -285,7 +285,7 @@ describe("Phase 6 — /api/pricing REST surface", () => {
         body: JSON.stringify({ pricePerMillionUsd: 1.5, effectiveFrom: 100 }),
       });
 
-      const logs = getLogsByEventType("pricing.inserted");
+      const logs = await getLogsByEventType("pricing.inserted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.provider).toBe("codex");
@@ -304,7 +304,7 @@ describe("Phase 6 — /api/pricing REST surface", () => {
       });
       await authedFetch(`/api/pricing/codex/gpt-5.3-codex/input/200`, { method: "DELETE" });
 
-      const logs = getLogsByEventType("pricing.deleted");
+      const logs = await getLogsByEventType("pricing.deleted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.provider).toBe("codex");

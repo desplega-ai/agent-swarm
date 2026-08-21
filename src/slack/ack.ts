@@ -57,7 +57,7 @@ export async function finalizeSlackMessageReaction(
   await ackSlackMessage(client, channel, timestamp, outcome);
 }
 
-export function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
+export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promise<void> {
   const app = getSlackApp();
   if (!app) return;
 
@@ -73,7 +73,7 @@ export function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
   }
 
   for (const { channelId, threadTs, timestamp } of triggers.values()) {
-    const linkedTasks = getSlackTasksInThread(channelId, threadTs).filter(
+    const linkedTasks = (await getSlackTasksInThread(channelId, threadTs)).filter(
       (task) => task.slackTriggerMessageTs === timestamp,
     );
     if (
@@ -92,7 +92,7 @@ export function finalizeTerminalSlackReactions(tasks: AgentTask[]): void {
 
   for (const task of tasks) {
     const outcome = task.status === "completed" ? "white_check_mark" : "x";
-    for (const log of getLogsByTaskIdChronological(task.id)) {
+    for (const log of await getLogsByTaskIdChronological(task.id)) {
       if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
       const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
       void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>

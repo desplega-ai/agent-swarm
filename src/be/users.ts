@@ -1,8 +1,8 @@
 /**
  * Canonical API-side identity surface — the only path that mutates identity
  * tables. Every mutating helper wraps row mutation + event emission in a
- * single `db.transaction()` so the invariant "every identity mutation has a
- * matching event row" (Q9) holds even on partial failures.
+ * single `getDbClient().transaction()` so the invariant "every identity
+ * mutation has a matching event row" (Q9) holds even on partial failures.
  *
  * This module is API-side ONLY. The DB-boundary checker (`scripts/check-db-boundary.sh`)
  * enforces that worker-side code paths (`src/commands/`, `src/hooks/`,
@@ -21,7 +21,7 @@
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { User } from "../types";
-import { getDb } from "./db";
+import { getDbClient } from "./db";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,8 +82,8 @@ function rowToUser(row: UserRow): User {
 // ---------------------------------------------------------------------------
 
 /** Single SELECT by primary key. */
-export function findUserById(id: string): User | null {
-  const row = getDb().prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+export async function findUserById(id: string): Promise<User | null> {
+  const row = await getDbClient().get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
   return row ? rowToUser(row) : null;
 }
 
@@ -91,14 +91,13 @@ export function findUserById(id: string): User | null {
  * Look up a user by an `(kind, externalId)` pair via `user_external_ids`.
  * Returns null if no mapping exists. Use this for webhook auto-link paths.
  */
-export function findUserByExternalId(kind: string, externalId: string): User | null {
-  const row = getDb()
-    .prepare<UserRow, [string, string]>(
-      `SELECT u.* FROM users u
+export async function findUserByExternalId(kind: string, externalId: string): Promise<User | null> {
+  const row = await getDbClient().get<UserRow>(
+    `SELECT u.* FROM users u
        INNER JOIN user_external_ids x ON x.userId = u.id
        WHERE x.kind = ? AND x.externalId = ?`,
-    )
-    .get(kind, externalId);
+    [kind, externalId],
+  );
   return row ? rowToUser(row) : null;
 }
 
@@ -110,22 +109,20 @@ export function findUserByExternalId(kind: string, externalId: string): User | n
  * `emailAliases != '[]'` in the alias branch so the rare row with NULL
  * aliases doesn't blow up the JOIN.
  */
-export function findUserByEmail(email: string): User | null {
+export async function findUserByEmail(email: string): Promise<User | null> {
   const lower = email.toLowerCase();
-  const db = getDb();
+  const db = getDbClient();
 
   // Primary email (case-insensitive)
-  const primary = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)")
-    .get(email);
+  const primary = await db.get<UserRow>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)", [
+    email,
+  ]);
   if (primary) return rowToUser(primary);
 
   // Alias array
-  const aliasRows = db
-    .prepare<UserRow, []>(
-      "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
-    )
-    .all();
+  const aliasRows = await db.query<UserRow>(
+    "SELECT * FROM users WHERE emailAliases IS NOT NULL AND emailAliases != '[]'",
+  );
   for (const r of aliasRows) {
     const aliases: string[] = r.emailAliases ? (JSON.parse(r.emailAliases) as string[]) : [];
     if (aliases.some((a) => a.toLowerCase() === lower)) {
@@ -142,20 +139,21 @@ export function findUserByEmail(email: string): User | null {
  * `resolve-user`'s name lookup treats more than one match as ambiguous
  * rather than guessing.
  */
-export function findUsersByName(name: string): User[] {
+export async function findUsersByName(name: string): Promise<User[]> {
   const trimmed = name.trim();
   if (!trimmed) return [];
-  const db = getDb();
+  const client = getDbClient();
 
-  const exact = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)")
-    .all(trimmed);
+  const exact = await client.query<UserRow>("SELECT * FROM users WHERE LOWER(name) = LOWER(?)", [
+    trimmed,
+  ]);
   if (exact.length > 0) return exact.map(rowToUser);
 
   const firstToken = trimmed.split(/\s+/)[0] ?? trimmed;
-  const prefixed = db
-    .prepare<UserRow, string>("SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'")
-    .all(firstToken);
+  const prefixed = await client.query<UserRow>(
+    "SELECT * FROM users WHERE LOWER(name) LIKE LOWER(?) || '%'",
+    [firstToken],
+  );
   return prefixed.map(rowToUser);
 }
 
@@ -163,12 +161,13 @@ export function findUsersByName(name: string): User[] {
  * Return all `(kind, externalId)` mappings for a user — used by the People
  * page detail view to render identity badges in one request.
  */
-export function getUserIdentities(userId: string): Array<{ kind: string; externalId: string }> {
-  return getDb()
-    .prepare<{ kind: string; externalId: string }, string>(
-      "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
-    )
-    .all(userId);
+export async function getUserIdentities(
+  userId: string,
+): Promise<Array<{ kind: string; externalId: string }>> {
+  return getDbClient().query<{ kind: string; externalId: string }>(
+    "SELECT kind, externalId FROM user_external_ids WHERE userId = ? ORDER BY kind, externalId",
+    [userId],
+  );
 }
 
 /**
@@ -213,35 +212,33 @@ function rowToEvent(row: IdentityEventRow): IdentityEvent {
  * is a cursor on `createdAt` (ISO string) so the caller can keep paging by
  * passing back the last event's `createdAt`.
  */
-export function listUserEvents(
+export async function listUserEvents(
   userId: string,
   opts: { limit?: number; before?: string } = {},
-): IdentityEvent[] {
+): Promise<IdentityEvent[]> {
   const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
   const before = opts.before;
-  const db = getDb();
+  const client = getDbClient();
   if (before) {
-    return db
-      .prepare<IdentityEventRow, [string, string, number]>(
-        `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+    const rows = await client.query<IdentityEventRow>(
+      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
            FROM user_identity_events
           WHERE userId = ? AND createdAt < ?
           ORDER BY createdAt DESC, rowid DESC
           LIMIT ?`,
-      )
-      .all(userId, before, limit)
-      .map(rowToEvent);
+      [userId, before, limit],
+    );
+    return rows.map(rowToEvent);
   }
-  return db
-    .prepare<IdentityEventRow, [string, number]>(
-      `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
+  const rows = await client.query<IdentityEventRow>(
+    `SELECT id, userId, eventType, actor, beforeJson, afterJson, createdAt
          FROM user_identity_events
         WHERE userId = ?
         ORDER BY createdAt DESC, rowid DESC
         LIMIT ?`,
-    )
-    .all(userId, limit)
-    .map(rowToEvent);
+    [userId, limit],
+  );
+  return rows.map(rowToEvent);
 }
 
 /**
@@ -266,15 +263,14 @@ type UserTokenRow = UserTokenSummary;
  * MCP-token plan, this helper lands here so step-8's `GET /users` response
  * can include token summaries.
  */
-export function listUserTokens(userId: string): UserTokenSummary[] {
-  return getDb()
-    .prepare<UserTokenRow, string>(
-      `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
+export async function listUserTokens(userId: string): Promise<UserTokenSummary[]> {
+  return getDbClient().query<UserTokenRow>(
+    `SELECT id, userId, label, tokenPreview, createdAt, lastUsedAt, revokedAt
          FROM user_tokens
         WHERE userId = ?
         ORDER BY createdAt DESC`,
-    )
-    .all(userId);
+    [userId],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +283,7 @@ export function listUserTokens(userId: string): UserTokenSummary[] {
  * `budget_changed` / `status_changed` directly (the mutating helpers below
  * already emit their own events in-transaction).
  */
-export function recordIdentityEvent(
+export async function recordIdentityEvent(
   userId: string,
   eventType:
     | "auto_merge"
@@ -304,13 +300,11 @@ export function recordIdentityEvent(
   actor: IdentityActor,
   before: unknown | null,
   after: unknown | null,
-): void {
-  getDb()
-    .prepare(
-      `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
+): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO user_identity_events (id, userId, eventType, actor, beforeJson, afterJson, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       randomUUID().replace(/-/g, ""),
       userId,
       eventType,
@@ -318,7 +312,8 @@ export function recordIdentityEvent(
       before == null ? null : JSON.stringify(before),
       after == null ? null : JSON.stringify(after),
       new Date().toISOString(),
-    );
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -333,45 +328,47 @@ export function recordIdentityEvent(
  * - Otherwise create a new row with `name` from hints (or the email
  *   local-part) and emit `identity_added` with the new row in `afterJson`.
  *
- * Wrapped in `db.transaction()` so create + event land together.
+ * Only the create branch is wrapped in `getDbClient().transaction()` so the
+ * new row + its event land together; the `findUserByEmail` read and the
+ * `auto_merge` event above it run outside any transaction.
  */
-export function findOrCreateUserByEmail(
+export async function findOrCreateUserByEmail(
   email: string,
   hints: { name?: string; role?: string; notes?: string; preferredChannel?: string },
   actor: IdentityActor,
-): { user: User; created: boolean } {
-  const existing = findUserByEmail(email);
+): Promise<{ user: User; created: boolean }> {
+  const existing = await findUserByEmail(email);
   if (existing) {
-    recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
+    await recordIdentityEvent(existing.id, "auto_merge", actor, null, { email, hints });
     return { user: existing, created: false };
   }
 
   const id = randomUUID().replace(/-/g, "");
   const now = new Date().toISOString();
   const name = hints.name?.trim() || email.split("@")[0] || email;
-  const db = getDb();
 
-  const created = db.transaction(() => {
-    db.prepare(
+  const created = await getDbClient().transaction(async (tx) => {
+    await tx.run(
       `INSERT INTO users (id, name, email, role, notes, emailAliases, preferredChannel, timezone, createdAt, lastUpdatedAt, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
-    ).run(
-      id,
-      name,
-      email,
-      hints.role ?? null,
-      hints.notes ?? null,
-      "[]",
-      hints.preferredChannel ?? "slack",
-      null,
-      now,
-      now,
+      [
+        id,
+        name,
+        email,
+        hints.role ?? null,
+        hints.notes ?? null,
+        "[]",
+        hints.preferredChannel ?? "slack",
+        null,
+        now,
+        now,
+      ],
     );
-    const row = db.prepare<UserRow, string>("SELECT * FROM users WHERE id = ?").get(id);
+    const row = await tx.get<UserRow>("SELECT * FROM users WHERE id = ?", [id]);
     if (!row) throw new Error("Failed to create user");
-    recordIdentityEvent(id, "identity_added", actor, null, { email, name });
+    await recordIdentityEvent(id, "identity_added", actor, null, { email, name });
     return rowToUser(row);
-  })();
+  });
 
   return { user: created, created: true };
 }
@@ -387,21 +384,20 @@ export function findOrCreateUserByEmail(
  *
  * Atomic: INSERT + event in one transaction.
  */
-export function linkIdentity(
+export async function linkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)").run(
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run("INSERT INTO user_external_ids (userId, kind, externalId) VALUES (?, ?, ?)", [
       userId,
       kind,
       externalId,
-    );
-    recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
-  })();
+    ]);
+    await recordIdentityEvent(userId, "identity_added", actor, null, { kind, externalId });
+  });
 }
 
 /**
@@ -409,19 +405,20 @@ export function linkIdentity(
  * still emit the event with the same before/after for the audit trail.
  * Atomic: DELETE + event in one transaction.
  */
-export function unlinkIdentity(
+export async function unlinkIdentity(
   userId: string,
   kind: string,
   externalId: string,
   actor: IdentityActor,
-): void {
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare(
-      "DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?",
-    ).run(userId, kind, externalId);
-    recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
-  })();
+): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    await tx.run("DELETE FROM user_external_ids WHERE userId = ? AND kind = ? AND externalId = ?", [
+      userId,
+      kind,
+      externalId,
+    ]);
+    await recordIdentityEvent(userId, "identity_removed", actor, { kind, externalId }, null);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -452,11 +449,11 @@ function sha256Hex(input: string): string {
  *
  * Token shape: `aswt_` + 24 base62 chars = >140 bits of entropy.
  */
-export function mintToken(
+export async function mintToken(
   userId: string,
   label: string | null,
   actor: IdentityActor,
-): { tokenId: string; plaintext: string } {
+): Promise<{ tokenId: string; plaintext: string }> {
   // 24 base62 chars from 24 random bytes (~143 bits of entropy).
   const plaintext = `${TOKEN_PREFIX}${base62(randomBytes(24))}`;
   const tokenId = randomUUID().replace(/-/g, "");
@@ -464,14 +461,14 @@ export function mintToken(
   const preview = plaintext.slice(-4);
   const now = new Date().toISOString();
 
-  const db = getDb();
-  db.transaction(() => {
-    db.prepare(
+  await getDbClient().transaction(async (tx) => {
+    await tx.run(
       `INSERT INTO user_tokens (id, userId, label, tokenHash, tokenPreview, createdAt)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(tokenId, userId, label, hash, preview, now);
-    recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
-  })();
+      [tokenId, userId, label, hash, preview, now],
+    );
+    await recordIdentityEvent(userId, "token_minted", actor, null, { tokenId, label, preview });
+  });
 
   return { tokenId, plaintext };
 }
@@ -480,56 +477,51 @@ export function mintToken(
  * Revoke a previously-minted token. Sets `revokedAt = now` and emits
  * `token_revoked`. Subsequent `resolveUserByToken(plaintext)` returns null.
  */
-export function revokeToken(tokenId: string, actor: IdentityActor): void {
-  const db = getDb();
-  db.transaction(() => {
-    const row = db
-      .prepare<{ userId: string; label: string | null; tokenPreview: string }, string>(
-        "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
-      )
-      .get(tokenId);
+export async function revokeToken(tokenId: string, actor: IdentityActor): Promise<void> {
+  await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<{ userId: string; label: string | null; tokenPreview: string }>(
+      "SELECT userId, label, tokenPreview FROM user_tokens WHERE id = ?",
+      [tokenId],
+    );
     if (!row) {
       throw new Error(`Token not found: ${tokenId}`);
     }
-    db.prepare("UPDATE user_tokens SET revokedAt = ? WHERE id = ?").run(
+    await tx.run("UPDATE user_tokens SET revokedAt = ? WHERE id = ?", [
       new Date().toISOString(),
       tokenId,
-    );
-    recordIdentityEvent(
+    ]);
+    await recordIdentityEvent(
       row.userId,
       "token_revoked",
       actor,
       { tokenId, label: row.label, preview: row.tokenPreview },
       null,
     );
-  })();
+  });
 }
 
 /**
  * Resolve a plaintext token to its owning user. Returns null if the token
- * is unknown or revoked. On a successful hit, fires-and-forgets a
- * `lastUsedAt` update so the People page can surface "last seen" without
- * blocking the request path.
+ * is unknown or revoked. On a successful hit, updates `lastUsedAt` so the
+ * People page can surface "last seen".
  */
-export function resolveUserByToken(plaintext: string): User | null {
+export async function resolveUserByToken(plaintext: string): Promise<User | null> {
   const hash = sha256Hex(plaintext);
-  const db = getDb();
+  const client = getDbClient();
 
-  const row = db
-    .prepare<{ id: string; userId: string; revokedAt: string | null }, string>(
-      "SELECT id, userId, revokedAt FROM user_tokens WHERE tokenHash = ?",
-    )
-    .get(hash);
+  const row = await client.get<{ id: string; userId: string; revokedAt: string | null }>(
+    "SELECT id, userId, revokedAt FROM user_tokens WHERE tokenHash = ?",
+    [hash],
+  );
   if (!row || row.revokedAt !== null) return null;
 
-  // Fire-and-forget lastUsedAt update. Synchronous bun:sqlite write is fast
-  // enough that we don't need to defer to a microtask; treating it as
-  // best-effort keeps the call-site clean.
+  // Best-effort lastUsedAt update — never let a failure here leak to the
+  // caller and block a successful token resolution.
   try {
-    db.prepare("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?").run(
+    await client.run("UPDATE user_tokens SET lastUsedAt = ? WHERE id = ?", [
       new Date().toISOString(),
       row.id,
-    );
+    ]);
   } catch {
     // Never let a `lastUsedAt` update failure leak to the caller.
   }

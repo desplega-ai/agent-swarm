@@ -6,7 +6,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createMcpServer, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createMcpServer, getDbClient, initDb } from "../be/db";
 import { getMcpServerAuthMethod, insertMcpOAuthPending } from "../be/db-queries/mcp-oauth";
 import {
   createOAuthPending,
@@ -81,8 +81,8 @@ beforeAll(async () => {
   // The mock provider runs on localhost; MCP token exchange SSRF-guards loopback.
   process.env.MCP_OAUTH_ALLOW_PRIVATE_HOSTS = "true";
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
-  createAgent({ id: NON_LEAD_ID, name: "worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
+  await createAgent({ id: NON_LEAD_ID, name: "worker", isLead: false, status: "idle" });
 
   providerServer = Bun.serve({
     port: 0,
@@ -165,10 +165,10 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("two labeled authorizations land independently with captured identity", async () => {
     const provider = "flow-multi";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider);
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = await getOAuthAppIdByProvider(provider);
     expect(appId).toBeTruthy();
-    const config = getOAuthProviderConfig(provider);
+    const config = await getOAuthProviderConfig(provider);
     if (!appId || !config) throw new Error("app setup failed");
 
     // First label: "support"
@@ -181,7 +181,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
     expect(res1.status).toBe(200);
     expect(lastTokenBody).toContain("grant_type=authorization_code");
 
-    let authorizations = listAuthorizationsForApp(appId);
+    let authorizations = await listAuthorizationsForApp(appId);
     expect(authorizations).toHaveLength(1);
     const supportAuth = authorizations[0]!;
     expect(supportAuth.label).toBe("support");
@@ -197,24 +197,24 @@ describe("static OAuth callback + multi-authorization flow", () => {
     const res2 = await driveStaticCallback(sales.state);
     expect(res2.status).toBe(200);
 
-    authorizations = listAuthorizationsForApp(appId);
+    authorizations = await listAuthorizationsForApp(appId);
     expect(authorizations).toHaveLength(2);
     const labels = authorizations.map((a) => a.label).sort();
     expect(labels).toEqual(["sales", "support"]);
     // Same support authorization id preserved.
-    expect(getAuthorizationById(supportAuth.id)?.label).toBe("support");
+    expect((await getAuthorizationById(supportAuth.id))?.label).toBe("support");
   });
 
   test("callback with no expires_in stores a NULL expiry and the binding resolves without a refresh-fail", async () => {
     const provider = "flow-noexpiry";
     // Long-lived token, no refresh token (GitHub-preset shape). Point the token
     // URL at the endpoint that omits expires_in.
-    upsertOAuthApp(provider, {
+    await upsertOAuthApp(provider, {
       ...testApp(provider),
       tokenUrl: `${providerBase}/token-noexpiry`,
     });
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const pending = await buildAuthorizationUrl(config, {
       appId,
       label: "default",
@@ -224,7 +224,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
     const res = await driveStaticCallback(pending.state);
     expect(res.status).toBe(200);
 
-    const auth = listAuthorizationsForApp(appId)[0]!;
+    const auth = (await listAuthorizationsForApp(appId))[0]!;
     // The 24h fabrication is gone: no expires_in → NULL expiry, no refresh token.
     expect(auth.expiresAt).toBeNull();
     expect(auth.refreshToken).toBeNull();
@@ -233,9 +233,9 @@ describe("static OAuth callback + multi-authorization flow", () => {
     // A NULL expiry reads as "ok" (does not expire), so a binding resolves and
     // the reactive refresh core is a no-op — it must NOT mark the row
     // refresh-failed just because there's no refresh token to rotate.
-    expect(getOAuthBindingTokenStatus(auth.id)).toBe("ok");
+    expect(await getOAuthBindingTokenStatus(auth.id)).toBe("ok");
     await ensureAuthorizationTokenOrThrow(auth.id);
-    const after = getAuthorizationById(auth.id);
+    const after = await getAuthorizationById(auth.id);
     expect(after?.status).toBe("active");
     expect(after?.lastErrorMessage ?? null).toBeNull();
   });
@@ -244,12 +244,12 @@ describe("static OAuth callback + multi-authorization flow", () => {
     const provider = "flow-scrub";
     // clientSecret is `${provider}-secret` = "flow-scrub-secret" (testApp). Point
     // the token URL at the failing endpoint that echoes the posted secrets.
-    upsertOAuthApp(provider, {
+    await upsertOAuthApp(provider, {
       ...testApp(provider),
       tokenUrl: `${providerBase}/token-fail`,
     });
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const pending = await buildAuthorizationUrl(config, {
       appId,
       label: "scrub",
@@ -266,8 +266,8 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("POST /api/oauth-apps/{id}/authorize-url (lead) issues a state the callback completes", async () => {
     const provider = "flow-http-route";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
 
     const authRes = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
       method: "POST",
@@ -287,7 +287,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
     const res = await driveStaticCallback(payload.state);
     expect(res.status).toBe(200);
-    expect(listAuthorizationsForApp(appId).some((a) => a.label === "billing")).toBe(true);
+    expect((await listAuthorizationsForApp(appId)).some((a) => a.label === "billing")).toBe(true);
 
     // The list route surfaces the authorization (no token material).
     const listRes = await fetch(`${appBase}/api/oauth-apps/${appId}/authorizations`);
@@ -300,9 +300,9 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("state is single-use — replay is rejected", async () => {
     const provider = "flow-replay";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const { state } = await buildAuthorizationUrl(config, { appId, flow: "generic" });
 
     expect((await driveStaticCallback(state)).status).toBe(200);
@@ -313,9 +313,9 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("expired pending rows are garbage-collected", async () => {
     const provider = "flow-gc";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    createOAuthPending({
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    await createOAuthPending({
       state: "gc-state",
       appId,
       flow: "generic",
@@ -323,7 +323,7 @@ describe("static OAuth callback + multi-authorization flow", () => {
       redirectUri: `${appBase}/api/oauth/callback`,
     });
     // Sweep everything created before "now + 1s" — removes the fresh row.
-    const removed = gcOAuthPending(-1000);
+    const removed = await gcOAuthPending(-1000);
     expect(removed).toBeGreaterThanOrEqual(1);
     const res = await driveStaticCallback("gc-state");
     expect(res.status).toBe(400);
@@ -331,23 +331,23 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
   test("legacy per-provider callback still completes a flow", async () => {
     const provider = "flow-legacy";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const { state } = await buildAuthorizationUrl(config, { appId, flow: "generic" });
     const res = await fetch(
       `${appBase}/api/oauth/${provider}/callback?code=legacy-code&state=${state}`,
     );
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("You can close this tab.");
-    expect(listAuthorizationsForApp(appId)).toHaveLength(1);
+    expect(await listAuthorizationsForApp(appId)).toHaveLength(1);
   });
 
   test("pending state is persisted in the DB (restart-safe, not an in-memory map)", async () => {
     const provider = "flow-restart";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const { state, codeVerifier } = await buildAuthorizationUrl(config, {
       appId,
       label: "persisted",
@@ -357,9 +357,10 @@ describe("static OAuth callback + multi-authorization flow", () => {
     // The row lives in oauth_pending (encrypted verifier) — a process restart
     // would keep it, unlike the old in-memory PKCE map. Assert it is on disk,
     // then complete the flow.
-    const row = getDb()
-      .query("SELECT state, label, flow, codeVerifier FROM oauth_pending WHERE state = ?")
-      .get(state) as { state: string; label: string; flow: string; codeVerifier: string } | null;
+    const row = (await getDbClient().get(
+      "SELECT state, label, flow, codeVerifier FROM oauth_pending WHERE state = ?",
+      [state],
+    )) as { state: string; label: string; flow: string; codeVerifier: string } | null;
     expect(row).toBeTruthy();
     expect(row!.label).toBe("persisted");
     expect(row!.flow).toBe("generic");
@@ -368,17 +369,17 @@ describe("static OAuth callback + multi-authorization flow", () => {
 
     const res = await driveStaticCallback(state);
     expect(res.status).toBe(200);
-    expect(listAuthorizationsForApp(appId).some((a) => a.label === "persisted")).toBe(true);
+    expect((await listAuthorizationsForApp(appId)).some((a) => a.label === "persisted")).toBe(true);
   });
 
   test("MCP-flow pending routes through the static callback and flips authMethod", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: `mcp-static-flip-${crypto.randomUUID()}`,
       transport: "http",
       url: `${providerBase}/mcp`,
       scope: "swarm",
     });
-    insertMcpOAuthPending({
+    await insertMcpOAuthPending({
       state: "mcp-static-state",
       mcpServerId: mcpServer.id,
       codeVerifier: "mcp-verifier",
@@ -392,17 +393,17 @@ describe("static OAuth callback + multi-authorization flow", () => {
       redirectUri: `${appBase}/api/oauth/callback`,
     });
 
-    expect(getMcpServerAuthMethod(mcpServer.id)).not.toBe("oauth");
+    expect(await getMcpServerAuthMethod(mcpServer.id)).not.toBe("oauth");
     const res = await driveStaticCallback("mcp-static-state", "mcp-code");
     // MCP callbacks redirect (302) back to the dashboard.
     expect(res.status).toBe(302);
-    expect(getMcpServerAuthMethod(mcpServer.id)).toBe("oauth");
+    expect(await getMcpServerAuthMethod(mcpServer.id)).toBe("oauth");
   });
 
   test("RBAC: non-lead agent is denied on the authorize-url manage route", async () => {
     const provider = "flow-rbac";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
     const res = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-agent-id": NON_LEAD_ID },
@@ -431,7 +432,7 @@ describe("step-4 security hardening", () => {
         }),
       });
       expect(res.status).toBe(400);
-      expect(getOAuthAppIdByProvider("sec-userinfo")).toBeNull();
+      expect(await getOAuthAppIdByProvider("sec-userinfo")).toBeNull();
     } finally {
       if (saved === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = saved;
@@ -456,7 +457,7 @@ describe("step-4 security hardening", () => {
         }),
       });
       expect(res.status).toBe(400);
-      expect(getOAuthAppIdByProvider("sec-revoke")).toBeNull();
+      expect(await getOAuthAppIdByProvider("sec-revoke")).toBeNull();
     } finally {
       if (saved === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = saved;
@@ -489,9 +490,9 @@ describe("step-4 security hardening", () => {
 
   test("success page HTML-escapes a hostile authorization label (XSS)", async () => {
     const provider = "sec-xss";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    const config = getOAuthProviderConfig(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    const config = (await getOAuthProviderConfig(provider))!;
     const label = "</h1><script>alert(1)</script>";
     const { state } = await buildAuthorizationUrl(config, { appId, label, flow: "generic" });
     const res = await driveStaticCallback(state);
@@ -503,8 +504,8 @@ describe("step-4 security hardening", () => {
 
   test("authorize-url rejects a non-http(s) finalRedirect (open redirect)", async () => {
     const provider = "sec-redirect";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
     const res = await fetch(`${appBase}/api/oauth-apps/${appId}/authorize-url`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-agent-id": LEAD_ID },
@@ -515,9 +516,9 @@ describe("step-4 security hardening", () => {
 
   test("consume enforces the 10-minute pending TTL", async () => {
     const provider = "sec-ttl";
-    upsertOAuthApp(provider, testApp(provider));
-    const appId = getOAuthAppIdByProvider(provider)!;
-    createOAuthPending({
+    await upsertOAuthApp(provider, testApp(provider));
+    const appId = (await getOAuthAppIdByProvider(provider))!;
+    await createOAuthPending({
       state: "ttl-state",
       appId,
       flow: "generic",
@@ -525,9 +526,10 @@ describe("step-4 security hardening", () => {
       redirectUri: `${appBase}/api/oauth/callback`,
     });
     // Backdate past the 10-minute TTL.
-    getDb()
-      .query("UPDATE oauth_pending SET createdAt = ? WHERE state = ?")
-      .run(new Date(Date.now() - 11 * 60 * 1000).toISOString(), "ttl-state");
+    await getDbClient().run("UPDATE oauth_pending SET createdAt = ? WHERE state = ?", [
+      new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      "ttl-state",
+    ]);
     const res = await driveStaticCallback("ttl-state");
     expect(res.status).toBe(400);
   });

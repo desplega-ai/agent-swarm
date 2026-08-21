@@ -30,11 +30,14 @@ const LEGACY_ALWAYS_ON_DEFAULTS = [
  * dashboard, and the operator can edit or delete it to take full control —
  * once a row exists this seed never touches it again.
  */
-export function seedLegacyCapabilitiesConfig(): { seeded: boolean; added: string[] } {
+export async function seedLegacyCapabilitiesConfig(): Promise<{
+  seeded: boolean;
+  added: string[];
+}> {
   const envValue = process.env.CAPABILITIES;
   if (!envValue) return { seeded: false, added: [] };
 
-  const existing = getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
+  const existing = await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
   if (existing.length > 0) return { seeded: false, added: [] };
 
   const current = new Set(
@@ -47,7 +50,7 @@ export function seedLegacyCapabilitiesConfig(): { seeded: boolean; added: string
   if (added.length === 0) return { seeded: false, added: [] };
 
   const next = [...current, ...added].join(",");
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "global",
     key: "CAPABILITIES",
     value: next,

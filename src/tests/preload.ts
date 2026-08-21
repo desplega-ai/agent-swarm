@@ -1,7 +1,20 @@
 import { Database } from "bun:sqlite";
 import { afterEach } from "bun:test";
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { closeDb, getDb, initDb } from "../be/db";
+import { getAllTemplateDefinitions } from "../prompts/registry";
 import { clearVolatileSecretsForTesting } from "../utils/secret-scrubber";
 
 // @hono/node-server (pulled in transitively by @modelcontextprotocol/sdk's
@@ -64,10 +77,90 @@ delete process.env.OPENROUTER_API_KEY;
 // may swap this out via __resetEncryptionKeyForTests + env mutation.
 process.env.SECRETS_ENCRYPTION_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-// Build one fully-migrated AND fully-seeded SQLite template per worker.
+// Build one fully-migrated AND fully-seeded SQLite template per process.
 // initDb runs all migrations, ensureAgentProfileColumns, seedContextVersions,
 // seedDefaultTemplates, etc. We serialize the result so each test suite can
 // restore from it instantly — no per-suite migration or seeding work at all.
+//
+// Under `bun test --parallel` (which implies --isolate) this preload runs once
+// PER TEST FILE, so the serialized template is cached on disk under $TMPDIR,
+// keyed by a hash of everything that shapes it. A cache hit is a single file
+// read instead of 130+ migrations plus seeding. AGENT_SWARM_TEST_TEMPLATE_CACHE=0
+// bypasses the cache (no read, no write) for the run.
+testTemplateGlobals.__testMigrationTemplate = loadOrBuildMigrationTemplate();
+// Building the template cold runs initDb, which also sets process-wide state
+// (encryption-key cache, prompt-resolver DI, sqlite-vec load, startup audit).
+// A cache hit skips that, so open the template once through initDb's fast path
+// to reproduce the same side effects, then close it. Tests that call
+// getEncryptionKey() before their own initDb() depend on this.
 initDb(":memory:");
-testTemplateGlobals.__testMigrationTemplate = getDb().serialize();
 closeDb();
+
+function migrationTemplateCacheKey(): string {
+  const hash = createHash("sha256");
+  hash.update(`bun:${Bun.version}\n`);
+  const inputs = [
+    join(import.meta.dir, "preload.ts"),
+    join(import.meta.dir, "../be/db.ts"),
+    join(import.meta.dir, "../be/seed-prompt-templates.ts"),
+  ];
+  const migrationsDir = join(import.meta.dir, "../be/migrations");
+  for (const name of readdirSync(migrationsDir).sort()) {
+    inputs.push(join(migrationsDir, name));
+  }
+  for (const file of inputs) {
+    hash.update(`${file}\n`);
+    hash.update(readFileSync(file));
+    hash.update("\n");
+  }
+  // seedDefaultTemplates bakes the prompt-template registry into the DB; the
+  // registry is populated by side-effect imports (db.ts -> seed-prompt-templates),
+  // so its current content is hashed directly instead of guessing source files.
+  hash.update(JSON.stringify(getAllTemplateDefinitions()));
+  return hash.digest("hex").slice(0, 32);
+}
+
+function loadOrBuildMigrationTemplate(): Uint8Array {
+  const cacheEnabled = process.env.AGENT_SWARM_TEST_TEMPLATE_CACHE !== "0";
+  const cacheDir = join(tmpdir(), "agent-swarm-test-template");
+  const key = cacheEnabled ? migrationTemplateCacheKey() : null;
+  const cachePath = key ? join(cacheDir, `${key}.sqlite`) : null;
+
+  if (cachePath && existsSync(cachePath)) {
+    try {
+      return new Uint8Array(readFileSync(cachePath));
+    } catch {
+      // Partial or unreadable entry: rebuild below and overwrite it.
+    }
+  }
+
+  initDb(":memory:");
+  const template = getDb().serialize();
+  closeDb();
+
+  if (cachePath && key) {
+    try {
+      mkdirSync(cacheDir, { recursive: true });
+      // Atomic publish: parallel workers that miss at the same time each write
+      // their own temp file, and rename makes the final path appear whole.
+      const tmpPath = join(cacheDir, `${key}.${process.pid}.tmp`);
+      writeFileSync(tmpPath, template);
+      renameSync(tmpPath, cachePath);
+      // Evict entries untouched for a day (other branches' keys, orphaned
+      // .tmp files from killed workers). Pruning by age instead of "everything
+      // but my key" lets two checkouts with different migrations share the dir.
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      for (const name of readdirSync(cacheDir)) {
+        const entry = join(cacheDir, name);
+        if (entry === cachePath) continue;
+        try {
+          if (statSync(entry).mtimeMs < cutoff) unlinkSync(entry);
+        } catch {}
+      }
+    } catch {
+      // Cache is an optimization only; the in-memory template is already built.
+    }
+  }
+
+  return template;
+}

@@ -1,4 +1,4 @@
-import { getDb } from "../be/db";
+import { getDbClient } from "../be/db";
 import { isIso8601Date, type UserConfigField } from "./definition";
 
 export type UserConfigValue = string | number | boolean | null;
@@ -105,12 +105,11 @@ export function userConfigValueIssues(
   return issues;
 }
 
-export function getAppUserConfigValues(appId: string, scope: string): unknown {
-  const row = getDb()
-    .prepare<AppUserConfigRow, [string, string]>(
-      'SELECT "values" AS storedValues FROM app_user_config WHERE appId = ? AND scope = ?',
-    )
-    .get(appId, scope);
+export async function getAppUserConfigValues(appId: string, scope: string): Promise<unknown> {
+  const row = await getDbClient().get<AppUserConfigRow>(
+    'SELECT "values" AS storedValues FROM app_user_config WHERE appId = ? AND scope = ?',
+    [appId, scope],
+  );
   if (!row) return {};
   try {
     return JSON.parse(row.storedValues);
@@ -119,17 +118,16 @@ export function getAppUserConfigValues(appId: string, scope: string): unknown {
   }
 }
 
-export function upsertAppUserConfigValues(
+export async function upsertAppUserConfigValues(
   appId: string,
   scope: string,
   values: Record<string, unknown>,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO app_user_config (id, appId, scope, "values", createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(appId, scope) DO UPDATE SET "values" = excluded."values", updatedAt = excluded.updatedAt`,
-    )
-    .run(crypto.randomUUID(), appId, scope, JSON.stringify(values), now, now);
+  await getDbClient().run(
+    `INSERT INTO app_user_config (id, appId, scope, "values", createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(appId, scope) DO UPDATE SET "values" = excluded."values", updatedAt = excluded.updatedAt`,
+    [crypto.randomUUID(), appId, scope, JSON.stringify(values), now, now],
+  );
 }

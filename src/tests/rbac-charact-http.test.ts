@@ -128,13 +128,13 @@ beforeAll(async () => {
   bareServer = createNoAuthContextServer();
   barePort = await listen(bareServer);
 
-  assigneeId = createAgent({ name: "rbac-fs-assignee", isLead: false, status: "idle" }).id;
-  creatorId = createAgent({ name: "rbac-fs-creator", isLead: false, status: "idle" }).id;
-  outsiderId = createAgent({ name: "rbac-fs-outsider", isLead: false, status: "idle" }).id;
-  leadId = createAgent({ name: "rbac-fs-lead", isLead: true, status: "idle" }).id;
+  assigneeId = (await createAgent({ name: "rbac-fs-assignee", isLead: false, status: "idle" })).id;
+  creatorId = (await createAgent({ name: "rbac-fs-creator", isLead: false, status: "idle" })).id;
+  outsiderId = (await createAgent({ name: "rbac-fs-outsider", isLead: false, status: "idle" })).id;
+  leadId = (await createAgent({ name: "rbac-fs-lead", isLead: true, status: "idle" })).id;
 
-  const user = createUser({ name: "RBAC FS User" });
-  userToken = mintToken(user.id, "rbac-charact", ACTOR).plaintext;
+  const user = await createUser({ name: "RBAC FS User" });
+  userToken = (await mintToken(user.id, "rbac-charact", ACTOR)).plaintext;
 });
 
 afterAll(async () => {
@@ -150,11 +150,13 @@ afterAll(async () => {
 beforeEach(async () => {
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   resetFileStorageProviderForTests();
-  taskId = createTaskExtended("rbac fs charact task", {
-    agentId: assigneeId,
-    creatorAgentId: creatorId,
-    source: "mcp",
-  }).id;
+  taskId = (
+    await createTaskExtended("rbac fs charact task", {
+      agentId: assigneeId,
+      creatorAgentId: creatorId,
+      source: "mcp",
+    })
+  ).id;
 });
 
 const DENY_BODY = { error: "Caller cannot mutate this task's files" };
@@ -235,7 +237,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     const res = await bareUpload({ agentId: outsiderId });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("missing X-Agent-ID (no auth, no agent) is denied with 403", async () => {
@@ -255,7 +257,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toHaveLength(1);
+    expect(await getTaskAttachments(taskId)).toHaveLength(1);
   });
 
   test("DELETE: assignee agent can delete", async () => {
@@ -267,6 +269,6 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
       agentId: assigneeId,
     });
     expect(res.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 });

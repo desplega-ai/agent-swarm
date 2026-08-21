@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
+import { deleteSwarmConfig, getDbClient, upsertSwarmConfig } from "../be/db";
 import { upsertCredentialBinding } from "../be/script-connections";
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { createApiRegistryClient } from "../scripts-runtime/api-client";
@@ -20,7 +20,7 @@ afterEach(() => {
 
 describe("credential broker", () => {
   test("resolves seeded GITHUB_TOKEN binding", async () => {
-    const emptyStore: CredentialBindingStore = { listActiveBindings: () => [] };
+    const emptyStore: CredentialBindingStore = { listActiveBindings: async () => [] };
     const broker = new CredentialBroker(
       emptyStore,
       (key) => (key === "GITHUB_TOKEN" ? "ghp_test" : undefined),
@@ -48,7 +48,7 @@ describe("credential broker", () => {
     );
     const broker = new CredentialBroker(
       {
-        listActiveBindings: () => [
+        listActiveBindings: async () => [
           {
             configKey: "GMAIL_SUPPORT_OAUTH_BINDING",
             allowedHosts: ["gmail.googleapis.com"],
@@ -87,7 +87,7 @@ describe("credential broker", () => {
   test("partitions a throwing OAuth resolver into failedBindings while others resolve", async () => {
     const broker = new CredentialBroker(
       {
-        listActiveBindings: () => [
+        listActiveBindings: async () => [
           {
             configKey: "BROKEN_OAUTH_BINDING",
             allowedHosts: ["api.broken.test"],
@@ -197,7 +197,7 @@ describe("credential broker", () => {
     }) as typeof fetch;
     const broker = new CredentialBroker(
       {
-        listActiveBindings: () => [
+        listActiveBindings: async () => [
           {
             configKey: "GMAIL_SUPPORT_OAUTH_BINDING",
             allowedHosts: ["gmail.googleapis.com"],
@@ -236,7 +236,7 @@ describe("credential broker", () => {
     const oauthResolver = mock(async () => "should-not-be-used");
     const broker = new CredentialBroker(
       {
-        listActiveBindings: () => [
+        listActiveBindings: async () => [
           {
             configKey: "VENDOR_CONFIG_KEY",
             allowedHosts: ["api.vendor.test"],
@@ -276,12 +276,12 @@ describe("credential broker", () => {
   test("registers resolved broker config values with the scrubber", async () => {
     // The legacy SCRIPT_CREDENTIAL_BINDINGS blob is retired — resolution is now
     // relational-only, so seed a relational binding + its config secret.
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "VENDOR_SPECIAL_API_KEY",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:VENDOR_SPECIAL_API_KEY]",
     });
-    const secretConfig = upsertSwarmConfig({
+    const secretConfig = await upsertSwarmConfig({
       scope: "global",
       key: "VENDOR_SPECIAL_API_KEY",
       value: "not_a_standard_token_shape_12345",
@@ -296,8 +296,8 @@ describe("credential broker", () => {
         "echo [REDACTED:VENDOR_SPECIAL_API_KEY]",
       );
     } finally {
-      getDb().run("DELETE FROM script_credential_bindings WHERE id = ?", [binding.id]);
-      deleteSwarmConfig(secretConfig.id);
+      await getDbClient().run("DELETE FROM script_credential_bindings WHERE id = ?", [binding.id]);
+      await deleteSwarmConfig(secretConfig.id);
     }
   });
 

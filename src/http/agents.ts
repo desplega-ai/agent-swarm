@@ -9,7 +9,7 @@ import {
   getAgentWithTasks,
   getAllAgents,
   getAllAgentsWithTasks,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   resetEmptyPollCount,
   setAgentHarnessProvider,
@@ -438,7 +438,7 @@ export async function handleAgentRegister(
       // Runtime ownership is permanent: a runtime id already serving another
       // agent must not be moved. `upsertRuntimeInstance` enforces this in SQL
       // too; rejecting here keeps the failure legible and pre-mutation.
-      const existingRuntime = getRuntimeInstanceById(parsed.body.runtimeInstanceId);
+      const existingRuntime = await getRuntimeInstanceById(parsed.body.runtimeInstanceId);
       if (existingRuntime && existingRuntime.agentId !== agentId) {
         jsonError(res, "runtimeInstanceId is already registered to another agent", 400);
         return true;
@@ -450,25 +450,25 @@ export async function handleAgentRegister(
       return true;
     }
 
-    const result = getDb().transaction(() => {
-      const existingAgent = getAgentById(agentId);
+    const result = await getDbClient().transaction(async () => {
+      const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
-          updateAgentStatus(existingAgent.id, "idle");
+          await updateAgentStatus(existingAgent.id, "idle");
         }
         if (multiRuntime) {
           // body.maxTasks is this runtime's own capacity, recorded below; it
           // must not redefine the logical policy, or two runtimes serving one
           // agent would race to overwrite it.
-          reconcileAgentMaxTasksPolicy(existingAgent.id);
+          await reconcileAgentMaxTasksPolicy(existingAgent.id);
         } else if (
           parsed.body.maxTasks !== undefined &&
           parsed.body.maxTasks !== existingAgent.maxTasks
         ) {
-          updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
+          await updateAgentMaxTasks(existingAgent.id, parsed.body.maxTasks);
         }
         if (parsed.body.provider && parsed.body.provider !== existingAgent.provider) {
-          updateAgentProvider(existingAgent.id, parsed.body.provider);
+          await updateAgentProvider(existingAgent.id, parsed.body.provider);
         }
         // Phase 1.5: worker-pushed harness_provider always wins on
         // re-registration. Env-driven, by design (per-agent live override
@@ -479,23 +479,23 @@ export async function handleAgentRegister(
           parsed.body.harness_provider &&
           parsed.body.harness_provider !== existingAgent.harnessProvider
         ) {
-          setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
+          await setAgentHarnessProvider(existingAgent.id, parsed.body.harness_provider);
         }
-        resetEmptyPollCount(existingAgent.id);
+        await resetEmptyPollCount(existingAgent.id);
         if (multiRuntime && parsed.body.runtimeInstanceId) {
-          upsertRuntimeInstance({
+          await upsertRuntimeInstance({
             id: parsed.body.runtimeInstanceId,
             agentId: existingAgent.id,
             reportedSlots: parsed.body.maxTasks ?? 1,
           });
           // A new live runtime can lift the agent out of waiting without
           // forcing idle over work another runtime is already doing.
-          reconcileAgentStatusFromRuntimes(existingAgent.id);
+          await reconcileAgentStatusFromRuntimes(existingAgent.id);
         }
-        return { agent: getAgentById(agentId), created: false };
+        return { agent: await getAgentById(agentId), created: false };
       }
 
-      const agent = createAgent({
+      const agent = await createAgent({
         id: agentId,
         name: parsed.body.name,
         isLead: parsed.body.isLead ?? false,
@@ -514,20 +514,20 @@ export async function handleAgentRegister(
       if (multiRuntime) {
         // Re-fetch below: this may adopt a policy row an operator wrote
         // before the agent existed.
-        reconcileAgentMaxTasksPolicy(agent.id);
+        await reconcileAgentMaxTasksPolicy(agent.id);
         if (parsed.body.runtimeInstanceId) {
-          upsertRuntimeInstance({
+          await upsertRuntimeInstance({
             id: parsed.body.runtimeInstanceId,
             agentId: agent.id,
             reportedSlots: parsed.body.maxTasks ?? 1,
           });
-          reconcileAgentStatusFromRuntimes(agent.id);
+          await reconcileAgentStatusFromRuntimes(agent.id);
         }
-        return { agent: getAgentById(agent.id), created: true };
+        return { agent: await getAgentById(agent.id), created: true };
       }
 
       return { agent, created: true };
-    })();
+    });
 
     telemetry.agent("registered", {
       role: parsed.body.role,
@@ -597,8 +597,10 @@ export async function handleAgentsRest(
     const includeTasks = parsed.query.include === "tasks";
     // List responses default to slim (no identity markdown); `?fields=full` restores it.
     const slim = parsed.query.fields !== "full";
-    const agents = includeTasks ? getAllAgentsWithTasks({ slim }) : getAllAgents({ slim });
-    const agentsWithCapacity = agents.map(agentWithCapacity);
+    const agents = includeTasks
+      ? await getAllAgentsWithTasks({ slim })
+      : await getAllAgents({ slim });
+    const agentsWithCapacity = await Promise.all(agents.map(agentWithCapacity));
     listAgents.respond(res, 200, { agents: agentsWithCapacity });
     return true;
   }
@@ -608,12 +610,12 @@ export async function handleAgentsRest(
     if (!parsed) return true;
 
     try {
-      const agent = updateAgentName(parsed.params.id, parsed.body.name.trim());
+      const agent = await updateAgentName(parsed.params.id, parsed.body.name.trim());
       if (!agent) {
         jsonError(res, "Agent not found", 404);
         return true;
       }
-      updateAgentNameRoute.respond(res, 200, agentWithCapacity(agent));
+      updateAgentNameRoute.respond(res, 200, await agentWithCapacity(agent));
     } catch (error) {
       jsonError(res, (error as Error).message, 409);
     }
@@ -623,12 +625,12 @@ export async function handleAgentsRest(
   if (getAgentSetupScript.match(req.method, pathSegments)) {
     const parsed = await getAgentSetupScript.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = getAgentById(parsed.params.id);
+    const agent = await getAgentById(parsed.params.id);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    const globalConfigs = getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
+    const globalConfigs = await getSwarmConfigs({ scope: "global", key: "SETUP_SCRIPT" });
     const globalSetupScript = globalConfigs[0]?.value ?? null;
     getAgentSetupScript.respond(res, 200, {
       setupScript: agent.setupScript ?? null,
@@ -640,12 +642,12 @@ export async function handleAgentsRest(
   if (listAgentRuntimeInstances.match(req.method, pathSegments)) {
     const parsed = await listAgentRuntimeInstances.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getAgentById(parsed.params.id)) {
+    if (!(await getAgentById(parsed.params.id))) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
     listAgentRuntimeInstances.respond(res, 200, {
-      runtimeInstances: listRuntimeInstancesForAgent(parsed.params.id).map(
+      runtimeInstances: (await listRuntimeInstancesForAgent(parsed.params.id)).map(
         ({ metadata: _metadata, ...instance }) => instance,
       ),
       staleThresholdMinutes: runtimeStaleThresholdMinutes(),
@@ -694,7 +696,7 @@ export async function handleAgentsRest(
 
     let agent: Agent | null;
     try {
-      agent = updateAgentProfile(
+      agent = await updateAgentProfile(
         parsed.params.id,
         {
           role: body.role,
@@ -719,7 +721,7 @@ export async function handleAgentsRest(
           versionMeta?.changeSource === "session_sync"
         ) {
           try {
-            createEvent({
+            await createEvent({
               category: "system",
               event: "system.profile_sync_rejected",
               status: "error",
@@ -757,7 +759,7 @@ export async function handleAgentsRest(
       try {
         for (const field of Object.keys(IDENTITY_FIELD_BUDGETS) as BudgetedIdentityField[]) {
           if (body[field] === undefined) continue;
-          createEvent({
+          await createEvent({
             category: "system",
             event: "system.profile_sync_reconciled",
             status: "ok",
@@ -778,14 +780,14 @@ export async function handleAgentsRest(
       }
     }
 
-    updateAgentProfileRoute.respond(res, 200, agentWithCapacity(agent));
+    updateAgentProfileRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
   if (updateAgentActivityRoute.match(req.method, pathSegments)) {
     const parsed = await updateAgentActivityRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    updateAgentActivity(parsed.params.id);
+    await updateAgentActivity(parsed.params.id);
     res.writeHead(204);
     res.end();
     return true;
@@ -794,7 +796,7 @@ export async function handleAgentsRest(
   if (setAgentHarnessProviderRoute.match(req.method, pathSegments)) {
     const parsed = await setAgentHarnessProviderRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
+    const agent = await setAgentHarnessProvider(parsed.params.id, parsed.body.harness_provider);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -802,14 +804,14 @@ export async function handleAgentsRest(
     // Mirror to swarm_config (scope=agent) so the worker's reconciliation
     // loop actually reads the new value. The column above is for dashboard
     // visibility; this row is the live override.
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: parsed.params.id,
       key: "HARNESS_PROVIDER",
       value: parsed.body.harness_provider,
       description: "Set via PATCH /api/agents/{id}/harness-provider",
     });
-    setAgentHarnessProviderRoute.respond(res, 200, agentWithCapacity(agent));
+    setAgentHarnessProviderRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
@@ -828,11 +830,13 @@ export async function handleAgentsRest(
       const modelForValidation =
         model !== undefined
           ? model
-          : (getSwarmConfigs({
-              scope: "agent",
-              scopeId: parsed.params.id,
-              key: "MODEL_OVERRIDE",
-            })[0]?.value ?? "");
+          : ((
+              await getSwarmConfigs({
+                scope: "agent",
+                scopeId: parsed.params.id,
+                key: "MODEL_OVERRIDE",
+              })
+            )[0]?.value ?? "");
       const capability = reasoningCapability(harness_provider, modelForValidation ?? "");
       if (!capability.levels.includes(reasoning_effort)) {
         json(
@@ -850,10 +854,14 @@ export async function handleAgentsRest(
       }
     }
 
-    const agent = getDb().transaction(() => {
-      const updated = setAgentHarnessProvider(parsed.params.id, harness_provider as ProviderName);
+    const agent = await getDbClient().transaction(async () => {
+      const updated = await setAgentHarnessProvider(
+        parsed.params.id,
+        harness_provider as ProviderName,
+      );
       if (!updated) return null;
-      upsertSwarmConfig({
+
+      await upsertSwarmConfig({
         scope: "agent",
         scopeId: parsed.params.id,
         key: "HARNESS_PROVIDER",
@@ -866,9 +874,9 @@ export async function handleAgentsRest(
       // below — this closes a pre-existing gap (there was previously no way
       // to clear MODEL_OVERRIDE via the API).
       if (model === null) {
-        deleteSwarmConfigByKey("agent", parsed.params.id, "MODEL_OVERRIDE");
+        await deleteSwarmConfigByKey("agent", parsed.params.id, "MODEL_OVERRIDE");
       } else if (model !== undefined) {
-        upsertSwarmConfig({
+        await upsertSwarmConfig({
           scope: "agent",
           scopeId: parsed.params.id,
           key: "MODEL_OVERRIDE",
@@ -883,9 +891,9 @@ export async function handleAgentsRest(
       // the runner reads this key (Phase 3), setting it is a no-op on the
       // worker side — this phase only wires storage + validation.
       if (reasoning_effort === null) {
-        deleteSwarmConfigByKey("agent", parsed.params.id, "REASONING_EFFORT_OVERRIDE");
+        await deleteSwarmConfigByKey("agent", parsed.params.id, "REASONING_EFFORT_OVERRIDE");
       } else if (reasoning_effort !== undefined) {
-        upsertSwarmConfig({
+        await upsertSwarmConfig({
           scope: "agent",
           scopeId: parsed.params.id,
           key: "REASONING_EFFORT_OVERRIDE",
@@ -895,12 +903,13 @@ export async function handleAgentsRest(
       }
 
       return updated;
-    })();
+    });
+
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
-    updateAgentRuntimeRoute.respond(res, 200, agentWithCapacity(agent));
+    updateAgentRuntimeRoute.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 
@@ -910,7 +919,7 @@ export async function handleAgentsRest(
     const parsed = await listCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const filter = parsed.query.status;
-    const agents = getAllAgents()
+    const agents = (await getAllAgents())
       .filter((a) => (filter ? a.status === filter : true))
       .map((a) => ({
         agentId: a.id,
@@ -934,7 +943,7 @@ export async function handleAgentsRest(
       queryParams,
     );
     if (!parsed) return true;
-    const existing = getAgentById(parsed.params.id);
+    const existing = await getAgentById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -955,18 +964,20 @@ export async function handleAgentsRest(
     let agent = existing;
     if (parsed.body.ready !== undefined) {
       if (multiRuntime && runtimeInstanceId) {
-        if (setRuntimeCredentialReady(runtimeInstanceId, parsed.params.id, parsed.body.ready)) {
-          updateAgentCredentialMissing(parsed.params.id, parsed.body.missing ?? null);
-          reconcileAgentStatusFromRuntimes(parsed.params.id);
+        if (
+          await setRuntimeCredentialReady(runtimeInstanceId, parsed.params.id, parsed.body.ready)
+        ) {
+          await updateAgentCredentialMissing(parsed.params.id, parsed.body.missing ?? null);
+          await reconcileAgentStatusFromRuntimes(parsed.params.id);
         }
-        agent = getAgentById(parsed.params.id) ?? existing;
+        agent = (await getAgentById(parsed.params.id)) ?? existing;
       } else {
         agent =
-          updateAgentCredentialState(
+          (await updateAgentCredentialState(
             parsed.params.id,
             parsed.body.ready,
             parsed.body.missing ?? null,
-          ) ?? existing;
+          )) ?? existing;
       }
     }
     if (!agent) {
@@ -988,7 +999,7 @@ export async function handleAgentsRest(
               null,
           }
         : null;
-      finalAgent = updateAgentCredStatus(parsed.params.id, nextStatus) ?? agent;
+      finalAgent = (await updateAgentCredStatus(parsed.params.id, nextStatus)) ?? agent;
     } else if (parsed.body.latest_model) {
       const current = agent.credStatus ?? {
         ready: parsed.body.ready ?? true,
@@ -1002,19 +1013,19 @@ export async function handleAgentsRest(
         bedrock: null,
       };
       finalAgent =
-        updateAgentCredStatus(parsed.params.id, {
+        (await updateAgentCredStatus(parsed.params.id, {
           ...current,
           latestModel: parsed.body.latest_model,
-        }) ?? agent;
+        })) ?? agent;
     }
-    updateAgentCredentialStatusRoute.respond(res, 200, agentWithCapacity(finalAgent));
+    updateAgentCredentialStatusRoute.respond(res, 200, await agentWithCapacity(finalAgent));
     return true;
   }
 
   if (getAgentCredentialStatusRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentCredentialStatusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = getAgentById(parsed.params.id);
+    const agent = await getAgentById(parsed.params.id);
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
@@ -1037,15 +1048,15 @@ export async function handleAgentsRest(
     if (!parsed) return true;
     const includeTasks = parsed.query.include === "tasks";
     const agent = includeTasks
-      ? getAgentWithTasks(parsed.params.id)
-      : getAgentById(parsed.params.id);
+      ? await getAgentWithTasks(parsed.params.id)
+      : await getAgentById(parsed.params.id);
 
     if (!agent) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    getAgent.respond(res, 200, agentWithCapacity(agent));
+    getAgent.respond(res, 200, await agentWithCapacity(agent));
     return true;
   }
 

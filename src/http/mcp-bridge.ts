@@ -15,14 +15,14 @@ import { json, jsonError } from "./utils";
 
 // Lazy singleton — created once on first bridge call to avoid boot-time cost.
 let _bridgeServer: McpServer | null = null;
-function getBridgeServer(): McpServer {
+async function getBridgeServer(): Promise<McpServer> {
   if (!_bridgeServer) {
     // Always full tool surface: the bridge is how scripts reach every SDK
     // tool, including when SCRIPTS_ONLY_MCP trims the external MCP server or
     // CAPABILITIES trims the externally exposed tool groups. Capability flags
     // shape the agents' MCP tool list, not what scripts can do — the scripts
     // surface is governed by SDK_ALLOWLIST instead.
-    _bridgeServer = createServer({ scriptsOnly: false, fullSurface: true });
+    _bridgeServer = await createServer({ scriptsOnly: false, fullSurface: true });
   }
   return _bridgeServer;
 }
@@ -77,7 +77,7 @@ export async function handleMcpBridge(
     return true;
   }
 
-  const server = getBridgeServer();
+  const server = await getBridgeServer();
   const tools = (server as unknown as { _registeredTools: ToolRegistry })._registeredTools;
 
   const tool = tools[toolName];

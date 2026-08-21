@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
@@ -14,9 +14,9 @@ import {
   initDb,
   updateAgentStatus,
 } from "../be/db";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-runner-polling.sqlite";
-const TEST_PORT = 13013;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -48,16 +48,16 @@ async function handleRequest(
 
     const agentId = myAgentId || crypto.randomUUID();
 
-    const result = getDb().transaction(() => {
-      const existingAgent = getAgentById(agentId);
+    const result = await getDbClient().transaction(async () => {
+      const existingAgent = await getAgentById(agentId);
       if (existingAgent) {
         if (existingAgent.status === "offline") {
-          updateAgentStatus(existingAgent.id, "idle");
+          await updateAgentStatus(existingAgent.id, "idle");
         }
-        return { agent: getAgentById(agentId), created: false };
+        return { agent: await getAgentById(agentId), created: false };
       }
 
-      const agent = createAgent({
+      const agent = await createAgent({
         id: agentId,
         name: parsedBody.name,
         isLead: parsedBody.isLead ?? false,
@@ -68,7 +68,7 @@ async function handleRequest(
       });
 
       return { agent, created: true };
-    })();
+    });
 
     return { status: result.created ? 201 : 200, body: result.agent };
   }
@@ -79,13 +79,13 @@ async function handleRequest(
       return { status: 400, body: { error: "Missing X-Agent-ID header" } };
     }
 
-    const result = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const result = await getDbClient().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
       if (!agent) {
         return { error: "Agent not found", status: 404 };
       }
 
-      const offeredTasks = getOfferedTasksForAgent(myAgentId);
+      const offeredTasks = await getOfferedTasksForAgent(myAgentId);
       const firstOfferedTask = offeredTasks[0];
       if (firstOfferedTask) {
         return {
@@ -97,7 +97,7 @@ async function handleRequest(
         };
       }
 
-      const pendingTask = getPendingTaskForAgent(myAgentId);
+      const pendingTask = await getPendingTaskForAgent(myAgentId);
       if (pendingTask) {
         return {
           trigger: {
@@ -109,7 +109,7 @@ async function handleRequest(
       }
 
       // Check for unread mentions - all agents can be woken by @mentions
-      const inbox = getInboxSummary(myAgentId);
+      const inbox = await getInboxSummary(myAgentId);
       if (inbox.mentionsCount > 0) {
         return {
           trigger: {
@@ -123,7 +123,7 @@ async function handleRequest(
         // Lead-specific triggers would go here (inbox, etc.)
       } else {
         // Worker-specific: check for unassigned tasks in pool
-        const unassignedCount = getUnassignedTasksCount();
+        const unassignedCount = await getUnassignedTasksCount();
         if (unassignedCount > 0) {
           return {
             trigger: {
@@ -135,7 +135,7 @@ async function handleRequest(
       }
 
       return { trigger: null };
-    })();
+    });
 
     if ("error" in result) {
       return { status: result.status ?? 500, body: { error: result.error } };
@@ -174,7 +174,7 @@ function createTestServer(): Server {
 
 describe("Runner-Level Polling API", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
 
   beforeAll(async () => {
     // Clean up any existing test database
@@ -189,12 +189,9 @@ describe("Runner-Level Polling API", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {
@@ -396,7 +393,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create a pending task assigned to this agent
-      const task = createTaskExtended("Test task for worker", {
+      const task = await createTaskExtended("Test task for worker", {
         agentId,
         creatorAgentId: "test-lead-001",
       });
@@ -434,7 +431,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create an offered task for this agent (using offeredTo sets status to "offered")
-      const task = createTaskExtended("Offered task for worker", {
+      const task = await createTaskExtended("Offered task for worker", {
         offeredTo: agentId,
         creatorAgentId: "test-lead-001",
       });
@@ -472,7 +469,7 @@ describe("Runner-Level Polling API", () => {
       });
 
       // Create an unassigned task (no agentId means status = "unassigned")
-      createTaskExtended("Unassigned task in pool", {
+      await createTaskExtended("Unassigned task in pool", {
         creatorAgentId: leadId,
         // No agentId = unassigned
       });

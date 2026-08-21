@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createMcpServer, getDb, initDb } from "../be/db";
+import { closeDb, createMcpServer, getDbClient, initDb } from "../be/db";
 import { findReusableMcpOAuthClient, getMcpOAuthToken } from "../be/db-queries/mcp-oauth";
 import { handleCore } from "../http/core";
 import { handleMcpOAuth } from "../http/mcp-oauth";
@@ -192,7 +192,7 @@ describe("MCP OAuth DCR client reuse", () => {
   }
 
   test("two authorize calls before any callback completes reuse one DCR client_id", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-basic",
       transport: "http",
       url: MCP_URL,
@@ -208,7 +208,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a changed issuer/registration endpoint forces re-registration", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-issuer-change",
       transport: "http",
       url: MCP_URL,
@@ -229,7 +229,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("an invalidated stored client re-registers exactly once on the next authorize call (no loop)", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-invalidate",
       transport: "http",
       url: MCP_URL,
@@ -244,8 +244,8 @@ describe("MCP OAuth DCR client reuse", () => {
       `/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`,
     );
     expect(callbackRes.status).toBe(302);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    expect(getMcpOAuthToken(server.id)?.dcrClientId).toBe("client-as-1.example.test-1");
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    expect((await getMcpOAuthToken(server.id))?.dcrClientId).toBe("client-as-1.example.test-1");
 
     // Provider now rejects the stored client at the token endpoint (e.g. a
     // subsequent refresh). Simulate via the refresh route.
@@ -256,7 +256,7 @@ describe("MCP OAuth DCR client reuse", () => {
       body: JSON.stringify({}),
     });
     expect(refreshRes.status).toBe(500);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("error");
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("error");
 
     // The next /authorize call must register fresh exactly once (not reuse
     // the now-invalidated client, and not loop).
@@ -273,7 +273,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("two concurrent first authorize calls for the same connector+user register exactly one DCR client (no TOCTOU race)", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-concurrent",
       transport: "http",
       url: MCP_URL,
@@ -305,7 +305,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a requested scope not covered by the stored client forces re-registration", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-scope-change",
       transport: "http",
       url: MCP_URL,
@@ -342,7 +342,7 @@ describe("MCP OAuth DCR client reuse", () => {
     // the stored client was never registered with "write" and re-register on
     // every call.
     asScopesSupported = ["read", "write"];
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "granted-narrower-than-registered",
       transport: "http",
       url: MCP_URL,
@@ -353,9 +353,9 @@ describe("MCP OAuth DCR client reuse", () => {
     expect(first.searchParams.get("scope")).toBe("read write");
     const state = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    expect(getMcpOAuthToken(server.id)?.scope).toBe("read");
-    const clientId = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    expect((await getMcpOAuthToken(server.id))?.scope).toBe("read");
+    const clientId = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     const second = await authorizeUrl(server.id);
@@ -375,7 +375,7 @@ describe("MCP OAuth DCR client reuse", () => {
     // connector's registered scope set even though the reuse check just
     // above already knew the true value (`reusable.registeredScopes`).
     asScopesSupported = ["read", "write"];
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "reuse-completes-not-register",
       transport: "http",
       url: MCP_URL,
@@ -394,14 +394,14 @@ describe("MCP OAuth DCR client reuse", () => {
       `/api/mcp-oauth/callback?state=${encodeURIComponent(stateB)}&code=auth-code`,
     );
     expect(callbackRes.status).toBe(302);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
 
-    const stored = findReusableMcpOAuthClient(server.id);
+    const stored = await findReusableMcpOAuthClient(server.id);
     expect(stored?.registeredScopes).toEqual(["read", "write"]);
   });
 
   test("an invalid_client from a freshly-registered client's callback does not invalidate the different, connected client", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "invalidate-wrong-target",
       transport: "http",
       url: MCP_URL,
@@ -412,8 +412,8 @@ describe("MCP OAuth DCR client reuse", () => {
     const first = await authorizeUrl(server.id);
     const stateA = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(stateA)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    const clientA = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    const clientA = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     // A second flow requests a scope the connected client wasn't registered
@@ -439,7 +439,7 @@ describe("MCP OAuth DCR client reuse", () => {
     // connected app) regardless of which client actually failed, silently
     // corrupting it on the next /authorize call.
     tokenShouldFail = "";
-    const afterFailure = getMcpOAuthToken(server.id);
+    const afterFailure = await getMcpOAuthToken(server.id);
     expect(afterFailure?.status).toBe("connected");
     expect(afterFailure?.dcrClientId).toBe(clientA);
 
@@ -449,11 +449,11 @@ describe("MCP OAuth DCR client reuse", () => {
     const third = await authorizeUrl(server.id);
     expect(dcrCallCount).toBe(2);
     expect(third.searchParams.get("client_id")).toBe(clientA);
-    expect(getMcpOAuthToken(server.id)?.dcrClientId).toBe(clientA);
+    expect((await getMcpOAuthToken(server.id))?.dcrClientId).toBe(clientA);
   });
 
   test("authorize-endpoint rejection (query.error) invalidates the reused client instead of waiting for GC", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "authorize-endpoint-reject",
       transport: "http",
       url: MCP_URL,
@@ -463,7 +463,7 @@ describe("MCP OAuth DCR client reuse", () => {
     const first = await authorizeUrl(server.id);
     const stateA = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(stateA)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
     expect(dcrCallCount).toBe(1);
 
     // Re-authorize reuses the connected client (no new registration yet) —
@@ -486,7 +486,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a legacy connector with no recorded registrationEndpoint reuses instead of re-registering forever", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "legacy-null-registration-endpoint",
       transport: "http",
       url: MCP_URL,
@@ -496,25 +496,23 @@ describe("MCP OAuth DCR client reuse", () => {
     const first = await authorizeUrl(server.id);
     const state = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    const clientId = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    const clientId = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     // Simulate a pre-this-PR row: registrationEndpoint was never recorded.
-    const db = getDb();
-    const appRow = db
-      .query(
-        `SELECT a.id, a.metadata FROM oauth_apps a
+    const appRow = (await getDbClient().get<{ id: string; metadata: string }>(
+      `SELECT a.id, a.metadata FROM oauth_apps a
          JOIN oauth_authorizations z ON z.appId = a.id
          WHERE a.mcpServerId = ?`,
-      )
-      .get(server.id) as { id: string; metadata: string };
+      [server.id],
+    ))!;
     const metadata = JSON.parse(appRow.metadata);
     metadata.registrationEndpoint = null;
-    db.query("UPDATE oauth_apps SET metadata = ? WHERE id = ?").run(
+    await getDbClient().run("UPDATE oauth_apps SET metadata = ? WHERE id = ?", [
       JSON.stringify(metadata),
       appRow.id,
-    );
+    ]);
 
     // An abandoned/retried flow must NOT force a fresh registration just
     // because the legacy row predates this field.
@@ -532,7 +530,7 @@ describe("MCP OAuth DCR client reuse", () => {
     // provider-advertised (or caller-requested) broader one, which the
     // provider may reject or silently narrow.
     asScopesSupported = ["read"];
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "legacy-null-registered-scopes",
       transport: "http",
       url: MCP_URL,
@@ -543,27 +541,25 @@ describe("MCP OAuth DCR client reuse", () => {
     expect(first.searchParams.get("scope")).toBe("read");
     const state = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    const originalClientId = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    const originalClientId = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     // Simulate a pre-this-series row: registeredScopes was never recorded
     // (migration 117's backfill, or a connect from before that field existed).
-    const db = getDb();
-    const appRow = db
-      .query(
-        `SELECT a.id, a.metadata FROM oauth_apps a
+    const appRow = (await getDbClient().get<{ id: string; metadata: string }>(
+      `SELECT a.id, a.metadata FROM oauth_apps a
          JOIN oauth_authorizations z ON z.appId = a.id
          WHERE a.mcpServerId = ?`,
-      )
-      .get(server.id) as { id: string; metadata: string };
+      [server.id],
+    ))!;
     const metadata = JSON.parse(appRow.metadata);
     delete metadata.registeredScopes;
-    db.query("UPDATE oauth_apps SET metadata = ? WHERE id = ?").run(
+    await getDbClient().run("UPDATE oauth_apps SET metadata = ? WHERE id = ?", [
       JSON.stringify(metadata),
       appRow.id,
-    );
-    expect(findReusableMcpOAuthClient(server.id)?.registeredScopes).toBeNull();
+    ]);
+    expect((await findReusableMcpOAuthClient(server.id))?.registeredScopes).toBeNull();
 
     // The provider now advertises a wider scope set than the unknown
     // registered client might actually support — must NOT infer coverage
@@ -578,7 +574,9 @@ describe("MCP OAuth DCR client reuse", () => {
     await dispatch(
       `/api/mcp-oauth/callback?state=${encodeURIComponent(secondState)}&code=auth-code-2`,
     );
-    expect(getMcpOAuthToken(server.id)?.dcrClientId).toBe(second.searchParams.get("client_id"));
+    expect((await getMcpOAuthToken(server.id))?.dcrClientId).toBe(
+      second.searchParams.get("client_id"),
+    );
 
     // The new client's registeredScopes is now known — later calls for the
     // same scope set reuse it without ever falling back to the granted
@@ -589,7 +587,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("no explicit scopes + an empty registered scope set does not reuse with the full discovery scope set", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "empty-registered-scope",
       transport: "http",
       url: MCP_URL,
@@ -602,8 +600,8 @@ describe("MCP OAuth DCR client reuse", () => {
     const first = await authorizeUrl(server.id);
     const state = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    const originalClientId = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    const originalClientId = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     // The provider now advertises real scopes.
@@ -619,7 +617,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a legacy connector with no recorded redirectUri reuses instead of re-registering forever", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "legacy-empty-redirect-uri",
       transport: "http",
       url: MCP_URL,
@@ -629,19 +627,17 @@ describe("MCP OAuth DCR client reuse", () => {
     const first = await authorizeUrl(server.id);
     const state = first.searchParams.get("state")!;
     await dispatch(`/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
-    const clientId = getMcpOAuthToken(server.id)?.dcrClientId;
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
+    const clientId = (await getMcpOAuthToken(server.id))?.dcrClientId;
     expect(dcrCallCount).toBe(1);
 
     // Simulate a pre-349b691c row: redirectUri was never persisted (migration
     // 117's backfill sentinel, or a connect from before that fix).
-    const db = getDb();
-    const appRow = db
-      .query(
-        `SELECT a.id FROM oauth_apps a JOIN oauth_authorizations z ON z.appId = a.id WHERE a.mcpServerId = ?`,
-      )
-      .get(server.id) as { id: string };
-    db.query("UPDATE oauth_apps SET redirectUri = '' WHERE id = ?").run(appRow.id);
+    const appRow = (await getDbClient().get<{ id: string }>(
+      `SELECT a.id FROM oauth_apps a JOIN oauth_authorizations z ON z.appId = a.id WHERE a.mcpServerId = ?`,
+      [server.id],
+    ))!;
+    await getDbClient().run("UPDATE oauth_apps SET redirectUri = '' WHERE id = ?", [appRow.id]);
 
     // An abandoned/retried flow must NOT force a fresh registration just
     // because the legacy row predates this field being recorded.
@@ -651,7 +647,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a failing exchange leaks no credential into the dashboard redirect or the log", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "callback-redaction",
       transport: "http",
       url: MCP_URL,
@@ -707,7 +703,7 @@ describe("MCP OAuth DCR client reuse", () => {
   });
 
   test("a callback in flight across the deploy exchanges with body-post, not Basic", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "inflight-legacy-pending",
       transport: "http",
       url: MCP_URL,
@@ -720,17 +716,16 @@ describe("MCP OAuth DCR client reuse", () => {
     // Simulate a pending row written before tokenEndpointAuthMethod existed:
     // the user started consent on the old build and the callback lands on the
     // new one. Its client was registered under the old body-post behavior.
-    getDb()
-      .query(
-        "UPDATE oauth_pending SET contextJson = json_remove(contextJson, '$.tokenEndpointAuthMethod') WHERE state = ?",
-      )
-      .run(state);
+    await getDbClient().run(
+      "UPDATE oauth_pending SET contextJson = json_remove(contextJson, '$.tokenEndpointAuthMethod') WHERE state = ?",
+      [state],
+    );
 
     const callbackRes = await dispatch(
       `/api/mcp-oauth/callback?state=${encodeURIComponent(state)}&code=auth-code`,
     );
     expect(callbackRes.status).toBe(302);
-    expect(getMcpOAuthToken(server.id)?.status).toBe("connected");
+    expect((await getMcpOAuthToken(server.id))?.status).toBe("connected");
 
     const body = new URLSearchParams(capturedTokenBody);
     expect(capturedTokenHeaders.Authorization).toBeUndefined();
@@ -738,6 +733,6 @@ describe("MCP OAuth DCR client reuse", () => {
     expect(body.get("client_secret")).toBe("secret-as-1.example.test-1");
 
     // And the resolution is persisted, so later refreshes stay consistent.
-    expect(getMcpOAuthToken(server.id)?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    expect((await getMcpOAuthToken(server.id))?.tokenEndpointAuthMethod).toBe("client_secret_post");
   });
 });

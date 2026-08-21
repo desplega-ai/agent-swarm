@@ -8,6 +8,7 @@ import {
   createScriptRun,
   createTaskExtended,
   getAgentById,
+  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getScriptRun,
   getScriptRunByIdempotencyKey,
@@ -16,6 +17,7 @@ import {
   listScriptRunJournalSteps,
   listScriptRuns,
   updateScriptRun,
+  updateScriptRunIfNotTerminal,
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
@@ -288,12 +290,12 @@ const agentTaskRoute = route({
   },
 });
 
-function requireAgent(res: ServerResponse, agentId: string | undefined) {
+async function requireAgent(res: ServerResponse, agentId: string | undefined) {
   if (!agentId) {
     jsonError(res, "X-Agent-ID required for script runs API", 400);
     return null;
   }
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) {
     jsonError(res, "Agent not found", 404);
     return null;
@@ -324,20 +326,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function assertRunWithinLimits(runId: string): { ok: true } | { ok: false; error: string } {
+async function assertRunWithinLimits(
+  runId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const maxSteps = scriptRunMaxSteps();
-  const stepCount = countScriptRunJournalSteps(runId);
+  const stepCount = await countScriptRunJournalSteps(runId);
   if (stepCount > maxSteps) {
     const error = `SCRIPT_RUN_MAX_STEPS exceeded (${stepCount}/${maxSteps})`;
-    abortScriptRunLimit(runId, error);
+    await abortScriptRunLimit(runId, error);
     return { ok: false, error };
   }
 
   const maxAgentTasks = scriptRunMaxAgentTasks();
-  const agentTaskCount = countScriptRunJournalAgentTaskSteps(runId);
+  const agentTaskCount = await countScriptRunJournalAgentTaskSteps(runId);
   if (agentTaskCount > maxAgentTasks) {
     const error = `SCRIPT_RUN_MAX_AGENT_TASKS exceeded (${agentTaskCount}/${maxAgentTasks})`;
-    abortScriptRunLimit(runId, error);
+    await abortScriptRunLimit(runId, error);
     return { ok: false, error };
   }
 
@@ -354,7 +358,7 @@ export async function handleScriptRuns(
   if (createScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await createScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const agent = requireAgent(res, agentId);
+    const agent = await requireAgent(res, agentId);
     if (!agent) return true;
 
     const lint = lintWorkflowLabels(parsed.body.source);
@@ -372,7 +376,7 @@ export async function handleScriptRuns(
     }
 
     if (parsed.body.idempotencyKey) {
-      const existingRun = getScriptRunByIdempotencyKey(parsed.body.idempotencyKey);
+      const existingRun = await getScriptRunByIdempotencyKey(parsed.body.idempotencyKey);
       if (existingRun) {
         json(
           res,
@@ -383,26 +387,31 @@ export async function handleScriptRuns(
       }
     }
 
+    // Cap check and insert commit together: N concurrent POSTs otherwise all
+    // read cap-1 active runs and all insert, exceeding the cap.
     const cap = scriptRunConcurrencyCap();
-    if (countActiveScriptRuns() >= cap) {
+    const creation = await getDbClient().transaction(async () => {
+      if ((await countActiveScriptRuns()) >= cap) return null;
+      return await createScriptRun({
+        id: crypto.randomUUID(),
+        agentId: agent.id,
+        source: parsed.body.source,
+        args: parsed.body.args ?? null,
+        scriptName: parsed.body.scriptName,
+        idempotencyKey: parsed.body.idempotencyKey,
+        requestedByUserId: parsed.body.requestedByUserId,
+        createdBy: parsed.body.requestedByUserId,
+      });
+    });
+    if (!creation) {
       json(res, { error: "script_run_concurrency_cap", cap }, 429);
       return true;
     }
-
-    const { run, existing } = createScriptRun({
-      id: crypto.randomUUID(),
-      agentId: agent.id,
-      source: parsed.body.source,
-      args: parsed.body.args ?? null,
-      scriptName: parsed.body.scriptName,
-      idempotencyKey: parsed.body.idempotencyKey,
-      requestedByUserId: parsed.body.requestedByUserId,
-      createdBy: parsed.body.requestedByUserId,
-    });
+    const { run, existing } = creation;
 
     if (!existing && parsed.body.background) {
-      startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch((err) => {
-        updateScriptRun(run.id, {
+      startScriptRunProcess(run, deriveApiBaseUrl(req), bearerToken(req)).catch(async (err) => {
+        await updateScriptRun(run.id, {
           status: "failed",
           pid: null,
           finishedAt: new Date().toISOString(),
@@ -438,8 +447,8 @@ export async function handleScriptRuns(
       offset: parsed.query.offset ?? 0,
     };
     listScriptRunsRoute.respond(res, 200, {
-      runs: listScriptRuns(opts),
-      total: countScriptRuns({
+      runs: await listScriptRuns(opts),
+      total: await countScriptRuns({
         status: opts.status,
         agentId: opts.agentId,
         scriptName: opts.scriptName,
@@ -451,19 +460,19 @@ export async function handleScriptRuns(
   if (getScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await getScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.id);
+    const run = await getScriptRun(parsed.params.id);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    getScriptRunRoute.respond(res, 200, { run, journal: listScriptRunJournalSteps(run.id) });
+    getScriptRunRoute.respond(res, 200, { run, journal: await listScriptRunJournalSteps(run.id) });
     return true;
   }
 
   if (deleteScriptRunRoute.match(req.method, pathSegments)) {
     const parsed = await deleteScriptRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.id);
+    const run = await getScriptRun(parsed.params.id);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
@@ -473,8 +482,11 @@ export async function handleScriptRuns(
       res.end();
       return true;
     }
-    terminateScriptRunProcess(run.id);
-    updateScriptRun(run.id, {
+    await terminateScriptRunProcess(run.id);
+    // Terminal-guarded write: terminateScriptRunProcess awaits, and the run's
+    // own harness can post its final status in that window. A blind UPDATE
+    // would store a genuinely completed run as "cancelled".
+    await updateScriptRunIfNotTerminal(run.id, {
       status: "cancelled",
       pid: null,
       finishedAt: new Date().toISOString(),
@@ -487,7 +499,7 @@ export async function handleScriptRuns(
   if (getInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await getInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const step = getScriptRunJournalStep(parsed.params.runId, parsed.params.stepKey);
+    const step = await getScriptRunJournalStep(parsed.params.runId, parsed.params.stepKey);
     if (!step) {
       jsonError(res, "Script run journal step not found", 404);
       return true;
@@ -508,22 +520,28 @@ export async function handleScriptRuns(
   if (postInternalStepRoute.match(req.method, pathSegments)) {
     const parsed = await postInternalStepRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    upsertScriptRunJournalStep({
-      runId: run.id,
-      stepKey: parsed.body.stepKey,
-      stepType: parsed.body.stepType,
-      config: parsed.body.config ?? {},
-      status: parsed.body.status,
-      result: parsed.body.result,
-      error: parsed.body.error,
-      durationMs: parsed.body.durationMs,
+    // The journal write and the cap re-read must be atomic: concurrent
+    // ctx.step.agentTask journal posts for the same run would otherwise all
+    // land before any of them counts, and every one of them would see (and be
+    // refused by) the post-write total.
+    const limit = await getDbClient().transaction(async () => {
+      await upsertScriptRunJournalStep({
+        runId: run.id,
+        stepKey: parsed.body.stepKey,
+        stepType: parsed.body.stepType,
+        config: parsed.body.config ?? {},
+        status: parsed.body.status,
+        result: parsed.body.result,
+        error: parsed.body.error,
+        durationMs: parsed.body.durationMs,
+      });
+      return assertRunWithinLimits(run.id);
     });
-    const limit = assertRunWithinLimits(run.id);
     if (!limit.ok) {
       json(res, { error: "script_run_limit", message: limit.error }, 429);
       return true;
@@ -535,11 +553,11 @@ export async function handleScriptRuns(
   if (heartbeatRoute.match(req.method, pathSegments)) {
     const parsed = await heartbeatRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getScriptRun(parsed.params.runId)) {
+    if (!(await getScriptRun(parsed.params.runId))) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    updateScriptRun(parsed.params.runId, { lastHeartbeatAt: new Date().toISOString() });
+    await updateScriptRun(parsed.params.runId, { lastHeartbeatAt: new Date().toISOString() });
     res.writeHead(204);
     res.end();
     return true;
@@ -548,7 +566,7 @@ export async function handleScriptRuns(
   if (statusRoute.match(req.method, pathSegments)) {
     const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
@@ -558,7 +576,10 @@ export async function handleScriptRuns(
       res.end();
       return true;
     }
-    updateScriptRun(parsed.params.runId, {
+    // Terminal-guarded write: the guard above ran before this handler's own
+    // awaits, so an operator DELETE cancelling the run in that window would
+    // otherwise be overwritten by this status.
+    await updateScriptRunIfNotTerminal(parsed.params.runId, {
       status: parsed.body.status,
       pid: null,
       finishedAt: parsed.body.status === "paused" ? null : new Date().toISOString(),
@@ -585,37 +606,40 @@ export async function handleScriptRuns(
   if (agentTaskRoute.match(req.method, pathSegments)) {
     const parsed = await agentTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getScriptRun(parsed.params.runId);
+    const run = await getScriptRun(parsed.params.runId);
     if (!run) {
       jsonError(res, "Script run not found", 404);
       return true;
     }
 
     const contextKey = `script-run:${run.id}:${parsed.body.stepKey}`;
-    let task = getLatestScriptRunStepTaskByContextKey(contextKey);
+    let task = await getLatestScriptRunStepTaskByContextKey(contextKey);
     if (!task) {
-      task = createTaskExtended(parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey, {
-        agentId: parsed.body.agentId,
-        tags: parsed.body.tags,
-        priority: parsed.body.priority,
-        offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
-        taskType: "script-run-step",
-        source: "mcp",
-        dir: parsed.body.dir,
-        vcsRepo: parsed.body.vcsRepo,
-        model: parsed.body.model,
-        parentTaskId: parsed.body.parentTaskId,
-        requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
-        outputSchema: parsed.body.outputSchema,
-        contextKey,
-      });
+      task = await createTaskExtended(
+        parsed.body.template ?? parsed.body.task ?? parsed.body.stepKey,
+        {
+          agentId: parsed.body.agentId,
+          tags: parsed.body.tags,
+          priority: parsed.body.priority,
+          offeredTo: parsed.body.offerMode ? parsed.body.agentId : undefined,
+          taskType: "script-run-step",
+          source: "mcp",
+          dir: parsed.body.dir,
+          vcsRepo: parsed.body.vcsRepo,
+          model: parsed.body.model,
+          parentTaskId: parsed.body.parentTaskId,
+          requestedByUserId: parsed.body.requestedByUserId ?? run.requestedByUserId,
+          outputSchema: parsed.body.outputSchema,
+          contextKey,
+        },
+      );
     }
 
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       // Once replay lookup/dispatch selects the step, stay pinned to its ID.
       // A later same-context task must never change which work this poll resolves.
-      const latest = getTaskById(task.id) ?? task;
+      const latest = (await getTaskById(task.id)) ?? task;
       if (latest.status === "completed") {
         agentTaskRoute.respond(res, 200, { taskId: latest.id, taskOutput: latest.output ?? null });
         return true;

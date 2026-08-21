@@ -273,10 +273,10 @@ export async function handleSchedules(
     // List responses default to slim (no full `taskTemplate`); `?fields=full` restores it.
     const schedules =
       parsed.query.fields === "full"
-        ? getScheduledTasks(filters)
-        : getScheduledTasks(filters, { slim: true });
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const decoratedSchedules = withFavoriteFlags(schedules, {
+        ? await getScheduledTasks(filters)
+        : await getScheduledTasks(filters, { slim: true });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const decoratedSchedules = await withFavoriteFlags(schedules, {
       favoriteScope,
       itemType: "schedule",
     });
@@ -336,14 +336,14 @@ export async function handleSchedules(
       }
     }
 
-    const existing = getScheduledTaskByName(body.name);
+    const existing = await getScheduledTaskByName(body.name);
     if (existing) {
       jsonError(res, "Schedule with this name already exists", 409);
       return true;
     }
 
     if (body.targetAgentId) {
-      const agent = getAgentById(body.targetAgentId);
+      const agent = await getAgentById(body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
         return true;
@@ -360,7 +360,7 @@ export async function handleSchedules(
         jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
         return true;
       }
-      if (!getWorkflow(body.workflowId)) {
+      if (!(await getWorkflow(body.workflowId))) {
         jsonError(res, `Workflow not found: ${body.workflowId}`, 400);
         return true;
       }
@@ -370,17 +370,17 @@ export async function handleSchedules(
         jsonError(res, "scriptName is required when targetType is 'script'.", 400);
         return true;
       }
-      if (!getScript({ name: body.scriptName, scope: "global" })) {
+      if (!(await getScript({ name: body.scriptName, scope: "global" }))) {
         jsonError(res, `Script not found: ${body.scriptName}`, 400);
         return true;
       }
     }
 
     try {
-      const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+      const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
       let key: string | undefined;
       try {
-        key = body.key ? authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
+        key = body.key ? await authorizeAssetKeyWrite(body.key, trustedUserId) : undefined;
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -405,7 +405,7 @@ export async function handleSchedules(
         }
       }
 
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         key,
         name: body.name,
         description: body.description,
@@ -425,7 +425,7 @@ export async function handleSchedules(
         workflowId: body.workflowId,
         scriptName: body.scriptName,
         scriptArgs: body.scriptArgs,
-        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       });
 
       createSchedule.respond(res, 201, schedule);
@@ -438,7 +438,7 @@ export async function handleSchedules(
   if (runScheduleNow.match(req.method, pathSegments)) {
     const parsed = await runScheduleNow.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const schedule = getScheduledTaskById(parsed.params.id);
+    const schedule = await getScheduledTaskById(parsed.params.id);
 
     if (!schedule) {
       jsonError(res, "Schedule not found", 404);
@@ -455,20 +455,20 @@ export async function handleSchedules(
 
       const now = new Date().toISOString();
       if (schedule.scheduleType === "one_time") {
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now,
           nextRunAt: null,
           enabled: false,
           lastUpdatedAt: now,
         });
       } else {
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now,
           lastUpdatedAt: now,
         });
       }
 
-      const updatedSchedule = getScheduledTaskById(parsed.params.id);
+      const updatedSchedule = await getScheduledTaskById(parsed.params.id);
       runScheduleNow.respond(res, 200, { schedule: updatedSchedule, workflowRunIds, task });
     } catch (error) {
       jsonError(res, error instanceof Error ? error.message : "Failed to run schedule", 500);
@@ -479,15 +479,18 @@ export async function handleSchedules(
   if (getSchedule.match(req.method, pathSegments)) {
     const parsed = await getSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const schedule = getScheduledTaskById(parsed.params.id);
+    const schedule = await getScheduledTaskById(parsed.params.id);
 
     if (!schedule) {
       jsonError(res, "Schedule not found", 404);
       return true;
     }
 
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const [decorated] = withFavoriteFlags([schedule], { favoriteScope, itemType: "schedule" });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const [decorated] = await withFavoriteFlags([schedule], {
+      favoriteScope,
+      itemType: "schedule",
+    });
     getSchedule.respond(res, 200, decorated ?? schedule);
     return true;
   }
@@ -504,7 +507,10 @@ export async function handleSchedules(
     const body = parsed.body as Record<string, unknown>;
     if (parsed.body.key !== undefined) {
       try {
-        body.key = authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId));
+        body.key = await authorizeAssetKeyWrite(
+          parsed.body.key,
+          await resolveHttpAuditUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -524,7 +530,7 @@ export async function handleSchedules(
       }
     }
 
-    const existing = getScheduledTaskById(parsed.params.id);
+    const existing = await getScheduledTaskById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Schedule not found", 404);
       return true;
@@ -562,7 +568,7 @@ export async function handleSchedules(
     }
 
     if (parsed.body.targetAgentId) {
-      const agent = getAgentById(parsed.body.targetAgentId);
+      const agent = await getAgentById(parsed.body.targetAgentId);
       if (!agent) {
         jsonError(res, "Target agent not found", 400);
         return true;
@@ -589,7 +595,7 @@ export async function handleSchedules(
         jsonError(res, "workflowId is required when targetType is 'workflow'.", 400);
         return true;
       }
-      if (!getWorkflow(mergedWorkflowId)) {
+      if (!(await getWorkflow(mergedWorkflowId))) {
         jsonError(res, `Workflow not found: ${mergedWorkflowId}`, 400);
         return true;
       }
@@ -599,14 +605,14 @@ export async function handleSchedules(
         jsonError(res, "scriptName is required when targetType is 'script'.", 400);
         return true;
       }
-      if (!getScript({ name: mergedScriptName, scope: "global" })) {
+      if (!(await getScript({ name: mergedScriptName, scope: "global" }))) {
         jsonError(res, `Script not found: ${mergedScriptName}`, 400);
         return true;
       }
     }
 
     if (parsed.body.name && parsed.body.name !== existing.name) {
-      const nameConflict = getScheduledTaskByName(parsed.body.name);
+      const nameConflict = await getScheduledTaskByName(parsed.body.name);
       if (nameConflict) {
         jsonError(res, "Schedule with this name already exists", 409);
         return true;
@@ -647,9 +653,9 @@ export async function handleSchedules(
       }
     }
 
-    const updatedBy = resolveHttpAuditUserId(req, myAgentId);
+    const updatedBy = await resolveHttpAuditUserId(req, myAgentId);
     if (updatedBy !== null) body.updatedBy = updatedBy;
-    const schedule = updateScheduledTask(parsed.params.id, body);
+    const schedule = await updateScheduledTask(parsed.params.id, body);
     routeHandle.respond(res, 200, schedule);
     return true;
   }
@@ -657,7 +663,7 @@ export async function handleSchedules(
   if (deleteSchedule.match(req.method, pathSegments)) {
     const parsed = await deleteSchedule.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const deleted = deleteScheduledTask(parsed.params.id);
+    const deleted = await deleteScheduledTask(parsed.params.id);
 
     if (!deleted) {
       jsonError(res, "Schedule not found", 404);

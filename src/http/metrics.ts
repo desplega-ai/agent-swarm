@@ -373,8 +373,8 @@ const metricSchemaRoute = route({
   },
 });
 
-function metricEditCounter(metricId: string): number {
-  const versions = getMetricVersions(metricId);
+async function metricEditCounter(metricId: string): Promise<number> {
+  const versions = await getMetricVersions(metricId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
@@ -400,7 +400,7 @@ export async function handleMetrics(
     try {
       const definition = validateMetricDefinition(parsed.body.definition);
       const slug = parsed.body.slug ?? slugify(parsed.body.title);
-      const metric = createMetric({
+      const metric = await createMetric({
         agentId: ownerAgentId,
         slug,
         title: parsed.body.title,
@@ -430,14 +430,14 @@ export async function handleMetrics(
     let total: number;
     if (parsed.query.agentId) {
       metrics = full
-        ? listMetricsByAgent(parsed.query.agentId, limit, offset)
-        : listMetricsByAgent(parsed.query.agentId, limit, offset, { slim: true });
-      total = countMetricsByAgent(parsed.query.agentId);
+        ? await listMetricsByAgent(parsed.query.agentId, limit, offset)
+        : await listMetricsByAgent(parsed.query.agentId, limit, offset, { slim: true });
+      total = await countMetricsByAgent(parsed.query.agentId);
     } else {
       metrics = full
-        ? listAllMetrics(limit, offset)
-        : listAllMetrics(limit, offset, { slim: true });
-      total = countAllMetrics();
+        ? await listAllMetrics(limit, offset)
+        : await listAllMetrics(limit, offset, { slim: true });
+      total = await countAllMetrics();
     }
     listMetricsRoute.respond(res, 200, { metrics, total, limit, offset });
     return true;
@@ -446,7 +446,7 @@ export async function handleMetrics(
   if (runMetricRoute.match(req.method, pathSegments)) {
     const parsed = await runMetricRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const metric = getMetric(parsed.params.id);
+    const metric = await getMetric(parsed.params.id);
     if (!metric) {
       res.writeHead(404);
       res.end();
@@ -463,12 +463,12 @@ export async function handleMetrics(
   if (getMetricVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getMetricVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getMetric(parsed.params.id)) {
+    if (!(await getMetric(parsed.params.id))) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const version = getMetricVersion(parsed.params.id, parsed.params.version);
+    const version = await getMetricVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -481,19 +481,21 @@ export async function handleMetrics(
   if (listMetricVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listMetricVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getMetric(parsed.params.id)) {
+    if (!(await getMetric(parsed.params.id))) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    listMetricVersionsRoute.respond(res, 200, { versions: getMetricVersions(parsed.params.id) });
+    listMetricVersionsRoute.respond(res, 200, {
+      versions: await getMetricVersions(parsed.params.id),
+    });
     return true;
   }
 
   if (getMetricRoute.match(req.method, pathSegments)) {
     const parsed = await getMetricRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const metric = getMetric(parsed.params.id);
+    const metric = await getMetric(parsed.params.id);
     if (!metric) {
       res.writeHead(404);
       res.end();
@@ -506,7 +508,7 @@ export async function handleMetrics(
   if (updateMetricRoute.match(req.method, pathSegments)) {
     const parsed = await updateMetricRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getMetric(parsed.params.id)) {
+    if (!(await getMetric(parsed.params.id))) {
       res.writeHead(404);
       res.end();
       return true;
@@ -517,11 +519,11 @@ export async function handleMetrics(
           ? validateMetricDefinition(parsed.body.definition)
           : undefined;
       try {
-        snapshotMetric(parsed.params.id, myAgentId);
+        await snapshotMetric(parsed.params.id, myAgentId);
       } catch {
         // Snapshot failures should not block edits, matching Pages.
       }
-      const updated = updateMetric(parsed.params.id, {
+      const updated = await updateMetric(parsed.params.id, {
         title: parsed.body.title,
         description: parsed.body.description ?? undefined,
         definition,
@@ -534,7 +536,7 @@ export async function handleMetrics(
       }
       updateMetricRoute.respond(res, 200, {
         id: updated.id,
-        version: metricEditCounter(updated.id),
+        version: await metricEditCounter(updated.id),
       });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err));
@@ -545,7 +547,7 @@ export async function handleMetrics(
   if (deleteMetricRoute.match(req.method, pathSegments)) {
     const parsed = await deleteMetricRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!deleteMetric(parsed.params.id)) {
+    if (!(await deleteMetric(parsed.params.id))) {
       res.writeHead(404);
       res.end();
       return true;

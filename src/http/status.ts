@@ -19,7 +19,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import {
   getAgentHarnessProviders,
-  getDb,
+  getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
   hasFirstCompletedTask,
@@ -188,8 +188,8 @@ export function _resetTestConnectionCache(): void {
   // intentionally empty
 }
 
-function rollupCredStatusForProvider(provider: string): CredRollup {
-  const agents = listAgentsWithCredStatusByProvider(provider);
+async function rollupCredStatusForProvider(provider: string): Promise<CredRollup> {
+  const agents = await listAgentsWithCredStatusByProvider(provider);
   const reports = agents.map((a) => a.credStatus).filter((s): s is AgentCredStatus => s != null);
 
   if (reports.length === 0) {
@@ -292,8 +292,8 @@ function describeRoll(roll: CredRollup): string {
  * may run several harnesses simultaneously. Empty fleet → `unverified` with
  * an onboarding hint.
  */
-function harnessMilestone(): SetupMilestone {
-  const fleet = getAgentHarnessProviders();
+async function harnessMilestone(): Promise<SetupMilestone> {
+  const fleet = await getAgentHarnessProviders();
 
   if (fleet.length === 0) {
     return {
@@ -305,15 +305,15 @@ function harnessMilestone(): SetupMilestone {
     };
   }
 
-  const perProvider = fleet
-    .map(({ provider }) => {
-      const parsed = ProviderNameSchema.safeParse(provider);
-      if (!parsed.success) return null;
-      return { provider: parsed.data, roll: rollupCredStatusForProvider(parsed.data) };
-    })
-    .filter(
-      (x): x is { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup } => x !== null,
-    );
+  const perProvider: { provider: z.infer<typeof ProviderNameSchema>; roll: CredRollup }[] = [];
+  for (const { provider } of fleet) {
+    const parsed = ProviderNameSchema.safeParse(provider);
+    if (!parsed.success) continue;
+    perProvider.push({
+      provider: parsed.data,
+      roll: await rollupCredStatusForProvider(parsed.data),
+    });
+  }
 
   if (perProvider.length === 0) {
     return {
@@ -398,8 +398,8 @@ function githubMilestone(): SetupMilestone {
   };
 }
 
-function linearMilestone(): SetupMilestone {
-  const tokens = getOAuthTokens("linear");
+async function linearMilestone(): Promise<SetupMilestone> {
+  const tokens = await getOAuthTokens("linear");
   if (!tokens) {
     return {
       id: "linear",
@@ -418,8 +418,8 @@ function linearMilestone(): SetupMilestone {
   };
 }
 
-function jiraMilestone(): SetupMilestone {
-  const tokens = getOAuthTokens("jira");
+async function jiraMilestone(): Promise<SetupMilestone> {
+  const tokens = await getOAuthTokens("jira");
   if (!tokens) {
     return {
       id: "jira",
@@ -430,7 +430,7 @@ function jiraMilestone(): SetupMilestone {
     };
   }
   // Verify cloudId is in oauth_apps.metadata.
-  const app = getOAuthApp("jira");
+  const app = await getOAuthApp("jira");
   let hasCloudId = false;
   try {
     const meta = app?.metadata ? JSON.parse(app.metadata) : null;
@@ -456,15 +456,15 @@ function jiraMilestone(): SetupMilestone {
   };
 }
 
-function workersMilestone(): SetupMilestone {
+async function workersMilestone(): Promise<SetupMilestone> {
   // `configured` if ≥1 row in agents; `verified` if both lead+worker alive
   // within the last 5 minutes.
-  const totalRow = getDb()
-    .prepare<{ count: number }, []>(`SELECT COUNT(*) AS count FROM agents`)
-    .get();
+  const totalRow = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count FROM agents`,
+  );
   const totalAgents = totalRow?.count ?? 0;
 
-  const { leads_alive, workers_alive } = getLiveAgentCounts(5);
+  const { leads_alive, workers_alive } = await getLiveAgentCounts(5);
   if (leads_alive > 0 && workers_alive > 0) {
     return {
       id: "workers",
@@ -496,8 +496,8 @@ function workersMilestone(): SetupMilestone {
   };
 }
 
-function firstTaskMilestone(): SetupMilestone {
-  if (hasFirstCompletedTask()) {
+async function firstTaskMilestone(): Promise<SetupMilestone> {
+  if (await hasFirstCompletedTask()) {
     return {
       id: "first_task",
       label: "First task completed",
@@ -514,15 +514,15 @@ function firstTaskMilestone(): SetupMilestone {
   };
 }
 
-function buildSetup(): SetupMilestone[] {
+async function buildSetup(): Promise<SetupMilestone[]> {
   return [
-    harnessMilestone(),
+    await harnessMilestone(),
     slackMilestone(),
     githubMilestone(),
-    linearMilestone(),
-    jiraMilestone(),
-    workersMilestone(),
-    firstTaskMilestone(),
+    await linearMilestone(),
+    await jiraMilestone(),
+    await workersMilestone(),
+    await firstTaskMilestone(),
   ];
 }
 
@@ -569,12 +569,12 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 
 // ─── Public payload builder (also exported for tests) ────────────────────────
 
-export function buildStatusPayload(): StatusResponse {
-  const setup = buildSetup();
+export async function buildStatusPayload(): Promise<StatusResponse> {
+  const setup = await buildSetup();
   return {
     identity: buildIdentity(),
     setup,
-    activity: getInstanceActivity(),
+    activity: await getInstanceActivity(),
     agent_fs: {
       configured: !!process.env.AGENT_FS_API_URL,
       base_url: process.env.AGENT_FS_API_URL ?? null,
@@ -646,7 +646,7 @@ export async function handleStatus(
 ): Promise<boolean> {
   if (getStatus.match(req.method, pathSegments)) {
     try {
-      const payload = buildStatusPayload();
+      const payload = await buildStatusPayload();
       json(res, payload);
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to build status", 500);
@@ -659,7 +659,7 @@ export async function handleStatus(
     if (!parsed) return true;
 
     const { provider } = parsed.body;
-    const roll = rollupCredStatusForProvider(provider);
+    const roll = await rollupCredStatusForProvider(provider);
 
     // No workers registered for this provider — the operator needs to start
     // a worker before any live test can run. Surface as a soft failure so

@@ -9,7 +9,7 @@ import {
 import { parseAppDefinition } from "../apps/definition";
 import { appIndexKey, appsNamespace, createAppRow, purgeAppRows } from "../apps/row-store";
 import { deleteApp, getApp } from "../apps/store";
-import { closeDb, countKv, getDb, getKv, initDb } from "../be/db";
+import { closeDb, countKv, getDbClient, getKv, initDb } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -95,9 +95,9 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -112,9 +112,9 @@ afterAll(async () => {
 
 describe("apps spike", () => {
   test("validates app definitions with normalized issue paths", async () => {
-    expect(parseAppDefinition(ideasDefinition).success).toBe(true);
+    expect((await parseAppDefinition(ideasDefinition)).success).toBe(true);
 
-    const missingEnum = parseAppDefinition({
+    const missingEnum = await parseAppDefinition({
       ...ideasDefinition,
       models: { idea: { columns: { status: { kind: "enum" } } } },
     });
@@ -123,7 +123,7 @@ describe("apps spike", () => {
       issues: [{ path: "models.idea.columns.status.enum" }],
     });
 
-    const prototypeReferences = parseAppDefinition({
+    const prototypeReferences = await parseAppDefinition({
       ...ideasDefinition,
       queries: {
         badModel: { model: "toString" },
@@ -138,7 +138,7 @@ describe("apps spike", () => {
       ]);
     }
 
-    const invalidDateDefault = parseAppDefinition({
+    const invalidDateDefault = await parseAppDefinition({
       ...ideasDefinition,
       models: { idea: { columns: { due: { kind: "date", default: "1" } } } },
     });
@@ -215,8 +215,8 @@ describe("apps spike", () => {
     });
   });
 
-  test("preserves the record-key validation message", () => {
-    const result = parseAppDefinition({
+  test("preserves the record-key validation message", async () => {
+    const result = await parseAppDefinition({
       ...ideasDefinition,
       models: {
         idea: { columns: { BadName: { kind: "string" } } },
@@ -283,7 +283,7 @@ describe("apps spike", () => {
       },
     );
     const notesIndexKey = appIndexKey("idea", "notes", "temporary", created.body.row.id);
-    expect(getKv(appsNamespace(appId), notesIndexKey)).not.toBeNull();
+    expect(await getKv(appsNamespace(appId), notesIndexKey)).not.toBeNull();
 
     const cleared = await request<{ row: Record<string, unknown> }>(
       `/api/apps/${appId}/models/idea/rows/${created.body.row.id}`,
@@ -291,7 +291,7 @@ describe("apps spike", () => {
     );
     expect(cleared.status).toBe(200);
     expect(Object.hasOwn(cleared.body.row, "notes")).toBe(false);
-    expect(getKv(appsNamespace(appId), notesIndexKey)).toBeNull();
+    expect(await getKv(appsNamespace(appId), notesIndexKey)).toBeNull();
 
     const required = await request<{ issues: Array<{ path: string }> }>(
       `/api/apps/${appId}/models/idea/rows/${created.body.row.id}`,
@@ -339,17 +339,17 @@ describe("apps spike", () => {
     const namespace = appsNamespace(appId);
     const openKey = appIndexKey("idea", "status", "open", rowId);
     const doneKey = appIndexKey("idea", "status", "done", rowId);
-    expect(getKv(namespace, openKey)).not.toBeNull();
+    expect(await getKv(namespace, openKey)).not.toBeNull();
 
     await request(`/api/apps/${appId}/models/idea/rows/${rowId}`, {
       method: "PATCH",
       body: JSON.stringify({ values: { status: "done" } }),
     });
-    expect(getKv(namespace, openKey)).toBeNull();
-    expect(getKv(namespace, doneKey)).not.toBeNull();
+    expect(await getKv(namespace, openKey)).toBeNull();
+    expect(await getKv(namespace, doneKey)).not.toBeNull();
 
     await request(`/api/apps/${appId}/models/idea/rows/${rowId}`, { method: "DELETE" });
-    expect(getKv(namespace, doneKey)).toBeNull();
+    expect(await getKv(namespace, doneKey)).toBeNull();
 
     const escapedDefinition = {
       ...ideasDefinition,
@@ -374,8 +374,8 @@ describe("apps spike", () => {
     );
     const escapedKey = appIndexKey("idea", "notes", escapedValue, escaped.body.row.id);
     expect(escapedKey).toMatch(/^[a-zA-Z0-9._:/%-]{1,512}$/);
-    expect(getKv(appsNamespace(escapedAppId), escapedKey)).not.toBeNull();
-    expect(countKv(appsNamespace(escapedAppId), { prefix: "idea/idx/toString/" })).toBe(0);
+    expect(await getKv(appsNamespace(escapedAppId), escapedKey)).not.toBeNull();
+    expect(await countKv(appsNamespace(escapedAppId), { prefix: "idea/idx/toString/" })).toBe(0);
   });
 
   test("row delete removes exactly the deleted row's computed index keys", async () => {
@@ -399,20 +399,24 @@ describe("apps spike", () => {
       body: JSON.stringify({ values: { title: "Second", notes: "shared" } }),
     });
     const namespace = appsNamespace(appId);
-    expect(countKv(namespace, { prefix: "idea/idx/" })).toBe(4);
+    expect(await countKv(namespace, { prefix: "idea/idx/" })).toBe(4);
 
     const deleted = await request(`/api/apps/${appId}/models/idea/rows/${first.body.row.id}`, {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
-    expect(countKv(namespace, { prefix: "idea/idx/" })).toBe(2);
-    expect(getKv(namespace, appIndexKey("idea", "status", "open", first.body.row.id))).toBeNull();
-    expect(getKv(namespace, appIndexKey("idea", "notes", "shared", first.body.row.id))).toBeNull();
+    expect(await countKv(namespace, { prefix: "idea/idx/" })).toBe(2);
     expect(
-      getKv(namespace, appIndexKey("idea", "status", "open", second.body.row.id)),
+      await getKv(namespace, appIndexKey("idea", "status", "open", first.body.row.id)),
+    ).toBeNull();
+    expect(
+      await getKv(namespace, appIndexKey("idea", "notes", "shared", first.body.row.id)),
+    ).toBeNull();
+    expect(
+      await getKv(namespace, appIndexKey("idea", "status", "open", second.body.row.id)),
     ).not.toBeNull();
     expect(
-      getKv(namespace, appIndexKey("idea", "notes", "shared", second.body.row.id)),
+      await getKv(namespace, appIndexKey("idea", "notes", "shared", second.body.row.id)),
     ).not.toBeNull();
   });
 
@@ -427,13 +431,13 @@ describe("apps spike", () => {
       ),
     );
     expect(responses.every((response) => response.status === 201)).toBe(true);
-    expect(countKv(appsNamespace(appId), { prefix: "idea/row/" })).toBe(30);
-    expect(countKv(appsNamespace(appId), { prefix: "idea/idx/status/open/" })).toBe(30);
+    expect(await countKv(appsNamespace(appId), { prefix: "idea/row/" })).toBe(30);
+    expect(await countKv(appsNamespace(appId), { prefix: "idea/idx/status/open/" })).toBe(30);
   });
 
   test("same-millisecond creates preserve creation order when sorted by createdAt", async () => {
     const appId = await createIdeasApp();
-    const app = getApp(appId);
+    const app = await getApp(appId);
     if (!app) throw new Error("created app missing");
     const model = app.definition.models.idea!;
     const originalDateNow = Date.now;
@@ -543,11 +547,11 @@ describe("apps spike", () => {
     });
     // Simulate a legacy/manually corrupted row: DELETE is the recovery path and
     // must not depend on the definition parsing.
-    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", ["{not json", appId]);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", ["{not json", appId]);
 
     const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
     expect(deleted).toEqual({ status: 200, body: { ok: true } });
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
     expect((await request(`/api/apps/${appId}`)).status).toBe(404);
   });
 
@@ -561,22 +565,22 @@ describe("apps spike", () => {
         }),
       ),
     );
-    expect(countKv(appsNamespace(appId), {})).toBeGreaterThan(0);
+    expect(await countKv(appsNamespace(appId), {})).toBeGreaterThan(0);
     const deleted = await request<{ ok: boolean }>(`/api/apps/${appId}`, { method: "DELETE" });
     expect(deleted).toEqual({ status: 200, body: { ok: true } });
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
     expect((await request(`/api/apps/${appId}`)).status).toBe(404);
   });
 
   test("a mutation queued during app purge cannot recreate orphan KV rows", async () => {
     const appId = await createIdeasApp();
-    const app = getApp(appId);
+    const app = await getApp(appId);
     if (!app) throw new Error("created app missing");
     const model = app.definition.models.idea!;
     let lateCreateOutcome: Promise<boolean> | undefined;
 
-    await purgeAppRows(appId, ["idea"], () => {
-      expect(deleteApp(appId)).toBe(true);
+    await purgeAppRows(appId, ["idea"], async () => {
+      expect(await deleteApp(appId)).toBe(true);
       lateCreateOutcome = createAppRow(appId, "idea", model, { title: "Too late" }).then(
         () => false,
         () => true,
@@ -585,6 +589,6 @@ describe("apps spike", () => {
 
     expect(lateCreateOutcome).toBeDefined();
     expect(await lateCreateOutcome).toBe(true);
-    expect(countKv(appsNamespace(appId), {})).toBe(0);
+    expect(await countKv(appsNamespace(appId), {})).toBe(0);
   });
 });

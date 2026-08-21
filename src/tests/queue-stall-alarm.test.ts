@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb, updateTaskVcs } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  getDbClient,
+  initDb,
+  updateTaskVcs,
+} from "../be/db";
 import {
   _test,
   checkQueueStall,
@@ -17,11 +24,12 @@ beforeAll(() => {
   initDb(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   _test.resetState();
-  getDb().run("DELETE FROM agent_log");
-  getDb().run("DELETE FROM agent_tasks");
-  getDb().run("DELETE FROM agents");
+  const client = getDbClient();
+  await client.run("DELETE FROM agent_log");
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
 });
 
 afterAll(async () => {
@@ -32,13 +40,14 @@ afterAll(async () => {
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
 });
 
-function setCreatedAt(taskId: string, createdAt: string): void {
-  getDb().run("UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?", [
+async function setCreatedAt(taskId: string, createdAt: string): Promise<void> {
+  const client = getDbClient();
+  await client.run("UPDATE agent_tasks SET createdAt = ?, lastUpdatedAt = ? WHERE id = ?", [
     createdAt,
     createdAt,
     taskId,
   ]);
-  getDb().run(
+  await client.run(
     "UPDATE agent_log SET createdAt = ? WHERE taskId = ? AND eventType = 'task_created'",
     [createdAt, taskId],
   );
@@ -46,9 +55,9 @@ function setCreatedAt(taskId: string, createdAt: string): void {
 
 describe("queue stall alarm", () => {
   test("positive control: alerts when a claimable task is older than 30 minutes", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Old claimable task", { agentId: worker.id });
-    setCreatedAt(task.id, "2026-08-17T16:29:59.000Z");
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Old claimable task", { agentId: worker.id });
+    await setCreatedAt(task.id, "2026-08-17T16:29:59.000Z");
     const notify = mock(async (_message: string) => {});
 
     const snapshot = await checkQueueStall(NOW, notify);
@@ -72,8 +81,8 @@ describe("queue stall alarm", () => {
   });
 
   test("does not alert for a non-empty but fresh queue", async () => {
-    const task = createTaskExtended("Fresh pool task");
-    setCreatedAt(task.id, "2026-08-17T16:45:00.000Z");
+    const task = await createTaskExtended("Fresh pool task");
+    await setCreatedAt(task.id, "2026-08-17T16:45:00.000Z");
     const notify = mock(async (_message: string) => {});
 
     const snapshot = await checkQueueStall(NOW, notify);
@@ -84,14 +93,15 @@ describe("queue stall alarm", () => {
   });
 
   test("measures queue age from a backlog task becoming claimable", async () => {
-    const task = createTaskExtended("Released backlog task");
-    setCreatedAt(task.id, "2026-08-17T12:00:00.000Z");
-    getDb().run("UPDATE agent_tasks SET status = 'backlog' WHERE id = ?", [task.id]);
-    getDb().run("UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ? WHERE id = ?", [
-      "2026-08-17T16:59:00.000Z",
-      task.id,
-    ]);
-    getDb().run(
+    const task = await createTaskExtended("Released backlog task");
+    await setCreatedAt(task.id, "2026-08-17T12:00:00.000Z");
+    const client = getDbClient();
+    await client.run("UPDATE agent_tasks SET status = 'backlog' WHERE id = ?", [task.id]);
+    await client.run(
+      "UPDATE agent_tasks SET status = 'unassigned', lastUpdatedAt = ? WHERE id = ?",
+      ["2026-08-17T16:59:00.000Z", task.id],
+    );
+    await client.run(
       `INSERT INTO agent_log (id, eventType, taskId, oldValue, newValue, createdAt)
        VALUES (?, 'task_status_change', ?, 'backlog', 'unassigned', ?)`,
       [crypto.randomUUID(), task.id, "2026-08-17T16:59:00.000Z"],
@@ -106,14 +116,14 @@ describe("queue stall alarm", () => {
   });
 
   test("measures queue age from the final dependency completing", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Newly unblocked", {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Newly unblocked", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
-    setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
-    getDb().run(
+    await setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
+    await getDbClient().run(
       "UPDATE agent_tasks SET status = 'completed', finishedAt = ?, lastUpdatedAt = ? WHERE id = ?",
       ["2026-08-17T16:59:00.000Z", "2026-08-17T16:59:00.000Z", prerequisite.id],
     );
@@ -127,78 +137,79 @@ describe("queue stall alarm", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  test("does not reset queue age when VCS metadata updates a claimable task", () => {
-    const task = createTaskExtended("Old task with new VCS metadata");
-    setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
+  test("does not reset queue age when VCS metadata updates a claimable task", async () => {
+    const task = await createTaskExtended("Old task with new VCS metadata");
+    await setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
 
-    updateTaskVcs(task.id, {
+    await updateTaskVcs(task.id, {
       vcsProvider: "github",
       vcsRepo: "desplega-ai/agent-swarm",
       vcsNumber: 1177,
       vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/1177",
     });
 
-    const snapshot = getQueueStallSnapshot(NOW);
+    const snapshot = await getQueueStallSnapshot(NOW);
     expect(snapshot.oldestAgeMs).toBe(60 * 60 * 1000);
     expect(isQueueStalled(snapshot)).toBe(true);
   });
 
-  test("does not reset claimable age when VCS metadata updates a completed dependency", () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Completed prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Waiting after prerequisite", {
+  test("does not reset claimable age when VCS metadata updates a completed dependency", async () => {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Completed prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Waiting after prerequisite", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
-    setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
-    getDb().run(
+    await setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
+    await getDbClient().run(
       "UPDATE agent_tasks SET status = 'completed', finishedAt = ?, lastUpdatedAt = ? WHERE id = ?",
       ["2026-08-17T16:00:00.000Z", "2026-08-17T16:00:00.000Z", prerequisite.id],
     );
 
-    updateTaskVcs(prerequisite.id, {
+    await updateTaskVcs(prerequisite.id, {
       vcsProvider: "github",
       vcsRepo: "desplega-ai/agent-swarm",
       vcsNumber: 1177,
       vcsUrl: "https://github.com/desplega-ai/agent-swarm/pull/1177",
     });
 
-    const snapshot = getQueueStallSnapshot(NOW);
+    const snapshot = await getQueueStallSnapshot(NOW);
     expect(snapshot.oldestTaskId).toBe(blocked.id);
     expect(snapshot.oldestAgeMs).toBe(60 * 60 * 1000);
     expect(isQueueStalled(snapshot)).toBe(true);
   });
 
-  test("excludes pending tasks whose dependencies are not complete", () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const prerequisite = createTaskExtended("Prerequisite", { agentId: worker.id });
-    const blocked = createTaskExtended("Blocked", {
+  test("excludes pending tasks whose dependencies are not complete", async () => {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const prerequisite = await createTaskExtended("Prerequisite", { agentId: worker.id });
+    const blocked = await createTaskExtended("Blocked", {
       agentId: worker.id,
       dependsOn: [prerequisite.id],
     });
-    setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
+    await setCreatedAt(blocked.id, "2026-08-17T12:00:00.000Z");
 
-    const snapshot = getQueueStallSnapshot(NOW);
+    const snapshot = await getQueueStallSnapshot(NOW);
 
     expect(snapshot.claimableCount).toBe(1);
     expect(snapshot.oldestTaskId).toBe(prerequisite.id);
   });
 
-  test("reports direct and pool pickup transitions as diagnostic context", () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle" });
-    const task = createTaskExtended("Queued", { agentId: worker.id });
-    getDb().run(
+  test("reports direct and pool pickup transitions as diagnostic context", async () => {
+    const worker = await createAgent({ name: "worker", isLead: false, status: "idle" });
+    const task = await createTaskExtended("Queued", { agentId: worker.id });
+    const client = getDbClient();
+    await client.run(
       `INSERT INTO agent_log (id, eventType, taskId, agentId, oldValue, newValue, createdAt)
        VALUES (?, 'task_status_change', ?, ?, 'pending', 'in_progress', ?)`,
       [crypto.randomUUID(), task.id, worker.id, "2026-08-17T16:50:00.000Z"],
     );
-    getDb().run(
+    await client.run(
       `INSERT INTO agent_log (id, eventType, taskId, agentId, oldValue, newValue, createdAt)
        VALUES (?, 'task_claimed', ?, ?, 'unassigned', 'in_progress', ?)`,
       [crypto.randomUUID(), task.id, worker.id, "2026-08-17T16:55:00.000Z"],
     );
 
-    expect(getQueueStallSnapshot(NOW).recentPickupCount).toBe(2);
+    expect((await getQueueStallSnapshot(NOW)).recentPickupCount).toBe(2);
   });
 
   test("scrubs secrets from notification failures before logging", () => {
@@ -211,13 +222,13 @@ describe("queue stall alarm", () => {
   });
 
   test("deduplicates an active alarm and sends recovery", async () => {
-    const task = createTaskExtended("Old pool task");
-    setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
+    const task = await createTaskExtended("Old pool task");
+    await setCreatedAt(task.id, "2026-08-17T16:00:00.000Z");
     const notify = mock(async (_message: string) => {});
 
     await checkQueueStall(NOW, notify);
     await checkQueueStall(NOW, notify);
-    getDb().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
+    await getDbClient().run("UPDATE agent_tasks SET status = 'completed' WHERE id = ?", [task.id]);
     await checkQueueStall(NOW, notify);
 
     expect(notify).toHaveBeenCalledTimes(2);

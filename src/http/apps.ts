@@ -655,13 +655,13 @@ const syncAppRoute = route({
  * (`user:<id>`, `agent:<id>`, or `operator`) for row provenance. Returns null
  * (after writing the 403) when the write is denied.
  */
-function authorizeApp(
+async function authorizeApp(
   req: IncomingMessage,
   res: ServerResponse,
   myAgentId: string | undefined,
   verb: "app.manage" | "app.use",
   resource: RbacResource,
-): string | null {
+): Promise<string | null> {
   const auth = getRequestAuth(req);
   let principal: RbacPrincipal;
   let actor: string;
@@ -672,7 +672,7 @@ function authorizeApp(
     principal = { kind: "user", userId: auth.userId };
     actor = `user:${auth.userId}`;
   } else {
-    const agent = myAgentId ? getAgentById(myAgentId) : null;
+    const agent = myAgentId ? await getAgentById(myAgentId) : null;
     principal = { kind: "agent", agentId: myAgentId ?? "", isLead: agent?.isLead ?? false };
     actor = myAgentId ? `agent:${myAgentId}` : "agent";
   }
@@ -687,13 +687,13 @@ function authorizeApp(
   return null;
 }
 
-function authorizeAppManage(
+async function authorizeAppManage(
   req: IncomingMessage,
   res: ServerResponse,
   myAgentId: string | undefined,
   appId?: string,
-): string | null {
-  return authorizeApp(
+): Promise<string | null> {
+  return await authorizeApp(
     req,
     res,
     myAgentId,
@@ -702,20 +702,23 @@ function authorizeAppManage(
   );
 }
 
-function authorizeAppUse(
+async function authorizeAppUse(
   req: IncomingMessage,
   res: ServerResponse,
   myAgentId: string | undefined,
   appId: string,
-): string | null {
-  return authorizeApp(req, res, myAgentId, "app.use", { kind: "app", appId });
+): Promise<string | null> {
+  return await authorizeApp(req, res, myAgentId, "app.use", { kind: "app", appId });
 }
 
 function invalidDefinition(res: ServerResponse, issues: AppValidationIssue[]): void {
   json(res, { error: "invalid app definition", issues }, 400);
 }
 
-function definitionNeedsRepair(res: ServerResponse, app: ReturnType<typeof getApp>): boolean {
+function definitionNeedsRepair(
+  res: ServerResponse,
+  app: Awaited<ReturnType<typeof getApp>>,
+): boolean {
   if (!app || !appDefinitionNeedsRepair(app)) return false;
   json(res, { error: "definition needs repair", issues: app.definitionError }, 409);
   return true;
@@ -750,12 +753,12 @@ function invalidRows(res: ServerResponse, error: unknown): boolean {
   return true;
 }
 
-function resolveModel(
+async function resolveModel(
   appId: string,
   modelName: string,
   res: ServerResponse,
-): { app: NonNullable<ReturnType<typeof getApp>>; model: ModelDef } | null {
-  const app = getApp(appId);
+): Promise<{ app: NonNullable<Awaited<ReturnType<typeof getApp>>>; model: ModelDef } | null> {
+  const app = await getApp(appId);
   if (definitionNeedsRepair(res, app)) return null;
   if (!app || !Object.hasOwn(app.definition.models, modelName)) {
     jsonError(res, "app or model not found", 404);
@@ -996,7 +999,7 @@ export async function handleApps(
     const parsed = await createAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     // App creation has no app resource to scope yet.
-    if (!authorizeAppManage(req, res, myAgentId)) return true;
+    if (!(await authorizeAppManage(req, res, myAgentId))) return true;
     if (parsed.body.forceElementBreak) {
       jsonError(
         res,
@@ -1005,7 +1008,7 @@ export async function handleApps(
       );
       return true;
     }
-    const definition = parseAppDefinition(parsed.body.definition, {
+    const definition = await parseAppDefinition(parsed.body.definition, {
       resolveApp: getApp,
       writerAgentId: myAgentId ?? null,
       writerIsUser: getRequestAuth(req)?.kind === "user",
@@ -1015,7 +1018,7 @@ export async function handleApps(
       return true;
     }
     createAppRoute.respond(res, 201, {
-      app: createApp({
+      app: await createApp({
         name: parsed.body.name,
         description: parsed.body.description,
         definition: definition.definition,
@@ -1025,20 +1028,20 @@ export async function handleApps(
   }
 
   if (listAppsRoute.match(req.method, pathSegments)) {
-    listAppsRoute.respond(res, 200, { apps: listApps() });
+    listAppsRoute.respond(res, 200, { apps: await listApps() });
     return true;
   }
 
   if (listAppVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listAppVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
     listAppVersionsRoute.respond(res, 200, {
-      versions: getAppVersions(parsed.params.id).map(decodeAppVersion),
+      versions: (await getAppVersions(parsed.params.id)).map(decodeAppVersion),
     });
     return true;
   }
@@ -1046,12 +1049,12 @@ export async function handleApps(
   if (getAppVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getAppVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    const version = getAppVersion(parsed.params.id, parsed.params.version);
+    const version = await getAppVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       jsonError(res, "app version not found", 404);
       return true;
@@ -1064,7 +1067,7 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await rollbackAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
     try {
       const rolledBack = await rollbackApp({
         appId: parsed.params.id,
@@ -1099,9 +1102,9 @@ export async function handleApps(
       return true;
     const parsed = await bulkCreateRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const rows = await createAppRows(
@@ -1122,9 +1125,9 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await createRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const row = await createAppRow(
@@ -1144,15 +1147,15 @@ export async function handleApps(
   if (listRowsRoute.match(req.method, pathSegments)) {
     const parsed = await listRowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     const { filters, issues } = filtersFromQuery(queryParams, resolved.model);
     if (issues.length > 0) {
       json(res, { error: "invalid row query", issues }, 400);
       return true;
     }
-    const rows = listAppRows(parsed.params.id, parsed.params.model).filter((row) =>
+    const rows = (await listAppRows(parsed.params.id, parsed.params.model)).filter((row) =>
       filters.every((filter) => rowValue(row, filter.column) === filter.value),
     );
     const sortRaw = parsed.query.sort;
@@ -1196,9 +1199,9 @@ export async function handleApps(
   if (getRowRoute.match(req.method, pathSegments)) {
     const parsed = await getRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    if (!resolveModel(parsed.params.id, parsed.params.model, res)) return true;
-    const row = getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    if (!(await resolveModel(parsed.params.id, parsed.params.model, res))) return true;
+    const row = await getAppRow(parsed.params.id, parsed.params.model, parsed.params.rowId);
     if (!row) {
       jsonError(res, "row not found", 404);
       return true;
@@ -1211,9 +1214,9 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await patchRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     try {
       const row = await patchAppRow(
@@ -1238,8 +1241,8 @@ export async function handleApps(
   if (deleteRowRoute.match(req.method, pathSegments)) {
     const parsed = await deleteRowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const resolved = resolveModel(parsed.params.id, parsed.params.model, res);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const resolved = await resolveModel(parsed.params.id, parsed.params.model, res);
     if (!resolved) return true;
     if (
       !(await deleteAppRow(
@@ -1259,8 +1262,8 @@ export async function handleApps(
   if (runNamedQueryRoute.match(req.method, pathSegments)) {
     const parsed = await runNamedQueryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const app = getApp(parsed.params.id);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const app = await getApp(parsed.params.id);
     if (definitionNeedsRepair(res, app)) return true;
     const queries = app?.definition.queries;
     if (!app || !queries || !Object.hasOwn(queries, parsed.params.name)) {
@@ -1276,7 +1279,7 @@ export async function handleApps(
     try {
       runNamedQueryRoute.respond(res, 200, {
         rows: applyQuery(
-          listAppRows(app.id, query.model),
+          await listAppRows(app.id, query.model),
           query,
           model,
           appQueryParamsFromRequest(queryParams),
@@ -1298,10 +1301,10 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await runActionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
 
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1316,7 +1319,7 @@ export async function handleApps(
     const action = actions[parsed.params.name]!;
     const input = parsed.body.input ?? {};
     if (action.kind === "script") {
-      const script = getScriptById(action.scriptId);
+      const script = await getScriptById(action.scriptId);
       if (!script) {
         json(
           res,
@@ -1400,14 +1403,14 @@ export async function handleApps(
       return true;
     }
 
-    const lead = action.agentId ? null : getLeadAgent();
+    const lead = action.agentId ? null : await getLeadAgent();
     const taskPrompt = resolveTemplate("task.app.action", {
       prompt: action.prompt,
       app_id: app.id,
       action_name: parsed.params.name,
       input_json: JSON.stringify(input),
     });
-    const task = createTaskWithSiblingAwareness(taskPrompt.text, {
+    const task = await createTaskWithSiblingAwareness(taskPrompt.text, {
       source: "api",
       agentId: action.agentId ?? lead?.id,
       // App-spawned tasks group under the app's asset namespace so a
@@ -1423,10 +1426,10 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_ROW_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await syncAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const actor = authorizeAppUse(req, res, myAgentId, parsed.params.id);
+    const actor = await authorizeAppUse(req, res, myAgentId, parsed.params.id);
     if (!actor) return true;
 
-    const app = getApp(parsed.params.id);
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1451,18 +1454,18 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await patchAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
 
-    if (!getApp(parsed.params.id)) {
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    let app: ReturnType<typeof updateApp> = null;
+    let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
-        const existing = getApp(parsed.params.id);
+        const existing = await getApp(parsed.params.id);
         if (!existing) {
           jsonError(res, "app not found", 404);
           responseHandled = true;
@@ -1478,7 +1481,7 @@ export async function handleApps(
           responseHandled = true;
           return;
         }
-        const definition = parseAppDefinition(patch.definition, {
+        const definition = await parseAppDefinition(patch.definition, {
           currentAppId: parsed.params.id,
           resolveApp: getApp,
           writerAgentId: myAgentId ?? null,
@@ -1497,9 +1500,9 @@ export async function handleApps(
           nextDefinition: definition.definition,
           migration: parsed.body.migration,
           forceElementBreak: parsed.body.forceElementBreak,
-          snapshot: () => {
+          snapshot: async () => {
             try {
-              snapshotApp(parsed.params.id, myAgentId);
+              await snapshotApp(parsed.params.id, myAgentId);
             } catch {
               throw new AppSnapshotFailure();
             }
@@ -1538,17 +1541,17 @@ export async function handleApps(
     if (enforceContentLengthCap(req, res, MAX_APP_BODY_BYTES) === BODY_TOO_LARGE) return true;
     const parsed = await updateAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
-    if (!getApp(parsed.params.id)) {
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
+    if (!(await getApp(parsed.params.id))) {
       jsonError(res, "app not found", 404);
       return true;
     }
-    let app: ReturnType<typeof updateApp> = null;
+    let app: Awaited<ReturnType<typeof updateApp>> = null;
     let migration!: AppMigrationReport;
     let responseHandled = false;
     try {
       await withAppDefinitionLock(parsed.params.id, async () => {
-        const existing = getApp(parsed.params.id);
+        const existing = await getApp(parsed.params.id);
         if (!existing) {
           jsonError(res, "app not found", 404);
           responseHandled = true;
@@ -1556,7 +1559,7 @@ export async function handleApps(
         }
         let definition: AppDefinition | undefined;
         if (parsed.body.definition !== undefined) {
-          const parsedDefinition = parseAppDefinition(parsed.body.definition, {
+          const parsedDefinition = await parseAppDefinition(parsed.body.definition, {
             currentAppId: parsed.params.id,
             resolveApp: getApp,
             writerAgentId: myAgentId ?? null,
@@ -1581,9 +1584,9 @@ export async function handleApps(
           nextDefinition,
           migration: parsed.body.migration,
           forceElementBreak: parsed.body.forceElementBreak,
-          snapshot: () => {
+          snapshot: async () => {
             try {
-              snapshotApp(parsed.params.id, myAgentId);
+              await snapshotApp(parsed.params.id, myAgentId);
             } catch {
               throw new AppSnapshotFailure();
             }
@@ -1621,8 +1624,8 @@ export async function handleApps(
   if (deleteAppRoute.match(req.method, pathSegments)) {
     const parsed = await deleteAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppManage(req, res, myAgentId, parsed.params.id)) return true;
-    const app = getApp(parsed.params.id);
+    if (!(await authorizeAppManage(req, res, myAgentId, parsed.params.id))) return true;
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1634,8 +1637,8 @@ export async function handleApps(
     // recovery path. The model list only picks purge lock names; the purge itself
     // sweeps the whole app namespace, so an empty list is safe.
     const purgeModels = app.definitionError ? [] : Object.keys(app.definition.models);
-    await purgeAppRows(app.id, purgeModels, () => {
-      deleted = deleteApp(app.id);
+    await purgeAppRows(app.id, purgeModels, async () => {
+      deleted = await deleteApp(app.id);
     });
     if (!deleted) {
       jsonError(res, "app not found", 404);
@@ -1648,15 +1651,15 @@ export async function handleApps(
   if (getAppRoute.match(req.method, pathSegments)) {
     const parsed = await getAppRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const app = getApp(parsed.params.id);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
     }
     // Per-source freshness for the runtime payload — present only once a
     // declared source has completed at least one pass.
-    const syncStatus = collectAppSyncStatus(app.id);
+    const syncStatus = await collectAppSyncStatus(app.id);
     getAppRoute.respond(res, 200, {
       app,
       ...(Object.keys(syncStatus).length > 0 ? { syncStatus } : {}),
@@ -1667,16 +1670,16 @@ export async function handleApps(
   if (getUserConfigRoute.match(req.method, pathSegments)) {
     const parsed = await getUserConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const app = getApp(parsed.params.id);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
     }
     if (definitionNeedsRepair(res, app)) return true;
     const schema = app.definition.userConfig ?? {};
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
-    const stored = owner ? getAppUserConfigValues(app.id, owner.scope) : {};
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
+    const stored = owner ? await getAppUserConfigValues(app.id, owner.scope) : {};
     getUserConfigRoute.respond(res, 200, { values: mergeUserConfigValues(schema, stored), schema });
     return true;
   }
@@ -1686,8 +1689,8 @@ export async function handleApps(
       return true;
     const parsed = await putUserConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!authorizeAppUse(req, res, myAgentId, parsed.params.id)) return true;
-    const app = getApp(parsed.params.id);
+    if (!(await authorizeAppUse(req, res, myAgentId, parsed.params.id))) return true;
+    const app = await getApp(parsed.params.id);
     if (!app) {
       jsonError(res, "app not found", 404);
       return true;
@@ -1707,7 +1710,7 @@ export async function handleApps(
       jsonError(res, "app does not define userConfig", 400);
       return true;
     }
-    const owner = resolveHttpFavoriteOwner(req, myAgentId);
+    const owner = await resolveHttpFavoriteOwner(req, myAgentId);
     if (!owner) {
       jsonError(res, "userConfig is per-user; agents have no user scope", 403);
       return true;
@@ -1722,7 +1725,7 @@ export async function handleApps(
       json(res, { error: "invalid userConfig values", issues }, 400);
       return true;
     }
-    upsertAppUserConfigValues(app.id, owner.scope, parsed.body.values);
+    await upsertAppUserConfigValues(app.id, owner.scope, parsed.body.values);
     putUserConfigRoute.respond(res, 200, {
       values: mergeUserConfigValues(schema, parsed.body.values),
       schema,

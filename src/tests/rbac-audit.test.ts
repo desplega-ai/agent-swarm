@@ -15,7 +15,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -45,19 +45,17 @@ type AuditRowSelect = {
   source: string;
 };
 
-function selectAuditRows(): AuditRowSelect[] {
-  return getDb()
-    .prepare(
-      `SELECT principalType, principalId, originatorUserId, verb, resourceType, resourceId,
+function selectAuditRows(): Promise<AuditRowSelect[]> {
+  return getDbClient().query<AuditRowSelect>(
+    `SELECT principalType, principalId, originatorUserId, verb, resourceType, resourceId,
               decision, reason, source
        FROM permission_audit ORDER BY ts, id`,
-    )
-    .all() as AuditRowSelect[];
+  );
 }
 
-function countAuditRows(): number {
-  const row = getDb().prepare("SELECT count(*) AS n FROM permission_audit").get() as { n: number };
-  return row.n;
+async function countAuditRows(): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>("SELECT count(*) AS n FROM permission_audit");
+  return row?.n ?? 0;
 }
 
 async function removeDbFiles() {
@@ -81,8 +79,8 @@ beforeAll(async () => {
   await removeDbFiles();
   initDb(TEST_DB_PATH);
 
-  createAgent({ id: LEAD_ID, name: "Audit Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Audit Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Audit Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Audit Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -101,10 +99,10 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Drain any leftover buffered rows, then start each test from a clean table.
-  flushAuditBuffer();
-  getDb().run("DELETE FROM permission_audit");
+  await flushAuditBuffer();
+  await getDbClient().run("DELETE FROM permission_audit");
   delete process.env.RBAC_AUDIT_DISABLED;
   delete process.env.RBAC_AUDIT_RETENTION_DAYS;
 });
@@ -118,7 +116,7 @@ afterEach(() => {
 });
 
 describe("buffer + flush persistence", () => {
-  test("persists allow AND deny rows from can() with correct columns", () => {
+  test("persists allow AND deny rows from can() with correct columns", async () => {
     setAuditSink(enqueueAuditRow);
 
     const allow = can({
@@ -137,11 +135,11 @@ describe("buffer + flush persistence", () => {
     expect(deny.allow).toBe(false);
 
     // Buffered, not yet written.
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
 
-    flushAuditBuffer();
+    await flushAuditBuffer();
 
-    const rows = selectAuditRows();
+    const rows = await selectAuditRows();
     expect(rows.length).toBe(2);
 
     const allowRow = rows.find((r) => r.decision === "allow");
@@ -180,9 +178,9 @@ describe("buffer + flush persistence", () => {
     // The threshold flush is deferred off the enqueue path (zero-delay
     // timeout) so the 200th can() call never blocks on the transaction —
     // nothing is persisted synchronously, everything lands a tick later.
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
     await Bun.sleep(10);
-    expect(countAuditRows()).toBe(200);
+    expect(await countAuditRows()).toBe(200);
   });
 
   test("interval flush drains the buffer", async () => {
@@ -191,17 +189,17 @@ describe("buffer + flush persistence", () => {
       { principal: { kind: "user", userId: "user-1" }, verb: "user.manage", source: "http" },
       { allow: true },
     );
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
 
     await Bun.sleep(120);
-    expect(countAuditRows()).toBe(1);
-    const row = selectAuditRows()[0];
+    expect(await countAuditRows()).toBe(1);
+    const row = (await selectAuditRows())[0];
     expect(row).toMatchObject({ principalType: "user", principalId: "user-1" });
   });
 });
 
 describe("kill-switch", () => {
-  test("RBAC_AUDIT_DISABLED=true writes nothing", () => {
+  test("RBAC_AUDIT_DISABLED=true writes nothing", async () => {
     process.env.RBAC_AUDIT_DISABLED = "true";
     setAuditSink(enqueueAuditRow);
 
@@ -214,67 +212,66 @@ describe("kill-switch", () => {
       { principal: { kind: "operator" }, verb: "user.manage", source: "http" },
       { allow: true },
     );
-    flushAuditBuffer();
+    await flushAuditBuffer();
 
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
   });
 });
 
 describe("flush resilience", () => {
-  test("throwing DB during flush does not propagate (batch dropped)", () => {
+  test("throwing DB during flush does not propagate (batch dropped)", async () => {
     enqueueAuditRow(
       { principal: { kind: "operator" }, verb: "user.manage", source: "http" },
       { allow: true },
     );
 
-    getDb().run("ALTER TABLE permission_audit RENAME TO permission_audit_broken");
+    await getDbClient().run("ALTER TABLE permission_audit RENAME TO permission_audit_broken");
     try {
-      expect(() => flushAuditBuffer()).not.toThrow();
+      await expect(flushAuditBuffer()).resolves.toBeUndefined();
     } finally {
-      getDb().run("ALTER TABLE permission_audit_broken RENAME TO permission_audit");
+      await getDbClient().run("ALTER TABLE permission_audit_broken RENAME TO permission_audit");
     }
 
     // Batch was dropped, not retried.
-    expect(countAuditRows()).toBe(0);
-    flushAuditBuffer();
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
+    await flushAuditBuffer();
+    expect(await countAuditRows()).toBe(0);
   });
 });
 
 describe("retention purge", () => {
-  test("deletes only rows older than the cutoff (default 30 days)", () => {
-    const insert = getDb().prepare(
+  const insertAuditRow = (offset: string) =>
+    getDbClient().run(
       `INSERT INTO permission_audit (ts, principalType, verb, decision, source)
        VALUES (datetime('now', ?), 'agent', 'user.manage', 'deny', 'mcp')`,
+      [offset],
     );
-    insert.run("-40 days");
-    insert.run("-29 days");
-    insert.run("-0 seconds");
-    expect(countAuditRows()).toBe(3);
 
-    const purged = purgeExpiredAuditRows();
+  test("deletes only rows older than the cutoff (default 30 days)", async () => {
+    await insertAuditRow("-40 days");
+    await insertAuditRow("-29 days");
+    await insertAuditRow("-0 seconds");
+    expect(await countAuditRows()).toBe(3);
+
+    const purged = await purgeExpiredAuditRows();
     expect(purged).toBe(1);
-    expect(countAuditRows()).toBe(2);
+    expect(await countAuditRows()).toBe(2);
   });
 
-  test("respects RBAC_AUDIT_RETENTION_DAYS override and runs via startAuditGc", () => {
+  test("respects RBAC_AUDIT_RETENTION_DAYS override and runs via startAuditGc", async () => {
     process.env.RBAC_AUDIT_RETENTION_DAYS = "7";
-    const insert = getDb().prepare(
-      `INSERT INTO permission_audit (ts, principalType, verb, decision, source)
-       VALUES (datetime('now', ?), 'agent', 'user.manage', 'deny', 'mcp')`,
-    );
-    insert.run("-10 days");
-    insert.run("-1 days");
+    await insertAuditRow("-10 days");
+    await insertAuditRow("-1 days");
 
     // startAuditGc purges immediately on start (pattern: startMemoryGc).
-    startAuditGc();
-    expect(countAuditRows()).toBe(1);
+    await startAuditGc();
+    expect(await countAuditRows()).toBe(1);
     stopAuditGc();
   });
 });
 
 describe("shutdown flush", () => {
-  test("final flushAuditBuffer() drains everything below the thresholds", () => {
+  test("final flushAuditBuffer() drains everything below the thresholds", async () => {
     enqueueAuditRow(
       {
         principal: { kind: "agent", agentId: WORKER_ID, isLead: false },
@@ -287,16 +284,16 @@ describe("shutdown flush", () => {
       { principal: { kind: "operator" }, verb: "user.manage", source: "http" },
       { allow: true },
     );
-    expect(countAuditRows()).toBe(0);
+    expect(await countAuditRows()).toBe(0);
 
     // Shutdown path: stop the timer first, then drain.
     stopAuditWriter();
-    flushAuditBuffer();
-    expect(countAuditRows()).toBe(2);
+    await flushAuditBuffer();
+    expect(await countAuditRows()).toBe(2);
 
     // Buffer is empty afterwards — a second drain writes nothing.
-    flushAuditBuffer();
-    expect(countAuditRows()).toBe(2);
+    await flushAuditBuffer();
+    expect(await countAuditRows()).toBe(2);
   });
 });
 
@@ -329,9 +326,9 @@ describe("migrated gate end-to-end (inject-learning)", () => {
     )) as ToolResult;
     expect(result.structuredContent.success).toBe(false);
 
-    flushAuditBuffer();
+    await flushAuditBuffer();
 
-    const rows = selectAuditRows();
+    const rows = await selectAuditRows();
     expect(rows.length).toBe(1);
     expect(rows[0]).toMatchObject({
       principalType: "agent",

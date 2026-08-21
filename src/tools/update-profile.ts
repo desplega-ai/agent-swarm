@@ -188,7 +188,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
 
       if (!isUpdatingSelf) {
         // Only lead agents can update other agents' profiles
-        const callingAgent = getAgentById(requestInfo.agentId);
+        const callingAgent = await getAgentById(requestInfo.agentId);
         if (!callingAgent) {
           return toolErr("Calling agent not found.", {
             data: { yourAgentId: requestInfo.agentId },
@@ -208,7 +208,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         }
 
         // Validate target agent exists before proceeding
-        const targetAgent = getAgentById(targetAgentId);
+        const targetAgent = await getAgentById(targetAgentId);
         if (!targetAgent) {
           return toolErr(`Target agent ${targetAgentId} not found.`, {
             data: { yourAgentId: requestInfo.agentId },
@@ -239,7 +239,9 @@ export const registerUpdateProfileTool = (server: McpServer) => {
       try {
         let agent: Agent | null = null;
         const previousSetupScript =
-          setupScript !== undefined ? (getAgentById(targetAgentId)?.setupScript ?? "") : undefined;
+          setupScript !== undefined
+            ? ((await getAgentById(targetAgentId))?.setupScript ?? "")
+            : undefined;
 
         if (setupScript !== undefined) {
           const syntaxError = await validateSetupScriptSyntax(setupScript);
@@ -254,7 +256,7 @@ export const registerUpdateProfileTool = (server: McpServer) => {
         // update failures cannot leave a partially-applied combined payload.
         // `avatar` is spread in only when present so `null` (reset) stays
         // distinguishable from "not provided".
-        agent = updateAgentProfile(
+        agent = await updateAgentProfile(
           targetAgentId,
           {
             name,

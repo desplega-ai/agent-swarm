@@ -54,8 +54,8 @@ function buildGithubContextKey(
  * Absent key / any value other than "false" → true (cancel, current behavior).
  * Value "false" → false (skip cancel, leave task untouched).
  */
-function cancelFlagEnabled(key: string): boolean {
-  const row = getSwarmConfigs({ scope: "global", key })[0];
+async function cancelFlagEnabled(key: string): Promise<boolean> {
+  const row = (await getSwarmConfigs({ scope: "global", key }))[0];
   return row?.value !== "false";
 }
 const cancelOnUnassignEnabled = () => cancelFlagEnabled("github.cancelOnUnassign");
@@ -147,8 +147,8 @@ function isDuplicate(eventKey: string): boolean {
  * Find the lead agent to receive GitHub tasks
  * Returns null if no lead is available (task will go to pool)
  */
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   // First try to find an online lead
   const onlineLead = agents.find((a) => a.isLead && a.status !== "offline");
   if (onlineLead) return onlineLead;
@@ -173,16 +173,16 @@ const UNMAPPED_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
  * Returns `undefined` when no mapping exists — callers pass that straight to
  * `requestedByUserId`.
  */
-function resolveGitHubSender(
+async function resolveGitHubSender(
   login: string,
   sampleEventType: string,
   sampleContext: string,
-): string | undefined {
-  const existing = findUserByExternalId("github", login);
+): Promise<string | undefined> {
+  const existing = await findUserByExternalId("github", login);
   if (existing) return existing.id;
 
   // No mapping → unmapped tracker.
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${login}:meta`,
     value: {
@@ -193,7 +193,7 @@ function resolveGitHubSender(
     valueType: "json",
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
-  incrKv(UNMAPPED_NAMESPACE, `${login}:count`, 1);
+  await incrKv(UNMAPPED_NAMESPACE, `${login}:count`, 1);
   return undefined;
 }
 
@@ -214,7 +214,7 @@ export async function handlePullRequest(
   } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "pull_request",
     `PR #${pr.number}: ${pr.title}`,
@@ -234,14 +234,14 @@ export async function handlePullRequest(
     }
 
     // Same task creation flow as mention-based handling
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.assigned",
       {
         pr_number: pr.number,
         pr_title: pr.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -255,7 +255,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -300,7 +300,7 @@ export async function handlePullRequest(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnUnassignEnabled()) {
+    if (!(await cancelOnUnassignEnabled())) {
       console.log(
         `[GitHub] unassign cancel disabled by config — leaving task untouched (PR #${pr.number})`,
       );
@@ -308,14 +308,14 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
+    const task = await findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
     }
 
     // Cancel the task
-    const cancelledTask = failTask(task.id, `Unassigned from GitHub PR #${pr.number}`);
+    const cancelledTask = await failTask(task.id, `Unassigned from GitHub PR #${pr.number}`);
     if (cancelledTask) {
       console.log(`[GitHub] Cancelled task ${task.id} for PR #${pr.number} (unassigned)`);
       return { created: false, taskId: task.id };
@@ -338,7 +338,7 @@ export async function handlePullRequest(
     }
 
     // Check if there's an existing active task for this PR — skip duplicate review tasks
-    const existingTask = findTaskByVcs(repository.full_name, pr.number);
+    const existingTask = await findTaskByVcs(repository.full_name, pr.number);
     if (existingTask) {
       console.log(
         `[GitHub] Skipping review task for PR #${pr.number} — active task ${existingTask.id} already exists`,
@@ -347,14 +347,14 @@ export async function handlePullRequest(
     }
 
     // Create review task
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.review_requested",
       {
         pr_number: pr.number,
         pr_title: pr.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -368,7 +368,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -413,7 +413,7 @@ export async function handlePullRequest(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnReviewRequestRemovedEnabled()) {
+    if (!(await cancelOnReviewRequestRemovedEnabled())) {
       console.log(
         `[GitHub] review-request-removed cancel disabled by config — leaving task untouched (PR #${pr.number})`,
       );
@@ -421,14 +421,17 @@ export async function handlePullRequest(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, pr.number);
+    const task = await findTaskByVcs(repository.full_name, pr.number);
     if (!task) {
       console.log(`[GitHub] No active task found for PR #${pr.number} to cancel`);
       return { created: false };
     }
 
     // Cancel the task
-    const cancelledTask = failTask(task.id, `Review request removed from GitHub PR #${pr.number}`);
+    const cancelledTask = await failTask(
+      task.id,
+      `Review request removed from GitHub PR #${pr.number}`,
+    );
     if (cancelledTask) {
       console.log(
         `[GitHub] Cancelled task ${task.id} for PR #${pr.number} (review request removed)`,
@@ -452,14 +455,14 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.pull_request.labeled",
       {
         pr_number: pr.number,
         pr_title: pr.title,
         label_name: labelName,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         head_ref: pr.head.ref,
         base_ref: pr.base.ref,
@@ -473,7 +476,7 @@ export async function handlePullRequest(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -544,7 +547,7 @@ export async function handlePullRequest(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Build task description
   const context = extractMentionContext(pr.body) || pr.title;
@@ -553,7 +556,7 @@ export async function handlePullRequest(
     {
       pr_number: pr.number,
       pr_title: pr.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       head_ref: pr.head.ref,
       base_ref: pr.base.ref,
@@ -568,7 +571,7 @@ export async function handlePullRequest(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -613,7 +616,7 @@ export async function handleIssue(
   const { action, issue, repository, sender, installation, assignee } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "issues",
     `Issue #${issue.number}: ${issue.title}`,
@@ -633,14 +636,14 @@ export async function handleIssue(
     }
 
     // Same task creation flow as mention-based handling
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.issue.assigned",
       {
         issue_number: issue.number,
         issue_title: issue.title,
         bot_name: GITHUB_BOT_NAME,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         issue_url: issue.html_url,
         context: issue.body || issue.title,
@@ -652,7 +655,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -697,7 +700,7 @@ export async function handleIssue(
     }
 
     // Config gate: skip cancel if disabled
-    if (!cancelOnUnassignEnabled()) {
+    if (!(await cancelOnUnassignEnabled())) {
       console.log(
         `[GitHub] unassign cancel disabled by config — leaving task untouched (issue #${issue.number})`,
       );
@@ -705,14 +708,14 @@ export async function handleIssue(
     }
 
     // Find the related task
-    const task = findTaskByVcs(repository.full_name, issue.number);
+    const task = await findTaskByVcs(repository.full_name, issue.number);
     if (!task) {
       console.log(`[GitHub] No active task found for issue #${issue.number} to cancel`);
       return { created: false };
     }
 
     // Cancel the task
-    const cancelledTask = failTask(task.id, `Unassigned from GitHub issue #${issue.number}`);
+    const cancelledTask = await failTask(task.id, `Unassigned from GitHub issue #${issue.number}`);
     if (cancelledTask) {
       console.log(`[GitHub] Cancelled task ${task.id} for issue #${issue.number} (unassigned)`);
       return { created: false, taskId: task.id };
@@ -734,14 +737,14 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const lead = findLeadAgent();
+    const lead = await findLeadAgent();
     const result = resolveTemplate(
       "github.issue.labeled",
       {
         issue_number: issue.number,
         issue_title: issue.title,
         label_name: labelName,
-        sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+        sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
         repo_full_name: repository.full_name,
         issue_url: issue.html_url,
         context: issue.body || issue.title,
@@ -753,7 +756,7 @@ export async function handleIssue(
       return { created: false };
     }
 
-    const task = createTaskWithSiblingAwareness(result.text, {
+    const task = await createTaskWithSiblingAwareness(result.text, {
       agentId: lead?.id ?? "",
       source: "github",
       vcsProvider: "github",
@@ -808,7 +811,7 @@ export async function handleIssue(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Build task description
   const context = extractMentionContext(issue.body) || issue.title;
@@ -817,7 +820,7 @@ export async function handleIssue(
     {
       issue_number: issue.number,
       issue_title: issue.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       issue_url: issue.html_url,
       context,
@@ -830,7 +833,7 @@ export async function handleIssue(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -876,7 +879,7 @@ export async function handleComment(
   const { action, comment, repository, sender, issue, pull_request, installation } = event;
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     eventType,
     comment.body.slice(0, 100),
@@ -899,7 +902,7 @@ export async function handleComment(
   }
 
   // Find lead agent (may be null - task will be unassigned)
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Determine context (issue or PR)
   const target = pull_request || issue;
@@ -909,7 +912,9 @@ export async function handleComment(
   const targetUrl = target?.html_url ?? comment.html_url;
 
   // Check if there's an existing task for this PR/Issue
-  const existingTask = targetNumber ? findTaskByVcs(repository.full_name, targetNumber) : null;
+  const existingTask = targetNumber
+    ? await findTaskByVcs(repository.full_name, targetNumber)
+    : null;
 
   // Build task description
   const context = extractMentionContext(comment.body);
@@ -924,7 +929,7 @@ export async function handleComment(
       target_type: targetType,
       target_number: targetNumber,
       target_title: targetTitle,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       comment_url: comment.html_url,
       context,
@@ -939,7 +944,7 @@ export async function handleComment(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",
@@ -1166,7 +1171,7 @@ export async function handlePullRequestReview(
   }
 
   // Resolve canonical user from GitHub sender
-  const requestedByUserId = resolveGitHubSender(
+  const requestedByUserId = await resolveGitHubSender(
     sender.login,
     "pull_request_review",
     `Review on PR #${pr.number}: ${review.state}`,
@@ -1195,7 +1200,7 @@ export async function handlePullRequestReview(
   }
 
   // Find any existing task for this PR
-  const existingTask = findTaskByVcs(repository.full_name, pr.number);
+  const existingTask = await findTaskByVcs(repository.full_name, pr.number);
 
   // Only notify for PRs where bot is creator or already has a task
   const isBotCreator = isBotAssignee(pr.user.login);
@@ -1204,7 +1209,7 @@ export async function handlePullRequestReview(
   }
 
   // Find lead agent for new task
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   // Get review state info
   const { emoji, label } = getReviewStateInfo(review.state);
@@ -1237,7 +1242,7 @@ export async function handlePullRequestReview(
       pr_number: pr.number,
       review_label: label,
       pr_title: pr.title,
-      sender_login: renderIdentity(resolveIdentity("github", sender.login)),
+      sender_login: renderIdentity(await resolveIdentity("github", sender.login)),
       repo_full_name: repository.full_name,
       review_url: review.html_url,
       review_body_section: reviewBodySection,
@@ -1253,7 +1258,7 @@ export async function handlePullRequestReview(
   }
 
   // Create task (assigned to lead if available, otherwise unassigned)
-  const task = createTaskWithSiblingAwareness(result.text, {
+  const task = await createTaskWithSiblingAwareness(result.text, {
     agentId: lead?.id ?? "",
     source: "github",
     vcsProvider: "github",

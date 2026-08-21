@@ -91,8 +91,8 @@ describe("GET /api/whoami", () => {
   });
 
   test("active user token resolves to its bound user", async () => {
-    const user = createUser({ name: "Whoami User", email: "whoami@example.com" });
-    const { plaintext } = mintToken(user.id, "rest", ACTOR);
+    const user = await createUser({ name: "Whoami User", email: "whoami@example.com" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(200);
@@ -103,18 +103,18 @@ describe("GET /api/whoami", () => {
   });
 
   test("revoked token is rejected at auth (401)", async () => {
-    const user = createUser({ name: "Revoked User" });
-    const { plaintext, tokenId } = mintToken(user.id, "rest", ACTOR);
-    revokeToken(tokenId, ACTOR);
+    const user = await createUser({ name: "Revoked User" });
+    const { plaintext, tokenId } = await mintToken(user.id, "rest", ACTOR);
+    await revokeToken(tokenId, ACTOR);
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);
   });
 
   test("suspended user's token is rejected at auth (401)", async () => {
-    const user = createUser({ name: "Suspended User" });
-    const { plaintext } = mintToken(user.id, "rest", ACTOR);
-    updateUser(user.id, { status: "suspended" });
+    const user = await createUser({ name: "Suspended User" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
+    await updateUser(user.id, { status: "suspended" });
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);

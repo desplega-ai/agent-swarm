@@ -786,7 +786,9 @@ export interface ElementReferenceTarget {
 
 export interface ElementReferenceContext {
   currentAppId?: string;
-  resolveApp?: (appId: string) => ElementReferenceTarget | null;
+  resolveApp?: (
+    appId: string,
+  ) => ElementReferenceTarget | null | Promise<ElementReferenceTarget | null>;
   /** Internal compatibility-scan mode: validate everything except unresolved external targets. */
   skipExternalTargetResolution?: boolean;
 }
@@ -841,10 +843,10 @@ function elementPropAccepts(
   return typeof value === "string" && isIso8601Date(value);
 }
 
-function elementReferenceIssues(
+async function elementReferenceIssues(
   definition: AppDefinition,
   context: ElementReferenceContext,
-): AppValidationIssue[] {
+): Promise<AppValidationIssue[]> {
   const issues: AppValidationIssue[] = [];
   const rootAppId = context.currentAppId ?? "$self";
   const cleanTargetDepths = new Map<string, number>();
@@ -888,10 +890,10 @@ function elementReferenceIssues(
   };
   const resolvedApps = new Map<string, ResolvedTargetApp | null>();
 
-  const resolveTarget = (appId: string): ResolvedTargetApp | null => {
+  const resolveTarget = async (appId: string): Promise<ResolvedTargetApp | null> => {
     if (appId === rootAppId) return { appId, definition };
     if (resolvedApps.has(appId)) return resolvedApps.get(appId)!;
-    const resolved = context.resolveApp?.(appId);
+    const resolved = await context.resolveApp?.(appId);
     const target = resolved
       ? {
           appId,
@@ -909,13 +911,13 @@ function elementReferenceIssues(
       ? "this app"
       : `app "${target.name ?? target.appId}"`;
 
-  const validateReference = (
+  const validateReference = async (
     ref: ElementRefNode,
     ownerDefinition: AppDefinition,
     ownerAppId: string,
     depth: number,
     stack: Set<string>,
-  ): boolean => {
+  ): Promise<boolean> => {
     if (expansionStopped) return false;
     if (!isPlainObject(ref.node.props)) return false;
     let referenceClean = true;
@@ -953,7 +955,7 @@ function elementReferenceIssues(
     const targetApp =
       targetAppId === ownerAppId
         ? { appId: ownerAppId, definition: ownerDefinition }
-        : resolveTarget(targetAppId);
+        : await resolveTarget(targetAppId);
     if (!targetApp) {
       if (context.skipExternalTargetResolution && targetAppId !== ownerAppId) return true;
       pushExpansionIssue(
@@ -1065,7 +1067,9 @@ function elementReferenceIssues(
       target.elements,
       `${ref.path}.target.${elementName}.elements`,
     )) {
-      if (!validateReference(nested, targetApp.definition, targetAppId, depth + 1, nextStack)) {
+      if (
+        !(await validateReference(nested, targetApp.definition, targetAppId, depth + 1, nextStack))
+      ) {
         targetClean = false;
       }
       if (expansionStopped) break;
@@ -1079,7 +1083,7 @@ function elementReferenceIssues(
   for (const [pageName, page] of Object.entries(definition.pages)) {
     if (expansionStopped) break;
     for (const ref of collectElementRefs(page.elements, `pages.${pageName}.elements`)) {
-      validateReference(ref, definition, rootAppId, 1, new Set());
+      await validateReference(ref, definition, rootAppId, 1, new Set());
       if (expansionStopped) break;
     }
   }
@@ -1087,18 +1091,18 @@ function elementReferenceIssues(
     if (expansionStopped) break;
     const stack = new Set([`${rootAppId}\0${elementName}`]);
     for (const ref of collectElementRefs(element.elements, `elements.${elementName}.elements`)) {
-      validateReference(ref, definition, rootAppId, 1, stack);
+      await validateReference(ref, definition, rootAppId, 1, stack);
       if (expansionStopped) break;
     }
   }
   return issues;
 }
 
-export function elementDefinitionIssues(
+export async function elementDefinitionIssues(
   definition: AppDefinition,
   catalog: AppCatalog,
   context: ElementReferenceContext = {},
-): AppValidationIssue[] {
+): Promise<AppValidationIssue[]> {
   const issues: AppValidationIssue[] = [];
   for (const [elementName, element] of Object.entries(definition.elements ?? {})) {
     const elementPath = `elements.${elementName}`;
@@ -1145,7 +1149,7 @@ export function elementDefinitionIssues(
       }
     });
   }
-  for (const referenceIssue of elementReferenceIssues(definition, context)) {
+  for (const referenceIssue of await elementReferenceIssues(definition, context)) {
     issues.push(referenceIssue);
   }
   return dedupeIssues(issues);

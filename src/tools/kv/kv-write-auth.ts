@@ -13,10 +13,10 @@ import { can } from "@/rbac";
  * page proxy. It is NOT a principal permission, so it stays inline here and
  * does not go through can() (plan Phase 3 scope boundary).
  */
-export function kvWriteAuthError(
+export async function kvWriteAuthError(
   namespace: string,
   info: { agentId: string | undefined },
-): string | null {
+): Promise<string | null> {
   const reservedErr = reservedNamespaceError(namespace);
   if (reservedErr) return reservedErr;
 
@@ -31,7 +31,7 @@ export function kvWriteAuthError(
     // denial as before (no separate "agent not found" branch). Own-namespace
     // writes skip the lead lookup, as before.
     const ownNamespace = info.agentId != null && namespace === `task:agent:${info.agentId}`;
-    const agent = !ownNamespace && info.agentId ? getAgentById(info.agentId) : null;
+    const agent = !ownNamespace && info.agentId ? await getAgentById(info.agentId) : null;
     const allowed =
       info.agentId != null &&
       can({

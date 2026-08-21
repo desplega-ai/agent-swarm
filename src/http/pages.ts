@@ -411,8 +411,8 @@ function withShareUrls<T extends { id: string; slug: string }>(
  * value is 2 (one snapshot row → version 1 → counter becomes 2). This is the
  * value POST and PUT return as `version` on the wire.
  */
-function pageEditCounter(pageId: string): number {
-  const versions = getPageVersions(pageId);
+async function pageEditCounter(pageId: string): Promise<number> {
+  const versions = await getPageVersions(pageId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
@@ -461,9 +461,12 @@ export async function handlePages(
 
     try {
       const key = parsed.body.key
-        ? authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId))
+        ? await authorizeAssetKeyWrite(
+            parsed.body.key,
+            await resolveHttpAuditUserId(req, myAgentId),
+          )
         : undefined;
-      const page = createPage({
+      const page = await createPage({
         key,
         agentId: myAgentId,
         slug,
@@ -530,15 +533,15 @@ export async function handlePages(
     const parsed = await resolvePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const page = parsed.query.agentId
-      ? getPageBySlug(parsed.query.agentId, parsed.query.slug)
-      : getLatestPageBySlug(parsed.query.slug);
+      ? await getPageBySlug(parsed.query.agentId, parsed.query.slug)
+      : await getLatestPageBySlug(parsed.query.slug);
     if (!page) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const [decorated] = await withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     resolvePageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }
@@ -559,21 +562,21 @@ export async function handlePages(
     let pages: Array<Page | PageSummary>;
     let total: number;
     if (parsed.query.agentId) {
-      pages = full
+      pages = await (full
         ? listPagesByAgent(parsed.query.agentId, limit, offset, keyFilters)
         : listPagesByAgent(parsed.query.agentId, limit, offset, {
             ...keyFilters,
             slim: true,
-          });
-      total = countPagesByAgent(parsed.query.agentId, keyFilters);
+          }));
+      total = await countPagesByAgent(parsed.query.agentId, keyFilters);
     } else {
-      pages = full
+      pages = await (full
         ? listAllPages(limit, offset, keyFilters)
-        : listAllPages(limit, offset, { ...keyFilters, slim: true });
-      total = countAllPages(keyFilters);
+        : listAllPages(limit, offset, { ...keyFilters, slim: true }));
+      total = await countAllPages(keyFilters);
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const decoratedPages = withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const decoratedPages = await withFavoriteFlags(pages, { favoriteScope, itemType: "page" });
     listPagesRoute.respond(res, 200, {
       pages: decoratedPages.map(withShareUrls),
       // Filter-aware total (real row count, not the current page's length) so
@@ -590,7 +593,7 @@ export async function handlePages(
   if (getPageVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getPageVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
@@ -600,7 +603,7 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const version = getPageVersion(parsed.params.id, parsed.params.version);
+    const version = await getPageVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -614,7 +617,7 @@ export async function handlePages(
   if (listPageVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listPageVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
@@ -624,7 +627,7 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const versions = getPageVersions(parsed.params.id);
+    const versions = await getPageVersions(parsed.params.id);
     listPageVersionsRoute.respond(res, 200, { versions });
     return true;
   }
@@ -632,7 +635,7 @@ export async function handlePages(
   if (getPageRoute.match(req.method, pathSegments)) {
     const parsed = await getPageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       res.writeHead(404);
       res.end();
@@ -645,8 +648,8 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const [decorated] = withFavoriteFlags([page], { favoriteScope, itemType: "page" });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const [decorated] = await withFavoriteFlags([page], { favoriteScope, itemType: "page" });
     getPageRoute.respond(res, 200, withShareUrls(decorated ?? page));
     return true;
   }
@@ -657,7 +660,7 @@ export async function handlePages(
     const parsed = await updatePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getPage(parsed.params.id);
+    const existing = await getPage(parsed.params.id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -679,7 +682,7 @@ export async function handlePages(
 
     // Snapshot first — failure must NOT block the update (mirrors workflows.ts).
     try {
-      snapshotPage(parsed.params.id, myAgentId);
+      await snapshotPage(parsed.params.id, myAgentId);
     } catch {
       // intentional empty
     }
@@ -687,7 +690,10 @@ export async function handlePages(
     let key: string | undefined;
     if (parsed.body.key !== undefined) {
       try {
-        key = authorizeAssetKeyWrite(parsed.body.key, resolveHttpAuditUserId(req, myAgentId));
+        key = await authorizeAssetKeyWrite(
+          parsed.body.key,
+          await resolveHttpAuditUserId(req, myAgentId),
+        );
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -697,7 +703,7 @@ export async function handlePages(
       }
     }
 
-    const updated = updatePage(parsed.params.id, {
+    const updated = await updatePage(parsed.params.id, {
       key,
       title: parsed.body.title,
       description: parsed.body.description ?? undefined,
@@ -715,7 +721,7 @@ export async function handlePages(
     updatePageRoute.respond(res, 200, {
       id: updated.id,
       key: updated.key,
-      version: pageEditCounter(updated.id),
+      version: await pageEditCounter(updated.id),
     });
     return true;
   }
@@ -724,7 +730,7 @@ export async function handlePages(
   if (deletePageRoute.match(req.method, pathSegments)) {
     const parsed = await deletePageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const existing = getPage(parsed.params.id);
+    const existing = await getPage(parsed.params.id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -734,7 +740,7 @@ export async function handlePages(
       jsonError(res, "Page belongs to another agent", 403);
       return true;
     }
-    const ok = deletePage(parsed.params.id);
+    const ok = await deletePage(parsed.params.id);
     if (!ok) {
       res.writeHead(404);
       res.end();
@@ -765,7 +771,7 @@ export async function handlePages(
     const parsed = await launchPageRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const page = getPage(parsed.params.id);
+    const page = await getPage(parsed.params.id);
     if (!page) {
       applyLaunchCors(req, res);
       res.writeHead(404);

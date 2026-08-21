@@ -614,14 +614,23 @@ describe("ScriptExecutor", () => {
     }
   });
 
-  test("resource ulimits actually apply to the spawned process (not just documented)", async () => {
-    const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
-    expect(result.status).toBe("success");
-    const out = result.output as { stdout: string };
-    // "unlimited" means no cap took effect; any other value is a real (finite) ulimit.
-    expect(out.stdout).not.toBe("unlimited");
-    expect(Number(out.stdout)).toBeGreaterThan(0);
-  });
+  // macOS cannot enforce the executor's ulimit sandbox preamble (no usable
+  // RLIMIT_AS); the spawned script fails before the behavior under test runs.
+  // Linux CI is the enforcing environment for these paths; the skips only
+  // unblock local macOS pushes now that pre-push tests are blocking (#1216).
+  const skipOnMacOS = test.skipIf(process.platform === "darwin");
+
+  skipOnMacOS(
+    "resource ulimits actually apply to the spawned process (not just documented)",
+    async () => {
+      const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
+      expect(result.status).toBe("success");
+      const out = result.output as { stdout: string };
+      // "unlimited" means no cap took effect; any other value is a real (finite) ulimit.
+      expect(out.stdout).not.toBe("unlimited");
+      expect(Number(out.stdout)).toBeGreaterThan(0);
+    },
+  );
 
   test("no explicit cwd: runs in a scoped tmpdir, not the server's working directory", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "pwd" }, {}));
@@ -633,35 +642,42 @@ describe("ScriptExecutor", () => {
 
   // ─── Codex review follow-ups (PR #1112, review 4876200033) ──────────────
 
-  test("truncated stdout carries an explicit marker instead of silently presenting a partial result as complete (PRRT_kwDOQr3Tmc6XCRu1)", async () => {
-    const result = await executor.run(
-      input({ runtime: "bash", script: "head -c 2000000 /dev/zero | tr '\\0' 'a'" }, {}),
-    );
-    expect(result.status).toBe("success");
-    const out = result.output as { exitCode: number; stdout: string };
-    expect(out.exitCode).toBe(0);
-    expect(out.stdout).toContain("…[stdout truncated]");
-    // Capped at MAX_OUTPUT_BYTES (1 MiB), well short of the 2,000,000 'a's emitted.
-    expect(out.stdout.length).toBeGreaterThan(1_000_000);
-    expect(out.stdout.length).toBeLessThan(1_100_000);
-  });
+  skipOnMacOS(
+    "truncated stdout carries an explicit marker instead of silently presenting a partial result as complete (PRRT_kwDOQr3Tmc6XCRu1)",
+    async () => {
+      const result = await executor.run(
+        input({ runtime: "bash", script: "head -c 2000000 /dev/zero | tr '\\0' 'a'" }, {}),
+      );
+      expect(result.status).toBe("success");
+      const out = result.output as { exitCode: number; stdout: string };
+      expect(out.exitCode).toBe(0);
+      expect(out.stdout).toContain("…[stdout truncated]");
+      // Capped at MAX_OUTPUT_BYTES (1 MiB), well short of the 2,000,000 'a's emitted.
+      expect(out.stdout.length).toBeGreaterThan(1_000_000);
+      expect(out.stdout.length).toBeLessThan(1_100_000);
+    },
+  );
 
-  test("drain-deadline snapshot keeps the partial output already read instead of discarding it as empty (PRRT_kwDOQr3Tmc6XCRuy)", async () => {
-    // The direct child prints known output, backgrounds a descendant that
-    // inherits its stdout pipe, then exits. `proc.exited` resolves
-    // immediately, but the descendant keeps the pipe's write end open past
-    // STREAM_DRAIN_GRACE_MS (5s) — the exact "successful script + surviving
-    // descendant holding the pipe" scenario the review comment described.
-    const result = await executor.run(
-      input({ runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" }, {}),
-    );
-    expect(result.status).toBe("success");
-    const out = result.output as { exitCode: number; stdout: string };
-    expect(out.exitCode).toBe(0);
-    // The bytes read before the deadline fired must survive — not an empty string.
-    expect(out.stdout).toContain("kept-output");
-    expect(out.stdout).toContain("…[stdout truncated]");
-  }, 10_000);
+  skipOnMacOS(
+    "drain-deadline snapshot keeps the partial output already read instead of discarding it as empty (PRRT_kwDOQr3Tmc6XCRuy)",
+    async () => {
+      // The direct child prints known output, backgrounds a descendant that
+      // inherits its stdout pipe, then exits. `proc.exited` resolves
+      // immediately, but the descendant keeps the pipe's write end open past
+      // STREAM_DRAIN_GRACE_MS (5s) — the exact "successful script + surviving
+      // descendant holding the pipe" scenario the review comment described.
+      const result = await executor.run(
+        input({ runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" }, {}),
+      );
+      expect(result.status).toBe("success");
+      const out = result.output as { exitCode: number; stdout: string };
+      expect(out.exitCode).toBe(0);
+      // The bytes read before the deadline fired must survive — not an empty string.
+      expect(out.stdout).toContain("kept-output");
+      expect(out.stdout).toContain("…[stdout truncated]");
+    },
+    10_000,
+  );
 
   // ─── argv-injection regression (Codex review, PR #1112 comment 3732205426,
   // thread PRRT_kwDOQr3Tmc6XH7VS) ───────────────────────────────────────

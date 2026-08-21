@@ -167,10 +167,10 @@ export async function completeGenericOAuthCallback(
   const state = query.state;
   if (!state) return { handled: false };
 
-  const pending = consumeOAuthPending(state);
+  const pending = await consumeOAuthPending(state);
   if (!pending) return { handled: false };
 
-  const app = getOAuthAppById(pending.appId);
+  const app = await getOAuthAppById(pending.appId);
   if (!app) {
     if (pending.finalRedirect) {
       redirectWith(res, pending.finalRedirect, { oauth: "error", error: "app_not_found" });
@@ -220,7 +220,7 @@ export async function completeGenericOAuthCallback(
       ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
       : null;
 
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId: pending.appId,
       label: pending.label,
       accessToken: tokens.accessToken,
@@ -238,7 +238,7 @@ export async function completeGenericOAuthCallback(
       idToken: tokens.idToken,
     });
     if (identity) {
-      updateAuthorizationIdentity(authorization.id, {
+      await updateAuthorizationIdentity(authorization.id, {
         accountEmail: identity.accountEmail,
         identityJson: identity.identityJson,
       });
@@ -315,17 +315,21 @@ export async function handleOAuthCallback(
 
 let gcTimer: ReturnType<typeof setInterval> | null = null;
 
+async function runOAuthPendingGcTick(): Promise<void> {
+  try {
+    const removed = (await gcOAuthPending()) + (await gcMcpOAuthPending());
+    if (removed > 0) {
+      console.debug(`[oauth] GC removed ${removed} expired pending session(s)`);
+    }
+  } catch (err) {
+    console.error("[oauth] pending GC failed:", err);
+  }
+}
+
 export function startOAuthPendingGc(intervalMs = 5 * 60 * 1000): void {
   if (gcTimer) return;
   gcTimer = setInterval(() => {
-    try {
-      const removed = gcOAuthPending() + gcMcpOAuthPending();
-      if (removed > 0) {
-        console.debug(`[oauth] GC removed ${removed} expired pending session(s)`);
-      }
-    } catch (err) {
-      console.error("[oauth] pending GC failed:", err);
-    }
+    void runOAuthPendingGcTick();
   }, intervalMs);
   if (typeof gcTimer?.unref === "function") gcTimer.unref();
 }

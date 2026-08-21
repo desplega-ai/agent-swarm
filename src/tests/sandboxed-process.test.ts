@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  BUN_NO_ORPHANS_FLAG,
   BUN_SANDBOX_VIRTUAL_MEMORY_MB,
   buildSandboxedCommand,
   createCappedStreamState,
@@ -78,6 +79,17 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
     const prelude = sandboxPrelude([shell, "-c", script]);
     expect(prelude).toContain(`ulimit -v ${BUN_SANDBOX_VIRTUAL_MEMORY_MB * 1024}`);
     expect(prelude).toContain(`ulimit -u ${JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS}`);
+  });
+
+  test("adds --no-orphans to a direct bun command exactly once, and only to bun", () => {
+    const bunPrelude = sandboxPrelude(["bun", "run", "harness.ts"]);
+    expect(bunPrelude).toContain(`'bun' '${BUN_NO_ORPHANS_FLAG}' 'run' 'harness.ts'`);
+
+    const alreadyFlagged = sandboxPrelude(["bun", BUN_NO_ORPHANS_FLAG, "run", "harness.ts"]);
+    expect(alreadyFlagged.split(BUN_NO_ORPHANS_FLAG)).toHaveLength(2);
+
+    expect(sandboxPrelude(["node", "harness.js"])).not.toContain(BUN_NO_ORPHANS_FLAG);
+    expect(sandboxPrelude(["git", "status"])).not.toContain(BUN_NO_ORPHANS_FLAG);
   });
 
   test("keeps strict defaults for direct non-interpreter commands", () => {

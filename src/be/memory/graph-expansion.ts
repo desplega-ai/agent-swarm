@@ -18,7 +18,7 @@
  *
  * Plan: thoughts/taras/plans/2026-07-02-memory-retrieval-v2-graph-and-measurement.md Phase 4
  */
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import type { AgentMemorySource } from "@/types";
 import { isGraphExpansionEnabled } from "./constants";
 import { type AgentMemoryRow, rowToCandidate } from "./providers/sqlite-store";
@@ -69,11 +69,11 @@ function addNeighborScopeConditions(
   }
 }
 
-export function expandCandidatesWithGraph(
+export async function expandCandidatesWithGraph(
   candidates: MemoryCandidate[],
   agentId: string,
   options: GraphExpansionOptions = {},
-): MemoryCandidate[] {
+): Promise<MemoryCandidate[]> {
   if (!isGraphExpansionEnabled()) return candidates;
   const { cap = 5, damping = 0.7, scope = "all", source, isLead = false } = options;
   if (candidates.length === 0 || cap <= 0) return candidates;
@@ -98,14 +98,13 @@ export function expandCandidatesWithGraph(
 
   let rows: NeighborRow[];
   try {
-    rows = getDb()
-      .prepare<NeighborRow, (string | number)[]>(
-        `SELECT m.*, ml.from_memory_id AS fromMemoryId, ml.strength AS linkStrength
+    rows = await getDbClient().query<NeighborRow>(
+      `SELECT m.*, ml.from_memory_id AS fromMemoryId, ml.strength AS linkStrength
          FROM memory_link ml
          JOIN agent_memory m ON m.id = ml.targetId
          WHERE ${conditions.join(" AND ")}`,
-      )
-      .all(...params);
+      params,
+    );
   } catch (err) {
     // Best-effort: a graph-expansion failure must never poison search.
     console.warn("[memory-graph] expansion query failed:", (err as Error).message);

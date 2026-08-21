@@ -56,12 +56,12 @@ export const registerKvSetTool = (server: McpServer) => {
       }),
     },
     async ({ key, value, valueType, expiresInSec, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const authErr = kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
+      const authErr = await kvWriteAuthError(resolved.namespace, { agentId: requestInfo.agentId });
       if (authErr) {
         return toolErr(authErr, {
           data: { yourAgentId: requestInfo.agentId, namespace: resolved.namespace },
@@ -114,7 +114,7 @@ export const registerKvSetTool = (server: McpServer) => {
       const expiresAt = expiresInSec !== undefined ? Date.now() + expiresInSec * 1000 : null;
 
       try {
-        const entry = upsertKv({
+        const entry = await upsertKv({
           namespace: resolved.namespace,
           key,
           value,

@@ -137,7 +137,7 @@ export async function handleEvents(
     if (!parsed) return true;
 
     try {
-      const count = createEventsBatch(parsed.body.events);
+      const count = await createEventsBatch(parsed.body.events);
       createEventsBatchRoute.respond(res, 201, { success: true, count });
     } catch (error) {
       console.error("[HTTP] Failed to create events batch:", error);
@@ -151,7 +151,7 @@ export async function handleEvents(
     const parsed = await getEventCountsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const counts = getEventCountsFiltered({
+    const counts = await getEventCountsFiltered({
       category: parsed.query.category || undefined,
       source: parsed.query.source || undefined,
       agentId: parsed.query.agentId || undefined,
@@ -170,7 +170,7 @@ export async function handleEvents(
     if (!parsed) return true;
 
     try {
-      const event = createEvent(parsed.body);
+      const event = await createEvent(parsed.body);
       createEventRoute.respond(res, 201, { success: true, event });
     } catch (error) {
       console.error("[HTTP] Failed to create event:", error);
@@ -184,7 +184,7 @@ export async function handleEvents(
     const parsed = await getEventsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const events = getEventsFiltered({
+    const events = await getEventsFiltered({
       category: parsed.query.category || undefined,
       event: parsed.query.event || undefined,
       status: parsed.query.status || undefined,

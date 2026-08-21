@@ -50,10 +50,10 @@ export function getTaskOutputValidationError(outputSchema: unknown, output: stri
  * surface. A forced correction updates only the explicitly provided text
  * fields; lifecycle state and terminal side effects remain untouched.
  */
-export function guardTerminalTaskResultWrite(
+export async function guardTerminalTaskResultWrite(
   task: AgentTask,
   write: TerminalResultWrite,
-): TerminalResultGuardResult {
+): Promise<TerminalResultGuardResult> {
   if (!isTerminalTaskStatus(task.status) || (!write.status && !write.force)) {
     return { handled: false };
   }
@@ -74,7 +74,7 @@ export function guardTerminalTaskResultWrite(
       return { handled: true, success: false, message: outputValidationError, task };
     }
 
-    const overwrittenTask = overwriteTerminalTaskResultText(task.id, {
+    const overwrittenTask = await overwriteTerminalTaskResultText(task.id, {
       ...(write.output !== undefined ? { output: write.output } : {}),
       ...(write.failureReason !== undefined ? { failureReason: write.failureReason } : {}),
     });

@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { createApp } from "../apps/store";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { getScript, listScripts } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
@@ -62,8 +62,8 @@ beforeAll(async () => {
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
 
-  const worker = createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
-  const lead = createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
+  const worker = await createAgent({ name: "scripts-worker", isLead: false, status: "idle" });
+  const lead = await createAgent({ name: "scripts-lead", isLead: true, status: "idle" });
   workerId = worker.id;
   leadId = lead.id;
 });
@@ -82,10 +82,11 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM apps");
-  getDb().run("DELETE FROM events WHERE event = 'script.global_upsert'");
+beforeEach(async () => {
+  const db = getDbClient();
+  await db.run("DELETE FROM scripts");
+  await db.run("DELETE FROM apps");
+  await db.run("DELETE FROM events WHERE event = 'script.global_upsert'");
 });
 
 type TestResponse = {
@@ -165,7 +166,7 @@ describe("/api/scripts HTTP", () => {
     expect(before.sdkTypes).not.toContain("namespace App_PmInbox");
     expect(before.stdlibTypes).not.toContain("namespace App_PmInbox");
 
-    createApp({
+    await createApp({
       name: "PM Inbox",
       definition: {
         models: { issue: { columns: { title: { kind: "string" } } } },
@@ -185,7 +186,7 @@ describe("/api/scripts HTTP", () => {
   });
 
   test("named-script types endpoint includes per-app types in both blobs", async () => {
-    createApp({
+    await createApp({
       name: "PM Inbox",
       definition: {
         models: { issue: { columns: { title: { kind: "string" } } } },
@@ -241,7 +242,7 @@ describe("/api/scripts HTTP", () => {
     const body = await res.json();
     expect(body.error).toBe("typecheck_failed");
     expect(body.diagnostics.length).toBeGreaterThan(0);
-    expect(getScript({ name: "bad-types", scope: "agent", scopeId: workerId })).toBeNull();
+    expect(await getScript({ name: "bad-types", scope: "agent", scopeId: workerId })).toBeNull();
   });
 
   test("upsert typecheck failure surfaces structured diagnostics with location + identifier", async () => {
@@ -376,13 +377,13 @@ describe("/api/scripts HTTP", () => {
     );
     expect(denied.status).toBe(403);
     expect(await denied.json()).toEqual({ error: "Global write requires lead agent" });
-    expect(getScript({ name: "global-worker-denied", scope: "global", scopeId: null })).toBeNull();
+    expect(
+      await getScript({ name: "global-worker-denied", scope: "global", scopeId: null }),
+    ).toBeNull();
 
-    const event = getDb()
-      .prepare<{ data: string }, []>(
-        "SELECT data FROM events WHERE event = 'script.global_upsert' LIMIT 1",
-      )
-      .get();
+    const event = await getDbClient().get<{ data: string }>(
+      "SELECT data FROM events WHERE event = 'script.global_upsert' LIMIT 1",
+    );
     expect(event).toBeFalsy();
   });
 
@@ -399,7 +400,9 @@ describe("/api/scripts HTTP", () => {
     });
     expect(del.status).toBe(403);
     expect(await del.json()).toEqual({ error: "Global delete requires lead agent" });
-    expect(getScript({ name: "global-lead-owned", scope: "global", scopeId: null })).toBeTruthy();
+    expect(
+      await getScript({ name: "global-lead-owned", scope: "global", scopeId: null }),
+    ).toBeTruthy();
   });
 
   test("lead agents can upsert and delete global scripts", async () => {
@@ -408,13 +411,13 @@ describe("/api/scripts HTTP", () => {
       leadId,
     );
     expect(allowed.status).toBe(200);
-    expect(getScript({ name: "global-lead-ok", scope: "global", scopeId: null })).toBeTruthy();
+    expect(
+      await getScript({ name: "global-lead-ok", scope: "global", scopeId: null }),
+    ).toBeTruthy();
 
-    const event = getDb()
-      .prepare<{ data: string }, []>(
-        "SELECT data FROM events WHERE event = 'script.global_upsert' LIMIT 1",
-      )
-      .get();
+    const event = await getDbClient().get<{ data: string }>(
+      "SELECT data FROM events WHERE event = 'script.global_upsert' LIMIT 1",
+    );
     expect(event).toBeTruthy();
     expect(JSON.parse(event!.data)).toMatchObject({
       isNew: true,
@@ -427,13 +430,15 @@ describe("/api/scripts HTTP", () => {
     });
     expect(del.status).toBe(200);
     expect(await del.json()).toEqual({ deleted: true });
-    expect(getScript({ name: "global-lead-ok", scope: "global", scopeId: null })).toBeNull();
+    expect(await getScript({ name: "global-lead-ok", scope: "global", scopeId: null })).toBeNull();
   });
 
   test("non-lead agents can still upsert and delete agent-scoped scripts", async () => {
     const allowed = await upsert({ name: "agent-worker-ok", source: validSource(2) }, workerId);
     expect(allowed.status).toBe(200);
-    expect(getScript({ name: "agent-worker-ok", scope: "agent", scopeId: workerId })).toBeTruthy();
+    expect(
+      await getScript({ name: "agent-worker-ok", scope: "agent", scopeId: workerId }),
+    ).toBeTruthy();
 
     const del = await dispatch("/api/scripts/agent-worker-ok?scope=agent", {
       method: "DELETE",
@@ -451,11 +456,9 @@ describe("/api/scripts HTTP", () => {
     );
     expect(res.status).toBe(200);
 
-    const event = getDb()
-      .prepare<{ data: string }, []>(
-        "SELECT data FROM events WHERE event = 'script.global_upsert' ORDER BY createdAt DESC LIMIT 1",
-      )
-      .get();
+    const event = await getDbClient().get<{ data: string }>(
+      "SELECT data FROM events WHERE event = 'script.global_upsert' ORDER BY createdAt DESC LIMIT 1",
+    );
     expect(JSON.parse(event!.data).isPromotion).toBe(true);
   });
 
@@ -476,7 +479,9 @@ describe("/api/scripts HTTP", () => {
       source: `const x: number = "no"; export default async () => x;`,
     });
     expect(failed.status).toBe(400);
-    expect(getScript({ name: slug, scope: "agent", scopeId: workerId })?.isScratch).toBe(true);
+    expect((await getScript({ name: slug, scope: "agent", scopeId: workerId }))?.isScratch).toBe(
+      true,
+    );
   });
 
   test("run named scripts and inline scripts, auto-saving only successful inline source", async () => {
@@ -501,9 +506,11 @@ describe("/api/scripts HTTP", () => {
     const inlineBody = await inline.json();
     expect(inlineBody.result).toEqual({ ok: "not typechecked" });
     expect(inlineBody.autoSaved.slug).toContain("scratch-inline-type-error-still-runs");
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?")
-      .run("2026-07-01T00:00:00.000Z", inlineBody.autoSaved.slug, workerId);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE name = ? AND scopeId = ?", [
+      "2026-07-01T00:00:00.000Z",
+      inlineBody.autoSaved.slug,
+      workerId,
+    ]);
     const reusedScratch = await dispatch("/api/scripts/run", {
       method: "POST",
       agentId: workerId,
@@ -511,14 +518,22 @@ describe("/api/scripts HTTP", () => {
     });
     expect(reusedScratch.status).toBe(200);
     expect(
-      getScript({ name: inlineBody.autoSaved.slug, scope: "agent", scopeId: workerId })?.updatedAt,
+      (
+        await getScript({
+          name: inlineBody.autoSaved.slug,
+          scope: "agent",
+          scopeId: workerId,
+        })
+      )?.updatedAt,
     ).not.toBe("2026-07-01T00:00:00.000Z");
 
-    const beforeFailed = listScripts({
-      scope: "agent",
-      scopeId: workerId,
-      includeScratch: true,
-    }).length;
+    const beforeFailed = (
+      await listScripts({
+        scope: "agent",
+        scopeId: workerId,
+        includeScratch: true,
+      })
+    ).length;
     const failed = await dispatch("/api/scripts/run", {
       method: "POST",
       agentId: workerId,
@@ -529,9 +544,9 @@ describe("/api/scripts HTTP", () => {
     });
     expect(failed.status).toBe(200);
     expect((await failed.json()).autoSaved).toBeUndefined();
-    expect(listScripts({ scope: "agent", scopeId: workerId, includeScratch: true }).length).toBe(
-      beforeFailed,
-    );
+    expect(
+      (await listScripts({ scope: "agent", scopeId: workerId, includeScratch: true })).length,
+    ).toBe(beforeFailed);
   });
 
   test("workspace-rw named scripts return 501", async () => {
@@ -572,7 +587,9 @@ describe("/api/scripts HTTP", () => {
     });
     expect(del.status).toBe(200);
     expect(await del.json()).toEqual({ deleted: true });
-    expect(getScript({ name: "lookup-helper", scope: "agent", scopeId: workerId })).toBeNull();
+    expect(
+      await getScript({ name: "lookup-helper", scope: "agent", scopeId: workerId }),
+    ).toBeNull();
   });
 
   test("script_query_types returns argsJsonSchema for a script with argsSchema export", async () => {

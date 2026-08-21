@@ -32,7 +32,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getKv,
   initDb,
 } from "../be/db";
@@ -113,31 +113,31 @@ function issueDefinition(scriptId: string, extra: Record<string, unknown> = {}):
   return appWith({ issue: { columns: ISSUE_COLUMNS, sources: { gh: ghSource(scriptId, extra) } } });
 }
 
-function parsed(definition: Definition) {
-  const result = parseAppDefinition(definition);
+async function parsed(definition: Definition) {
+  const result = await parseAppDefinition(definition);
   if (!result.success) throw new Error(JSON.stringify(result.issues));
   return result.definition;
 }
 
-function createSyncApp(definition: Definition, name = "Engine app"): string {
-  return createApp({ name, definition: parsed(definition) }).id;
+async function createSyncApp(definition: Definition, name = "Engine app"): Promise<string> {
+  return (await createApp({ name, definition: await parsed(definition) })).id;
 }
 
-function modelOf(appId: string, model: string): ModelDef {
-  const app = getApp(appId);
+async function modelOf(appId: string, model: string): Promise<ModelDef> {
+  const app = await getApp(appId);
   const resolved = app?.definition.models[model];
   if (!resolved) throw new Error(`unknown model ${model}`);
   return resolved;
 }
 
-function rowsOf(appId: string, model = "issue", joinKey = "issueKey"): AppRow[] {
-  return listAppRows(appId, model).sort((a, b) =>
+async function rowsOf(appId: string, model = "issue", joinKey = "issueKey"): Promise<AppRow[]> {
+  return (await listAppRows(appId, model)).sort((a, b) =>
     String(a[joinKey] ?? a.id).localeCompare(String(b[joinKey] ?? b.id)),
   );
 }
 
-function rowSnapshot(appId: string, model = "issue"): string {
-  return JSON.stringify(listAppRows(appId, model).sort((a, b) => a.id.localeCompare(b.id)));
+async function rowSnapshot(appId: string, model = "issue"): Promise<string> {
+  return JSON.stringify((await listAppRows(appId, model)).sort((a, b) => a.id.localeCompare(b.id)));
 }
 
 let scriptCounter = 0;
@@ -204,7 +204,7 @@ function ghRecord(key: string | number, overrides: Record<string, unknown> = {})
 /** node:http around the two handlers the doors live in — no ports but 0. */
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-    setRequestAuth(req, resolveHttpRequestAuth(req, API_KEY));
+    setRequestAuth(req, await resolveHttpRequestAuth(req, API_KEY));
     res.setHeader("Content-Type", "application/json");
     const pathSegments = getPathSegments(req.url || "");
     const queryParams = parseQueryParams(req.url || "");
@@ -255,8 +255,8 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   initDb(TEST_DB_PATH);
-  createAgent({ id: OWNER_AGENT_ID, name: "apps-sync-owner", isLead: false, status: "idle" });
-  createAgent({ id: LEAD_AGENT_ID, name: "apps-sync-lead", isLead: true, status: "idle" });
+  await createAgent({ id: OWNER_AGENT_ID, name: "apps-sync-owner", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_AGENT_ID, name: "apps-sync-lead", isLead: true, status: "idle" });
   syncTool = registeredTool(registerAppSyncTool, "app-sync");
   scriptDeleteTool = registeredTool(registerScriptDeleteTool, "script-delete");
   server = createTestServer();
@@ -288,9 +288,9 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 describe("script source pulls", () => {
@@ -299,7 +299,7 @@ describe("script source pulls", () => {
       ghRecord(1),
       ghRecord("two", { user: { login: "Grace Hopper" }, price: 1, created_at: "2026-02-02" }),
     ]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const result = await runAppSync({ appId, invokedBy: "user:tester" });
 
@@ -319,7 +319,7 @@ describe("script source pulls", () => {
     });
     expect(result.passes[0]?.error).toBeUndefined();
 
-    const rows = rowsOf(appId);
+    const rows = await rowsOf(appId);
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({
       issueKey: "1",
@@ -339,15 +339,15 @@ describe("script source pulls", () => {
 
   test("changed data updates projected columns only; an unchanged pass just refreshes", async () => {
     const script = await fixtureScript("update", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
 
     // An operator owns `note`; sync must never touch it.
-    const before = rowsOf(appId)[0]!;
+    const before = (await rowsOf(appId))[0]!;
     await patchAppRow(
       appId,
       "issue",
-      modelOf(appId, "issue"),
+      await modelOf(appId, "issue"),
       before.id,
       { note: "mine" },
       {
@@ -359,7 +359,7 @@ describe("script source pulls", () => {
     const second = await runAppSync({ appId });
     expect(second.passes[0]).toMatchObject({ pulled: 2, created: 0, updated: 1, refreshed: 1 });
 
-    const updated = rowsOf(appId)[0]!;
+    const updated = (await rowsOf(appId))[0]!;
     expect(updated.title).toBe("Renamed");
     expect(updated.note).toBe("mine");
     expect(updated.updatedBy).toBe("sync:gh");
@@ -370,7 +370,7 @@ describe("script source pulls", () => {
     const third = await runAppSync({ appId });
     expect(third.passes[0]).toMatchObject({ created: 0, updated: 0, refreshed: 2 });
 
-    const refreshed = rowsOf(appId)[0]!;
+    const refreshed = (await rowsOf(appId))[0]!;
     expect(refreshed.updatedAt).toBe(updated.updatedAt);
     expect(refreshed.updatedBy).toBe(updated.updatedBy);
     expect(refreshed.note).toBe("mine");
@@ -381,16 +381,16 @@ describe("script source pulls", () => {
 
   test("a vanished record goes stale with syncedAt frozen; reappearing clears it", async () => {
     const script = await fixtureScript("stale", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const seeded = rowsOf(appId)[0]!;
+    const seeded = (await rowsOf(appId))[0]!;
 
     await script.set([ghRecord(2)]);
     const sweep = await runAppSync({ appId });
     expect(sweep.passes[0]).toMatchObject({ pulled: 1, markedStale: 1, refreshed: 1 });
     expect(sweep.passes[0]?.staleSweepSkipped).toBeUndefined();
 
-    const stale = rowsOf(appId)[0]!;
+    const stale = (await rowsOf(appId))[0]!;
     expect(stale.stale).toBe(true);
     expect(stale.syncedAt).toBe(seeded.syncedAt);
     expect(stale.updatedAt).toBe(seeded.updatedAt);
@@ -402,7 +402,7 @@ describe("script source pulls", () => {
     await script.set([ghRecord(1), ghRecord(2)]);
     const back = await runAppSync({ appId });
     expect(back.passes[0]).toMatchObject({ created: 0, markedStale: 0 });
-    const revived = rowsOf(appId)[0]!;
+    const revived = (await rowsOf(appId))[0]!;
     expect(revived.stale).toBe(false);
     expect(Date.parse(String(revived.syncedAt))).toBeGreaterThan(
       Date.parse(String(stale.syncedAt)),
@@ -413,13 +413,13 @@ describe("script source pulls", () => {
     const script = await fixtureScript("projection", [
       ghRecord(1, { price: "not a number", created_at: "yesterday", title: 42 }),
     ]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
     expect(pass.error).toBeUndefined();
     expect(pass.created).toBe(1);
-    const row = rowsOf(appId)[0]!;
+    const row = (await rowsOf(appId))[0]!;
     expect(row.amountCents).toBeNull();
     expect(row.openedAt).toBeNull();
     expect(row.title).toBeNull();
@@ -430,7 +430,7 @@ describe("script source pulls", () => {
 
   test("complete:false skips the stale sweep and warns", async () => {
     const script = await fixtureScript("incomplete", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
 
     await script.set({ records: [ghRecord(2)], complete: false });
@@ -443,7 +443,7 @@ describe("script source pulls", () => {
       staleSweepSkipped: true,
     });
     expect(pass.warnings.some((warning) => warning.includes("stale sweep skipped"))).toBe(true);
-    expect(rowsOf(appId)[0]?.stale).toBe(false);
+    expect((await rowsOf(appId))[0]?.stale).toBe(false);
   });
 
   test("a pull above the 500-record cap truncates and drops completeness", async () => {
@@ -451,20 +451,20 @@ describe("script source pulls", () => {
     await script.setSource(
       "export default async () => Array.from({ length: 501 }, (_, i) => ({ key: 'k' + i, fields: { title: 't' + i } }));",
     );
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
     expect(pass).toMatchObject({ pulled: 500, created: 500, staleSweepSkipped: true });
     expect(pass.warnings.some((warning) => warning.includes("500-record cap"))).toBe(true);
-    expect(listAppRows(appId, "issue")).toHaveLength(500);
+    expect(await listAppRows(appId, "issue")).toHaveLength(500);
   });
 
   test("an invalid return shape fails the pass with zero row churn", async () => {
     const script = await fixtureScript("shape", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     await script.set({ error: "upstream said no" });
     const result = await runAppSync({ appId });
@@ -472,28 +472,28 @@ describe("script source pulls", () => {
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("invalid payload");
     expect(result.passes[0]).toMatchObject({ pulled: 0, created: 0, updated: 0, markedStale: 0 });
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("a thrown script error fails the pass with zero row churn", async () => {
     const script = await fixtureScript("throw", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     await script.setSource('export default async () => { throw new Error("upstream exploded"); };');
     const result = await runAppSync({ appId });
 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("upstream exploded");
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("a non-zero exit fails the pass with zero row churn", async () => {
     const script = await fixtureScript("exit", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     await script.setSource("export default async () => { process.exit(3); };");
     const result = await runAppSync({ appId });
@@ -501,26 +501,26 @@ describe("script source pulls", () => {
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toBeDefined();
     expect(result.passes[0]).toMatchObject({ pulled: 0, created: 0, updated: 0, markedStale: 0 });
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("does not adopt an unowned row that already carries the join key", async () => {
     const script = await fixtureScript("adopt", [ghRecord(1)]);
-    const appId = createSyncApp(appWith({ issue: { columns: ownedIssueColumns() } }));
+    const appId = await createSyncApp(appWith({ issue: { columns: ownedIssueColumns() } }));
     await createAppRow(
       appId,
       "issue",
-      modelOf(appId, "issue"),
+      await modelOf(appId, "issue"),
       { issueKey: "1", title: "hand made", note: "human" },
       { actor: "user:operator" },
     );
     // Adding a source to a model that already has rows is a free schema edit.
-    updateApp(appId, { definition: parsed(issueDefinition(script.id)) });
+    await updateApp(appId, { definition: await parsed(issueDefinition(script.id)) });
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
     expect(pass).toMatchObject({ created: 1, updated: 0 });
-    const rows = rowsOf(appId);
+    const rows = await rowsOf(appId);
     expect(rows).toHaveLength(2);
     const human = rows.find((row) => row.note === "human")!;
     expect(human.source).toBeUndefined();
@@ -555,12 +555,12 @@ describe("script source inputs and run-as", () => {
       source:
         "export default async (args) => [{ key: 'echo', fields: { payload: JSON.stringify(args) } }];",
     });
-    const appId = createSyncApp(echoDefinition(scriptId, { connection: "echoConn" }));
+    const appId = await createSyncApp(echoDefinition(scriptId, { connection: "echoConn" }));
 
     const result = await runAppSync({ appId });
 
     expect(result.ok).toBe(true);
-    const payload = JSON.parse(String(rowsOf(appId)[0]?.payload));
+    const payload = JSON.parse(String((await rowsOf(appId))[0]?.payload));
     expect(payload).toEqual({
       repo: "owner/name",
       app: { id: appId },
@@ -576,14 +576,14 @@ describe("script source inputs and run-as", () => {
       source:
         "export default async (args) => [{ key: 'echo', fields: { payload: JSON.stringify(args) } }];",
     });
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       echoDefinition(scriptId, { args: { repo: "x", model: "hijack", source: "hijack2" } }),
     );
 
     const result = await runAppSync({ appId });
 
     expect(result.ok).toBe(true);
-    expect(JSON.parse(String(rowsOf(appId)[0]?.payload))).toEqual({
+    expect(JSON.parse(String((await rowsOf(appId))[0]?.payload))).toEqual({
       repo: "x",
       app: { id: appId },
       model: "issue",
@@ -607,7 +607,7 @@ describe("script source inputs and run-as", () => {
       scopeId: OWNER_AGENT_ID,
       agentId: OWNER_AGENT_ID,
     });
-    const appId = createSyncApp(echoDefinition(scriptId, { connection: "ownerOnly" }));
+    const appId = await createSyncApp(echoDefinition(scriptId, { connection: "ownerOnly" }));
 
     const result = await runAppSync({ appId });
 
@@ -630,7 +630,7 @@ describe("script source inputs and run-as", () => {
     });
     // The lead-scoped connection is only reachable when run-as resolved to the
     // lead — both at definition-write time and in the pull preflight.
-    const appId = createSyncApp(echoDefinition(scriptId, { connection: "leadOnly" }));
+    const appId = await createSyncApp(echoDefinition(scriptId, { connection: "leadOnly" }));
 
     const result = await runAppSync({ appId });
 
@@ -650,7 +650,7 @@ describe("script source inputs and run-as", () => {
       name: scriptName("marker"),
       source: 'export default async () => { throw new Error("MARKER script ran"); };',
     });
-    const appId = createSyncApp(echoDefinition(scriptId, { connection: "goesDark" }));
+    const appId = await createSyncApp(echoDefinition(scriptId, { connection: "goesDark" }));
 
     await upsertScriptConnection({
       slug: "goesDark",
@@ -666,7 +666,7 @@ describe("script source inputs and run-as", () => {
     expect(result.passes[0]?.error).toContain('connection "goesDark" not found or disabled');
     // The marker proves the script was never invoked.
     expect(result.passes[0]?.error).not.toContain("MARKER");
-    expect(listAppRows(appId, "issue")).toHaveLength(0);
+    expect(await listAppRows(appId, "issue")).toHaveLength(0);
   });
 
   test("a source naming a connection that never existed fails the pass", async () => {
@@ -681,10 +681,10 @@ describe("script source inputs and run-as", () => {
       baseUrl: "https://api.ghost.test/graphql",
       allowedHosts: ["api.ghost.test"],
     });
-    const appId = createSyncApp(echoDefinition(scriptId, { connection: "ghostConn" }));
+    const appId = await createSyncApp(echoDefinition(scriptId, { connection: "ghostConn" }));
     // Stored definitions outlive their connections; the engine re-resolves the
     // slug on every pull rather than trusting write-time validation.
-    getDb().run("DELETE FROM script_connections WHERE slug = 'ghostConn'");
+    await getDbClient().run("DELETE FROM script_connections WHERE slug = 'ghostConn'");
 
     const result = await runAppSync({ appId });
 
@@ -712,26 +712,26 @@ describe("swarm-tasks source", () => {
     });
   }
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM agent_tasks");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM agent_tasks");
   });
 
   test("projects tasks flatly, truncates the prompt and honours the default heartbeat filter", async () => {
     const longPrompt = "x".repeat(1500);
-    const task = createTaskExtended(longPrompt, {
+    const task = await createTaskExtended(longPrompt, {
       agentId: OWNER_AGENT_ID,
       tags: ["alpha"],
       priority: 70,
       vcsProvider: "github",
       vcsAuthor: "octocat",
     });
-    createTaskExtended("heartbeat noise", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
-    const appId = createSyncApp(taskDefinition());
+    await createTaskExtended("heartbeat noise", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
+    const appId = await createSyncApp(taskDefinition());
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
     expect(pass).toMatchObject({ connector: "swarm-tasks", pulled: 1, created: 1 });
-    const rows = rowsOf(appId, "task", "taskKey");
+    const rows = await rowsOf(appId, "task", "taskKey");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       taskKey: task.id,
@@ -745,22 +745,22 @@ describe("swarm-tasks source", () => {
   });
 
   test("assetKey prefix-scopes the window and includeHeartbeat widens it", async () => {
-    createTaskExtended("app owned", { agentId: OWNER_AGENT_ID, key: "shared/apps/demo/one" });
-    createTaskExtended("elsewhere", { agentId: OWNER_AGENT_ID, key: "shared/other/two" });
-    createTaskExtended("beat", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
+    await createTaskExtended("app owned", { agentId: OWNER_AGENT_ID, key: "shared/apps/demo/one" });
+    await createTaskExtended("elsewhere", { agentId: OWNER_AGENT_ID, key: "shared/other/two" });
+    await createTaskExtended("beat", { agentId: OWNER_AGENT_ID, tags: ["heartbeat"] });
 
-    const scoped = createSyncApp(taskDefinition({ assetKey: "shared/apps/demo" }), "Scoped");
+    const scoped = await createSyncApp(taskDefinition({ assetKey: "shared/apps/demo" }), "Scoped");
     expect((await runAppSync({ appId: scoped })).passes[0]?.pulled).toBe(1);
 
-    const withBeats = createSyncApp(taskDefinition({ includeHeartbeat: true }), "With beats");
+    const withBeats = await createSyncApp(taskDefinition({ includeHeartbeat: true }), "With beats");
     expect((await runAppSync({ appId: withBeats })).passes[0]?.pulled).toBe(3);
   });
 
   test("a full page marks the pull incomplete and skips the sweep", async () => {
     for (let index = 0; index < 3; index += 1) {
-      createTaskExtended(`task ${index}`, { agentId: OWNER_AGENT_ID });
+      await createTaskExtended(`task ${index}`, { agentId: OWNER_AGENT_ID });
     }
-    const appId = createSyncApp(taskDefinition({ limit: 2 }));
+    const appId = await createSyncApp(taskDefinition({ limit: 2 }));
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
@@ -769,45 +769,48 @@ describe("swarm-tasks source", () => {
 
   test("status, tags and agentId filters narrow the window", async () => {
     const other = crypto.randomUUID();
-    createAgent({ id: other, name: "apps-sync-other", isLead: false, status: "idle" });
-    createTaskExtended("mine tagged", { agentId: OWNER_AGENT_ID, tags: ["alpha", "beta"] });
-    createTaskExtended("mine untagged", { agentId: OWNER_AGENT_ID });
-    createTaskExtended("theirs tagged", { agentId: other, tags: ["alpha"] });
-    createTaskExtended("backlog", { tags: ["alpha"], status: "backlog" });
+    await createAgent({ id: other, name: "apps-sync-other", isLead: false, status: "idle" });
+    await createTaskExtended("mine tagged", { agentId: OWNER_AGENT_ID, tags: ["alpha", "beta"] });
+    await createTaskExtended("mine untagged", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("theirs tagged", { agentId: other, tags: ["alpha"] });
+    await createTaskExtended("backlog", { tags: ["alpha"], status: "backlog" });
 
-    const byAgent = createSyncApp(taskDefinition({ agentId: OWNER_AGENT_ID }), "By agent");
+    const byAgent = await createSyncApp(taskDefinition({ agentId: OWNER_AGENT_ID }), "By agent");
     expect((await runAppSync({ appId: byAgent })).passes[0]?.pulled).toBe(2);
 
-    const byTag = createSyncApp(taskDefinition({ tags: "beta" }), "By tag");
+    const byTag = await createSyncApp(taskDefinition({ tags: "beta" }), "By tag");
     expect((await runAppSync({ appId: byTag })).passes[0]?.pulled).toBe(1);
 
-    const byStatus = createSyncApp(taskDefinition({ status: "backlog,pending" }), "By status");
+    const byStatus = await createSyncApp(
+      taskDefinition({ status: "backlog,pending" }),
+      "By status",
+    );
     expect((await runAppSync({ appId: byStatus })).passes[0]?.pulled).toBe(4);
 
-    const bogus = createSyncApp(taskDefinition({ status: "nonsense" }), "Bogus status");
+    const bogus = await createSyncApp(taskDefinition({ status: "nonsense" }), "Bogus status");
     const failed = await runAppSync({ appId: bogus });
     expect(failed.ok).toBe(false);
     expect(failed.passes[0]?.error).toContain('unknown task status "nonsense"');
   });
 
   test("a user-invoked sync is scoped to the requester and never sweeps stale", async () => {
-    const userId = createUser({ name: "Apps Sync Requester" }).id;
-    createTaskExtended("mine: fix the login flow", {
+    const userId = (await createUser({ name: "Apps Sync Requester" })).id;
+    await createTaskExtended("mine: fix the login flow", {
       agentId: OWNER_AGENT_ID,
       requestedByUserId: userId,
     });
-    createTaskExtended("theirs: rotate the billing keys", {
+    await createTaskExtended("theirs: rotate the billing keys", {
       agentId: OWNER_AGENT_ID,
-      requestedByUserId: createUser({ name: "Apps Sync Other" }).id,
+      requestedByUserId: (await createUser({ name: "Apps Sync Other" })).id,
     });
-    createTaskExtended("pool: unattributed chore", { agentId: OWNER_AGENT_ID });
-    const appId = createSyncApp(taskDefinition());
+    await createTaskExtended("pool: unattributed chore", { agentId: OWNER_AGENT_ID });
+    const appId = await createSyncApp(taskDefinition());
 
     const scoped = (await runAppSync({ appId, invokedBy: `user:${userId}` })).passes[0]!;
 
     expect(scoped).toMatchObject({ pulled: 1, created: 1, staleSweepSkipped: true });
     expect(scoped.warnings.some((w) => w.includes("scoped to tasks requested"))).toBe(true);
-    const rows = rowsOf(appId, "task", "taskKey");
+    const rows = await rowsOf(appId, "task", "taskKey");
     expect(rows).toHaveLength(1);
     expect(String(rows[0]?.prompt)).toContain("fix the login flow");
     expect(JSON.stringify(rows)).not.toContain("rotate the billing keys");
@@ -819,34 +822,34 @@ describe("swarm-tasks source", () => {
   });
 
   test("malformed scoping config fails the pass instead of widening it", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
 
-    const badAgent = createSyncApp(taskDefinition({ agentId: 123 }), "Bad agentId");
+    const badAgent = await createSyncApp(taskDefinition({ agentId: 123 }), "Bad agentId");
     const agentResult = await runAppSync({ appId: badAgent });
     expect(agentResult.ok).toBe(false);
     expect(agentResult.passes[0]?.error).toContain("config.agentId must be a non-empty string");
     expect(agentResult.passes[0]?.pulled).toBe(0);
 
-    const badKey = createSyncApp(taskDefinition({ assetKey: true }), "Bad assetKey");
+    const badKey = await createSyncApp(taskDefinition({ assetKey: true }), "Bad assetKey");
     const keyResult = await runAppSync({ appId: badKey });
     expect(keyResult.ok).toBe(false);
     expect(keyResult.passes[0]?.error).toContain("config.assetKey must be a non-empty string");
-    expect(rowsOf(badKey, "task", "taskKey")).toHaveLength(0);
+    expect(await rowsOf(badKey, "task", "taskKey")).toHaveLength(0);
 
-    const badStatus = createSyncApp(taskDefinition({ status: " , " }), "Bad status");
+    const badStatus = await createSyncApp(taskDefinition({ status: " , " }), "Bad status");
     const statusResult = await runAppSync({ appId: badStatus });
     expect(statusResult.ok).toBe(false);
     expect(statusResult.passes[0]?.error).toContain("config.status must name at least one");
 
-    const badTags = createSyncApp(taskDefinition({ tags: "" }), "Bad tags");
+    const badTags = await createSyncApp(taskDefinition({ tags: "" }), "Bad tags");
     const tagsResult = await runAppSync({ appId: badTags });
     expect(tagsResult.ok).toBe(false);
     expect(tagsResult.passes[0]?.error).toContain("config.tags must name at least one");
   });
 
   test("an unsupported config key is reported as a warning", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
-    const appId = createSyncApp(taskDefinition({ nonsense: "value" }));
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    const appId = await createSyncApp(taskDefinition({ nonsense: "value" }));
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
@@ -854,21 +857,21 @@ describe("swarm-tasks source", () => {
   });
 
   test("limit rails: over the cap and below the floor each warn", async () => {
-    createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("only task", { agentId: OWNER_AGENT_ID });
 
-    const over = createSyncApp(taskDefinition({ limit: 500 }), "Over cap");
+    const over = await createSyncApp(taskDefinition({ limit: 500 }), "Over cap");
     const overPass = (await runAppSync({ appId: over })).passes[0]!;
     expect(overPass.warnings).toHaveLength(1);
     expect(overPass.warnings[0]).toBe("config.limit 500 exceeds the 200 cap; using 200");
 
-    const under = createSyncApp(taskDefinition({ limit: 0 }), "Under floor");
+    const under = await createSyncApp(taskDefinition({ limit: 0 }), "Under floor");
     const underPass = (await runAppSync({ appId: under })).passes[0]!;
     expect(underPass.warnings).toHaveLength(1);
     expect(underPass.warnings[0]).toBe('config.limit "0" is not a positive integer; using 100');
   });
 
   test("projects every documented task field onto its bound column", async () => {
-    const task = createTaskExtended("full shape", {
+    const task = await createTaskExtended("full shape", {
       agentId: OWNER_AGENT_ID,
       source: "slack",
       tags: ["alpha", "beta"],
@@ -878,7 +881,7 @@ describe("swarm-tasks source", () => {
       vcsUrl: "https://git.test/mr/77",
       vcsAuthor: "octocat",
     });
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       appWith({
         task: {
           columns: {
@@ -906,7 +909,7 @@ describe("swarm-tasks source", () => {
     const pass = (await runAppSync({ appId })).passes[0]!;
 
     expect(pass.warnings).toHaveLength(0);
-    const row = rowsOf(appId, "task", "taskKey")[0]!;
+    const row = (await rowsOf(appId, "task", "taskKey"))[0]!;
     expect(row).toMatchObject({
       taskKey: task.id,
       taskId: task.id,
@@ -933,8 +936,8 @@ describe("swarm-tasks source", () => {
       // The task text never leaves the DB layer, so nothing upstream of the
       // engine can scrub it: the cents transform fails and quotes the raw
       // value into a warning the engine itself composes.
-      createTaskExtended(`leaked ${secret}`, { agentId: OWNER_AGENT_ID });
-      const appId = createSyncApp(
+      await createTaskExtended(`leaked ${secret}`, { agentId: OWNER_AGENT_ID });
+      const appId = await createSyncApp(
         appWith({
           task: {
             columns: {
@@ -967,14 +970,14 @@ describe("swarm-tasks source", () => {
     try {
       // An unknown status token is echoed back by the engine itself — the only
       // scrub between it and the caller is the engine's own.
-      const appId = createSyncApp(taskDefinition({ status: secret }));
+      const appId = await createSyncApp(taskDefinition({ status: secret }));
 
       const result = await runAppSync({ appId });
 
       expect(result.ok).toBe(false);
       expect(result.passes[0]?.error).toContain("[REDACTED:APPS_SYNC_FIXTURE_TOKEN]");
       expect(result.passes[0]?.error).not.toContain(secret);
-      const status = getAppSyncStatus(appId, "task", "pool")!;
+      const status = (await getAppSyncStatus(appId, "task", "pool"))!;
       expect(status.error).toContain("[REDACTED:APPS_SYNC_FIXTURE_TOKEN]");
       expect(status.error).not.toContain(secret);
     } finally {
@@ -986,10 +989,10 @@ describe("swarm-tasks source", () => {
 
 describe("pair expansion", () => {
   test("fans out to every declared pair and reports unresolvable requests", async () => {
-    getDb().run("DELETE FROM agent_tasks");
-    createTaskExtended("pool task", { agentId: OWNER_AGENT_ID });
+    await getDbClient().run("DELETE FROM agent_tasks");
+    await createTaskExtended("pool task", { agentId: OWNER_AGENT_ID });
     const script = await fixtureScript("fanout", [ghRecord(1)]);
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       appWith({
         issue: {
           columns: {
@@ -1032,7 +1035,7 @@ describe("pair expansion", () => {
       message: 'unknown source "nope" on model "issue"',
     });
 
-    const sourceless = createSyncApp(
+    const sourceless = await createSyncApp(
       appWith({ issue: { columns: { issueKey: { kind: "string" } } } }),
       "Sourceless",
     );
@@ -1052,9 +1055,9 @@ describe("pair expansion", () => {
 describe("concurrency", () => {
   test("single-flight short-circuits and an interleaved operator write survives", async () => {
     const script = await fixtureScript("concurrent", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const seededRow = rowsOf(appId)[0]!;
+    const seededRow = (await rowsOf(appId))[0]!;
 
     // The pull now takes ~400ms and returns changed data for record 1.
     await script.setSource(
@@ -1085,7 +1088,7 @@ describe("concurrency", () => {
 
     // The slow pass has not finished, so the status still describes the seed
     // pass: a short-circuited trigger must never write status of its own.
-    expect(getAppSyncStatus(appId, "issue", "gh")).toMatchObject({
+    expect(await getAppSyncStatus(appId, "issue", "gh")).toMatchObject({
       ok: true,
       created: 2,
       updated: 0,
@@ -1098,7 +1101,7 @@ describe("concurrency", () => {
     const operatorWrite = patchAppRow(
       appId,
       "issue",
-      modelOf(appId, "issue"),
+      await modelOf(appId, "issue"),
       seededRow.id,
       { note: "written mid-pull" },
       { actor: "user:operator" },
@@ -1106,7 +1109,7 @@ describe("concurrency", () => {
     const operatorRow = createAppRow(
       appId,
       "issue",
-      modelOf(appId, "issue"),
+      await modelOf(appId, "issue"),
       { note: "operator only" },
       { actor: "user:operator" },
     );
@@ -1120,7 +1123,7 @@ describe("concurrency", () => {
     expect(result.ok).toBe(true);
     expect(result.passes[0]).toMatchObject({ pulled: 2, created: 0, updated: 1, refreshed: 1 });
 
-    const rows = rowsOf(appId);
+    const rows = await rowsOf(appId);
     const synced = rows.filter((row) => row.source === "gh");
     expect(synced).toHaveLength(2);
     expect(new Set(synced.map((row) => row.issueKey)).size).toBe(2);
@@ -1135,7 +1138,7 @@ describe("concurrency", () => {
     expect(unowned.stale).toBeUndefined();
 
     // The short-circuited trigger must not have overwritten the real pass state.
-    expect(getAppSyncStatus(appId, "issue", "gh")).toMatchObject({
+    expect(await getAppSyncStatus(appId, "issue", "gh")).toMatchObject({
       ok: true,
       created: 0,
       updated: 1,
@@ -1145,9 +1148,9 @@ describe("concurrency", () => {
 
   test("a definition change during the pull aborts the pass with no writes", async () => {
     const script = await fixtureScript("racy", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
@@ -1156,15 +1159,15 @@ describe("concurrency", () => {
     );
     const pass = runAppSync({ appId });
     // Drop the source while the pull is in the air.
-    updateApp(appId, {
-      definition: parsed(appWith({ issue: { columns: ownedIssueColumns() } })),
+    await updateApp(appId, {
+      definition: await parsed(appWith({ issue: { columns: ownedIssueColumns() } })),
     });
 
     const result = await pass;
 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("no longer declares source");
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("a join-key swap during the pull aborts the pass with no writes", async () => {
@@ -1173,7 +1176,7 @@ describe("concurrency", () => {
       ...columns,
       altKey: { kind: "string" },
     });
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       appWith({
         issue: { columns: withAltKey(ISSUE_COLUMNS), sources: { gh: ghSource(script.id) } },
       }),
@@ -1188,11 +1191,11 @@ describe("concurrency", () => {
     const pass = runAppSync({ appId });
     // A join key is immutable in place, so the only way to move it is
     // remove-then-re-add — both halves land while the pull is in the air.
-    updateApp(appId, {
-      definition: parsed(appWith({ issue: { columns: withAltKey(ownedIssueColumns()) } })),
+    await updateApp(appId, {
+      definition: await parsed(appWith({ issue: { columns: withAltKey(ownedIssueColumns()) } })),
     });
-    updateApp(appId, {
-      definition: parsed(
+    await updateApp(appId, {
+      definition: await parsed(
         appWith({
           issue: {
             columns: withAltKey(ISSUE_COLUMNS),
@@ -1201,55 +1204,55 @@ describe("concurrency", () => {
         }),
       ),
     });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     const result = await pass;
 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("changed while the pull was running");
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("an args swap during the pull aborts the pass with no writes", async () => {
     const script = await fixtureScript("args-drift", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
         [ghRecord(1, { title: "stale payload" })],
       )}; };`,
     );
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     const pass = runAppSync({ appId });
     // Same connector and join key, different args: the old guard missed this.
-    updateApp(appId, {
-      definition: parsed(issueDefinition(script.id, { args: { repo: "owner/other" } })),
+    await updateApp(appId, {
+      definition: await parsed(issueDefinition(script.id, { args: { repo: "owner/other" } })),
     });
 
     const result = await pass;
 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("changed while the pull was running");
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("a binding swap during the pull aborts the pass with no writes", async () => {
     const script = await fixtureScript("binding-drift", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
         [ghRecord(1, { title: "stale payload" })],
       )}; };`,
     );
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     const pass = runAppSync({ appId });
     // Rebind `title` to a different field mid-pull: the payload was projected
     // against the old rules and must not land under the new ones.
-    updateApp(appId, {
-      definition: parsed(
+    await updateApp(appId, {
+      definition: await parsed(
         appWith({
           issue: {
             columns: {
@@ -1266,7 +1269,7 @@ describe("concurrency", () => {
 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("changed while the pull was running");
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
   });
 
   test("a mid-pass write failure reports the committed churn instead of zero counts", async () => {
@@ -1274,7 +1277,7 @@ describe("concurrency", () => {
     // SECOND create after the first already committed and the pass counts
     // must say so instead of reporting the zero-count base.
     const script = await fixtureScript("partial", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const realCreate = rowStore.createAppRowUnlocked;
     let creates = 0;
@@ -1290,22 +1293,22 @@ describe("concurrency", () => {
       expect(result.ok).toBe(false);
       expect(pass.error).toContain("kv write failed (injected)");
       expect(pass).toMatchObject({ pulled: 2, created: 1 });
-      expect(rowsOf(appId).map((row) => row.issueKey)).toEqual(["1"]);
-      expect(getAppSyncStatus(appId, "issue", "gh")).toMatchObject({ ok: false, created: 1 });
+      expect((await rowsOf(appId)).map((row) => row.issueKey)).toEqual(["1"]);
+      expect(await getAppSyncStatus(appId, "issue", "gh")).toMatchObject({ ok: false, created: 1 });
     } finally {
       spy.mockRestore();
     }
   });
 
   test("single-flight is keyed per source, not per model", async () => {
-    createTaskExtended("pool work", { agentId: OWNER_AGENT_ID });
+    await createTaskExtended("pool work", { agentId: OWNER_AGENT_ID });
     const script = await fixtureScript("perSource", []);
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 400)); return ${JSON.stringify(
         [ghRecord(1)],
       )}; };`,
     );
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       appWith({
         issue: {
           columns: {
@@ -1336,7 +1339,7 @@ describe("concurrency", () => {
     expect(slowResult.passes[0]).toMatchObject({ source: "gh", created: 1, markedStale: 0 });
     // Each source sweeps only its own rows.
     expect(
-      rowsOf(appId)
+      (await rowsOf(appId))
         .filter((row) => row.source === "pool")
         .every((row) => row.stale === false),
     ).toBe(true);
@@ -1346,7 +1349,7 @@ describe("concurrency", () => {
 describe("populated-column rebind guard", () => {
   test("rebinding a populated column to another source is rejected like a fresh binding", async () => {
     const script = await fixtureScript("rebind", [ghRecord(1)]);
-    const appId = createSyncApp(
+    const appId = await createSyncApp(
       appWith({
         issue: {
           columns: { ...ISSUE_COLUMNS, taskKey: { kind: "string" } },
@@ -1358,7 +1361,7 @@ describe("populated-column rebind guard", () => {
       }),
     );
     await runAppSync({ appId, source: "gh" });
-    expect(rowsOf(appId)[0]?.title).toBe("Issue 1");
+    expect((await rowsOf(appId))[0]?.title).toBe("Issue 1");
 
     // Move title from gh to pool while a gh-written value exists: the value
     // would be stranded read-only on a row pool never reconciles.
@@ -1404,17 +1407,17 @@ describe("pass snapshot consistency", () => {
         a: { columns: { ...ISSUE_COLUMNS }, sources: { gh: ghSource(slow.id) } },
         b: { columns: { ...ISSUE_COLUMNS }, sources: { gh: ghSource(secondId) } },
       });
-    const appId = createSyncApp(definitionWith(oldScript.id));
+    const appId = await createSyncApp(definitionWith(oldScript.id));
 
     const run = runAppSync({ appId });
     // While pass "a" awaits its slow pull, repoint model b's source. Pass "b"
     // must pull the CURRENT script — pulling the selection-time one while
     // fingerprinting the fresh resolve would commit drifted data silently.
-    updateApp(appId, { definition: parsed(definitionWith(newScript.id)) });
+    await updateApp(appId, { definition: await parsed(definitionWith(newScript.id)) });
     const result = await run;
 
     expect(result.ok).toBe(true);
-    const bRows = rowsOf(appId, "b");
+    const bRows = await rowsOf(appId, "b");
     expect(bRows).toHaveLength(1);
     expect(bRows[0]?.title).toBe("from-new");
   });
@@ -1430,14 +1433,14 @@ describe("secret hygiene and sync status", () => {
       await script.setSource(
         `export default async () => { throw new Error("upstream rejected ${secret}"); };`,
       );
-      const appId = createSyncApp(issueDefinition(script.id));
+      const appId = await createSyncApp(issueDefinition(script.id));
 
       const result = await runAppSync({ appId });
 
       expect(result.ok).toBe(false);
       expect(result.passes[0]?.error).toContain("[REDACTED:APPS_SYNC_FIXTURE_TOKEN]");
       expect(result.passes[0]?.error).not.toContain(secret);
-      expect(getAppSyncStatus(appId, "issue", "gh")?.error).not.toContain(secret);
+      expect((await getAppSyncStatus(appId, "issue", "gh"))?.error).not.toContain(secret);
     } finally {
       delete process.env.APPS_SYNC_FIXTURE_TOKEN;
       refreshSecretScrubberCache();
@@ -1446,12 +1449,12 @@ describe("secret hygiene and sync status", () => {
 
   test("sync status records the last pass at the documented key", async () => {
     const script = await fixtureScript("status", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
 
-    const entry = getKv(`apps:${appId}`, "sync-status:issue:gh");
+    const entry = await getKv(`apps:${appId}`, "sync-status:issue:gh");
     expect(entry).not.toBeNull();
-    const ok = getAppSyncStatus(appId, "issue", "gh")!;
+    const ok = (await getAppSyncStatus(appId, "issue", "gh"))!;
     expect(ok).toMatchObject({ ok: true, created: 1, updated: 0, refreshed: 0, markedStale: 0 });
     expect(Object.keys(ok).sort()).toEqual([
       "created",
@@ -1469,7 +1472,7 @@ describe("secret hygiene and sync status", () => {
     await script.setSource('export default async () => { throw new Error("pull failed"); };');
     await runAppSync({ appId });
 
-    const failed = getAppSyncStatus(appId, "issue", "gh")!;
+    const failed = (await getAppSyncStatus(appId, "issue", "gh"))!;
     expect(failed.ok).toBe(false);
     expect(failed.error).toContain("pull failed");
     expect(Object.keys(failed).sort()).toEqual([
@@ -1486,7 +1489,7 @@ describe("secret hygiene and sync status", () => {
 
   test("per-source status rides the app payload once a pass has run", async () => {
     const script = await fixtureScript("payload-status", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     // No pass yet: the payload carries no syncStatus key at all.
     const before = await request<{ app: object; syncStatus?: unknown }>(`/api/apps/${appId}`);
@@ -1506,7 +1509,7 @@ describe("secret hygiene and sync status", () => {
 
   test("app-get carries sync status on both result channels", async () => {
     const script = await fixtureScript("appget-status", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
 
     const appGetTool = registeredTool(registerAppGetTool, "app-get");
@@ -1525,9 +1528,9 @@ describe("secret hygiene and sync status", () => {
 
   test("a source change invalidates the stale sync status; unrelated edits keep it", async () => {
     const script = await fixtureScript("status-invalidate", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
 
     // An unrelated definition edit keeps the pair's freshness.
     const unrelated = await request<{ app: object }>(`/api/apps/${appId}`, {
@@ -1537,7 +1540,7 @@ describe("secret hygiene and sync status", () => {
       }),
     });
     expect(unrelated.status).toBe(200);
-    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
 
     // Changing the source's args discards freshness the old config earned:
     // the status would otherwise claim a pass the new config never ran.
@@ -1548,14 +1551,14 @@ describe("secret hygiene and sync status", () => {
       }),
     });
     expect(changed.status).toBe(200);
-    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).toBeNull();
   });
 
   test("an obsolete in-flight pass cannot resurrect invalidated status", async () => {
     const script = await fixtureScript("status-race", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     await runAppSync({ appId });
-    expect(getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).not.toBeNull();
 
     await script.setSource(
       `export default async () => { await new Promise((resolve) => setTimeout(resolve, 300)); return ${JSON.stringify(
@@ -1571,13 +1574,13 @@ describe("secret hygiene and sync status", () => {
       }),
     });
     expect(changed.status).toBe(200);
-    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).toBeNull();
 
     // ...and the aborted obsolete pass must NOT write it back.
     const result = await inFlight;
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("changed while the pull was running");
-    expect(getAppSyncStatus(appId, "issue", "gh")).toBeNull();
+    expect(await getAppSyncStatus(appId, "issue", "gh")).toBeNull();
   });
 
   test("a pulled field carrying a known secret is redacted before it lands in a row", async () => {
@@ -1588,12 +1591,12 @@ describe("secret hygiene and sync status", () => {
       const script = await fixtureScript("secret-field", [
         ghRecord(1, { title: `deploy key ${secret}` }),
       ]);
-      const appId = createSyncApp(issueDefinition(script.id));
+      const appId = await createSyncApp(issueDefinition(script.id));
 
       const pass = (await runAppSync({ appId })).passes[0]!;
 
       expect(pass.error).toBeUndefined();
-      const rows = rowsOf(appId);
+      const rows = await rowsOf(appId);
       expect(rows[0]?.title).toBe("deploy key [REDACTED:APPS_SYNC_FIXTURE_TOKEN]");
       expect(JSON.stringify(rows)).not.toContain(secret);
     } finally {
@@ -1609,9 +1612,9 @@ describe("secret hygiene and sync status", () => {
     try {
       // 990 filler chars put the secret across the 1000-char cap: truncating
       // first would strand an unrecognizable 10-char prefix in the row.
-      getDb().run("DELETE FROM agent_tasks");
-      createTaskExtended("x".repeat(990) + secret, { agentId: OWNER_AGENT_ID });
-      const appId = createSyncApp(
+      await getDbClient().run("DELETE FROM agent_tasks");
+      await createTaskExtended("x".repeat(990) + secret, { agentId: OWNER_AGENT_ID });
+      const appId = await createSyncApp(
         appWith({
           task: {
             columns: {
@@ -1625,7 +1628,7 @@ describe("secret hygiene and sync status", () => {
 
       await runAppSync({ appId });
 
-      const prompt = String(rowsOf(appId, "task", "taskKey")[0]?.prompt);
+      const prompt = String((await rowsOf(appId, "task", "taskKey"))[0]?.prompt);
       expect(prompt).toHaveLength(1000);
       expect(prompt).toContain("[REDACTED");
       expect(prompt).not.toContain(secret.slice(0, 12));
@@ -1645,7 +1648,7 @@ describe("secret hygiene and sync status", () => {
       await script.setSource(
         `export default async () => { console.error("${"x".repeat(480)}" + ${JSON.stringify(secret)}); process.exit(2); };`,
       );
-      const appId = createSyncApp(issueDefinition(script.id));
+      const appId = await createSyncApp(issueDefinition(script.id));
 
       const result = await runAppSync({ appId });
 
@@ -1674,7 +1677,7 @@ const mutableLegacyPolicy = LEGACY_POLICY as unknown as Record<"app.use", Legacy
 describe("HTTP POST /api/apps/{id}/sync", () => {
   test("runs every declared pair and answers {ok, passes}", async () => {
     const script = await fixtureScript("http-sync", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const response = await request<SyncBody>(`/api/apps/${appId}/sync`, {
       method: "POST",
@@ -1692,7 +1695,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
       created: 2,
       invokedBy: "operator",
     });
-    const rows = rowsOf(appId);
+    const rows = await rowsOf(appId);
     expect(rows.map((row) => row.issueKey)).toEqual(["1", "2"]);
     expect(rows[0]).toMatchObject({ source: "gh", stale: false, title: "Issue 1" });
     expect(typeof rows[0]?.syncedAt).toBe("string");
@@ -1700,7 +1703,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
 
   test("narrows to one pair when the body names model and source", async () => {
     const script = await fixtureScript("http-sync-narrow", [ghRecord(9)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const response = await request<SyncBody>(`/api/apps/${appId}/sync`, {
       method: "POST",
@@ -1709,7 +1712,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
 
     expect(response.status).toBe(200);
     expect(response.body.passes).toHaveLength(1);
-    expect(rowsOf(appId)).toHaveLength(1);
+    expect(await rowsOf(appId)).toHaveLength(1);
   });
 
   test("404s for an unknown app", async () => {
@@ -1724,8 +1727,8 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
 
   test("400s with path-bearing issues when nothing matches", async () => {
     const script = await fixtureScript("http-sync-nopair", []);
-    const withSource = createSyncApp(issueDefinition(script.id));
-    const sourceless = createSyncApp(
+    const withSource = await createSyncApp(issueDefinition(script.id));
+    const sourceless = await createSyncApp(
       appWith({ issue: { columns: ownedIssueColumns() } }),
       "Sourceless app",
     );
@@ -1758,7 +1761,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
 
   test("403s and never pulls when app.use is denied", async () => {
     const script = await fixtureScript("http-sync-denied", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
     const original = mutableLegacyPolicy["app.use"];
     mutableLegacyPolicy["app.use"] = { ...original, evaluate: () => false };
     try {
@@ -1770,12 +1773,12 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     } finally {
       mutableLegacyPolicy["app.use"] = original;
     }
-    expect(rowsOf(appId)).toHaveLength(0);
+    expect(await rowsOf(appId)).toHaveLength(0);
   });
 
   test("accepts a request with no body at all", async () => {
     const script = await fixtureScript("http-sync-bodyless", [ghRecord(1)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     // No Content-Type, no payload — parseBody must yield {} rather than throw.
     const response = await fetch(`${base}/api/apps/${appId}/sync`, {
@@ -1787,13 +1790,13 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.passes).toHaveLength(1);
-    expect(rowsOf(appId)).toHaveLength(1);
+    expect(await rowsOf(appId)).toHaveLength(1);
   });
 
   test("answers 200 with ok:false when a pass fails", async () => {
     const script = await fixtureScript("http-sync-passfail", []);
     await script.setSource('export default async () => { throw new Error("door pull failed"); };');
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const response = await request<SyncBody & { taskId?: string }>(`/api/apps/${appId}/sync`, {
       method: "POST",
@@ -1807,7 +1810,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     expect(response.body.passes).toHaveLength(1);
     expect(response.body.passes?.[0]?.error).toContain("door pull failed");
     expect(Object.hasOwn(response.body, "taskId")).toBe(false);
-    expect(rowsOf(appId)).toHaveLength(0);
+    expect(await rowsOf(appId)).toHaveLength(0);
   });
 });
 
@@ -1816,7 +1819,7 @@ describe("sync action kind", () => {
     const script = await fixtureScript("action-sync", [ghRecord(1)]);
     const definition = issueDefinition(script.id);
     (definition as { actions?: unknown }).actions = { refresh: { kind: "sync" } };
-    const appId = createSyncApp(definition);
+    const appId = await createSyncApp(definition);
 
     const response = await request<{
       ok: boolean;
@@ -1841,7 +1844,7 @@ describe("sync action kind", () => {
       created: 1,
     });
     expect(typeof response.body.durationMs).toBe("number");
-    expect(rowsOf(appId)).toHaveLength(1);
+    expect(await rowsOf(appId)).toHaveLength(1);
   });
 
   test("reports a failed pass as ok:false plus a named error, still without taskId", async () => {
@@ -1851,7 +1854,7 @@ describe("sync action kind", () => {
     (definition as { actions?: unknown }).actions = {
       refresh: { kind: "sync", model: "issue", source: "gh" },
     };
-    const appId = createSyncApp(definition);
+    const appId = await createSyncApp(definition);
 
     const response = await request<{
       ok: boolean;
@@ -1875,15 +1878,15 @@ describe("sync action kind", () => {
     const script = await fixtureScript("action-sync-detached", [ghRecord(1)]);
     const definition = issueDefinition(script.id);
     (definition as { actions?: unknown }).actions = { refresh: { kind: "sync" } };
-    const appId = createSyncApp(definition);
+    const appId = await createSyncApp(definition);
     // Drop the source behind the action's back — the stored action stays valid.
-    const app = getApp(appId)!;
+    const app = (await getApp(appId))!;
     const models = structuredClone(app.definition.models) as Record<string, ModelDef>;
     delete models.issue?.sources;
     for (const column of Object.values(models.issue?.columns ?? {})) {
       delete (column as { source?: unknown }).source;
     }
-    updateApp(appId, { definition: { ...app.definition, models } });
+    await updateApp(appId, { definition: { ...app.definition, models } });
 
     const response = await request<SyncBody>(`/api/apps/${appId}/actions/refresh`, {
       method: "POST",
@@ -1900,7 +1903,7 @@ describe("sync action kind", () => {
 describe("app-sync MCP tool", () => {
   test("returns a rendered pass table and the result object", async () => {
     const script = await fixtureScript("mcp-sync", [ghRecord(1), ghRecord(2)]);
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const result = (await syncTool.handler({ appId }, toolMeta())) as StructuredResult<{
       success: boolean;
@@ -1923,13 +1926,13 @@ describe("app-sync MCP tool", () => {
     expect(result.structuredContent.message).toContain("2 created");
     expect(result.structuredContent.details).toContain("| model | source |");
     expect(result.structuredContent.details).toContain("| issue | gh |");
-    expect(rowsOf(appId)).toHaveLength(2);
+    expect(await rowsOf(appId)).toHaveLength(2);
   });
 
   test("is an error result when a pass fails or nothing matches", async () => {
     const script = await fixtureScript("mcp-sync-fail", []);
     await script.setSource('export default async () => { throw new Error("mcp pull failed"); };');
-    const appId = createSyncApp(issueDefinition(script.id));
+    const appId = await createSyncApp(issueDefinition(script.id));
 
     const failed = (await syncTool.handler({ appId }, toolMeta())) as StructuredResult<{
       success: boolean;
@@ -1980,7 +1983,7 @@ describe("script delete guard", () => {
   test("409s naming the app and the source path", async () => {
     const name = scriptName("guard-source");
     const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
-    const appId = createSyncApp(guardDefinition(scriptId), "Guarded app");
+    const appId = await createSyncApp(guardDefinition(scriptId), "Guarded app");
 
     const blocked = await deleteScriptByName(name);
 
@@ -1992,7 +1995,7 @@ describe("script delete guard", () => {
         message: `app "Guarded app" (${appId}) uses this script at models.issue.sources.gh`,
       },
     ]);
-    expect(getApp(appId)).not.toBeNull();
+    expect(await getApp(appId)).not.toBeNull();
   });
 
   test("409s when only a script action references it", async () => {
@@ -2000,7 +2003,7 @@ describe("script delete guard", () => {
     const scriptId = await saveScript({ name, source: "export default async () => ({});" });
     const definition = appWith({ issue: { columns: { note: { kind: "string" } } } });
     (definition as { actions?: unknown }).actions = { run: { kind: "script", scriptId } };
-    const appId = createSyncApp(definition, "Action app");
+    const appId = await createSyncApp(definition, "Action app");
 
     const blocked = await deleteScriptByName(name);
 
@@ -2016,13 +2019,13 @@ describe("script delete guard", () => {
   test("blocks on a broken definition that still names the script", async () => {
     const name = scriptName("guard-broken");
     const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
-    const appId = createSyncApp(guardDefinition(scriptId), "Broken app");
+    const appId = await createSyncApp(guardDefinition(scriptId), "Broken app");
     // Corrupt the stored definition the way a bad hand-edit would.
-    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", [
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
       JSON.stringify({ models: { issue: { sources: { gh: { scriptId } } } }, oops: true }),
       appId,
     ]);
-    expect(getApp(appId)?.definitionError).toBeDefined();
+    expect((await getApp(appId))?.definitionError).toBeDefined();
 
     const blocked = await deleteScriptByName(name);
 
@@ -2035,11 +2038,14 @@ describe("script delete guard", () => {
   test("blocks on an unparseable definition that still contains the id", async () => {
     const name = scriptName("guard-nonjson");
     const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
-    const appId = createSyncApp(guardDefinition(scriptId), "Unparseable app");
+    const appId = await createSyncApp(guardDefinition(scriptId), "Unparseable app");
     // Not JSON at all: decodeApp cannot even parse it, so the tolerant
     // collector yields nothing and only the raw probe can see the reference.
-    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", [`{not json ${scriptId}`, appId]);
-    expect(getApp(appId)?.definitionError?.[0]?.message).toContain("invalid stored JSON");
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      `{not json ${scriptId}`,
+      appId,
+    ]);
+    expect((await getApp(appId))?.definitionError?.[0]?.message).toContain("invalid stored JSON");
 
     const blocked = await deleteScriptByName(name);
 
@@ -2055,7 +2061,7 @@ describe("script delete guard", () => {
   test("the script-delete MCP tool carries the blocking apps in its text channel", async () => {
     const name = scriptName("guard-mcp");
     const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
-    const appId = createSyncApp(guardDefinition(scriptId), "MCP guarded app");
+    const appId = await createSyncApp(guardDefinition(scriptId), "MCP guarded app");
 
     const result = (await scriptDeleteTool.handler(
       { name, scope: "global" },
@@ -2070,13 +2076,13 @@ describe("script delete guard", () => {
     );
     // Both channels stay consistent — the text channel must carry it too.
     expect(JSON.stringify(result.content)).toContain("models.issue.sources.gh");
-    expect(getApp(appId)).not.toBeNull();
+    expect(await getApp(appId)).not.toBeNull();
   });
 
   test("succeeds once the source is removed via PATCH", async () => {
     const name = scriptName("guard-removable");
     const scriptId = await saveScript({ name, source: "export default async () => ([]);" });
-    const appId = createSyncApp(guardDefinition(scriptId), "Removable app");
+    const appId = await createSyncApp(guardDefinition(scriptId), "Removable app");
 
     expect((await deleteScriptByName(name)).status).toBe(409);
 
@@ -2294,14 +2300,14 @@ describe("github-issues-pull", () => {
 
 describe("apps-sync catalog registration", () => {
   for (const name of ["github-issues-pull", "app-sync-run"]) {
-    test(`${name} is registered and typechecks against the live SDK`, () => {
+    test(`${name} is registered and typechecks against the live SDK`, async () => {
       const entry = SEED_SCRIPTS.find((script) => script.name === name);
       expect(entry).toBeDefined();
       expect(entry?.description.length).toBeGreaterThan(0);
       expect(entry?.intent.length).toBeGreaterThan(0);
 
       expect(validateScriptImports(entry?.source ?? "").ok).toBe(true);
-      const typecheck = typecheckScript(entry?.source ?? "");
+      const typecheck = await typecheckScript(entry?.source ?? "");
       expect(typecheck.ok ? [] : typecheck.diagnostics).toEqual([]);
     });
   }
@@ -2437,7 +2443,9 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
   test("a successful pull creates rows from the fixture's page", async () => {
     nextPage = () => [ghApiIssue(1), ghApiPull(2), ghApiIssue(3)];
     const scriptId = await saveScript({ name: scriptName("fixture-ok"), source: fixtureSource() });
-    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+    const appId = await createSyncApp(
+      fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }),
+    );
 
     const pass = (await runAppSync({ appId })).passes[0]!;
 
@@ -2445,7 +2453,7 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
     expect(pass).toMatchObject({ pulled: 2, created: 2 });
     expect(pass.staleSweepSkipped).toBeUndefined();
     expect(seen?.path).toBe("/repos/owner/name/issues?state=open&per_page=100");
-    const rows = rowsOf(appId);
+    const rows = await rowsOf(appId);
     expect(rows.map((row) => row.issueKey)).toEqual(["1", "3"]);
     expect(rows[0]).toMatchObject({
       issueKey: "1",
@@ -2462,7 +2470,9 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
       name: scriptName("fixture-page"),
       source: fixtureSource(),
     });
-    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 2 }));
+    const appId = await createSyncApp(
+      fixtureDefinition(scriptId, { repo: "owner/name", limit: 2 }),
+    );
 
     nextPage = () => [ghApiIssue(10)];
     const first = (await runAppSync({ appId })).passes[0]!;
@@ -2482,16 +2492,18 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
     });
     expect(second.warnings.some((warning) => warning.includes("stale sweep skipped"))).toBe(true);
     // The row the incomplete window never saw must survive.
-    expect(rowsOf(appId).find((row) => row.issueKey === "10")?.stale).toBe(false);
+    expect((await rowsOf(appId)).find((row) => row.issueKey === "10")?.stale).toBe(false);
   });
 
   test("a fetch that outlives its timeout fails the pass with zero row churn", async () => {
     const name = scriptName("fixture-timeout");
     const scriptId = await saveScript({ name, source: fixtureSource() });
-    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+    const appId = await createSyncApp(
+      fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }),
+    );
     nextPage = () => [ghApiIssue(30)];
     await runAppSync({ appId });
-    const before = rowSnapshot(appId);
+    const before = await rowSnapshot(appId);
 
     // Bare fetch, not ctx.stdlib.fetch: the stdlib wrapper retries three times,
     // so an external abort there costs three stalled attempts instead of one.
@@ -2507,7 +2519,7 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
     expect(result.ok).toBe(false);
     expect(result.passes[0]?.error).toContain("TimeoutError");
     expect(result.passes[0]).toMatchObject({ pulled: 0, created: 0, updated: 0, markedStale: 0 });
-    expect(rowSnapshot(appId)).toBe(before);
+    expect(await rowSnapshot(appId)).toBe(before);
     releaseStall?.();
   });
 
@@ -2525,16 +2537,20 @@ describe("a sync source against a dummy GitHub through the real sandbox", () => 
       name: scriptName("fixture-auth"),
       source: fixtureSource(),
     });
-    const appId = createSyncApp(fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }));
+    const appId = await createSyncApp(
+      fixtureDefinition(scriptId, { repo: "owner/name", limit: 100 }),
+    );
 
     const result = await runAppSync({ appId });
 
     // The fixture host is not allowlisted for the binding, so the placeholder
     // header is DROPPED before egress: no auth reaches it — never the token.
     expect(seen?.authorization ?? null).toBeNull();
-    expect(rowsOf(appId)[0]?.title ?? null).toBeNull();
-    expect(JSON.stringify(rowsOf(appId))).not.toContain(FIXTURE_TOKEN);
+    expect((await rowsOf(appId))[0]?.title ?? null).toBeNull();
+    expect(JSON.stringify(await rowsOf(appId))).not.toContain(FIXTURE_TOKEN);
     expect(JSON.stringify(result)).not.toContain(FIXTURE_TOKEN);
-    expect(JSON.stringify(getAppSyncStatus(appId, "issue", "gh"))).not.toContain(FIXTURE_TOKEN);
+    expect(JSON.stringify(await getAppSyncStatus(appId, "issue", "gh"))).not.toContain(
+      FIXTURE_TOKEN,
+    );
   });
 });

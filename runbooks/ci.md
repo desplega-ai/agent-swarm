@@ -22,8 +22,8 @@ CI detects what changed and runs the matching jobs:
 
 | Job | Local equivalent | Common failure |
 |---|---|---|
-| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun run check:dep-graph` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); or a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason |
-| **Run Tests** | `bun run test:root` | New test or test that depends on undocumented setup |
+| **Lint and Type Check** | `bun run lint && bun run tsc:check && bash scripts/check-db-boundary.sh && bash scripts/check-api-key-boundary.sh && bash scripts/check-rbac-boundary.sh && bash scripts/check-audit-columns.sh && bun run check:dep-graph && bun run check:bun-version` | Worker code imported `bun:sqlite` or `src/be/db` — DB boundary violation (grep + dependency-cruiser graph rules); an inline `isLead` authz check in `src/tools/`/`src/http/` — RBAC boundary violation (use `can()` from `src/rbac/`); a new table without `created_by`/`updated_by` — add the columns or list the table in `.non-audit-tables` with a reason; or a Dockerfile `FROM oven/bun:<tag>` that does not match `package.json` `packageManager` |
+| **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
@@ -50,7 +50,8 @@ Run this from the repo root before every push. It mirrors merge-gate exactly for
 bun install --frozen-lockfile
 bun run lint            # NOT lint:fix — CI fails on warnings, not just errors
 bun run tsc:check
-bun run test:root
+bun run test:root -- --parallel=4          # CI splits this into --shard=1/2 and --shard=2/2
+bun run check:bun-version
 bash scripts/check-db-boundary.sh
 bash scripts/check-api-key-boundary.sh
 bash scripts/check-rbac-boundary.sh
@@ -91,6 +92,12 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 9. **Docker build cache mismatch.** Local Docker pulled a cached layer that CI doesn't have. Run `docker build --no-cache -f Dockerfile.worker .` if a clean local build is suspicious.
 10. **Audit-column failure.** You added a migration creating a table without `created_by`/`updated_by` (`scripts/check-audit-columns.sh`). Add the columns, or register the table in `.non-audit-tables` with a comment naming where attribution actually lives.
 11. **Tool classification failure.** You registered a new MCP tool without adding it to `CORE_TOOLS`/`DEFERRED_TOOLS` in `src/tools/tool-config.ts` (`src/tests/tool-annotations.test.ts` fails in `test:root`).
+12. **Bun version pin drift.** You bumped `packageManager` in `package.json` (or one Dockerfile) without the others. `bun run check:bun-version` lists every pin that disagrees: `Dockerfile`, `Dockerfile.worker` (builder `FROM` + the runtime `bun.sh/install` pin), `apps/evals/Dockerfile`. CI installs whatever `packageManager` says (`setup-bun` with `bun-version-file: package.json`), so the pin IS the CI version.
+13. **Test port collision under `--parallel`.** A test bound a literal port and another file in the same shard bound the same one; the loser reports `Server did not start within 60000ms` or `EADDRINUSE`. Use `listenOnFreePort()` / `getFreePort()` from `src/tests/test-net.ts`.
+
+## Bun version
+
+`package.json` `packageManager` is the single source of truth. Bump it, then `bun run check:bun-version` tells you which Dockerfile pins to update; run `bun install --frozen-lockfile` on the new runtime to confirm it still accepts `bun.lock` (a lockfile-format change would surface here) and commit everything together. CI and the Docker images run exactly that version. `engines.bun` stays at the runtime floor the shipped CLI needs (`>=1.3.12`, text imports); `bun test --timings` / `--update-timings` and `bun pm licenses` are 1.4-only and only run in CI.
 
 ## Lockfile discipline
 
@@ -99,6 +106,10 @@ CI uses `bun install --frozen-lockfile`. A single root install now covers `apps/
 - **Adding/upgrading a dep:** run `bun install <pkg>` (in the relevant workspace dir), then commit BOTH `package.json` AND the root `bun.lock`.
 - **Cloning fresh / switching branches:** run `bun install --frozen-lockfile` to mirror CI. If it errors, the lockfile is stale — `bun install` (without `--frozen-lockfile`) and commit the result.
 - **Never edit lockfiles by hand.**
+- **Lockfile format:** `bun.lock` stays `lockfileVersion: 1`. Bun 1.4 writes v2 only for NEW lockfiles and keeps an existing v1 file as v1 on every write (verified: `bun add` + `bun remove` on 1.4.0 leaves the header untouched), and 1.4 reads v1 without complaint. Do not delete the lockfile to force v2: a fresh resolve bumps dependency versions. Nested or version-scoped `overrides` would move it to v3, which Bun < 1.4 cannot read.
+- **Security fixes:** `bun audit` lists known-vulnerable versions in the lockfile and `bun audit fix` rewrites `bun.lock` to the nearest patched versions inside the declared ranges. Run it on a branch, then commit `bun.lock` like any other dep change.
+- **Duplicate versions:** `bun dedupe --check` exits 1 when the lockfile holds removable duplicate versions (31 today: `zod`, `openai`, `@biomejs/biome`, ...). It is **not** in the gate because `bun dedupe` re-resolves ranges and can move tool versions (Biome among them); run it deliberately in its own PR and review the diff.
+- **Third-party licenses:** every GitHub release attaches `third-party-licenses.json` (`bun pm licenses --prod --json` from the `create-release` job).
 
 ## docs-site / templates-ui
 

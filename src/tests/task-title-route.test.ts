@@ -46,7 +46,8 @@ async function api(
 
 beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "task-title-route-worker", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "task-title-route-worker", isLead: false, status: "idle" }))
+    .id;
 
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -67,7 +68,7 @@ afterAll(async () => {
 
 describe("PATCH /api/tasks/{id}/title", () => {
   test("sets a title and returns the updated task", async () => {
-    const task = createTaskExtended("some session prompt", { agentId });
+    const task = await createTaskExtended("some session prompt", { agentId });
 
     const res = await api("PATCH", `/api/tasks/${task.id}/title`, { title: "My renamed session" });
     expect(res.status).toBe(200);
@@ -76,7 +77,7 @@ describe("PATCH /api/tasks/{id}/title", () => {
   });
 
   test("empty string clears the title", async () => {
-    const task = createTaskExtended("another session prompt", { agentId });
+    const task = await createTaskExtended("another session prompt", { agentId });
     await api("PATCH", `/api/tasks/${task.id}/title`, { title: "Temporary title" });
 
     const cleared = await api("PATCH", `/api/tasks/${task.id}/title`, { title: "" });
@@ -85,7 +86,7 @@ describe("PATCH /api/tasks/{id}/title", () => {
   });
 
   test("null clears the title", async () => {
-    const task = createTaskExtended("yet another session prompt", { agentId });
+    const task = await createTaskExtended("yet another session prompt", { agentId });
     await api("PATCH", `/api/tasks/${task.id}/title`, { title: "Temporary title" });
 
     const cleared = await api("PATCH", `/api/tasks/${task.id}/title`, { title: null });
@@ -99,7 +100,7 @@ describe("PATCH /api/tasks/{id}/title", () => {
   });
 
   test("title over 120 chars is rejected", async () => {
-    const task = createTaskExtended("long title test prompt", { agentId });
+    const task = await createTaskExtended("long title test prompt", { agentId });
     const res = await api("PATCH", `/api/tasks/${task.id}/title`, { title: "x".repeat(121) });
     expect(res.status).toBe(400);
   });

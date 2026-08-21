@@ -21,8 +21,8 @@ afterAll(() => {
 });
 
 describe("calculateNextRun", () => {
-  test("calculates next run with cron expression", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with cron expression", async () => {
+    const schedule = await createScheduledTask({
       name: "test-cron-1",
       taskTemplate: "Test task",
       cronExpression: "0 9 * * *", // Daily at 9 AM
@@ -37,8 +37,8 @@ describe("calculateNextRun", () => {
     expect(nextRun).toBe("2026-01-15T09:00:00.000Z");
   });
 
-  test("calculates next run with cron expression crossing day", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with cron expression crossing day", async () => {
+    const schedule = await createScheduledTask({
       name: "test-cron-2",
       taskTemplate: "Test task",
       cronExpression: "0 9 * * *", // Daily at 9 AM
@@ -53,8 +53,8 @@ describe("calculateNextRun", () => {
     expect(nextRun).toBe("2026-01-16T09:00:00.000Z");
   });
 
-  test("calculates next run with interval", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with interval", async () => {
+    const schedule = await createScheduledTask({
       name: "test-interval-1",
       taskTemplate: "Test task",
       intervalMs: 3600000, // 1 hour
@@ -67,8 +67,8 @@ describe("calculateNextRun", () => {
     expect(nextRun).toBe("2026-01-15T09:00:00.000Z");
   });
 
-  test("calculates next run with small interval", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with small interval", async () => {
+    const schedule = await createScheduledTask({
       name: "test-interval-2",
       taskTemplate: "Test task",
       intervalMs: 60000, // 1 minute
@@ -81,8 +81,8 @@ describe("calculateNextRun", () => {
     expect(nextRun).toBe("2026-01-15T08:31:00.000Z");
   });
 
-  test("calculates next run with timezone", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with timezone", async () => {
+    const schedule = await createScheduledTask({
       name: "test-tz-1",
       taskTemplate: "Test task",
       cronExpression: "0 9 * * *", // 9 AM in specified timezone
@@ -120,8 +120,8 @@ describe("calculateNextRun", () => {
     );
   });
 
-  test("calculates next run with every-minute cron", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with every-minute cron", async () => {
+    const schedule = await createScheduledTask({
       name: "test-cron-every-minute",
       taskTemplate: "Test task",
       cronExpression: "* * * * *", // Every minute
@@ -135,8 +135,8 @@ describe("calculateNextRun", () => {
     expect(nextRun).toBe("2026-01-15T08:31:00.000Z");
   });
 
-  test("calculates next run with weekly cron", () => {
-    const schedule = createScheduledTask({
+  test("calculates next run with weekly cron", async () => {
+    const schedule = await createScheduledTask({
       name: "test-cron-weekly",
       taskTemplate: "Test task",
       cronExpression: "0 9 * * 1", // Every Monday at 9 AM
@@ -153,8 +153,8 @@ describe("calculateNextRun", () => {
 });
 
 describe("createStandaloneScheduleTask", () => {
-  test("passes the schedule's parentTaskId through to the created task", () => {
-    const agent = createAgent({
+  test("passes the schedule's parentTaskId through to the created task", async () => {
+    const agent = await createAgent({
       name: "Deferred Wake-up Worker",
       description: "Agent that owns the deferred task",
       role: "worker",
@@ -163,12 +163,12 @@ describe("createStandaloneScheduleTask", () => {
       maxTasks: 1,
       capabilities: [],
     });
-    const parent = createTaskExtended("original work that needed time", {
+    const parent = await createTaskExtended("original work that needed time", {
       agentId: agent.id,
       source: "mcp",
     });
 
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: "test-deferred-parent",
       taskTemplate: `Resume task ${parent.id}: the deploy should be green now`,
       scheduleType: "one_time",
@@ -180,21 +180,21 @@ describe("createStandaloneScheduleTask", () => {
       parentTaskId: parent.id,
     });
 
-    const task = createStandaloneScheduleTask(schedule);
+    const task = await createStandaloneScheduleTask(schedule);
     expect(task.parentTaskId).toBe(parent.id);
     expect(task.taskType).toBe("deferred");
     expect(task.tags).toContain("deferred");
   });
 
-  test("a schedule without parentTaskId creates a parentless task", () => {
-    const schedule = createScheduledTask({
+  test("a schedule without parentTaskId creates a parentless task", async () => {
+    const schedule = await createScheduledTask({
       name: "test-no-parent",
       taskTemplate: "Ordinary scheduled work",
       cronExpression: "0 9 * * *",
       timezone: "UTC",
     });
 
-    const task = createStandaloneScheduleTask(schedule);
+    const task = await createStandaloneScheduleTask(schedule);
     expect(task.parentTaskId).toBeFalsy();
   });
 });

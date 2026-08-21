@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { computeRrfScore, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
 const TEST_DB_PATH = "./test-memory-hybrid.sqlite";
@@ -58,7 +58,7 @@ describe("memory hybrid search", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Hybrid Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Hybrid Test Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 
@@ -73,8 +73,8 @@ describe("memory hybrid search", () => {
     }
   });
 
-  test("syncs FTS rows on store and delete", () => {
-    const memory = store.store({
+  test("syncs FTS rows on store and delete", async () => {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name: "lexical row",
@@ -82,41 +82,43 @@ describe("memory hybrid search", () => {
       source: "manual",
     });
 
-    const inserted = getDb()
-      .prepare<{ count: number }, [string]>(
+    const inserted = (
+      await getDbClient().get<{ count: number }>(
         "SELECT COUNT(*) AS count FROM memory_fts WHERE memory_id = ?",
+        [memory.id],
       )
-      .get(memory.id)?.count;
+    )?.count;
     expect(inserted).toBe(1);
 
-    store.delete(memory.id);
-    const deleted = getDb()
-      .prepare<{ count: number }, [string]>(
+    await store.delete(memory.id);
+    const deleted = (
+      await getDbClient().get<{ count: number }>(
         "SELECT COUNT(*) AS count FROM memory_fts WHERE memory_id = ?",
+        [memory.id],
       )
-      .get(memory.id)?.count;
+    )?.count;
     expect(deleted).toBe(0);
   });
 
-  test("uses keyword arm for exact terms and dedupes fused results", () => {
-    const exact = store.store({
+  test("uses keyword arm for exact terms and dedupes fused results", async () => {
+    const exact = await store.store({
       agentId,
       scope: "agent",
       name: "runbook",
       content: "The incident codeword is quasarneedle.",
       source: "manual",
     });
-    const semantic = store.store({
+    const semantic = await store.store({
       agentId,
       scope: "agent",
       name: "general note",
       content: "A generic operational note.",
       source: "manual",
     });
-    store.updateEmbedding(exact.id, vector(1), "test");
-    store.updateEmbedding(semantic.id, vector(1), "test");
+    await store.updateEmbedding(exact.id, vector(1), "test");
+    await store.updateEmbedding(semantic.id, vector(1), "test");
 
-    const results = store.search(vector(1), agentId, {
+    const results = await store.search(vector(1), agentId, {
       scope: "agent",
       limit: 10,
       queryText: "quasarneedle",
@@ -128,25 +130,25 @@ describe("memory hybrid search", () => {
     expect(results.find((result) => result.id === semantic.id)?.retrievalSource).toBe("vec");
   });
 
-  test("hybrid RRF compounds memories present in both vector and FTS arms", () => {
-    const both = store.store({
+  test("hybrid RRF compounds memories present in both vector and FTS arms", async () => {
+    const both = await store.store({
       agentId,
       scope: "agent",
       name: "compound exact",
       content: "The exact compound marker is rrfneedle.",
       source: "manual",
     });
-    const vectorOnly = store.store({
+    const vectorOnly = await store.store({
       agentId,
       scope: "agent",
       name: "compound semantic",
       content: "A semantic-only note.",
       source: "manual",
     });
-    store.updateEmbedding(both.id, vector(1), "test");
-    store.updateEmbedding(vectorOnly.id, vector(1), "test");
+    await store.updateEmbedding(both.id, vector(1), "test");
+    await store.updateEmbedding(vectorOnly.id, vector(1), "test");
 
-    const results = store.search(vector(1), agentId, {
+    const results = await store.search(vector(1), agentId, {
       scope: "agent",
       limit: 10,
       queryText: "rrfneedle",
@@ -159,8 +161,8 @@ describe("memory hybrid search", () => {
     expect(bothResult!.similarity).toBeGreaterThan(vectorOnlyResult!.similarity);
   });
 
-  test("falls back to keyword-only search when vector query is unavailable", () => {
-    const exact = store.store({
+  test("falls back to keyword-only search when vector query is unavailable", async () => {
+    const exact = await store.store({
       agentId,
       scope: "agent",
       name: "keyword fallback",
@@ -168,7 +170,7 @@ describe("memory hybrid search", () => {
       source: "manual",
     });
 
-    const results = store.search(new Float32Array(0), agentId, {
+    const results = await store.search(new Float32Array(0), agentId, {
       scope: "agent",
       limit: 5,
       queryText: "lexiconneedle",
@@ -178,26 +180,27 @@ describe("memory hybrid search", () => {
     expect(results.find((result) => result.id === exact.id)?.retrievalSource).toBe("fts");
   });
 
-  test("applies source-aware recency decay to FTS-only ranking", () => {
-    const stale = store.store({
+  test("applies source-aware recency decay to FTS-only ranking", async () => {
+    const stale = await store.store({
       agentId,
       scope: "agent",
       name: "stale keyword",
       content: "The decay marker is decayneedle.",
       source: "task_completion",
     });
-    const fresh = store.store({
+    const fresh = await store.store({
       agentId,
       scope: "agent",
       name: "fresh keyword",
       content: "The decay marker is decayneedle.",
       source: "task_completion",
     });
-    getDb()
-      .prepare("UPDATE agent_memory SET createdAt = ? WHERE id = ?")
-      .run(new Date(Date.now() - 60 * 86400000).toISOString(), stale.id);
+    await getDbClient().run("UPDATE agent_memory SET createdAt = ? WHERE id = ?", [
+      new Date(Date.now() - 60 * 86400000).toISOString(),
+      stale.id,
+    ]);
 
-    const results = store.search(new Float32Array(0), agentId, {
+    const results = await store.search(new Float32Array(0), agentId, {
       scope: "agent",
       limit: 10,
       queryText: "decayneedle",

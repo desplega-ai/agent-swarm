@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlinkSync } from "node:fs";
-import { closeDb, createUser, getDb, getKv, initDb } from "../be/db";
+import { closeDb, createUser, getDbClient, getKv, initDb } from "../be/db";
 import * as usersModule from "../be/users";
 import {
   findUserByExternalId,
@@ -97,35 +97,34 @@ afterAll(() => {
   cleanupDb();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Wipe state between tests — full isolation. Identity-related tables only;
   // leave the schema and seeded singletons untouched.
-  const db = getDb();
-  db.exec("DELETE FROM user_identity_events");
-  db.exec("DELETE FROM user_external_ids");
-  db.exec("DELETE FROM users");
-  db.exec("DELETE FROM kv_entries WHERE namespace LIKE 'integration:%'");
+  const db = getDbClient();
+  await db.run("DELETE FROM user_identity_events");
+  await db.run("DELETE FROM user_external_ids");
+  await db.run("DELETE FROM users");
+  await db.run("DELETE FROM kv_entries WHERE namespace LIKE 'integration:%'");
 });
 
-function countUsers(): number {
-  return getDb().prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM users").get()?.n ?? 0;
+async function countUsers(): Promise<number> {
+  return (await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM users"))?.n ?? 0;
 }
 
-function externalIdRows(): Array<{ kind: string; externalId: string; userId: string }> {
-  return getDb()
-    .prepare<{ kind: string; externalId: string; userId: string }, []>(
-      "SELECT kind, externalId, userId FROM user_external_ids ORDER BY kind, externalId",
-    )
-    .all();
+async function externalIdRows(): Promise<
+  Array<{ kind: string; externalId: string; userId: string }>
+> {
+  return getDbClient().query<{ kind: string; externalId: string; userId: string }>(
+    "SELECT kind, externalId, userId FROM user_external_ids ORDER BY kind, externalId",
+  );
 }
 
-function identityEventTypes(userId: string): string[] {
-  return getDb()
-    .prepare<{ eventType: string }, string>(
-      "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
-    )
-    .all(userId)
-    .map((r) => r.eventType);
+async function identityEventTypes(userId: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ eventType: string }>(
+    "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY createdAt ASC, rowid ASC",
+    [userId],
+  );
+  return rows.map((r) => r.eventType);
 }
 
 // ---------------------------------------------------------------------------
@@ -149,13 +148,13 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(userId).toBeDefined();
-    expect(countUsers()).toBe(1);
+    expect(await countUsers()).toBe(1);
 
-    const ext = externalIdRows();
+    const ext = await externalIdRows();
     expect(ext).toHaveLength(1);
     expect(ext[0]).toMatchObject({ kind: "slack", externalId: "U_HUMAN", userId });
 
-    const events = identityEventTypes(userId!);
+    const events = await identityEventTypes(userId!);
     // Brand-new email triggers two `identity_added` events:
     //   * `findOrCreateUserByEmail` creates the user → `identity_added`
     //   * `linkIdentity('slack', ...)` adds the alias → `identity_added`
@@ -182,8 +181,8 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(second).toBe(first);
-    expect(countUsers()).toBe(1);
-    expect(externalIdRows()).toHaveLength(1);
+    expect(await countUsers()).toBe(1);
+    expect(await externalIdRows()).toHaveLength(1);
     // The second call must hit the alias fast path — `client.users.info` was
     // called exactly once (on the first lookup).
     expect(callCounts.U_HUMAN).toBe(1);
@@ -205,10 +204,10 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     expect(userId).toBeUndefined();
-    expect(countUsers()).toBe(0);
-    expect(externalIdRows()).toHaveLength(0);
+    expect(await countUsers()).toBe(0);
+    expect(await externalIdRows()).toHaveLength(0);
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect(meta).not.toBeNull();
     expect(meta!.valueType).toBe("json");
     const metaValue = meta!.value as {
@@ -221,7 +220,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
     expect(metaValue.lastSeenAt).toBeTruthy();
     expect(meta!.expiresAt).not.toBeNull();
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count).not.toBeNull();
     expect(count!.valueType).toBe("integer");
     expect(count!.value).toBe(1);
@@ -242,10 +241,10 @@ describe("resolveSlackUserId — three-step cascade", () => {
       sampleContext: "second",
     });
 
-    const meta = getKv("integration:unmapped:slack", "U_BOT:meta");
+    const meta = await getKv("integration:unmapped:slack", "U_BOT:meta");
     expect((meta!.value as { sampleContext: string }).sampleContext).toBe("second");
 
-    const count = getKv("integration:unmapped:slack", "U_BOT:count");
+    const count = await getKv("integration:unmapped:slack", "U_BOT:count");
     expect(count!.value).toBe(2);
   });
 
@@ -257,17 +256,17 @@ describe("resolveSlackUserId — three-step cascade", () => {
     });
 
     // Seed an existing user with the same email — no slack alias yet.
-    const db = getDb();
-    db.prepare(
+    await getDbClient().run(
       `INSERT INTO users (id, name, email, emailAliases, status, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-    ).run(
-      "existing-id",
-      "Pre-existing",
-      "shared@example.com",
-      "[]",
-      new Date().toISOString(),
-      new Date().toISOString(),
+      [
+        "existing-id",
+        "Pre-existing",
+        "shared@example.com",
+        "[]",
+        new Date().toISOString(),
+        new Date().toISOString(),
+      ],
     );
 
     const userId = await resolveSlackUserId(client, "U_HUMAN", {
@@ -277,25 +276,25 @@ describe("resolveSlackUserId — three-step cascade", () => {
 
     // Auto-merge: cascade lands on the existing row, no new `users` insert.
     expect(userId).toBe("existing-id");
-    expect(countUsers()).toBe(1);
+    expect(await countUsers()).toBe(1);
 
     // One slack alias linked to the pre-existing user.
-    const identities = getUserIdentities("existing-id");
+    const identities = await getUserIdentities("existing-id");
     expect(identities).toEqual([{ kind: "slack", externalId: "U_HUMAN" }]);
 
     // Audit trail: auto_merge (by email) + identity_added (alias link).
-    expect(identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
+    expect(await identityEventTypes("existing-id")).toEqual(["auto_merge", "identity_added"]);
   });
 
   test("concurrent alias enrollment returns the external-ID winner", async () => {
     const { client } = makeMockClient({
       U_RACE: { user: { profile: { email: "racer@example.com", real_name: "Racer" } } },
     });
-    const winner = createUser({ name: "Race winner", email: "winner@example.com" });
+    const winner = await createUser({ name: "Race winner", email: "winner@example.com" });
     const originalLinkIdentity = usersModule.linkIdentity;
     const linkSpy = spyOn(usersModule, "linkIdentity").mockImplementationOnce(
-      (_userId, kind, externalId, actor) => {
-        originalLinkIdentity(winner.id, kind, externalId, actor);
+      async (_userId, kind, externalId, actor) => {
+        await originalLinkIdentity(winner.id, kind, externalId, actor);
         throw new Error("simulated concurrent enrollment");
       },
     );
@@ -307,7 +306,7 @@ describe("resolveSlackUserId — three-step cascade", () => {
       });
 
       expect(resolved).toBe(winner.id);
-      expect(findUserByExternalId("slack", "U_RACE")?.id).toBe(winner.id);
+      expect((await findUserByExternalId("slack", "U_RACE"))?.id).toBe(winner.id);
     } finally {
       linkSpy.mockRestore();
     }
@@ -328,7 +327,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_OK).toBe(1);
 
     // Cached row carries the 24h TTL anchor.
-    const cached = getKv("integration:user-enrichment:slack", "U_OK");
+    const cached = await getKv("integration:user-enrichment:slack", "U_OK");
     expect(cached).not.toBeNull();
     expect(cached!.expiresAt).not.toBeNull();
     expect(cached!.expiresAt! - Date.now()).toBeGreaterThan(23 * 60 * 60 * 1000);
@@ -346,7 +345,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(callCounts.U_ERR).toBe(2);
 
     // Nothing persisted.
-    expect(getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_ERR")).toBeNull();
   });
 
   test("no-email profile → no cache, second call still calls the API", async () => {
@@ -361,7 +360,7 @@ describe("enrichSlackUserEmail — 24h success cache, no failure cache", () => {
     expect(second).toBeNull();
     expect(callCounts.U_NOEMAIL).toBe(2);
 
-    expect(getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
+    expect(await getKv("integration:user-enrichment:slack", "U_NOEMAIL")).toBeNull();
   });
 });
 
@@ -375,40 +374,40 @@ describe("findUserByExternalId — sanity check after cascade", () => {
       sampleEventType: "message",
       sampleContext: "test",
     });
-    const looked = findUserByExternalId("slack", "U_HUMAN");
+    const looked = await findUserByExternalId("slack", "U_HUMAN");
     expect(looked).not.toBeNull();
     expect(looked!.id).toBe(id);
   });
 });
 
 describe("rewriteSlackMentions — pure DB, zero Slack API calls", () => {
-  test("resolved mention renders '<@id|Name>' — the canonical pair", () => {
-    const user = createUser({ name: "Manuel", email: "manuel-rw@example.com" });
-    linkIdentity(user.id, "slack", "U3000RESOLVED", SYSTEM_ACTOR);
+  test("resolved mention renders '<@id|Name>' — the canonical pair", async () => {
+    const user = await createUser({ name: "Manuel", email: "manuel-rw@example.com" });
+    await linkIdentity(user.id, "slack", "U3000RESOLVED", SYSTEM_ACTOR);
 
-    const rewritten = rewriteSlackMentions("hey <@U3000RESOLVED> can you look at this");
+    const rewritten = await rewriteSlackMentions("hey <@U3000RESOLVED> can you look at this");
     expect(rewritten).toBe("hey <@U3000RESOLVED|Manuel> can you look at this");
   });
 
-  test("unresolved mention renders '<@id> (unknown user)' — never a guessed name", () => {
-    const rewritten = rewriteSlackMentions("hey <@U4000UNKNOWN> can you look at this");
+  test("unresolved mention renders '<@id> (unknown user)' — never a guessed name", async () => {
+    const rewritten = await rewriteSlackMentions("hey <@U4000UNKNOWN> can you look at this");
     expect(rewritten).toBe("hey <@U4000UNKNOWN> (unknown user) can you look at this");
   });
 
-  test("bot self mention renders '(that's you)' distinctly", () => {
-    const rewritten = rewriteSlackMentions("hey <@U123SWARMBOT>", "U123SWARMBOT");
+  test("bot self mention renders '(that's you)' distinctly", async () => {
+    const rewritten = await rewriteSlackMentions("hey <@U123SWARMBOT>", "U123SWARMBOT");
     expect(rewritten).toBe("hey <@U123SWARMBOT> (that's you)");
   });
 
-  test("multiple mentions in one string are each rewritten independently", () => {
-    const user = createUser({ name: "Tainá", email: "taina-rw@example.com" });
-    linkIdentity(user.id, "slack", "U5000RESOLVED", SYSTEM_ACTOR);
+  test("multiple mentions in one string are each rewritten independently", async () => {
+    const user = await createUser({ name: "Tainá", email: "taina-rw@example.com" });
+    await linkIdentity(user.id, "slack", "U5000RESOLVED", SYSTEM_ACTOR);
 
-    const rewritten = rewriteSlackMentions("<@U5000RESOLVED> and <@U6000UNKNOWN> both here");
+    const rewritten = await rewriteSlackMentions("<@U5000RESOLVED> and <@U6000UNKNOWN> both here");
     expect(rewritten).toBe("<@U5000RESOLVED|Tainá> and <@U6000UNKNOWN> (unknown user) both here");
   });
 
-  test("text with no mentions passes through unchanged", () => {
-    expect(rewriteSlackMentions("no mentions here")).toBe("no mentions here");
+  test("text with no mentions passes through unchanged", async () => {
+    expect(await rewriteSlackMentions("no mentions here")).toBe("no mentions here");
   });
 });

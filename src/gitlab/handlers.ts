@@ -47,8 +47,8 @@ function extractMentionContext(text: string): string {
   return text.replace(new RegExp(`@${GITLAB_BOT_NAME}\\b`, "gi"), "").trim();
 }
 
-function findLeadAgent() {
-  const agents = getAllAgents();
+async function findLeadAgent() {
+  const agents = await getAllAgents();
   return (
     agents.find((a) => a.role === "lead" && a.status === "idle") ??
     agents.find((a) => a.role === "lead") ??
@@ -75,29 +75,29 @@ const GITLAB_WEBHOOK_ACTOR = { kind: "system", id: "webhook:gitlab" } as const;
  * Returns `undefined` when no mapping could be established — callers pass
  * that straight to `requestedByUserId`.
  */
-function resolveGitLabSender(
+async function resolveGitLabSender(
   user: GitLabUser,
   sampleEventType: string,
   sampleContext: string,
-): string | undefined {
-  const existing = findUserByExternalId("gitlab", user.username);
+): Promise<string | undefined> {
+  const existing = await findUserByExternalId("gitlab", user.username);
   if (existing) return existing.id;
 
   // Inline-email cascade — only run when email is a real non-empty string.
   // Some GitLab installations emit `email: ""` instead of omitting the field.
   const inlineEmail = typeof user.email === "string" ? user.email.trim() : "";
   if (inlineEmail !== "") {
-    const { user: linked } = findOrCreateUserByEmail(
+    const { user: linked } = await findOrCreateUserByEmail(
       inlineEmail,
       { name: user.name },
       GITLAB_WEBHOOK_ACTOR,
     );
-    linkIdentity(linked.id, "gitlab", user.username, GITLAB_WEBHOOK_ACTOR);
+    await linkIdentity(linked.id, "gitlab", user.username, GITLAB_WEBHOOK_ACTOR);
     return linked.id;
   }
 
   // No mapping + no inline email → unmapped tracker.
-  upsertKv({
+  await upsertKv({
     namespace: UNMAPPED_NAMESPACE,
     key: `${user.username}:meta`,
     value: {
@@ -108,7 +108,7 @@ function resolveGitLabSender(
     valueType: "json",
     expiresAt: Date.now() + UNMAPPED_TTL_MS,
   });
-  incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
+  await incrKv(UNMAPPED_NAMESPACE, `${user.username}:count`, 1);
   return undefined;
 }
 
@@ -116,8 +116,8 @@ function resolveGitLabSender(
  * Render a GitLab username for agent-visible text: the resolved canonical
  * name or the explicit UNKNOWN sentinel — never the raw `username`.
  */
-function renderGitLabIdentity(username: string): string {
-  return renderIdentity(resolveIdentity("gitlab", username));
+async function renderGitLabIdentity(username: string): Promise<string> {
+  return renderIdentity(await resolveIdentity("gitlab", username));
 }
 
 // ── Event Handlers ──
@@ -130,7 +130,7 @@ export async function handleMergeRequest(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveGitLabSender(
+  const requestedByUserId = await resolveGitLabSender(
     user,
     "merge_request",
     `MR !${mr.iid}: ${mr.title}`,
@@ -144,7 +144,7 @@ export async function handleMergeRequest(
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   switch (action) {
     case "open": {
@@ -157,11 +157,12 @@ export async function handleMergeRequest(
 
       const context = mr.description ? extractMentionContext(mr.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
+      const username = await renderGitLabIdentity(user.username);
       const result = resolveTemplate("gitlab.merge_request.opened", {
         mr_iid: mr.iid,
         mr_title: mr.title,
         repo,
-        username: renderGitLabIdentity(user.username),
+        username,
         source_branch: mr.source_branch,
         target_branch: mr.target_branch,
         mr_url: mr.url,
@@ -172,7 +173,7 @@ export async function handleMergeRequest(
         return { created: false };
       }
 
-      const task = createTaskWithSiblingAwareness(result.text, {
+      const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -200,18 +201,18 @@ export async function handleMergeRequest(
     case "close":
     case "merge": {
       // Cancel existing tasks for this MR
-      const existingTask = findTaskByVcs(repo, mr.iid);
+      const existingTask = await findTaskByVcs(repo, mr.iid);
       if (existingTask) {
         const reason = action === "merge" ? "MR was merged" : "MR was closed";
         console.log(`[GitLab] Cancelling task ${existingTask.id} — ${reason}`);
-        failTask(existingTask.id, reason);
+        await failTask(existingTask.id, reason);
       }
       return { created: false };
     }
 
     case "update": {
       // Check if there's an active task for this MR — if so, notify about the update
-      const task = findTaskByVcs(repo, mr.iid);
+      const task = await findTaskByVcs(repo, mr.iid);
       if (task) {
         console.log(`[GitLab] MR #${mr.iid} updated, active task exists: ${task.id}`);
         // Don't create a new task — the worker will see the changes
@@ -234,7 +235,7 @@ export async function handleIssue(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender
-  const requestedByUserId = resolveGitLabSender(
+  const requestedByUserId = await resolveGitLabSender(
     user,
     "issue",
     `Issue #${issue.iid}: ${issue.title}`,
@@ -247,7 +248,7 @@ export async function handleIssue(
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
 
   switch (action) {
     case "open": {
@@ -265,11 +266,12 @@ export async function handleIssue(
 
       const context = issue.description ? extractMentionContext(issue.description) : "";
       const contextSection = context ? `Context: ${context}\n\n` : "";
+      const username = await renderGitLabIdentity(user.username);
       const result = resolveTemplate("gitlab.issue.assigned", {
         issue_iid: issue.iid,
         issue_title: issue.title,
         repo,
-        username: renderGitLabIdentity(user.username),
+        username,
         issue_url: issue.url,
         context_section: contextSection,
       });
@@ -278,7 +280,7 @@ export async function handleIssue(
         return { created: false };
       }
 
-      const task = createTaskWithSiblingAwareness(result.text, {
+      const task = await createTaskWithSiblingAwareness(result.text, {
         agentId: lead?.id ?? null,
         source: "gitlab",
         vcsProvider: "gitlab",
@@ -304,10 +306,10 @@ export async function handleIssue(
     }
 
     case "close": {
-      const existingTask = findTaskByVcs(repo, issue.iid);
+      const existingTask = await findTaskByVcs(repo, issue.iid);
       if (existingTask) {
         console.log(`[GitLab] Cancelling task ${existingTask.id} — issue closed`);
-        failTask(existingTask.id, "Issue was closed");
+        await failTask(existingTask.id, "Issue was closed");
       }
       return { created: false };
     }
@@ -322,7 +324,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender.
-  const requestedByUserId = resolveGitLabSender(user, "note", note.note);
+  const requestedByUserId = await resolveGitLabSender(user, "note", note.note);
 
   // Only handle comments with bot mentions
   if (!detectMention(note.note)) {
@@ -336,7 +338,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const context = extractMentionContext(note.note);
 
   // Determine the target entity (MR or issue)
@@ -361,15 +363,16 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
   }
 
   // Check if there's already an active task for this entity
-  const existingTask = targetNumber ? findTaskByVcs(repo, targetNumber) : null;
+  const existingTask = targetNumber ? await findTaskByVcs(repo, targetNumber) : null;
 
   const existingTaskNote = existingTask
     ? `\n\n_Note: There's an active task (${existingTask.id}) for this ${entityLabel}._`
     : "";
 
+  const username = await renderGitLabIdentity(user.username);
   const noteResult = resolveTemplate("gitlab.comment.mentioned", {
     entity_label: entityLabel,
-    username: renderGitLabIdentity(user.username),
+    username,
     repo,
     target_url: targetUrl,
     context,
@@ -380,7 +383,7 @@ export async function handleNote(event: NoteEvent): Promise<{ created: boolean; 
     return { created: false };
   }
 
-  const task = createTaskWithSiblingAwareness(noteResult.text, {
+  const task = await createTaskWithSiblingAwareness(noteResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",
@@ -422,7 +425,7 @@ export async function handlePipeline(
   const repo = project.path_with_namespace;
 
   // Resolve canonical user from GitLab sender — whoever triggered the pipeline.
-  const requestedByUserId = resolveGitLabSender(user, "pipeline", `Pipeline #${pipeline.id}`);
+  const requestedByUserId = await resolveGitLabSender(user, "pipeline", `Pipeline #${pipeline.id}`);
 
   // Only handle failed pipelines that are associated with a merge request
   if (pipeline.status !== "failed") {
@@ -441,12 +444,12 @@ export async function handlePipeline(
   }
 
   // Only create task if there's already an active task for this MR
-  const existingTask = findTaskByVcs(repo, mrIid);
+  const existingTask = await findTaskByVcs(repo, mrIid);
   if (!existingTask) {
     return { created: false };
   }
 
-  const lead = findLeadAgent();
+  const lead = await findLeadAgent();
   const pipelineResult = resolveTemplate("gitlab.pipeline.failed", {
     pipeline_id: pipeline.id,
     mr_iid: mrIid,
@@ -460,7 +463,7 @@ export async function handlePipeline(
     return { created: false };
   }
 
-  const task = createTaskWithSiblingAwareness(pipelineResult.text, {
+  const task = await createTaskWithSiblingAwareness(pipelineResult.text, {
     agentId: lead?.id ?? null,
     source: "gitlab",
     vcsProvider: "gitlab",

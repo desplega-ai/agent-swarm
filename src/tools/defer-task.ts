@@ -6,7 +6,7 @@ import {
   completeTask,
   createScheduledTask,
   getAgentById,
-  getDb,
+  getDbClient,
   getTaskById,
   updateAgentStatusFromCapacity,
 } from "@/be/db";
@@ -64,12 +64,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr(`Agent not found: ${requestInfo.agentId}`);
       }
 
-      const task = getTaskById(taskId);
+      const task = await getTaskById(taskId);
       if (!task) {
         return toolErr(`Task with ID "${taskId}" not found.`);
       }
@@ -101,10 +101,12 @@ export const registerDeferTaskTool = (server: McpServer) => {
 
       const checksBlock = renderChecks(checks);
       const taskTemplate = `Resume task ${taskId}: ${note}${checksBlock}`;
+      const createdBy =
+        (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ?? undefined;
 
       try {
-        const committed = getDb().transaction(() => {
-          const schedule = createScheduledTask({
+        const committed = await getDbClient().transaction(async () => {
+          const schedule = await createScheduledTask({
             // Unique name (`getScheduledTaskByName` is a unique lookup). The ms
             // timestamp keeps repeated deferrals of the same task from colliding.
             name: `deferred-${taskId.slice(0, 8)}-${Date.now()}`,
@@ -121,8 +123,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
             model: task.model,
             modelTier: task.modelTier,
             parentTaskId: taskId,
-            createdBy:
-              resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined,
+            createdBy,
           });
 
           const output = `Deferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
@@ -130,33 +131,37 @@ export const registerDeferTaskTool = (server: McpServer) => {
           // Deliberately NOT running `getTaskOutputValidationError`: a deferral
           // note is a status line about pending work, not the task's structured
           // output. The wake-up run produces that.
-          const completed = completeTask(taskId, output);
+          const completed = await completeTask(taskId, output);
 
-          ensure({
-            id: "completed",
-            flow: "task",
-            runId: taskId,
-            depIds: task.wasPaused ? ["started", "resumed"] : ["started"],
-            data: {
-              taskId,
-              agentId: task.agentId,
-              previousStatus: task.status,
-              hasOutput: true,
-            },
-            validator: (data) => data.previousStatus === "in_progress",
-            // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-            filter: ({}, ctx) => ctx.deps.length > 0,
-            conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+          // afterCommit: the transaction can still roll back; business-use must
+          // not be told the task completed for a write that never landed.
+          getDbClient().afterCommit(() => {
+            ensure({
+              id: "completed",
+              flow: "task",
+              runId: taskId,
+              depIds: task.wasPaused ? ["started", "resumed"] : ["started"],
+              data: {
+                taskId,
+                agentId: task.agentId,
+                previousStatus: task.status,
+                hasOutput: true,
+              },
+              validator: (data) => data.previousStatus === "in_progress",
+              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+              filter: ({}, ctx) => ctx.deps.length > 0,
+              conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+            });
           });
 
           if (task.agentId) {
-            updateAgentStatusFromCapacity(task.agentId);
+            await updateAgentStatusFromCapacity(task.agentId);
           }
 
           return { scheduleId: schedule.id, output, completed: completed ?? task };
-        })();
+        });
 
-        runTaskTerminalEffects({
+        await runTaskTerminalEffects({
           task: committed.completed,
           status: "completed",
           output: committed.output,

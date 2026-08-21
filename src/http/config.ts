@@ -48,7 +48,7 @@ function singleHeader(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(raw) ? raw[0] : raw;
 }
 
-function userMayReadSecrets(req: IncomingMessage): boolean {
+async function userMayReadSecrets(req: IncomingMessage): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return true;
   // Agent/no-user HTTP reads keep their pre-RBAC behavior; MCP get-config has
@@ -56,12 +56,12 @@ function userMayReadSecrets(req: IncomingMessage): boolean {
   if (auth?.kind !== "user") return true;
   if (!isRbacEnabled()) return true;
 
-  const grant = getUserGrant(auth.userId);
+  const grant = await getUserGrant(auth.userId);
   return grant.grantsAll || grant.verbs.has("config.read.secrets");
 }
 
-function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
-  if (!includeSecrets || userMayReadSecrets(req)) {
+async function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
+  if (!includeSecrets || (await userMayReadSecrets(req))) {
     return { effectiveIncludeSecrets: includeSecrets, secretsNote: "" };
   }
   return { effectiveIncludeSecrets: false, secretsNote: SECRETS_FORCE_MASK_NOTE };
@@ -82,15 +82,15 @@ function resolveSecretsRead(req: IncomingMessage, includeSecrets: boolean) {
  * Returns true when the request may proceed; on denial it writes a 403 and
  * returns false.
  */
-function ensureConfigAdmin(
+async function ensureConfigAdmin(
   req: IncomingMessage,
   res: ServerResponse,
   verb: Extract<PermissionVerb, "config.write.any" | "config.delete.any">,
-): boolean {
+): Promise<boolean> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator" || auth?.kind === "user") return true;
   const agentId = singleHeader(req, "x-agent-id");
-  const agent = agentId ? getAgentById(agentId) : undefined;
+  const agent = agentId ? await getAgentById(agentId) : undefined;
   const decision = can({
     principal: { kind: "agent", agentId: agentId ?? "", isLead: agent?.isLead ?? false },
     verb,
@@ -269,9 +269,9 @@ export async function handleConfig(
     const parsed = await getResolvedConfigRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
-      getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
+      await getResolvedConfig(parsed.query.agentId || undefined, parsed.query.repoId || undefined),
     );
     const result = effectiveIncludeSecrets ? configs : maskSecrets(configs);
     if (effectiveIncludeSecrets) {
@@ -326,12 +326,12 @@ export async function handleConfig(
     const parsed = await getConfigById.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const config = getSwarmConfigById(parsed.params.id);
+    const config = await getSwarmConfigById(parsed.params.id);
     if (!config) {
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const singleResult = effectiveIncludeSecrets ? config : maskSecrets([config])[0]!;
     if (effectiveIncludeSecrets && singleResult.isSecret && singleResult.value) {
       registerVolatileSecret(singleResult.value, `config:${singleResult.key}`);
@@ -347,9 +347,9 @@ export async function handleConfig(
     const parsed = await listConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     const includeSecrets = parsed.query.includeSecrets === "true";
-    const { effectiveIncludeSecrets, secretsNote } = resolveSecretsRead(req, includeSecrets);
+    const { effectiveIncludeSecrets, secretsNote } = await resolveSecretsRead(req, includeSecrets);
     const configs = stripApiOnlyKeys(
-      getSwarmConfigs({
+      await getSwarmConfigs({
         scope: parsed.query.scope || undefined,
         scopeId: parsed.query.scopeId || undefined,
       }),
@@ -372,7 +372,7 @@ export async function handleConfig(
   if (upsertConfig.match(req.method, pathSegments)) {
     const parsed = await upsertConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConfigAdmin(req, res, "config.write.any")) return true;
+    if (!(await ensureConfigAdmin(req, res, "config.write.any"))) return true;
     const { scope, scopeId, key, value, isSecret, envPath, description } = parsed.body;
 
     if (scope === "global" && scopeId) {
@@ -398,7 +398,7 @@ export async function handleConfig(
 
     try {
       const includeSecrets = queryParams.get("includeSecrets") === "true";
-      const config = upsertSwarmConfigWithPolicyMirror({
+      const config = await upsertSwarmConfigWithPolicyMirror({
         scope,
         scopeId: scopeId || null,
         key,
@@ -425,13 +425,13 @@ export async function handleConfig(
   if (deleteConfig.match(req.method, pathSegments)) {
     const parsed = await deleteConfig.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!ensureConfigAdmin(req, res, "config.delete.any")) return true;
-    const existing = getSwarmConfigLookupById(parsed.params.id);
+    if (!(await ensureConfigAdmin(req, res, "config.delete.any"))) return true;
+    const existing = await getSwarmConfigLookupById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Config not found", 404);
       return true;
     }
-    const deleted = deleteSwarmConfig(parsed.params.id);
+    const deleted = await deleteSwarmConfig(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Config not found", 404);
       return true;
@@ -444,7 +444,7 @@ export async function handleConfig(
       existing.scopeId &&
       existing.key === AGENT_MAX_TASKS_CONFIG_KEY
     ) {
-      resetAgentMaxTasksMirror(existing.scopeId);
+      await resetAgentMaxTasksMirror(existing.scopeId);
     }
     deleteConfig.respond(res, 200, { success: true });
     return true;

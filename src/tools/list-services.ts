@@ -59,7 +59,7 @@ export const registerListServicesTool = (server: McpServer) => {
       }
 
       try {
-        let services = getAllServices({
+        let services = await getAllServices({
           agentId,
           name,
           status,
@@ -71,13 +71,15 @@ export const registerListServicesTool = (server: McpServer) => {
         }
 
         // Denormalize agent names
-        const servicesWithAgentNames = services.map((service) => {
-          const agent = getAgentById(service.agentId);
-          return {
-            ...service,
-            agentName: agent?.name,
-          };
-        });
+        const servicesWithAgentNames = await Promise.all(
+          services.map(async (service) => {
+            const agent = await getAgentById(service.agentId);
+            return {
+              ...service,
+              agentName: agent?.name,
+            };
+          }),
+        );
 
         const count = servicesWithAgentNames.length;
         const statusSummary =

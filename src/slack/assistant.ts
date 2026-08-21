@@ -85,7 +85,7 @@ export function createAssistant(): Assistant {
         // the identity primitive before it reaches agent-visible task text —
         // never a raw Slack ID. Bot-mention routing checks below use the
         // raw `messageText`, not this rendered copy.
-        const renderedMessageText = rewriteSlackMentions(messageText);
+        const renderedMessageText = await rewriteSlackMentions(messageText);
 
         // Resolve the bot's own Slack user ID (cached after first call) so we can
         // check whether this message is actually addressed to us.
@@ -121,7 +121,7 @@ export function createAssistant(): Assistant {
           : undefined;
 
         // 1. Check if an agent is already working in this thread
-        const workingAgent = getAgentWorkingOnThread(channelId, threadTs);
+        const workingAgent = await getAgentWorkingOnThread(channelId, threadTs);
 
         if (workingAgent && workingAgent.status !== "offline") {
           // Follow-up message → route to the same agent
@@ -139,8 +139,8 @@ export function createAssistant(): Assistant {
           }
 
           // Otherwise, create a follow-up task for the working agent
-          const latestTask = getMostRecentTaskInThread(channelId, threadTs);
-          const task = createTaskWithSiblingAwareness(renderedMessageText, {
+          const latestTask = await getMostRecentTaskInThread(channelId, threadTs);
+          const task = await createTaskWithSiblingAwareness(renderedMessageText, {
             agentId: workingAgent.id,
             source: "slack",
             slackChannelId: channelId,
@@ -177,10 +177,10 @@ export function createAssistant(): Assistant {
             ? `\n\n[User is viewing channel <#${ctx.channel_id}>]`
             : "";
 
-        const lead = getLeadAgent();
+        const lead = await getLeadAgent();
         if (!lead) {
           // No lead — still queue the task
-          const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+          const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
             source: "slack",
             slackChannelId: channelId,
             slackThreadTs: threadTs,
@@ -199,7 +199,7 @@ export function createAssistant(): Assistant {
           return;
         }
 
-        const task = createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
+        const task = await createTaskWithSiblingAwareness(renderedMessageText + channelContext, {
           agentId: lead.id,
           source: "slack",
           slackChannelId: channelId,

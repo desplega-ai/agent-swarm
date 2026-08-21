@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createApp } from "../apps/store";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import { typecheckScript } from "../be/scripts/typecheck";
 
 const TEST_DB_PATH = "./test-scripts-typecheck.sqlite";
@@ -37,8 +37,8 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -47,7 +47,7 @@ afterAll(async () => {
 });
 
 describe("typecheckScript", () => {
-  test("accepts ES2022 globals: JSON, Math, Date, Number, String, Error, isFinite, encodeURIComponent, parseInt, parseFloat", () => {
+  test("accepts ES2022 globals: JSON, Math, Date, Number, String, Error, isFinite, encodeURIComponent, parseInt, parseFloat", async () => {
     const source = `
       export default async () => {
         const a = JSON.stringify({});
@@ -61,10 +61,10 @@ describe("typecheckScript", () => {
         return { a, b, c, d, e, f, g };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts Promise<T> return annotations on async functions and Promise.all", () => {
+  test("accepts Promise<T> return annotations on async functions and Promise.all", async () => {
     const source = `
       async function helper(): Promise<number[]> {
         return await Promise.all([Promise.resolve(1), Promise.resolve(2)]);
@@ -74,10 +74,10 @@ describe("typecheckScript", () => {
         return arr[0] + arr[1];
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts Array<T> annotations and array-producing methods (split, match, map, reduce)", () => {
+  test("accepts Array<T> annotations and array-producing methods (split, match, map, reduce)", async () => {
     const source = `
       export default async (): Promise<{ tokens: string[]; matches: string[] | null; doubled: number[]; sum: number }> => {
         const s: string = "a=1&b=2";
@@ -89,10 +89,10 @@ describe("typecheckScript", () => {
         return { tokens, matches, doubled, sum };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts throw new Error and structured object errors", () => {
+  test("accepts throw new Error and structured object errors", async () => {
     const source = `
       export default async () => {
         try {
@@ -103,10 +103,10 @@ describe("typecheckScript", () => {
         }
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts the global fetch + Request/Response/Headers/URLSearchParams shapes", () => {
+  test("accepts the global fetch + Request/Response/Headers/URLSearchParams shapes", async () => {
     const source = `
       export default async (args: { url: string }): Promise<{ ok: boolean; status: number; body: string; qs: string }> => {
         const req = new Request(args.url, { method: "GET", headers: { Accept: "application/json" } });
@@ -116,10 +116,10 @@ describe("typecheckScript", () => {
         return { ok: res.ok, status: res.status, body, qs: params.toString() };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts URL construction + console + setTimeout + crypto.randomUUID", () => {
+  test("accepts URL construction + console + setTimeout + crypto.randomUUID", async () => {
     const source = `
       export default async () => {
         const u: URL = new URL("https://example.com/path?x=1");
@@ -129,10 +129,10 @@ describe("typecheckScript", () => {
         return { id, host: u.hostname };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("accepts Bun's process.env + Buffer + TextEncoder/TextDecoder + AbortController", () => {
+  test("accepts Bun's process.env + Buffer + TextEncoder/TextDecoder + AbortController", async () => {
     const source = `
       export default async () => {
         const path = process.env.PATH ?? "/usr/bin";
@@ -144,11 +144,11 @@ describe("typecheckScript", () => {
         return { path, bytes: buf.length, dec, aborted: ctrl.signal.aborted };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("rejects actual type errors and returns structured diagnostics with location, code, severity", () => {
-    const result = typecheckScript(`
+  test("rejects actual type errors and returns structured diagnostics with location, code, severity", async () => {
+    const result = await typecheckScript(`
       export default async () => {
         const x: number = "not a number";
         return x;
@@ -168,8 +168,8 @@ describe("typecheckScript", () => {
     expect(d.message).toContain("number");
   });
 
-  test("returns exactly one formatted entry per compiler diagnostic", () => {
-    const result = typecheckScript(`
+  test("returns exactly one formatted entry per compiler diagnostic", async () => {
+    const result = await typecheckScript(`
       export default async () => {
         const count: number = "one";
         const enabled: boolean = 1;
@@ -185,8 +185,8 @@ describe("typecheckScript", () => {
     expect(result.diagnostics[1]).toContain("Type 'number' is not assignable to type 'boolean'");
   });
 
-  test("captures the offending identifier on TS2304 (Cannot find name)", () => {
-    const result = typecheckScript(`
+  test("captures the offending identifier on TS2304 (Cannot find name)", async () => {
+    const result = await typecheckScript(`
       export default async () => {
         return noSuchGlobal;
       };
@@ -199,8 +199,8 @@ describe("typecheckScript", () => {
     expect(cantFind?.identifier).toBe("noSuchGlobal");
   });
 
-  test("surfaces 'Did you mean…' suggestions when TS provides them", () => {
-    const result = typecheckScript(`
+  test("surfaces 'Did you mean…' suggestions when TS provides them", async () => {
+    const result = await typecheckScript(`
       export default async () => Mat.floor(3.7);
     `);
     expect(result.ok).toBe(false);
@@ -212,15 +212,15 @@ describe("typecheckScript", () => {
     expect(hint?.suggestion).toBe("Math");
   });
 
-  test("still rejects unknown ctx.swarm tools (SDK surface enforcement still works)", () => {
-    const result = typecheckScript(`
+  test("still rejects unknown ctx.swarm tools (SDK surface enforcement still works)", async () => {
+    const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => ctx.swarm.no_such_tool({});
     `);
     expect(result.ok).toBe(false);
   });
 
-  test("types KV SDK envelopes and entry values without changing their runtime shapes", () => {
+  test("types KV SDK envelopes and entry values without changing their runtime shapes", async () => {
     const source = `
       import type { ScriptContext } from "swarm-sdk";
 
@@ -272,10 +272,10 @@ describe("typecheckScript", () => {
         return { nullableCount };
       };
     `;
-    expect(typecheckScript(source).ok).toBe(true);
+    expect((await typecheckScript(source)).ok).toBe(true);
   });
 
-  test("does NOT include lib.dom.d.ts wholesale — DOM-only globals stay rejected", () => {
+  test("does NOT include lib.dom.d.ts wholesale — DOM-only globals stay rejected", async () => {
     // window/document/localStorage are intentionally NOT exposed by the runtime
     // and must NOT typecheck. This prevents authors from writing browser code
     // that breaks at runtime.
@@ -285,7 +285,7 @@ describe("typecheckScript", () => {
       `export default async () => localStorage.getItem("x");`,
     ];
     for (const source of cases) {
-      const r = typecheckScript(source);
+      const r = await typecheckScript(source);
       expect(r.ok).toBe(false);
     }
   });
@@ -300,9 +300,9 @@ describe("per-app generated types", () => {
     });
   }
 
-  test("types declared row columns", () => {
-    const typedApp = createTypedApp();
-    const result = typecheckScript(`
+  test("types declared row columns", async () => {
+    const typedApp = await createTypedApp();
+    const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => {
         const res = await ctx.swarm.app_query({
@@ -317,9 +317,9 @@ describe("per-app generated types", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("rejects misspelled row columns with an identifier diagnostic", () => {
-    const typedApp = createTypedApp();
-    const result = typecheckScript(`
+  test("rejects misspelled row columns with an identifier diagnostic", async () => {
+    const typedApp = await createTypedApp();
+    const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => {
         const res = await ctx.swarm.app_query({
@@ -336,9 +336,9 @@ describe("per-app generated types", () => {
     expect(result.diagnostics.join("\n")).toContain("titel");
   });
 
-  test("rejects invalid enum literals assigned to filtered params", () => {
-    const typedApp = createTypedApp();
-    const result = typecheckScript(`
+  test("rejects invalid enum literals assigned to filtered params", async () => {
+    const typedApp = await createTypedApp();
+    const result = await typecheckScript(`
       import type { App_PmInbox, ScriptContext } from "swarm-sdk";
       export default async (_args: unknown, ctx: ScriptContext) => {
         const params: { status: Exclude<App_PmInbox.Issue["status"], undefined> } = {
@@ -355,9 +355,9 @@ describe("per-app generated types", () => {
     expect(result.ok).toBe(false);
   });
 
-  test("keeps the loose fallback overload for dynamic app ids", () => {
-    createTypedApp();
-    const result = typecheckScript(`
+  test("keeps the loose fallback overload for dynamic app ids", async () => {
+    await createTypedApp();
+    const result = await typecheckScript(`
       import type { ScriptContext } from "swarm-sdk";
       export default async (args: { appId: string }, ctx: ScriptContext) =>
         ctx.swarm.app_query({ appId: args.appId, query: "byStatus", params: { status: "closed" } });
@@ -366,25 +366,24 @@ describe("per-app generated types", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("ignores an unparseable stored definition", () => {
-    createTypedApp();
-    getDb()
-      .prepare(
-        `INSERT INTO apps (id, name, description, definition, created_at, updated_at)
+  test("ignores an unparseable stored definition", async () => {
+    await createTypedApp();
+    await getDbClient().run(
+      `INSERT INTO apps (id, name, description, definition, created_at, updated_at)
          VALUES (?, ?, NULL, ?, ?, ?)`,
-      )
-      .run(
+      [
         "broken-app-id",
         "Broken App",
         '{"models":"not an object"}',
         "2026-08-06T00:00:00.000Z",
         "2026-08-06T00:00:00.000Z",
-      );
+      ],
+    );
 
-    expect(typecheckScript("export default async () => ({ ok: true });").ok).toBe(true);
+    expect((await typecheckScript("export default async () => ({ ok: true });")).ok).toBe(true);
   });
 
-  test("leaves empty-app typechecking unchanged", () => {
-    expect(typecheckScript("export default async () => ({ ok: true });").ok).toBe(true);
+  test("leaves empty-app typechecking unchanged", async () => {
+    expect((await typecheckScript("export default async () => ({ ok: true });")).ok).toBe(true);
   });
 });

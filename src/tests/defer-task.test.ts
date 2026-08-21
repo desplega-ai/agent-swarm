@@ -66,24 +66,28 @@ describe("defer-task handler", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    agentId = createAgent({
-      name: "Defer Worker",
-      description: "Agent that defers tasks",
-      role: "worker",
-      isLead: false,
-      status: "busy",
-      maxTasks: 1,
-      capabilities: [],
-    }).id;
-    otherAgentId = createAgent({
-      name: "Other Worker",
-      description: "Agent that owns a different task",
-      role: "worker",
-      isLead: false,
-      status: "busy",
-      maxTasks: 1,
-      capabilities: [],
-    }).id;
+    agentId = (
+      await createAgent({
+        name: "Defer Worker",
+        description: "Agent that defers tasks",
+        role: "worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+        capabilities: [],
+      })
+    ).id;
+    otherAgentId = (
+      await createAgent({
+        name: "Other Worker",
+        description: "Agent that owns a different task",
+        role: "worker",
+        isLead: false,
+        status: "busy",
+        maxTasks: 1,
+        capabilities: [],
+      })
+    ).id;
   });
 
   afterAll(async () => {
@@ -102,23 +106,25 @@ describe("defer-task handler", () => {
     };
   }
 
-  function startedTask(description: string, owner: string = agentId) {
-    const task = createTaskExtended(description, {
+  async function startedTask(description: string, owner: string = agentId) {
+    const task = await createTaskExtended(description, {
       agentId: owner,
       source: "mcp",
       priority: 70,
       modelTier: "smart",
     });
-    startTask(task.id);
+    await startTask(task.id);
     return task;
   }
 
-  function schedulesForTask(taskId: string) {
-    return getScheduledTasks({ hideCompleted: false }).filter((s) => s.parentTaskId === taskId);
+  async function schedulesForTask(taskId: string) {
+    return (await getScheduledTasks({ hideCompleted: false })).filter(
+      (s) => s.parentTaskId === taskId,
+    );
   }
 
   test("delayMs path: completes the task and books a one-off wake-up schedule", async () => {
-    const task = startedTask("wait for the deploy to finish");
+    const task = await startedTask("wait for the deploy to finish");
     const before = Date.now();
 
     const result = (await buildTool().handler(
@@ -136,7 +142,7 @@ describe("defer-task handler", () => {
     // The NUDGES entry tells the caller to stop working on the task.
     expect(result.structuredContent.nudge).toContain("Stop working on this task now");
 
-    const schedules = schedulesForTask(task.id);
+    const schedules = await schedulesForTask(task.id);
     expect(schedules.length).toBe(1);
     const schedule = schedules[0]!;
     expect(schedule.id).toBe(result.structuredContent.scheduleId!);
@@ -158,14 +164,14 @@ describe("defer-task handler", () => {
     expect(nextRunMs).toBeLessThan(before + 1_800_000 + 60_000);
     expect(result.structuredContent.nextRunAt).toBe(schedule.nextRunAt!);
 
-    const stored = getTaskById(task.id);
+    const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
     expect(stored?.output).toContain("deploy 42 is still running");
     expect(stored?.output).toContain(schedule.id);
   });
 
   test("runAt path is honoured verbatim", async () => {
-    const task = startedTask("wait for the reply");
+    const task = await startedTask("wait for the reply");
     const runAt = new Date(Date.now() + 7_200_000).toISOString();
 
     const result = (await buildTool().handler(
@@ -176,14 +182,14 @@ describe("defer-task handler", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.nextRunAt).toBe(runAt);
 
-    const schedules = schedulesForTask(task.id);
+    const schedules = await schedulesForTask(task.id);
     expect(schedules.length).toBe(1);
     expect(schedules[0]!.nextRunAt).toBe(runAt);
-    expect(getTaskById(task.id)?.status).toBe("completed");
+    expect((await getTaskById(task.id))?.status).toBe("completed");
   });
 
   test("rejects both delayMs and runAt, and rejects neither", async () => {
-    const both = startedTask("both timings");
+    const both = await startedTask("both timings");
     const bothResult = (await buildTool().handler(
       {
         taskId: both.id,
@@ -195,23 +201,23 @@ describe("defer-task handler", () => {
     )) as DeferTaskResult;
     expect(bothResult.structuredContent.success).toBe(false);
     expect(bothResult.structuredContent.message).toContain("not both");
-    expect(schedulesForTask(both.id).length).toBe(0);
-    expect(getTaskById(both.id)?.status).toBe("in_progress");
+    expect((await schedulesForTask(both.id)).length).toBe(0);
+    expect((await getTaskById(both.id))?.status).toBe("in_progress");
 
-    const neither = startedTask("no timing");
+    const neither = await startedTask("no timing");
     const neitherResult = (await buildTool().handler(
       { taskId: neither.id, note: "pending" },
       meta(),
     )) as DeferTaskResult;
     expect(neitherResult.structuredContent.success).toBe(false);
     expect(neitherResult.structuredContent.message).toContain("delayMs or runAt");
-    expect(schedulesForTask(neither.id).length).toBe(0);
-    expect(getTaskById(neither.id)?.status).toBe("in_progress");
+    expect((await schedulesForTask(neither.id)).length).toBe(0);
+    expect((await getTaskById(neither.id))?.status).toBe("in_progress");
   });
 
   test("an already-terminal task cannot be deferred and books no schedule", async () => {
-    const task = startedTask("already done");
-    completeTask(task.id, "finished");
+    const task = await startedTask("already done");
+    await completeTask(task.id, "finished");
 
     const result = (await buildTool().handler(
       { taskId: task.id, delayMs: 60_000, note: "pending" },
@@ -220,11 +226,11 @@ describe("defer-task handler", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("already completed");
-    expect(schedulesForTask(task.id).length).toBe(0);
+    expect((await schedulesForTask(task.id)).length).toBe(0);
   });
 
   test("another agent's task is refused and books no schedule", async () => {
-    const task = startedTask("not yours", otherAgentId);
+    const task = await startedTask("not yours", otherAgentId);
 
     const result = (await buildTool().handler(
       { taskId: task.id, delayMs: 60_000, note: "pending" },
@@ -233,8 +239,8 @@ describe("defer-task handler", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("not assigned to you");
-    expect(schedulesForTask(task.id).length).toBe(0);
-    expect(getTaskById(task.id)?.status).toBe("in_progress");
+    expect((await schedulesForTask(task.id)).length).toBe(0);
+    expect((await getTaskById(task.id))?.status).toBe("in_progress");
   });
 
   test("an unknown task is refused", async () => {

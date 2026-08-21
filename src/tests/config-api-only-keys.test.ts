@@ -46,17 +46,22 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
 
-  const agent = createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
   agentId = agent.id;
 
   // The API-owned bootstrap key + a normal global secret a worker legitimately reads.
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "global",
     key: BOOTSTRAP_KEY,
     value: BOOTSTRAP_VALUE,
     isSecret: true,
   });
-  upsertSwarmConfig({ scope: "global", key: "SOME_WORKER_SECRET", value: "ok", isSecret: true });
+  await upsertSwarmConfig({
+    scope: "global",
+    key: "SOME_WORKER_SECRET",
+    value: "ok",
+    isSecret: true,
+  });
 
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const pathSegments = getPathSegments(req.url || "");

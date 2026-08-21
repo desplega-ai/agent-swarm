@@ -7,6 +7,7 @@ import { resolveHttpAuditUserId } from "../be/audit-user";
 import {
   getAgentById,
   getDb,
+  getDbClient,
   getTaskById,
   listAssetSummaries,
   moveAssetKey,
@@ -175,40 +176,40 @@ const moveAssetRoute = route({
   },
 });
 
-function assetMovePrincipal(
+async function assetMovePrincipal(
   req: IncomingMessage,
   myAgentId: string | undefined,
-): RbacPrincipal | null {
+): Promise<RbacPrincipal | null> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "operator") return { kind: "operator" };
   if (auth?.kind === "user") return { kind: "user", userId: auth.userId };
   if (!myAgentId) return null;
-  const agent = getAgentById(myAgentId);
+  const agent = await getAgentById(myAgentId);
   return { kind: "agent", agentId: myAgentId, isLead: agent?.isLead ?? false };
 }
 
-function canMutateTaskNamespace(
+async function canMutateTaskNamespace(
   task: { id: string; agentId: string | null; creatorAgentId?: string },
   myAgentId: string | undefined,
   req: IncomingMessage,
-): boolean {
+): Promise<boolean> {
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
     agentId: task.agentId,
     creatorAgentId: task.creatorAgentId,
   };
-  const principal = assetMovePrincipal(req, myAgentId);
+  const principal = await assetMovePrincipal(req, myAgentId);
   if (!principal) return false;
   return can({ principal, verb: "task.fs.mutate", resource, source: "http" }).allow;
 }
 
-function canManageAppNamespace(
+async function canManageAppNamespace(
   id: string,
   req: IncomingMessage,
   myAgentId: string | undefined,
-): boolean {
-  const principal = assetMovePrincipal(req, myAgentId);
+): Promise<boolean> {
+  const principal = await assetMovePrincipal(req, myAgentId);
   return (
     !!principal &&
     can({ principal, verb: "app.manage", resource: { kind: "app", appId: id }, source: "http" })
@@ -216,12 +217,12 @@ function canManageAppNamespace(
   );
 }
 
-function canManageScriptNamespace(
-  script: NonNullable<ReturnType<typeof getScriptById>>,
+async function canManageScriptNamespace(
+  script: NonNullable<Awaited<ReturnType<typeof getScriptById>>>,
   req: IncomingMessage,
   myAgentId: string | undefined,
-): boolean {
-  const principal = assetMovePrincipal(req, myAgentId);
+): Promise<boolean> {
+  const principal = await assetMovePrincipal(req, myAgentId);
   if (!principal) return false;
   if (principal.kind === "operator") return true;
   if (principal.kind !== "agent") return false;
@@ -245,7 +246,11 @@ export async function handleAssets(
     const parsed = await keyAuditRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
-    keyAuditRoute.respond(res, 200, auditAssetKeys(getDb()));
+    // auditAssetKeys stays sync (shared with the boot audit); run it inside a
+    // client transaction so the read cannot observe another request's
+    // uncommitted writes on the shared connection.
+    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()));
+    keyAuditRoute.respond(res, 200, audit);
     return true;
   }
 
@@ -262,7 +267,7 @@ export async function handleAssets(
       }
       types.push(result.data);
     }
-    const assets = listAssetSummaries({
+    const assets = await listAssetSummaries({
       keyPrefix: parsed.query.keyPrefix,
       types: types.length > 0 ? types : undefined,
       limit: parsed.query.limit,
@@ -276,9 +281,11 @@ export async function handleAssets(
     if (!parsed) return true;
     if (!ensureOperator(req, res)) return true;
     try {
-      const actor = resolveHttpAuditUserId(req, myAgentId);
-      const key = parsed.body.key ? authorizeAssetKeyWrite(parsed.body.key, actor) : undefined;
-      const mapping = upsertAssetKeyMapping({
+      const actor = await resolveHttpAuditUserId(req, myAgentId);
+      const key = parsed.body.key
+        ? await authorizeAssetKeyWrite(parsed.body.key, actor)
+        : undefined;
+      const mapping = await upsertAssetKeyMapping({
         providerId: parsed.body.providerId,
         providerOrgId: parsed.body.orgId,
         providerDriveId: parsed.body.driveId,
@@ -307,42 +314,42 @@ export async function handleAssets(
     if (!parsed) return true;
     if (parsed.params.entityType === "file" && !ensureOperator(req, res)) return true;
     if (parsed.params.entityType === "task") {
-      const task = getTaskById(parsed.params.id);
+      const task = await getTaskById(parsed.params.id);
       if (!task) {
         jsonError(res, "Asset not found", 404);
         return true;
       }
-      if (!canMutateTaskNamespace(task, myAgentId, req)) {
+      if (!(await canMutateTaskNamespace(task, myAgentId, req))) {
         jsonError(res, "Not authorized to move this task namespace", 403);
         return true;
       }
     }
     if (parsed.params.entityType === "app") {
-      if (!getApp(parsed.params.id)) {
+      if (!(await getApp(parsed.params.id))) {
         jsonError(res, "Asset not found", 404);
         return true;
       }
-      if (!canManageAppNamespace(parsed.params.id, req, myAgentId)) {
+      if (!(await canManageAppNamespace(parsed.params.id, req, myAgentId))) {
         jsonError(res, "Not authorized to move this app namespace", 403);
         return true;
       }
     }
     if (parsed.params.entityType === "script") {
-      const script = getScriptById(parsed.params.id);
+      const script = await getScriptById(parsed.params.id);
       if (!script) {
         jsonError(res, "Asset not found", 404);
         return true;
       }
-      if (!canManageScriptNamespace(script, req, myAgentId)) {
+      if (!(await canManageScriptNamespace(script, req, myAgentId))) {
         jsonError(res, "Not authorized to move this script namespace", 403);
         return true;
       }
     }
 
     try {
-      const actor = resolveHttpAuditUserId(req, myAgentId);
-      const key = authorizeAssetKeyWrite(parsed.body.key, actor);
-      const moved = moveAssetKey({
+      const actor = await resolveHttpAuditUserId(req, myAgentId);
+      const key = await authorizeAssetKeyWrite(parsed.body.key, actor);
+      const moved = await moveAssetKey({
         entityType: parsed.params.entityType,
         id: parsed.params.id,
         key,

@@ -57,7 +57,7 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
   let skipped = 0;
   const failed: string[] = [];
 
-  for (const row of listAuthorizationSweepRows()) {
+  for (const row of await listAuthorizationSweepRows()) {
     checked++;
 
     if (row.status === "revoked" || !row.hasRefreshToken) {
@@ -74,10 +74,10 @@ export async function sweepOAuthTokenRefresh(): Promise<OAuthRefreshSweepResult>
       continue;
     }
 
-    const before = getAuthorizationById(row.authorizationId);
+    const before = await getAuthorizationById(row.authorizationId);
     try {
       await forceRefreshAuthorizationOrThrow(row.authorizationId);
-      const after = getAuthorizationById(row.authorizationId);
+      const after = await getAuthorizationById(row.authorizationId);
       // forceRefreshAuthorizationOrThrow stays silent on some no-op paths (row
       // changed concurrently, config vanished mid-flight) — only count real
       // refreshes.

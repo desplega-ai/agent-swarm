@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getDb, upsertSwarmConfig } from "@/be/db";
+import { getDb, getDbClient, upsertSwarmConfig } from "@/be/db";
 import { getAuthorizationById, getOAuthAppById } from "@/be/db-queries/oauth";
 import { assertUrlSafe, publicEndpointSsrfOptions } from "@/oauth/mcp-wrapper";
 import type {
@@ -346,7 +346,7 @@ function pascal(name: string): string {
   return `${camel[0]?.toUpperCase()}${camel.slice(1)}`;
 }
 
-export function listRelationalCredentialBindings(context?: {
+export async function listRelationalCredentialBindings(context?: {
   agentId?: string;
   repoId?: string;
   includeInactive?: boolean;
@@ -354,10 +354,10 @@ export function listRelationalCredentialBindings(context?: {
   // (the credential broker and connection decorators need them) and only the
   // standalone binding surfaces pass `excludeManaged` to hide them.
   excludeManaged?: boolean;
-}): ScriptCredentialBindingRecord[] {
-  const rows = getDb()
-    .prepare<BindingRow, []>("SELECT * FROM script_credential_bindings ORDER BY config_key ASC")
-    .all();
+}): Promise<ScriptCredentialBindingRecord[]> {
+  const rows = await getDbClient().query<BindingRow>(
+    "SELECT * FROM script_credential_bindings ORDER BY config_key ASC",
+  );
   return rows
     .map(bindingFromRow)
     .filter((binding) => context?.includeInactive || binding.active !== false)
@@ -365,32 +365,34 @@ export function listRelationalCredentialBindings(context?: {
     .filter((binding) => !context || applies(binding.scope, binding.scopeId ?? null, context));
 }
 
-function findManagedBindingByConnectionId(
+async function findManagedBindingByConnectionId(
   connectionId: string,
-): ScriptCredentialBindingRecord | null {
-  const row = getDb()
-    .prepare<BindingRow, [string]>(
-      "SELECT * FROM script_credential_bindings WHERE managed_by_connection_id = ?",
-    )
-    .get(connectionId);
+): Promise<ScriptCredentialBindingRecord | null> {
+  const row = await getDbClient().get<BindingRow>(
+    "SELECT * FROM script_credential_bindings WHERE managed_by_connection_id = ?",
+    [connectionId],
+  );
   return row ? bindingFromRow(row) : null;
 }
 
-export function getCredentialBindingById(id: string): ScriptCredentialBindingRecord | null {
-  const row = getDb()
-    .prepare<BindingRow, [string]>("SELECT * FROM script_credential_bindings WHERE id = ?")
-    .get(id);
+export async function getCredentialBindingById(
+  id: string,
+): Promise<ScriptCredentialBindingRecord | null> {
+  const row = await getDbClient().get<BindingRow>(
+    "SELECT * FROM script_credential_bindings WHERE id = ?",
+    [id],
+  );
   return row ? bindingFromRow(row) : null;
 }
 
-function findCredentialBindingByIdentity(data: {
+async function findCredentialBindingByIdentity(data: {
   configKey: string;
   scope: ScriptConnectionScope;
   scopeId: string | null;
   headerTemplate?: string | null;
   queryTemplate?: string | null;
   managedByConnectionId?: string | null;
-}): ScriptCredentialBindingRecord | null {
+}): Promise<ScriptCredentialBindingRecord | null> {
   // Managed ownership is part of the identity: a connection-managed upsert
   // (managedByConnectionId set) may ONLY reuse a row already managed by that
   // same connection, and a standalone upsert (null) may ONLY reuse a standalone
@@ -399,28 +401,27 @@ function findCredentialBindingByIdentity(data: {
   // binding that shares configKey/scope/template — stamping source='connection'
   // + managed_by_connection_id onto it, hiding it from the raw-fetch UI and
   // letting later connection-auth changes mutate/delete the user's credential.
-  const row = getDb()
-    .prepare<BindingRow, [string, string, string, string, string, string]>(
-      `SELECT * FROM script_credential_bindings
-       WHERE config_key = ?
-         AND scope = ?
-         AND COALESCE(scope_id, '') = ?
-         AND COALESCE(header_template, '') = ?
-         AND COALESCE(query_template, '') = ?
-         AND COALESCE(managed_by_connection_id, '') = ?`,
-    )
-    .get(
+  const row = await getDbClient().get<BindingRow>(
+    `SELECT * FROM script_credential_bindings
+     WHERE config_key = ?
+       AND scope = ?
+       AND COALESCE(scope_id, '') = ?
+       AND COALESCE(header_template, '') = ?
+       AND COALESCE(query_template, '') = ?
+       AND COALESCE(managed_by_connection_id, '') = ?`,
+    [
       data.configKey,
       data.scope,
       data.scopeId ?? "",
       data.headerTemplate ?? "",
       data.queryTemplate ?? "",
       data.managedByConnectionId ?? "",
-    );
+    ],
+  );
   return row ? bindingFromRow(row) : null;
 }
 
-export function upsertCredentialBinding(data: {
+export async function upsertCredentialBinding(data: {
   id?: string;
   configKey: string;
   allowedHosts: string[];
@@ -434,7 +435,7 @@ export function upsertCredentialBinding(data: {
   source?: "default" | "user" | "migration" | "connection";
   managedByConnectionId?: string | null;
   userId?: string | null;
-}): ScriptCredentialBindingRecord {
+}): Promise<ScriptCredentialBindingRecord> {
   const now = new Date().toISOString();
   const id = data.id ?? crypto.randomUUID();
   const scope = data.scope ?? "global";
@@ -446,11 +447,11 @@ export function upsertCredentialBinding(data: {
     throw new Error("oauthAuthorizationId is required for oauth credential bindings");
   }
   if (authKind === "oauth" && data.oauthAuthorizationId) {
-    const authorization = getAuthorizationById(data.oauthAuthorizationId);
+    const authorization = await getAuthorizationById(data.oauthAuthorizationId);
     if (!authorization) {
       throw new Error(`OAuth authorization ${data.oauthAuthorizationId} was not found`);
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       throw new Error(
         `OAuth authorization ${data.oauthAuthorizationId} is not a generic provider authorization`,
@@ -466,45 +467,25 @@ export function upsertCredentialBinding(data: {
   const oauthAuthorizationId = data.oauthAuthorizationId ?? null;
   const source = data.source ?? (managedByConnectionId ? "connection" : "user");
   const existing =
-    (data.id ? getCredentialBindingById(data.id) : null) ??
-    findCredentialBindingByIdentity({
+    (data.id ? await getCredentialBindingById(data.id) : null) ??
+    (await findCredentialBindingByIdentity({
       configKey: data.configKey,
       scope,
       scopeId,
       headerTemplate: data.headerTemplate,
       queryTemplate: data.queryTemplate,
       managedByConnectionId,
-    });
+    }));
 
   if (existing) {
     const targetId = existing.id;
-    const row = getDb()
-      .prepare<
-        BindingRow,
-        [
-          string,
-          string,
-          string | null,
-          string | null,
-          string,
-          string | null,
-          number,
-          string,
-          string | null,
-          string,
-          string | null,
-          string | null,
-          string,
-          string,
-        ]
-      >(
-        `UPDATE script_credential_bindings
-         SET config_key = ?, allowed_hosts_json = ?, header_template = ?, query_template = ?,
-             scope = ?, scope_id = ?, active = ?, auth_kind = ?, oauth_authorization_id = ?,
-             source = ?, managed_by_connection_id = ?, updated_by = ?, updated_at = ?
-         WHERE id = ? RETURNING *`,
-      )
-      .get(
+    const row = await getDbClient().get<BindingRow>(
+      `UPDATE script_credential_bindings
+       SET config_key = ?, allowed_hosts_json = ?, header_template = ?, query_template = ?,
+           scope = ?, scope_id = ?, active = ?, auth_kind = ?, oauth_authorization_id = ?,
+           source = ?, managed_by_connection_id = ?, updated_by = ?, updated_at = ?
+       WHERE id = ? RETURNING *`,
+      [
         data.configKey,
         JSON.stringify(data.allowedHosts),
         data.headerTemplate ?? null,
@@ -519,40 +500,19 @@ export function upsertCredentialBinding(data: {
         data.userId ?? null,
         now,
         targetId,
-      );
+      ],
+    );
     if (!row) throw new Error("Failed to update credential binding");
     return bindingFromRow(row);
   }
 
-  const row = getDb()
-    .prepare<
-      BindingRow,
-      [
-        string,
-        string,
-        string,
-        string | null,
-        string | null,
-        string,
-        string | null,
-        number,
-        string,
-        string | null,
-        string,
-        string | null,
-        string,
-        string,
-        string | null,
-        string | null,
-      ]
-    >(
-      `INSERT INTO script_credential_bindings
-       (id, config_key, allowed_hosts_json, header_template, query_template, scope, scope_id,
-        active, auth_kind, oauth_authorization_id, source, managed_by_connection_id,
-        created_at, updated_at, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-    )
-    .get(
+  const row = await getDbClient().get<BindingRow>(
+    `INSERT INTO script_credential_bindings
+     (id, config_key, allowed_hosts_json, header_template, query_template, scope, scope_id,
+      active, auth_kind, oauth_authorization_id, source, managed_by_connection_id,
+      created_at, updated_at, created_by, updated_by)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    [
       id,
       data.configKey,
       JSON.stringify(data.allowedHosts),
@@ -569,23 +529,29 @@ export function upsertCredentialBinding(data: {
       now,
       data.userId ?? null,
       data.userId ?? null,
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create credential binding");
   return bindingFromRow(row);
 }
 
-export function disableCredentialBinding(
+export async function disableCredentialBinding(
   id: string,
   userId?: string | null,
-): ScriptCredentialBindingRecord | null {
-  const row = getDb()
-    .prepare<BindingRow, [string, string | null, string]>(
-      `UPDATE script_credential_bindings SET active = 0, updated_at = ?, updated_by = ? WHERE id = ? RETURNING *`,
-    )
-    .get(new Date().toISOString(), userId ?? null, id);
+): Promise<ScriptCredentialBindingRecord | null> {
+  const row = await getDbClient().get<BindingRow>(
+    `UPDATE script_credential_bindings SET active = 0, updated_at = ?, updated_by = ? WHERE id = ? RETURNING *`,
+    [new Date().toISOString(), userId ?? null, id],
+  );
   return row ? bindingFromRow(row) : null;
 }
 
+// NOTE: kept synchronous (raw getDb()) rather than routed through getDbClient().
+// getScriptApiTypes()/getScriptMcpTypes() below are used as DEFAULT PARAMETER
+// VALUES in src/be/scripts/typecheck.ts's scriptSdkTypesWithGeneratedApis /
+// scriptStdlibTypesWithGeneratedApis — a default-parameter expression cannot
+// contain an await, so listScriptConnections (and everything that only reads
+// through it) must stay synchronous.
 export function listScriptConnections(context?: {
   agentId?: string;
   repoId?: string;
@@ -608,10 +574,11 @@ export function listScriptConnections(context?: {
     );
 }
 
-export function getScriptConnectionById(id: string): ScriptConnectionRecord | null {
-  const row = getDb()
-    .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
-    .get(id);
+export async function getScriptConnectionById(id: string): Promise<ScriptConnectionRecord | null> {
+  const row = await getDbClient().get<ConnectionRow>(
+    "SELECT * FROM script_connections WHERE id = ?",
+    [id],
+  );
   return row ? connectionFromRow(row) : null;
 }
 
@@ -1098,7 +1065,23 @@ export class ConnectionAuthValidationError extends Error {
   }
 }
 
-function deriveConnectionBinding(
+/**
+ * Raised when an upsert's full-row UPDATE finds the connection at a newer
+ * version than the snapshot it was computed from. Another writer committed in
+ * between, so writing would silently revert their auth / allowedHosts change.
+ * Routes map this to 409; the caller re-reads and retries.
+ */
+export class ScriptConnectionConflictError extends Error {
+  readonly statusCode = 409;
+  constructor(id: string) {
+    super(
+      `Script connection ${id} was modified by another writer; re-read it and retry the update.`,
+    );
+    this.name = "ScriptConnectionConflictError";
+  }
+}
+
+async function deriveConnectionBinding(
   auth: ConnectionAuthInput,
   ctx: {
     slug: string;
@@ -1106,7 +1089,7 @@ function deriveConnectionBinding(
     scope: ScriptConnectionScope;
     scopeId: string | null;
   },
-): DerivedConnectionBinding | null {
+): Promise<DerivedConnectionBinding | null> {
   if (auth.type === "none") return null;
 
   let configKey: string;
@@ -1115,11 +1098,11 @@ function deriveConnectionBinding(
     if (!auth.authorizationId) {
       throw new Error("oauth connection auth requires an authorizationId.");
     }
-    const authorization = getAuthorizationById(auth.authorizationId);
+    const authorization = await getAuthorizationById(auth.authorizationId);
     if (!authorization) {
       throw new Error(`OAuth authorization ${auth.authorizationId} was not found.`);
     }
-    const app = getOAuthAppById(authorization.appId);
+    const app = await getOAuthAppById(authorization.appId);
     if (!app || app.mcpServerId !== null) {
       throw new Error(
         `OAuth authorization ${auth.authorizationId} is not a generic provider authorization.`,
@@ -1285,12 +1268,11 @@ export function connectionAuthInputFromFlat(input: {
   return undefined;
 }
 
-function deleteManagedBindingForConnection(connectionId: string): void {
-  getDb()
-    .prepare<unknown, [string]>(
-      "DELETE FROM script_credential_bindings WHERE managed_by_connection_id = ?",
-    )
-    .run(connectionId);
+async function deleteManagedBindingForConnection(connectionId: string): Promise<void> {
+  await getDbClient().run(
+    "DELETE FROM script_credential_bindings WHERE managed_by_connection_id = ?",
+    [connectionId],
+  );
 }
 
 /**
@@ -1311,24 +1293,22 @@ function deleteManagedBindingForConnection(connectionId: string): void {
  *      connection's derived `connection.<slug>.secret` key (when auth_type used a
  *      derived inline secret) so the secret is not orphaned.
  */
-function deleteManagedConnectionSecret(input: {
+async function deleteManagedConnectionSecret(input: {
   scope: ScriptConnectionScope;
   scopeId: string | null;
   key: string;
-}): void {
+}): Promise<void> {
   const scopeId = input.scope === "global" ? null : input.scopeId;
   if (scopeId === null) {
-    getDb()
-      .prepare<unknown, [string, string]>(
-        "DELETE FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
-      )
-      .run(input.scope, input.key);
+    await getDbClient().run(
+      "DELETE FROM swarm_config WHERE scope = ? AND scopeId IS NULL AND key = ?",
+      [input.scope, input.key],
+    );
   } else {
-    getDb()
-      .prepare<unknown, [string, string, string]>(
-        "DELETE FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
-      )
-      .run(input.scope, scopeId, input.key);
+    await getDbClient().run(
+      "DELETE FROM swarm_config WHERE scope = ? AND scopeId = ? AND key = ?",
+      [input.scope, scopeId, input.key],
+    );
   }
 }
 
@@ -1590,14 +1570,13 @@ export async function upsertScriptConnection(data: {
   let openapiSpec: unknown;
 
   const existing = data.id
-    ? getDb()
-        .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
-        .get(data.id)
-    : getDb()
-        .prepare<ConnectionRow, [string, string, string | null]>(
-          "SELECT * FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
-        )
-        .get(normalizedSlug, scope, scopeId);
+    ? await getDbClient().get<ConnectionRow>("SELECT * FROM script_connections WHERE id = ?", [
+        data.id,
+      ])
+    : await getDbClient().get<ConnectionRow>(
+        "SELECT * FROM script_connections WHERE slug = ? AND scope = ? AND COALESCE(scope_id, '') = COALESCE(?, '')",
+        [normalizedSlug, scope, scopeId],
+      );
   const connectionId = existing?.id ?? id;
   const existingConnection = existing ? connectionFromRow(existing) : null;
   let effectiveBaseUrl = data.baseUrl ?? null;
@@ -1649,7 +1628,7 @@ export async function upsertScriptConnection(data: {
   // credential descriptor (raw fetch() / advanced path).
   const explicitBinding =
     explicitLegacyBinding && data.credentialBindingId
-      ? getCredentialBindingById(data.credentialBindingId)
+      ? await getCredentialBindingById(data.credentialBindingId)
       : null;
   const explicitBindingCredential: CredentialDescriptorInput = explicitBinding
     ? {
@@ -1715,7 +1694,7 @@ export async function upsertScriptConnection(data: {
       // generationError below — wrap them so the outer catch rethrows and the
       // upsert fails loudly instead of clearing the managed binding.
       try {
-        derived = deriveConnectionBinding(authIntent, {
+        derived = await deriveConnectionBinding(authIntent, {
           slug: normalizedSlug,
           baseUrl: effectiveBaseUrl,
           scope,
@@ -1782,7 +1761,7 @@ export async function upsertScriptConnection(data: {
     effectiveBaseUrl = data.baseUrl;
     baseUrlSource = "user";
     allowedHosts = data.allowedHosts;
-    derived = deriveConnectionBinding(authIntent, {
+    derived = await deriveConnectionBinding(authIntent, {
       slug: normalizedSlug,
       baseUrl: data.baseUrl,
       scope,
@@ -1818,97 +1797,97 @@ export async function upsertScriptConnection(data: {
   // (connection.credential_binding_id ↔ binding.managed_by_connection_id).
   // Defer FK enforcement to commit so a fresh connection + its binding can be
   // written in a single atomic pass regardless of insert order.
-  const writeConnectionAndBinding = getDb().transaction((): ConnectionRow => {
-    getDb().run("PRAGMA defer_foreign_keys = ON");
+  const writeConnectionAndBinding = (): Promise<ConnectionRow> =>
+    getDbClient().transaction(async (tx): Promise<ConnectionRow> => {
+      await tx.run("PRAGMA defer_foreign_keys = ON");
 
-    if (derived?.secretWrite) {
-      upsertSwarmConfig({ ...derived.secretWrite, isSecret: true });
-    }
+      if (derived?.secretWrite) {
+        await upsertSwarmConfig({ ...derived.secretWrite, isSecret: true });
+      }
 
-    // Drop a superseded derived inline secret (see oldDerivedSecretKey above).
-    // Skip when the connection's binding still references that same key (same
-    // slug + still inline, or a metadata-only rename that kept it) — it is not
-    // orphaned. The old row lives under the EXISTING connection's scope.
-    if (oldDerivedSecretKey && oldDerivedSecretKey !== newReferencedConfigKey) {
-      deleteManagedConnectionSecret({
-        scope: existingConnection?.scope ?? scope,
-        scopeId: existingConnection?.scopeId ?? scopeId,
-        key: oldDerivedSecretKey,
-      });
-      supersededSecretDeleted = true;
-    }
+      // Drop a superseded derived inline secret (see oldDerivedSecretKey above).
+      // Skip when the connection's binding still references that same key (same
+      // slug + still inline, or a metadata-only rename that kept it) — it is not
+      // orphaned. The old row lives under the EXISTING connection's scope.
+      if (oldDerivedSecretKey && oldDerivedSecretKey !== newReferencedConfigKey) {
+        await deleteManagedConnectionSecret({
+          scope: existingConnection?.scope ?? scope,
+          scopeId: existingConnection?.scopeId ?? scopeId,
+          key: oldDerivedSecretKey,
+        });
+        supersededSecretDeleted = true;
+      }
 
-    let credentialBindingId: string | null;
-    let authCols: AuthColumns;
-    if (explicitLegacyBinding) {
-      deleteManagedBindingForConnection(connectionId);
-      credentialBindingId = data.credentialBindingId ?? null;
-      authCols = NONE_AUTH_COLUMNS;
-    } else if (derived) {
-      const existingManaged = findManagedBindingByConnectionId(connectionId);
-      const binding = upsertCredentialBinding({
-        id: existingManaged?.id,
-        configKey: derived.configKey,
-        allowedHosts: derived.allowedHosts,
-        headerTemplate: derived.headerTemplate,
-        queryTemplate: derived.queryTemplate,
+      let credentialBindingId: string | null;
+      let authCols: AuthColumns;
+      if (explicitLegacyBinding) {
+        await deleteManagedBindingForConnection(connectionId);
+        credentialBindingId = data.credentialBindingId ?? null;
+        authCols = NONE_AUTH_COLUMNS;
+      } else if (derived) {
+        const existingManaged = await findManagedBindingByConnectionId(connectionId);
+        const binding = await upsertCredentialBinding({
+          id: existingManaged?.id,
+          configKey: derived.configKey,
+          allowedHosts: derived.allowedHosts,
+          headerTemplate: derived.headerTemplate,
+          queryTemplate: derived.queryTemplate,
+          scope,
+          scopeId,
+          active: true,
+          authKind: derived.authKind,
+          oauthAuthorizationId: derived.oauthAuthorizationId,
+          managedByConnectionId: connectionId,
+          source: "connection",
+          userId: data.userId,
+        });
+        credentialBindingId = binding.id;
+        authCols = derived.authColumns;
+      } else {
+        // auth `none`: drop any managed binding; clear the connection link when it
+        // pointed at that managed binding, otherwise preserve an explicit one.
+        const existingManaged = await findManagedBindingByConnectionId(connectionId);
+        if (existingManaged) await deleteManagedBindingForConnection(connectionId);
+        credentialBindingId =
+          existingConnection &&
+          existingManaged &&
+          existingConnection.credentialBindingId === existingManaged.id
+            ? null
+            : (existingConnection?.credentialBindingId ?? null);
+        authCols = NONE_AUTH_COLUMNS;
+      }
+
+      const params = [
+        normalizedSlug,
+        data.displayName ?? null,
+        data.kind,
         scope,
         scopeId,
-        active: true,
-        authKind: derived.authKind,
-        oauthAuthorizationId: derived.oauthAuthorizationId,
-        managedByConnectionId: connectionId,
-        source: "connection",
-        userId: data.userId,
-      });
-      credentialBindingId = binding.id;
-      authCols = derived.authColumns;
-    } else {
-      // auth `none`: drop any managed binding; clear the connection link when it
-      // pointed at that managed binding, otherwise preserve an explicit one.
-      const existingManaged = findManagedBindingByConnectionId(connectionId);
-      if (existingManaged) deleteManagedBindingForConnection(connectionId);
-      credentialBindingId =
-        existingConnection &&
-        existingManaged &&
-        existingConnection.credentialBindingId === existingManaged.id
-          ? null
-          : (existingConnection?.credentialBindingId ?? null);
-      authCols = NONE_AUTH_COLUMNS;
-    }
+        effectiveBaseUrl,
+        baseUrlSource,
+        JSON.stringify(allowedHosts),
+        credentialBindingId,
+        authCols.authType,
+        authCols.authConfigKey,
+        authCols.authAuthorizationId,
+        authCols.authParamName,
+        authCols.authTemplateOverride,
+        authCols.authHostsOverrideJson,
+        openapiSpecSourceKind,
+        openapiSpecSource,
+        openapiSpecJson,
+        openapiSpecEtag,
+        openapiSpecFetchedAt,
+        data.mcpServerId ?? null,
+        generatedTypes,
+        generatedRuntimeJson,
+        generatedAt,
+        generationError,
+        data.enabled === false ? 0 : 1,
+      ] as const;
 
-    const params = [
-      normalizedSlug,
-      data.displayName ?? null,
-      data.kind,
-      scope,
-      scopeId,
-      effectiveBaseUrl,
-      baseUrlSource,
-      JSON.stringify(allowedHosts),
-      credentialBindingId,
-      authCols.authType,
-      authCols.authConfigKey,
-      authCols.authAuthorizationId,
-      authCols.authParamName,
-      authCols.authTemplateOverride,
-      authCols.authHostsOverrideJson,
-      openapiSpecSourceKind,
-      openapiSpecSource,
-      openapiSpecJson,
-      openapiSpecEtag,
-      openapiSpecFetchedAt,
-      data.mcpServerId ?? null,
-      generatedTypes,
-      generatedRuntimeJson,
-      generatedAt,
-      generationError,
-      data.enabled === false ? 0 : 1,
-    ] as const;
-
-    if (existing) {
-      const row = getDb()
-        .prepare<ConnectionRow, [...typeof params, string, string | null, number, string]>(
+      if (existing) {
+        const row = await tx.get<ConnectionRow>(
           `UPDATE script_connections SET
             slug = ?, display_name = ?, kind = ?, scope = ?, scope_id = ?, base_url = ?,
             base_url_source = ?, allowed_hosts_json = ?, credential_binding_id = ?,
@@ -1918,18 +1897,27 @@ export async function upsertScriptConnection(data: {
             openapi_spec_fetched_at = ?, mcp_server_id = ?, generated_types = ?,
             generated_runtime_json = ?, generated_at = ?, generation_error = ?, enabled = ?,
             updated_at = ?, updated_by = ?, version = ?
-           WHERE id = ? RETURNING *`,
-        )
-        .get(...params, now, data.userId ?? null, existing.version + 1, existing.id);
-      if (!row) throw new Error("Failed to update script connection");
-      return row;
-    }
+           WHERE id = ? AND version = ? RETURNING *`,
+          [
+            ...params,
+            now,
+            data.userId ?? null,
+            existing.version + 1,
+            existing.id,
+            existing.version,
+          ],
+        );
+        // `version` predicate: this UPDATE writes every column from a snapshot
+        // read many awaits ago (binding derivation, spec fetch, credential
+        // lookups). A writer that committed in between would be reverted
+        // wholesale, including auth and the SSRF allowlist this request never
+        // touched. `setScriptConnectionEnabled` bumps the same counter, so it
+        // is caught too.
+        if (!row) throw new ScriptConnectionConflictError(existing.id);
+        return row;
+      }
 
-    const row = getDb()
-      .prepare<
-        ConnectionRow,
-        [string, ...typeof params, string, string, string | null, string | null]
-      >(
+      const row = await tx.get<ConnectionRow>(
         `INSERT INTO script_connections
          (id, slug, display_name, kind, scope, scope_id, base_url, base_url_source, allowed_hosts_json,
           credential_binding_id, auth_type, auth_config_key, auth_authorization_id, auth_param_name,
@@ -1938,13 +1926,13 @@ export async function upsertScriptConnection(data: {
           mcp_server_id, generated_types, generated_runtime_json, generated_at, generation_error,
           enabled, created_at, updated_at, created_by, updated_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
-      )
-      .get(connectionId, ...params, now, now, data.userId ?? null, data.userId ?? null);
-    if (!row) throw new Error("Failed to create script connection");
-    return row;
-  });
+        [connectionId, ...params, now, now, data.userId ?? null, data.userId ?? null],
+      );
+      if (!row) throw new Error("Failed to create script connection");
+      return row;
+    });
 
-  const row = writeConnectionAndBinding();
+  const row = await writeConnectionAndBinding();
   if (derived?.secretWrite || supersededSecretDeleted) refreshSecretScrubberCache();
   return connectionFromRow(row);
 }
@@ -1954,9 +1942,10 @@ export async function refreshScriptConnection(
   userId?: string | null,
   callerAgentId?: string,
 ): Promise<ScriptConnectionRecord | null> {
-  const row = getDb()
-    .prepare<ConnectionRow, [string]>("SELECT * FROM script_connections WHERE id = ?")
-    .get(id);
+  const row = await getDbClient().get<ConnectionRow>(
+    "SELECT * FROM script_connections WHERE id = ?",
+    [id],
+  );
   if (!row) return null;
   const connection = connectionFromRow(row);
 
@@ -2020,13 +2009,12 @@ export async function refreshScriptConnection(
     etag: connection.openapiSpecEtag,
   });
   if (fetched.status === "not_modified") {
-    const refreshed = getDb()
-      .prepare<ConnectionRow, [string, string]>(
-        `UPDATE script_connections
-         SET openapi_spec_fetched_at = ?
-         WHERE id = ? RETURNING *`,
-      )
-      .get(fetched.fetchedAt, id);
+    const refreshed = await getDbClient().get<ConnectionRow>(
+      `UPDATE script_connections
+       SET openapi_spec_fetched_at = ?
+       WHERE id = ? RETURNING *`,
+      [fetched.fetchedAt, id],
+    );
     return refreshed ? connectionFromRow(refreshed) : null;
   }
 
@@ -2057,18 +2045,17 @@ export async function refreshScriptConnection(
   });
 }
 
-export function setScriptConnectionEnabled(
+export async function setScriptConnectionEnabled(
   id: string,
   enabled: boolean,
   userId?: string | null,
-): ScriptConnectionRecord | null {
-  const row = getDb()
-    .prepare<ConnectionRow, [number, string, string | null, string]>(
-      `UPDATE script_connections
-       SET enabled = ?, updated_at = ?, updated_by = ?, version = version + 1
-       WHERE id = ? RETURNING *`,
-    )
-    .get(enabled ? 1 : 0, new Date().toISOString(), userId ?? null, id);
+): Promise<ScriptConnectionRecord | null> {
+  const row = await getDbClient().get<ConnectionRow>(
+    `UPDATE script_connections
+     SET enabled = ?, updated_at = ?, updated_by = ?, version = version + 1
+     WHERE id = ? RETURNING *`,
+    [enabled ? 1 : 0, new Date().toISOString(), userId ?? null, id],
+  );
   return row ? connectionFromRow(row) : null;
 }
 

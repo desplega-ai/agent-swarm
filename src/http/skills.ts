@@ -413,7 +413,7 @@ export async function handleSkills(
   if (getAgentSkillsSignatureRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentSkillsSignatureRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const sig = computeAgentSkillsSignature(parsed.params.id);
+    const sig = await computeAgentSkillsSignature(parsed.params.id);
     getAgentSkillsSignatureRoute.respond(res, 200, {
       hash: sig.hash,
       count: sig.count,
@@ -426,8 +426,8 @@ export async function handleSkills(
   if (getAgentSkillsRoute.match(req.method, pathSegments)) {
     const parsed = await getAgentSkillsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const skills = getAgentSkills(parsed.params.id);
-    const signature = computeAgentSkillsSignature(parsed.params.id).hash;
+    const skills = await getAgentSkills(parsed.params.id);
+    const signature = (await computeAgentSkillsSignature(parsed.params.id)).hash;
     getAgentSkillsRoute.respond(res, 200, { skills, total: skills.length, signature });
     return true;
   }
@@ -463,7 +463,7 @@ export async function handleSkills(
         description = `Complex skill from ${parsed.body.sourceRepo}`;
       }
 
-      const skill = createSkill({
+      const skill = await createSkill({
         name,
         description,
         content,
@@ -489,11 +489,11 @@ export async function handleSkills(
     if (!parsed) return true;
 
     const remoteSkills = parsed.body.skillId
-      ? (() => {
-          const s = getSkillById(parsed.body.skillId!);
+      ? await (async () => {
+          const s = await getSkillById(parsed.body.skillId!);
           return s && s.type === "remote" ? [s] : [];
         })()
-      : listSkills({ type: "remote" });
+      : await listSkills({ type: "remote" });
 
     let updated = 0;
     const errors: string[] = [];
@@ -514,7 +514,7 @@ export async function handleSkills(
 
         if (parsed.body.force || newHash !== skill.sourceHash) {
           const pm = parseSkillContent(newContent);
-          updateSkill(skill.id, {
+          await updateSkill(skill.id, {
             content: newContent,
             name: pm.name,
             description: pm.description,
@@ -531,7 +531,7 @@ export async function handleSkills(
           updated++;
         } else {
           // Content unchanged — still update lastFetchedAt
-          updateSkill(skill.id, { lastFetchedAt: now });
+          await updateSkill(skill.id, { lastFetchedAt: now });
         }
       } catch (err) {
         errors.push(`${skill.name}: ${err instanceof Error ? err.message : "Unknown"}`);
@@ -551,7 +551,7 @@ export async function handleSkills(
       return true;
     }
 
-    const result = syncSkillsToFilesystem(agentId);
+    const result = await syncSkillsToFilesystem(agentId);
     syncFilesystemRoute.respond(res, 200, {
       synced: result.synced,
       removed: result.removed,
@@ -566,14 +566,14 @@ export async function handleSkills(
     const parsed = await installSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
     }
 
     try {
-      const agentSkill = installSkill(parsed.body.agentId, parsed.params.id);
+      const agentSkill = await installSkill(parsed.body.agentId, parsed.params.id);
       installSkillRoute.respond(res, 200, { agentSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Install failed", 400);
@@ -586,7 +586,7 @@ export async function handleSkills(
     const parsed = await uninstallSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const removed = uninstallSkill(parsed.params.agentId, parsed.params.id);
+    const removed = await uninstallSkill(parsed.params.agentId, parsed.params.id);
     uninstallSkillRoute.respond(res, 200, { success: removed });
     return true;
   }
@@ -599,8 +599,8 @@ export async function handleSkills(
     // List responses default to slim (no `content`); `?fields=full` restores it.
     const includeContent = parsed.query.fields === "full";
     const skills = parsed.query.search
-      ? searchSkills(parsed.query.search, 20, includeContent)
-      : listSkills({
+      ? await searchSkills(parsed.query.search, 20, includeContent)
+      : await listSkills({
           type: parsed.query.type as "remote" | "personal" | undefined,
           scope: parsed.query.scope as "global" | "swarm" | "agent" | undefined,
           ownerAgentId: parsed.query.agentId,
@@ -618,13 +618,13 @@ export async function handleSkills(
     const parsed = await listSkillFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
     }
 
-    const files = listSkillFileManifest(parsed.params.id);
+    const files = await listSkillFileManifest(parsed.params.id);
     listSkillFilesRoute.respond(res, 200, { files, total: files.length });
     return true;
   }
@@ -634,7 +634,7 @@ export async function handleSkills(
     const parsed = await bulkUpsertSkillFilesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -645,8 +645,8 @@ export async function handleSkills(
     }
 
     try {
-      const files = upsertSkillFiles(parsed.params.id, parsed.body.files);
-      const updatedSkill = getSkillById(parsed.params.id);
+      const files = await upsertSkillFiles(parsed.params.id, parsed.body.files);
+      const updatedSkill = await getSkillById(parsed.params.id);
       bulkUpsertSkillFilesRoute.respond(res, 200, {
         files,
         total: files.length,
@@ -663,14 +663,14 @@ export async function handleSkills(
     const parsed = await getSkillFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
     }
 
     try {
-      const file = getSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      const file = await getSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
       if (!file) {
         jsonError(res, "Skill file not found", 404);
         return true;
@@ -687,7 +687,7 @@ export async function handleSkills(
     const parsed = await upsertSkillFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -698,11 +698,11 @@ export async function handleSkills(
     }
 
     try {
-      const file = upsertSkillFile(parsed.params.id, {
+      const file = await upsertSkillFile(parsed.params.id, {
         path: decodeSkillFilePath(pathSegments),
         ...parsed.body,
       });
-      const updatedSkill = getSkillById(parsed.params.id);
+      const updatedSkill = await getSkillById(parsed.params.id);
       upsertSkillFileRoute.respond(res, 200, { file, skill: updatedSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Failed to upsert file", 400);
@@ -715,7 +715,7 @@ export async function handleSkills(
     const parsed = await deleteSkillFileRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -726,12 +726,12 @@ export async function handleSkills(
     }
 
     try {
-      const deleted = deleteSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
+      const deleted = await deleteSkillFile(parsed.params.id, decodeSkillFilePath(pathSegments));
       if (!deleted) {
         jsonError(res, "Skill file not found", 404);
         return true;
       }
-      const updatedSkill = getSkillById(parsed.params.id);
+      const updatedSkill = await getSkillById(parsed.params.id);
       deleteSkillFileRoute.respond(res, 200, { success: true, skill: updatedSkill });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Invalid file path", 400);
@@ -744,7 +744,7 @@ export async function handleSkills(
     const parsed = await getSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const skill = getSkillById(parsed.params.id);
+    const skill = await getSkillById(parsed.params.id);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -760,7 +760,7 @@ export async function handleSkills(
 
     try {
       const pm = parseSkillContent(parsed.body.content);
-      const skill = createSkill({
+      const skill = await createSkill({
         name: pm.name,
         description: pm.description,
         content: parsed.body.content,
@@ -788,7 +788,7 @@ export async function handleSkills(
     const parsed = await updateSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getSkillById(parsed.params.id);
+    const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -843,7 +843,7 @@ export async function handleSkills(
       updates.userInvocable = pm.userInvocable;
     }
 
-    const skill = updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
+    const skill = await updateSkill(parsed.params.id, updates as Parameters<typeof updateSkill>[1]);
     if (!skill) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -857,7 +857,7 @@ export async function handleSkills(
     const parsed = await deleteSkillRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const existing = getSkillById(parsed.params.id);
+    const existing = await getSkillById(parsed.params.id);
     if (!existing) {
       jsonError(res, "Skill not found", 404);
       return true;
@@ -867,7 +867,7 @@ export async function handleSkills(
       return true;
     }
 
-    const deleted = deleteSkill(parsed.params.id);
+    const deleted = await deleteSkill(parsed.params.id);
     if (!deleted) {
       jsonError(res, "Skill not found", 404);
       return true;

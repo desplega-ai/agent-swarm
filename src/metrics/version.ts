@@ -1,13 +1,16 @@
 import { createMetricVersion, getMetric, getMetricVersions } from "../be/db";
 import type { MetricSnapshot, MetricVersion } from "../types";
 
-export function snapshotMetric(metricId: string, changedByAgentId?: string): MetricVersion {
-  const metric = getMetric(metricId);
+export async function snapshotMetric(
+  metricId: string,
+  changedByAgentId?: string,
+): Promise<MetricVersion> {
+  const metric = await getMetric(metricId);
   if (!metric) {
     throw new Error(`Metric ${metricId} not found — cannot create snapshot`);
   }
 
-  const existingVersions = getMetricVersions(metricId);
+  const existingVersions = await getMetricVersions(metricId);
   const maxVersion = existingVersions.length > 0 ? existingVersions[0]!.version : 0;
   const nextVersion = maxVersion + 1;
 

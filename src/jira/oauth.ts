@@ -14,13 +14,13 @@ const ACCESSIBLE_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessib
  * `initJira()`, so this is a thin projection of the row — the drift-prone
  * hardcoding it used to carry moved into the seeding call + schema.
  */
-export function getJiraOAuthConfig(): OAuthProviderConfig | null {
-  const app = getOAuthApp("jira");
+export async function getJiraOAuthConfig(): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp("jira");
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
 export async function getJiraAuthorizationUrl(): Promise<string | null> {
-  const config = getJiraOAuthConfig();
+  const config = await getJiraOAuthConfig();
   if (!config) return null;
   // flow='tracker' so the unified state-keyed callback runs the tracker
   // post-processing (cloudId capture) after landing tokens on the default
@@ -65,7 +65,7 @@ export async function resolveAndStoreJiraCloudId(
     throw new Error("Jira accessible-resources returned malformed entry (missing id/url)");
   }
 
-  updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
+  await updateJiraMetadata({ cloudId: first.id, siteUrl: first.url });
   return { cloudId: first.id, siteUrl: first.url };
 }
 
@@ -89,7 +89,7 @@ export async function handleJiraCallback(
   cloudId: string;
   siteUrl: string;
 }> {
-  const config = getJiraOAuthConfig();
+  const config = await getJiraOAuthConfig();
   if (!config) throw new Error("Jira OAuth not configured");
 
   const tokens = await exchangeCode(config, code, state);

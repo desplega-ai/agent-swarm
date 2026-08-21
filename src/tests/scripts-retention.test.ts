@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { createApp, deleteApp } from "../apps/store";
-import { closeDb, createWorkflow, deleteWorkflow, getDb, initDb } from "../be/db";
+import { closeDb, createWorkflow, deleteWorkflow, getDb, getDbClient, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { createScriptApi, getScript, insertScript, upsertScriptByName } from "../be/scripts/db";
 import { purgeExpiredScratchScripts } from "../be/scripts/retention";
@@ -21,7 +21,7 @@ async function clearDb(): Promise<void> {
   }
 }
 
-function addScript(name: string, isScratch: boolean) {
+async function addScript(name: string, isScratch: boolean) {
   return insertScript({
     name,
     scope: "agent",
@@ -48,16 +48,16 @@ describe("scratch script retention", () => {
     else process.env.AGENT_SWARM_API_KEY = savedApiKey;
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM scripts");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM scripts");
   });
 
-  test("purges only scratch-prefixed rows inactive for more than 14 days", () => {
-    const staleScratch = addScript("scratch-stale-a1b2c3d4", true);
-    const freshScratch = addScript("scratch-fresh-a1b2c3d4", true);
-    const namedWithPrefix = addScript("scratch-named-a1b2c3d4", false);
-    const flaggedWithoutPrefix = addScript("temporary-script", true);
-    const globalScratch = insertScript({
+  test("purges only scratch-prefixed rows inactive for more than 14 days", async () => {
+    const staleScratch = await addScript("scratch-stale-a1b2c3d4", true);
+    const freshScratch = await addScript("scratch-fresh-a1b2c3d4", true);
+    const namedWithPrefix = await addScript("scratch-named-a1b2c3d4", false);
+    const flaggedWithoutPrefix = await addScript("temporary-script", true);
+    const globalScratch = await insertScript({
       name: "scratch-global-a1b2c3d4",
       scope: "global",
       source: "export default () => 'global'",
@@ -67,42 +67,45 @@ describe("scratch script retention", () => {
       isScratch: true,
     });
 
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?, ?)")
-      .run(
-        "2026-07-01T00:00:00.000Z",
-        staleScratch.id,
-        namedWithPrefix.id,
-        flaggedWithoutPrefix.id,
-        globalScratch.id,
-      );
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?")
-      .run("2026-08-10T00:00:00.000Z", freshScratch.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?, ?)", [
+      "2026-07-01T00:00:00.000Z",
+      staleScratch.id,
+      namedWithPrefix.id,
+      flaggedWithoutPrefix.id,
+      globalScratch.id,
+    ]);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [
+      "2026-08-10T00:00:00.000Z",
+      freshScratch.id,
+    ]);
 
-    expect(purgeExpiredScratchScripts(NOW)).toBe(1);
-    expect(getScript({ name: staleScratch.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    expect(await purgeExpiredScratchScripts(NOW)).toBe(1);
     expect(
-      getScript({ name: freshScratch.name, scope: "agent", scopeId: "agent-1" }),
+      await getScript({ name: staleScratch.name, scope: "agent", scopeId: "agent-1" }),
+    ).toBeNull();
+    expect(
+      await getScript({ name: freshScratch.name, scope: "agent", scopeId: "agent-1" }),
     ).not.toBeNull();
     expect(
-      getScript({ name: namedWithPrefix.name, scope: "agent", scopeId: "agent-1" }),
+      await getScript({ name: namedWithPrefix.name, scope: "agent", scopeId: "agent-1" }),
     ).not.toBeNull();
     expect(
-      getScript({ name: flaggedWithoutPrefix.name, scope: "agent", scopeId: "agent-1" }),
+      await getScript({ name: flaggedWithoutPrefix.name, scope: "agent", scopeId: "agent-1" }),
     ).not.toBeNull();
-    expect(getScript({ name: globalScratch.name, scope: "global" })).not.toBeNull();
+    expect(await getScript({ name: globalScratch.name, scope: "global" })).not.toBeNull();
   });
 
-  test("a stale scratch script referenced by an app definition survives the sweep", () => {
-    const wired = addScript("scratch-app-wired-a1b2c3d4", true);
-    const unwired = addScript("scratch-app-unwired-a1b2c3d4", true);
+  test("a stale scratch script referenced by an app definition survives the sweep", async () => {
+    const wired = await addScript("scratch-app-wired-a1b2c3d4", true);
+    const unwired = await addScript("scratch-app-unwired-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
-      .run(old, wired.id, unwired.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)", [
+      old,
+      wired.id,
+      unwired.id,
+    ]);
 
-    const app = createApp({
+    const app = await createApp({
       name: "retention-test-app",
       definition: {
         models: {},
@@ -113,23 +116,29 @@ describe("scratch script retention", () => {
     });
 
     try {
-      expect(purgeExpiredScratchScripts(NOW)).toBe(1);
-      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
-      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(await purgeExpiredScratchScripts(NOW)).toBe(1);
+      expect(
+        await getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" }),
+      ).not.toBeNull();
+      expect(
+        await getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
     } finally {
-      deleteApp(app.id);
+      await deleteApp(app.id);
     }
   });
 
-  test("a stale scratch script referenced only by a broken app's raw definition string survives the sweep", () => {
-    const wired = addScript("scratch-broken-wired-a1b2c3d4", true);
-    const unwired = addScript("scratch-broken-unwired-a1b2c3d4", true);
+  test("a stale scratch script referenced only by a broken app's raw definition string survives the sweep", async () => {
+    const wired = await addScript("scratch-broken-wired-a1b2c3d4", true);
+    const unwired = await addScript("scratch-broken-unwired-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
-      .run(old, wired.id, unwired.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)", [
+      old,
+      wired.id,
+      unwired.id,
+    ]);
 
-    const app = createApp({
+    const app = await createApp({
       name: "retention-test-broken-app",
       definition: {
         models: {},
@@ -141,45 +150,58 @@ describe("scratch script retention", () => {
     // Corrupt the stored JSON so decodeApp() falls into the invalid-JSON
     // branch: `definition` becomes the raw string itself, and the wired
     // script's id survives only inside that unparseable text.
-    getDb()
-      .prepare("UPDATE apps SET definition = ? WHERE id = ?")
-      .run(`{"actions": {"run": {"scriptId": "${wired.id}"`, app.id);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", [
+      `{"actions": {"run": {"scriptId": "${wired.id}"`,
+      app.id,
+    ]);
 
     try {
-      expect(purgeExpiredScratchScripts(NOW)).toBe(1);
-      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
-      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(await purgeExpiredScratchScripts(NOW)).toBe(1);
+      expect(
+        await getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" }),
+      ).not.toBeNull();
+      expect(
+        await getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
     } finally {
-      deleteApp(app.id);
+      await deleteApp(app.id);
     }
   });
 
-  test("a stale scratch script bound to a public API endpoint survives the sweep", () => {
-    const wired = addScript("scratch-api-wired-a1b2c3d4", true);
-    const unwired = addScript("scratch-api-unwired-a1b2c3d4", true);
+  test("a stale scratch script bound to a public API endpoint survives the sweep", async () => {
+    const wired = await addScript("scratch-api-wired-a1b2c3d4", true);
+    const unwired = await addScript("scratch-api-unwired-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)")
-      .run(old, wired.id, unwired.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?)", [
+      old,
+      wired.id,
+      unwired.id,
+    ]);
 
-    createScriptApi({ scriptId: wired.id, agentId: "agent-1", authMode: "none" });
+    await createScriptApi({ scriptId: wired.id, agentId: "agent-1", authMode: "none" });
 
-    expect(purgeExpiredScratchScripts(NOW)).toBe(1);
-    expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
-    expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+    expect(await purgeExpiredScratchScripts(NOW)).toBe(1);
+    expect(
+      await getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" }),
+    ).not.toBeNull();
+    expect(await getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
   });
 
-  test("a stale scratch script referenced by an agent-scoped workflow swarm-script node survives the sweep", () => {
-    const wired = addScript("scratch-wf-wired-a1b2c3d4", true);
-    const unwired = addScript("scratch-wf-unwired-a1b2c3d4", true);
-    const wrongOwner = addScript("scratch-wf-wrongowner-a1b2c3d4", true);
-    const globalNode = addScript("scratch-wf-global-a1b2c3d4", true);
+  test("a stale scratch script referenced by an agent-scoped workflow swarm-script node survives the sweep", async () => {
+    const wired = await addScript("scratch-wf-wired-a1b2c3d4", true);
+    const unwired = await addScript("scratch-wf-unwired-a1b2c3d4", true);
+    const wrongOwner = await addScript("scratch-wf-wrongowner-a1b2c3d4", true);
+    const globalNode = await addScript("scratch-wf-global-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?, ?)")
-      .run(old, wired.id, unwired.id, wrongOwner.id, globalNode.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?, ?)", [
+      old,
+      wired.id,
+      unwired.id,
+      wrongOwner.id,
+      globalNode.id,
+    ]);
 
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: "retention-test-workflow",
       definition: {
         nodes: [
@@ -199,7 +221,7 @@ describe("scratch script retention", () => {
       createdByAgentId: "agent-1",
     });
     // Same script name, wrong workflow owner — must not protect wrongOwner's row.
-    const otherOwnerWorkflow = createWorkflow({
+    const otherOwnerWorkflow = await createWorkflow({
       name: "retention-test-workflow-other-owner",
       definition: {
         nodes: [
@@ -215,30 +237,41 @@ describe("scratch script retention", () => {
     });
 
     try {
-      expect(purgeExpiredScratchScripts(NOW)).toBe(3);
-      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
-      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
-      expect(getScript({ name: wrongOwner.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
-      expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(await purgeExpiredScratchScripts(NOW)).toBe(3);
+      expect(
+        await getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" }),
+      ).not.toBeNull();
+      expect(
+        await getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
+      expect(
+        await getScript({ name: wrongOwner.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
+      expect(
+        await getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
     } finally {
-      deleteWorkflow(workflow.id);
-      deleteWorkflow(otherOwnerWorkflow.id);
+      await deleteWorkflow(workflow.id);
+      await deleteWorkflow(otherOwnerWorkflow.id);
     }
   });
 
-  test("a stale scratch script referenced by an ownerless workflow's swarm-script node survives by name alone", () => {
-    const wired = addScript("scratch-wf-ownerless-wired-a1b2c3d4", true);
-    const unwired = addScript("scratch-wf-ownerless-unwired-a1b2c3d4", true);
-    const globalNode = addScript("scratch-wf-ownerless-global-a1b2c3d4", true);
+  test("a stale scratch script referenced by an ownerless workflow's swarm-script node survives by name alone", async () => {
+    const wired = await addScript("scratch-wf-ownerless-wired-a1b2c3d4", true);
+    const unwired = await addScript("scratch-wf-ownerless-unwired-a1b2c3d4", true);
+    const globalNode = await addScript("scratch-wf-ownerless-global-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?)")
-      .run(old, wired.id, unwired.id, globalNode.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?)", [
+      old,
+      wired.id,
+      unwired.id,
+      globalNode.id,
+    ]);
 
     // No createdByAgentId: the resolving agent is only known at trigger time
     // (SwarmScriptExecutor falls back to trigger.agentId), so the sweep can only
     // match by script name across every agent scope.
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: "retention-test-workflow-ownerless",
       definition: {
         nodes: [
@@ -258,12 +291,18 @@ describe("scratch script retention", () => {
     });
 
     try {
-      expect(purgeExpiredScratchScripts(NOW)).toBe(2);
-      expect(getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
-      expect(getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
-      expect(getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" })).toBeNull();
+      expect(await purgeExpiredScratchScripts(NOW)).toBe(2);
+      expect(
+        await getScript({ name: wired.name, scope: "agent", scopeId: "agent-1" }),
+      ).not.toBeNull();
+      expect(
+        await getScript({ name: unwired.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
+      expect(
+        await getScript({ name: globalNode.name, scope: "agent", scopeId: "agent-1" }),
+      ).toBeNull();
     } finally {
-      deleteWorkflow(workflow.id);
+      await deleteWorkflow(workflow.id);
     }
   });
 
@@ -279,9 +318,10 @@ describe("scratch script retention", () => {
       isScratch: true,
     };
     const created = await upsertScriptByName(args);
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?")
-      .run("2026-07-01T00:00:00.000Z", created.script.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [
+      "2026-07-01T00:00:00.000Z",
+      created.script.id,
+    ]);
 
     const reused = await upsertScriptByName(args);
 
@@ -291,38 +331,40 @@ describe("scratch script retention", () => {
   });
 
   test("a successful shared saved-script execution refreshes scratch last-used time", async () => {
-    const script = addScript("scratch-app-action-a1b2c3d4", true);
+    const script = await addScript("scratch-app-action-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
 
     const output = await runSavedScriptAsAgent({ script, input: null, agentId: "agent-1" });
 
     expect(output.exitCode).toBe(0);
     expect(
-      getScript({ name: script.name, scope: "agent", scopeId: "agent-1" })?.updatedAt,
+      (await getScript({ name: script.name, scope: "agent", scopeId: "agent-1" }))?.updatedAt,
     ).not.toBe(old);
   });
 
   test("a stale scratch script survives a GC tick that fires while its run is still in flight", async () => {
-    const script = addScript("scratch-inflight-a1b2c3d4", true);
+    const script = await addScript("scratch-inflight-a1b2c3d4", true);
     const old = "2026-07-01T00:00:00.000Z";
-    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
 
-    // Don't await yet: runSavedScriptAsAgent touches last-used synchronously
-    // before its first `await`, so by the time this line returns the row is
-    // already fresh — mirroring a run that's still executing when the daily
-    // GC tick fires.
+    // Don't await yet: runSavedScriptAsAgent's first act is the last-used
+    // touch, which claims its slot in the DbClient's FIFO queue before this
+    // call returns — so the purge below is ordered after it and sees a fresh
+    // row, mirroring a run that's still executing when the daily GC tick fires.
     const runPromise = runSavedScriptAsAgent({ script, input: null, agentId: "agent-1" });
 
-    expect(purgeExpiredScratchScripts(NOW)).toBe(0);
-    expect(getScript({ name: script.name, scope: "agent", scopeId: "agent-1" })).not.toBeNull();
+    expect(await purgeExpiredScratchScripts(NOW)).toBe(0);
+    expect(
+      await getScript({ name: script.name, scope: "agent", scopeId: "agent-1" }),
+    ).not.toBeNull();
 
     const output = await runPromise;
     expect(output.exitCode).toBe(0);
   });
 
   test("a failed saved-script execution restores the pre-run last-used time instead of extending it", async () => {
-    const script = insertScript({
+    const script = await insertScript({
       name: "scratch-failing-a1b2c3d4",
       scope: "agent",
       scopeId: "agent-1",
@@ -333,8 +375,8 @@ describe("scratch script retention", () => {
       isScratch: true,
     });
     const old = "2026-07-01T00:00:00.000Z";
-    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
-    const staleScript = getScript({
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
+    const staleScript = await getScript({
       name: script.name,
       scope: "agent",
       scopeId: "agent-1",
@@ -348,15 +390,15 @@ describe("scratch script retention", () => {
     });
 
     expect(output.exitCode).not.toBe(0);
-    expect(getScript({ name: script.name, scope: "agent", scopeId: "agent-1" })?.updatedAt).toBe(
-      old,
-    );
+    expect(
+      (await getScript({ name: script.name, scope: "agent", scopeId: "agent-1" }))?.updatedAt,
+    ).toBe(old);
   });
 
-  test("migration grants existing agent scratch rows a fresh retention window only", () => {
-    const agentScratch = addScript("scratch-existing-a1b2c3d4", true);
-    const namedWithPrefix = addScript("scratch-existing-named-a1b2c3d4", false);
-    const globalScratch = insertScript({
+  test("migration grants existing agent scratch rows a fresh retention window only", async () => {
+    const agentScratch = await addScript("scratch-existing-a1b2c3d4", true);
+    const namedWithPrefix = await addScript("scratch-existing-named-a1b2c3d4", false);
+    const globalScratch = await insertScript({
       name: "scratch-existing-global-a1b2c3d4",
       scope: "global",
       source: "export default () => 'global'",
@@ -366,19 +408,23 @@ describe("scratch script retention", () => {
       isScratch: true,
     });
     const old = "2026-07-01T00:00:00.000Z";
-    getDb()
-      .prepare("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?)")
-      .run(old, agentScratch.id, namedWithPrefix.id, globalScratch.id);
-    getDb().run("DELETE FROM _migrations WHERE version = 130");
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id IN (?, ?, ?)", [
+      old,
+      agentScratch.id,
+      namedWithPrefix.id,
+      globalScratch.id,
+    ]);
+    await getDbClient().run("DELETE FROM _migrations WHERE version = 130");
 
     runMigrations(getDb());
 
     expect(
-      getScript({ name: agentScratch.name, scope: "agent", scopeId: "agent-1" })?.updatedAt,
+      (await getScript({ name: agentScratch.name, scope: "agent", scopeId: "agent-1" }))?.updatedAt,
     ).not.toBe(old);
     expect(
-      getScript({ name: namedWithPrefix.name, scope: "agent", scopeId: "agent-1" })?.updatedAt,
+      (await getScript({ name: namedWithPrefix.name, scope: "agent", scopeId: "agent-1" }))
+        ?.updatedAt,
     ).toBe(old);
-    expect(getScript({ name: globalScratch.name, scope: "global" })?.updatedAt).toBe(old);
+    expect((await getScript({ name: globalScratch.name, scope: "global" }))?.updatedAt).toBe(old);
   });
 });

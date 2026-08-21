@@ -23,12 +23,12 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const existing = getMcpServerById(args.id);
+      const existing = await getMcpServerById(args.id);
       if (!existing) {
         return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -45,7 +45,7 @@ export const registerMcpServerDeleteTool = (server: McpServer) => {
         });
       }
 
-      const result = deleteMcpServer(args.id);
+      const result = await deleteMcpServer(args.id);
       const message = result.deleted
         ? `Deleted MCP server "${existing.name}" and ${result.deletedScriptConnectionCount} script connection(s).`
         : "Delete failed.";

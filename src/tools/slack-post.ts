@@ -46,7 +46,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.");
       }
@@ -71,10 +71,10 @@ export const registerSlackPostTool = (server: McpServer) => {
         const slackMessage = markdownToSlack(message);
 
         const sourceTask = requestInfo.sourceTaskId
-          ? getTaskById(requestInfo.sourceTaskId)
+          ? await getTaskById(requestInfo.sourceTaskId)
           : undefined;
         const contextKey = sourceTask?.contextKey;
-        const tree = threadTs ? getSlackTreeMessageByThread(channelId, threadTs) : null;
+        const tree = threadTs ? await getSlackTreeMessageByThread(channelId, threadTs) : null;
         const messageBlocks: Record<string, unknown>[] = [
           ...(blocks ?? [
             {
@@ -118,7 +118,7 @@ export const registerSlackPostTool = (server: McpServer) => {
         const messageTs = result.ts;
         if (messageTs) {
           const effectiveThreadTs = threadTs ?? messageTs;
-          recordSlackMessage({
+          await recordSlackMessage({
             contextKey: contextKey ?? `task:slack:${channelId}:${effectiveThreadTs}`,
             channelId,
             threadTs: effectiveThreadTs,

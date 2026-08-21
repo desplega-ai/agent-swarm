@@ -27,7 +27,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       const store = getMemoryStore();
-      const memory = store.peek(memoryId);
+      const memory = await store.peek(memoryId);
 
       if (!memory) {
         return toolErr(`Memory "${memoryId}" not found.`, {
@@ -36,7 +36,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
       }
 
       // Permission check: own memories or lead can delete swarm-scoped
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -54,7 +54,7 @@ export const registerMemoryDeleteTool = (server: McpServer) => {
         );
       }
 
-      const deleted = store.delete(memoryId);
+      const deleted = await store.delete(memoryId);
 
       const message = deleted
         ? `Memory "${memoryId}" deleted.`

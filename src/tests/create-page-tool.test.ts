@@ -100,7 +100,7 @@ describe("create_page MCP tool", () => {
     expect(result.structuredContent.yourAgentId).toBe(agentId);
 
     // DB row exists with the auto-slug from the title.
-    const row = getPageBySlug(agentId, "hello-page");
+    const row = await getPageBySlug(agentId, "hello-page");
     expect(row).not.toBeNull();
     expect(row!.body).toBe("<h1>hello</h1>");
     expect(row!.authMode).toBe("authed");
@@ -118,7 +118,7 @@ describe("create_page MCP tool", () => {
       fakeMeta,
     );
 
-    const row = getPageBySlug(agentId, "public-page");
+    const row = await getPageBySlug(agentId, "public-page");
     expect(row).not.toBeNull();
     expect(row!.authMode).toBe("public");
   });
@@ -152,12 +152,12 @@ describe("create_page MCP tool", () => {
     expect(second.structuredContent.version).toBe(2);
 
     // Version row holds the PRE-update body.
-    const versions = getPageVersions(first.structuredContent.id);
+    const versions = await getPageVersions(first.structuredContent.id);
     expect(versions).toHaveLength(1);
     expect(versions[0]!.snapshot.body).toBe("v0");
 
     // Parent now holds the new body.
-    const row = getPageBySlug(agentId, "upsert");
+    const row = await getPageBySlug(agentId, "upsert");
     expect(row?.body).toBe("v1");
   });
 
@@ -188,7 +188,7 @@ describe("create_page MCP tool", () => {
       },
       fakeMeta,
     );
-    const row = getPageBySlug(agentId, "pw-tool");
+    const row = await getPageBySlug(agentId, "pw-tool");
     expect(row?.passwordHash).toBeDefined();
     expect(row?.passwordHash).not.toBe("open-sesame");
     expect(await Bun.password.verify("open-sesame", row!.passwordHash!)).toBe(true);

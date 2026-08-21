@@ -76,8 +76,8 @@ beforeAll(async () => {
   }
   closeDb();
   initDb(TEST_DB_PATH);
-  createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+  await createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -106,7 +106,7 @@ describe("register-service security validation", () => {
     expect(structured.service?.script).toBe("/workspace/services/demo/server.ts");
     expect(structured.service?.interpreter).toBe("bun");
 
-    const stored = getServiceByAgentAndName(WORKER_ID, WORKER_ID);
+    const stored = await getServiceByAgentAndName(WORKER_ID, WORKER_ID);
     expect(stored?.agentId).toBe(WORKER_ID);
     expect(stored?.args).toEqual(["--host", "0.0.0.0"]);
   });
@@ -131,7 +131,7 @@ describe("register-service security validation", () => {
     expect(traversedOutsideWorkspace.message).toContain(
       "script must resolve under /workspace/ or /home/worker/",
     );
-    expect(getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
+    expect(await getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
   });
 
   test("rejects shell interpreters", async () => {
@@ -149,7 +149,7 @@ describe("register-service security validation", () => {
       expect(structured.message).toContain("interpreter must be one of: node, bun, python3");
     }
 
-    expect(getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
+    expect(await getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
   });
 
   test("rejects shell metacharacters in args before persistence", async () => {
@@ -171,12 +171,12 @@ describe("register-service security validation", () => {
       const structured = structuredOf(result);
       expect(structured.success).toBe(false);
       expect(structured.message).toContain("args must not contain shell metacharacters");
-      expect(getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
+      expect(await getServiceByAgentAndName(OTHER_WORKER_ID, OTHER_WORKER_ID)).toBeNull();
     }
   });
 
   test("ecosystem config only includes services owned by the requesting agent", async () => {
-    createService(OTHER_WORKER_ID, OTHER_WORKER_ID, {
+    await createService(OTHER_WORKER_ID, OTHER_WORKER_ID, {
       script: "/workspace/other/server.ts",
       interpreter: "bun",
     });

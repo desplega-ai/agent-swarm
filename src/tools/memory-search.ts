@@ -96,7 +96,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         return toolErr("Agent ID required. Are you registered in the swarm?");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const isLead = agent?.isLead ?? false;
 
       // Try vector search first
@@ -105,16 +105,20 @@ export const registerMemorySearchTool = (server: McpServer) => {
       const queryEmbedding = await provider.embed(query);
 
       const candidateLimit = limit * CANDIDATE_SET_MULTIPLIER;
-      const candidates = store.search(queryEmbedding ?? new Float32Array(0), requestInfo.agentId, {
-        scope: scope as "agent" | "swarm" | "all",
-        limit: candidateLimit,
-        source,
-        isLead,
-        queryText: query,
-      });
+      const candidates = await store.search(
+        queryEmbedding ?? new Float32Array(0),
+        requestInfo.agentId,
+        {
+          scope: scope as "agent" | "swarm" | "all",
+          limit: candidateLimit,
+          source,
+          isLead,
+          queryText: query,
+        },
+      );
       // Default-on 1-hop memory_link neighbor expansion (disable with
       // MEMORY_GRAPH_EXPANSION=0|false).
-      const expanded = expandCandidatesWithGraph(candidates, requestInfo.agentId, {
+      const expanded = await expandCandidatesWithGraph(candidates, requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         source,
         isLead,
@@ -128,7 +132,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
         // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §3
         if (requestInfo.sourceTaskId) {
           try {
-            recordRetrievals(
+            await recordRetrievals(
               requestInfo.sourceTaskId,
               requestInfo.agentId,
               ranked.map((r) => ({
@@ -169,7 +173,7 @@ export const registerMemorySearchTool = (server: McpServer) => {
       }
 
       // Fallback: list recent memories (no OPENAI_API_KEY and no FTS hit)
-      const recent = store.list(requestInfo.agentId, {
+      const recent = await store.list(requestInfo.agentId, {
         scope: scope as "agent" | "swarm" | "all",
         limit,
         isLead,

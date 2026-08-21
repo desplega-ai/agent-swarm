@@ -10,7 +10,7 @@ import {
   closeDb,
   createAgent,
   getActivePricingRow,
-  getDb,
+  getDbClient,
   initDb,
   insertPricingRow,
 } from "../be/db";
@@ -89,7 +89,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   seedPricingFromModelsDev({ quiet: true });
-  agentId = createAgent({ name: "session-cost-golden", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "session-cost-golden", isLead: false, status: "idle" })).id;
   server = createTestServer(API_KEY);
   port = await listen(server);
 });
@@ -100,18 +100,19 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  getDb().prepare("DELETE FROM session_costs").run();
-  getDb().prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
-function seedRate(
+async function seedRate(
   provider: PricingProvider,
   model: string,
   tokenClass: PricingTokenClass,
   pricePerMillionUsd: number,
-): void {
-  insertPricingRow({
+): Promise<void> {
+  await insertPricingRow({
     provider,
     model,
     tokenClass,
@@ -120,13 +121,13 @@ function seedRate(
   });
 }
 
-function seedModelRates(
+async function seedModelRates(
   provider: PricingProvider,
   model: string,
   rates: Partial<Record<PricingTokenClass, number>>,
-): void {
+): Promise<void> {
   for (const [tokenClass, rate] of Object.entries(rates)) {
-    seedRate(provider, model, tokenClass as PricingTokenClass, rate);
+    await seedRate(provider, model, tokenClass as PricingTokenClass, rate);
   }
 }
 
@@ -157,18 +158,19 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   // Seeder assertion (not a recompute golden): safe here only because seeded
   // rows use effective_from = 0 and afterEach deletes rows with > 0 — the
   // boot-seeded book survives while per-test rates are wiped.
-  test("fresh DB seeds wildcard web-search request rates", () => {
+  test("fresh DB seeds wildcard web-search request rates", async () => {
     expect(
-      getActivePricingRow("claude", "*", "web_search", FIXTURE_CREATED_AT)?.pricePerMillionUsd,
+      (await getActivePricingRow("claude", "*", "web_search", FIXTURE_CREATED_AT))
+        ?.pricePerMillionUsd,
     ).toBe(10_000);
     expect(
-      getActivePricingRow("claude-managed", "*", "web_search", FIXTURE_CREATED_AT)
+      (await getActivePricingRow("claude-managed", "*", "web_search", FIXTURE_CREATED_AT))
         ?.pricePerMillionUsd,
     ).toBe(10_000);
   });
 
   test("aef117fe: opus-5 all-1h cache writes reproduce provider billing", async () => {
-    seedModelRates("claude", "claude-opus-5", {
+    await seedModelRates("claude", "claude-opus-5", {
       input: 5,
       output: 25,
       cached_input: 0.5,
@@ -195,14 +197,14 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("f9769315: each model uses its own rates and keeps per-model cost parity", async () => {
-    seedModelRates("claude", "claude-opus-4-8", {
+    await seedModelRates("claude", "claude-opus-4-8", {
       input: 5,
       output: 25,
       cached_input: 0.5,
       cache_write: 6.25,
       cache_write_1h: 10,
     });
-    seedModelRates("claude", "claude-haiku-4-5", {
+    await seedModelRates("claude", "claude-haiku-4-5", {
       input: 1,
       output: 5,
       cached_input: 0.1,
@@ -269,7 +271,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("28943d8a: sonnet-5 intro rates replace the stale harness rate", async () => {
-    seedModelRates("claude", "claude-sonnet-5", {
+    await seedModelRates("claude", "claude-sonnet-5", {
       input: 2,
       output: 10,
       cached_input: 0.2,
@@ -298,7 +300,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("codex keeps OpenAI-inclusive input subtraction", async () => {
-    seedModelRates("codex", "codex-golden", {
+    await seedModelRates("codex", "codex-golden", {
       input: 2,
       output: 10,
       cached_input: 0.2,
@@ -321,7 +323,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("legacy cache writes without a TTL split keep the 5m class", async () => {
-    seedModelRates("claude", "claude-legacy-cache-write", {
+    await seedModelRates("claude", "claude-legacy-cache-write", {
       input: 5,
       output: 25,
       cache_write: 6.25,
@@ -343,7 +345,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("per-model cache writes inherit the session TTL ratio", async () => {
-    seedModelRates("claude", "claude-mixed-cache-write", {
+    await seedModelRates("claude", "claude-mixed-cache-write", {
       input: 5,
       output: 25,
       cache_write: 6.25,
@@ -378,8 +380,8 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("one unpriced model makes the whole breakdown unpriced", async () => {
-    seedModelRates("claude", "claude-priced-model", { input: 5, output: 25 });
-    seedModelRates("claude", "claude-missing-output", { input: 1 });
+    await seedModelRates("claude", "claude-priced-model", { input: 5, output: 25 });
+    await seedModelRates("claude", "claude-missing-output", { input: 1 });
 
     const body = await postCost({
       sessionId: "claude-partially-priced-breakdown",
@@ -412,13 +414,13 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("claude-managed adds the pricing-table runtime-hour fee", async () => {
-    seedModelRates("claude-managed", "claude-managed-golden", {
+    await seedModelRates("claude-managed", "claude-managed-golden", {
       input: 3,
       output: 15,
       cached_input: 0.3,
       cache_write: 3.75,
     });
-    seedRate("claude-managed", "*", "runtime_hour", 0.08 * 1_000_000);
+    await seedRate("claude-managed", "*", "runtime_hour", 0.08 * 1_000_000);
 
     const body = await postCost({
       sessionId: "claude-managed-runtime",
@@ -440,7 +442,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("claude input_tokens stay billable when cache reads are larger", async () => {
-    seedModelRates("claude", "claude-input-semantics", {
+    await seedModelRates("claude", "claude-input-semantics", {
       input: 5,
       output: 25,
       cached_input: 0.5,
@@ -463,7 +465,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("pi keeps Anthropic input semantics when web-search pricing is absent", async () => {
-    seedModelRates("pi", "pi-anthropic-input", {
+    await seedModelRates("pi", "pi-anthropic-input", {
       input: 2,
       output: 10,
       cached_input: 0.2,
@@ -496,7 +498,7 @@ describe("Phase 3 — session cost recompute golden fixtures", () => {
   });
 
   test("a missing 1h cache-write rate makes a split payload unpriced", async () => {
-    seedModelRates("claude", "claude-missing-1h", {
+    await seedModelRates("claude", "claude-missing-1h", {
       input: 5,
       output: 25,
       cache_write: 6.25,

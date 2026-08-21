@@ -14,7 +14,10 @@ linker = "hoisted"
 [test]
 coverage = false
 maxConcurrency = 1
-retry = 3
+# No global retry: a flaky test must opt in with `test(name, fn, { retry: N })`
+# so the flake stays visible. CI runs `bun test --parallel=4 --shard=N/2` with
+# cached --timings files (see LOCAL_TESTING.md); plain `bun test` still works
+# for a single file or a local full run.
 preload = ["./src/tests/preload.ts"]
 # apps/evals is a SEPARATE bun package with its own deps (@libsql/client, etc.) and its
 # own CI test step (working-directory: apps/evals). Exclude it from the ROOT test run so

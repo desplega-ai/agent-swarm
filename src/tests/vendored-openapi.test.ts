@@ -11,7 +11,7 @@ import {
   sha256,
   trimOpenapiSpec,
 } from "../../scripts/vendored-openapi-utils";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import { refreshScriptConnection, upsertScriptConnection } from "../be/script-connections";
 import {
@@ -79,16 +79,17 @@ async function dispatch(
   return { status, body: JSON.parse(text) as unknown };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  leadAgentId = createAgent({ name: "vendored-openapi-lead", isLead: true, status: "idle" }).id;
+  leadAgentId = (await createAgent({ name: "vendored-openapi-lead", isLead: true, status: "idle" }))
+    .id;
 });
 
-afterEach(() => {
+afterEach(async () => {
   globalThis.fetch = originalFetch;
   resetIntegrationsCatalogCacheForTesting();
-  getDb().run("DELETE FROM script_connections");
+  await getDbClient().run("DELETE FROM script_connections");
 });
 
 afterAll(() => {

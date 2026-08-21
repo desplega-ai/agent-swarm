@@ -81,3 +81,6 @@ docker-compose.desplega.yaml
 
 # Opencode artifacts
 .opencode/
+
+# bun test --timings scratch dir (CI restores it from the actions cache)
+.bun-test-timings/

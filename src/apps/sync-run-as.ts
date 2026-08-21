@@ -13,6 +13,6 @@ import type { ScriptRecord } from "../types";
  * Definition validation and the sync engine both resolve through here so they
  * can never disagree about whose connections count.
  */
-export function resolveSyncRunAs(script: ScriptRecord): string {
-  return getSavedScriptOwnerAgentId(script) ?? getLeadAgent()?.id ?? "app-sync";
+export async function resolveSyncRunAs(script: ScriptRecord): Promise<string> {
+  return getSavedScriptOwnerAgentId(script) ?? (await getLeadAgent())?.id ?? "app-sync";
 }
