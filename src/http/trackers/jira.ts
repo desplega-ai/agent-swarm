@@ -228,9 +228,9 @@ function getRedirectUri(req: IncomingMessage): string {
   return `${deriveApiBaseUrl(req)}/api/trackers/jira/callback`;
 }
 
-function buildJiraStatusPayload(req: IncomingMessage): JiraStatusPayload {
-  const tokens = getOAuthTokens("jira");
-  const meta = getJiraMetadata();
+async function buildJiraStatusPayload(req: IncomingMessage): Promise<JiraStatusPayload> {
+  const tokens = await getOAuthTokens("jira");
+  const meta = await getJiraMetadata();
   const scope = tokens?.scope ?? null;
   // Atlassian returns scopes space-separated in the token response.
   const scopeList = scope ? scope.split(/[\s,]+/).filter(Boolean) : [];
@@ -320,7 +320,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    jiraStatus.respond(res, 200, buildJiraStatusPayload(req));
+    jiraStatus.respond(res, 200, await buildJiraStatusPayload(req));
     return true;
   }
 
@@ -334,8 +334,8 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const authorizationId = getDefaultAuthorizationIdForProvider("jira");
-    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    const authorizationId = await getDefaultAuthorizationIdForProvider("jira");
+    const authorization = authorizationId ? await getAuthorizationById(authorizationId) : null;
     if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
@@ -357,7 +357,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    jiraRefresh.respond(res, 200, buildJiraStatusPayload(req));
+    jiraRefresh.respond(res, 200, await buildJiraStatusPayload(req));
     return true;
   }
 
@@ -465,7 +465,7 @@ export async function handleJiraTracker(
       return true;
     }
 
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     const ids = (meta.webhookIds ?? []).map((entry) => entry.id);
 
     let webhooksDeleted = 0;
@@ -481,8 +481,8 @@ export async function handleJiraTracker(
       }
     }
 
-    deleteOAuthTokens("jira");
-    clearJiraMetadata();
+    await deleteOAuthTokens("jira");
+    await clearJiraMetadata();
 
     console.log(
       `[Jira] Disconnected: ${webhooksDeleted}/${ids.length} webhooks deleted, tokens cleared, metadata reset`,

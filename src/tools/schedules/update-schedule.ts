@@ -146,16 +146,16 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
         return toolErr("Schedule not found.");
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.");
       }
@@ -181,7 +181,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Validate targetAgentId if provided and not null
       if (targetAgentId && targetAgentId !== null) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
         }
@@ -189,7 +189,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
 
       // Check if new name conflicts with existing
       if (newName && newName !== schedule.name) {
-        const existing = getScheduledTaskByName(newName);
+        const existing = await getScheduledTaskByName(newName);
         if (existing) {
           return toolErr(`Schedule with name "${newName}" already exists.`);
         }
@@ -208,7 +208,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (!mergedWorkflowId) {
           return toolErr("workflowId is required when targetType is 'workflow'.");
         }
-        if (!getWorkflow(mergedWorkflowId)) {
+        if (!(await getWorkflow(mergedWorkflowId))) {
           return toolErr(`Workflow not found: ${mergedWorkflowId}`);
         }
       }
@@ -216,7 +216,7 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         if (!mergedScriptName) {
           return toolErr("scriptName is required when targetType is 'script'.");
         }
-        if (!getScript({ name: mergedScriptName, scope: "global" })) {
+        if (!(await getScript({ name: mergedScriptName, scope: "global" }))) {
           return toolErr(`Script not found: ${mergedScriptName}`);
         }
       }
@@ -293,9 +293,10 @@ export const registerUpdateScheduleTool = (server: McpServer) => {
         }
 
         const updatedBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
-        if (key !== undefined) updateData.key = authorizeAssetKeyWrite(key, updatedBy);
-        const updated = updateScheduledTask(schedule.id, { ...updateData, updatedBy });
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
+        if (key !== undefined) updateData.key = await authorizeAssetKeyWrite(key, updatedBy);
+        const updated = await updateScheduledTask(schedule.id, { ...updateData, updatedBy });
 
         if (!updated) {
           return toolErr("Failed to update schedule.");

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { upsertPromptTemplate } from "@/be/db";
+import { getDbClient, upsertPromptTemplate } from "@/be/db";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 import { PromptTemplateScopeSchema, PromptTemplateStateSchema } from "@/types";
 
@@ -70,15 +70,20 @@ export const registerSetPromptTemplateTool = (server: McpServer) => {
       }
 
       try {
-        const template = upsertPromptTemplate({
-          eventType,
-          scope,
-          scopeId: scope === "global" ? null : scopeId,
-          state,
-          body,
-          changedBy: requestInfo.agentId,
-          changeReason,
-        });
+        // The sync helper stays on the raw handle for the boot seeder; on
+        // this request path, run it inside a client transaction so the write
+        // holds the FIFO lock instead of landing inside a foreign BEGIN window.
+        const template = await getDbClient().transaction(async () =>
+          upsertPromptTemplate({
+            eventType,
+            scope,
+            scopeId: scope === "global" ? null : scopeId,
+            state,
+            body,
+            changedBy: requestInfo.agentId,
+            changeReason,
+          }),
+        );
 
         return toolOk(`Template "${eventType}" set successfully at version ${template.version}.`, {
           details: `Prompt template for "${eventType}" set successfully (scope: ${scope}${scopeId ? `, scopeId: ${scopeId}` : ""}, v${template.version}).`,

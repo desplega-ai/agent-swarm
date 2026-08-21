@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { initAgentMail, resetAgentMail } from "../agentmail";
 import {
   getAgentById,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getInjectableGlobalConfigs,
   getRecentlyCancelledTasksForAgent,
@@ -25,7 +25,11 @@ import { decideAdmission, isRbacEnabled } from "../rbac";
 import { startSlackApp, stopSlackApp } from "../slack";
 import type { AgentStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
-import { setRequestAuth } from "../utils/request-auth-context";
+import {
+  beginRequestAuthScope,
+  runWithoutRequestAuth,
+  setRequestAuth,
+} from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { resolveHttpRequestAuth } from "./auth";
 import { generateOpenApiSpec, SCALAR_HTML } from "./openapi";
@@ -56,8 +60,8 @@ import { agentWithCapacity, getPathSegments, jsonError, parseQueryParams } from 
  */
 const injectedEnvOriginals = new Map<string, { original: string | undefined; injected: string }>();
 
-export function loadGlobalConfigsIntoEnv(override = false): string[] {
-  const globalConfigs = getInjectableGlobalConfigs();
+export async function loadGlobalConfigsIntoEnv(override = false): Promise<string[]> {
+  const globalConfigs = await getInjectableGlobalConfigs();
   const updated: string[] = [];
   const liveKeys = new Set<string>();
 
@@ -126,7 +130,16 @@ export type ReloadConfigResult = {
  * pick up the new values without requiring a process restart.
  */
 export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfigResult> {
-  const updated = loadGlobalConfigsIntoEnv(true);
+  // Run outside any request-auth frame: this (re)starts long-lived
+  // integration clients (Slack socket, pollers, timers). Created inside a
+  // request's frame they capture that request's auth slot for their whole
+  // lifetime, and their later DB writes get attributed to whichever user
+  // happened to save config.
+  return runWithoutRequestAuth(() => reloadGlobalConfigsAndIntegrationsInner());
+}
+
+async function reloadGlobalConfigsAndIntegrationsInner(): Promise<ReloadConfigResult> {
+  const updated = await loadGlobalConfigsIntoEnv(true);
 
   // File-storage provider selection reads process.env once and memoizes; the
   // env we just (re)hydrated may flip it (local-fs → agent-fs after late
@@ -152,10 +165,10 @@ export async function reloadGlobalConfigsAndIntegrations(): Promise<ReloadConfig
   if (isGitLabEnabled()) integrations.push("gitlab");
 
   resetLinear();
-  if (initLinear()) integrations.push("linear");
+  if (await initLinear()) integrations.push("linear");
 
   resetJira();
-  if (initJira()) integrations.push("jira");
+  if (await initJira()) integrations.push("jira");
 
   await stopSlackApp();
   await startSlackApp();
@@ -337,6 +350,11 @@ export async function handleCore(
   myAgentId: string | undefined,
   apiKey: string,
 ): Promise<boolean> {
+  // Install the ambient auth slot synchronously — before this function's first
+  // await — so the (asynchronously resolved) auth reaches everything the
+  // request pipeline does afterwards, including audit columns in the DB layer.
+  beginRequestAuthScope();
+
   // Handle preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -383,13 +401,13 @@ export async function handleCore(
   // either the global swarm key or an active user-bound `aswt_` token.
   const pathSegments = getPathSegments(req.url || "");
   const isUserMcpRoute = req.url === "/mcp-user";
-  let auth = null as ReturnType<typeof resolveHttpRequestAuth>;
+  let auth = null as Awaited<ReturnType<typeof resolveHttpRequestAuth>>;
   // `/mcp-user` runs its own `aswt_`-token auth in `handleMcpUser`; the swarm
   // API key must not gate it.
   if (isUserMcpRoute || isPublicRoute(req.method, pathSegments)) {
     setRequestAuth(req, null);
   } else {
-    auth = resolveHttpRequestAuth(req, apiKey);
+    auth = await resolveHttpRequestAuth(req, apiKey);
 
     if (!auth) {
       setRequestAuth(req, null);
@@ -401,7 +419,7 @@ export async function handleCore(
   }
 
   if (auth?.kind === "user" && isRbacEnabled()) {
-    const grant = getUserGrant(auth.userId);
+    const grant = await getUserGrant(auth.userId);
     if (!grant.grantsAll) {
       const def = findRoute(req.method, pathSegments);
       const decision = decideAdmission({
@@ -448,7 +466,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
 
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
@@ -461,12 +479,12 @@ export async function handleCore(
 
     // Add capacity info and polling limit check to agent response
     const agentResponse = {
-      ...agentWithCapacity(agent),
-      shouldBlockPolling: shouldBlockPolling(myAgentId),
+      ...(await agentWithCapacity(agent)),
+      shouldBlockPolling: await shouldBlockPolling(myAgentId),
     };
 
     if (includeInbox) {
-      const inbox = getInboxSummary(myAgentId);
+      const inbox = await getInboxSummary(myAgentId);
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ...agentResponse, inbox }));
       return true;
@@ -489,7 +507,7 @@ export async function handleCore(
       return true;
     }
 
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Agent not found" }));
@@ -502,7 +520,7 @@ export async function handleCore(
 
     if (taskId) {
       // Check if specific task is cancelled
-      const task = getTaskById(taskId);
+      const task = await getTaskById(taskId);
       if (task && task.status === "cancelled") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -525,7 +543,7 @@ export async function handleCore(
     }
 
     // No taskId - return all recently cancelled tasks for this agent
-    const cancelledTasks = getRecentlyCancelledTasksForAgent(myAgentId);
+    const cancelledTasks = await getRecentlyCancelledTasksForAgent(myAgentId);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ cancelled: cancelledTasks }));
     return true;
@@ -541,12 +559,10 @@ export async function handleCore(
     const runtimeInstanceId = singleHeader(req, "x-runtime-instance-id");
     const multiRuntime = isMultiRuntimeEnabled();
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const found = await getDbClient().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
       }
 
@@ -557,7 +573,7 @@ export async function handleCore(
         // runtimes have all exited. Failing that check is a no-op rather
         // than an error — ping is non-destructive, and rejecting it would
         // break workers that predate the flag.
-        if (!runtimeInstanceId || !touchRuntimeInstance(runtimeInstanceId, agent.id)) {
+        if (!runtimeInstanceId || !(await touchRuntimeInstance(runtimeInstanceId, agent.id))) {
           return true;
         }
       }
@@ -573,12 +589,14 @@ export async function handleCore(
         status = "waiting_for_credentials";
       }
 
-      updateAgentStatus(agent.id, status);
+      await updateAgentStatus(agent.id, status);
 
       return true;
     });
 
-    if (!tx()) {
+    if (!found) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
     }
 
@@ -610,12 +628,10 @@ export async function handleCore(
       return true;
     }
 
-    const tx = getDb().transaction(() => {
-      const agent = getAgentById(myAgentId);
+    const found = await getDbClient().transaction(async () => {
+      const agent = await getAgentById(myAgentId);
 
       if (!agent) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Agent not found" }));
         return false;
       }
 
@@ -623,17 +639,19 @@ export async function handleCore(
         // One process exiting retires only its own runtime; the logical state
         // is then recomputed from whatever is left — offline when nothing is,
         // otherwise reflecting the surviving runtimes' readiness and work.
-        markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
-        reconcileAgentStatusFromRuntimes(agent.id);
+        await markRuntimeInstanceOffline(runtimeInstanceId, agent.id);
+        await reconcileAgentStatusFromRuntimes(agent.id);
       } else {
         // Legacy semantics, with or without a runtime header.
-        updateAgentStatus(agent.id, "offline");
+        await updateAgentStatus(agent.id, "offline");
       }
 
       return true;
     });
 
-    if (!tx()) {
+    if (!found) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Agent not found" }));
       return true;
     }
 

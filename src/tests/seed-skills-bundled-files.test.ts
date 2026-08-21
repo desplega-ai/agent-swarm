@@ -105,14 +105,14 @@ describe("seeded skills with bundled files", () => {
     }
   });
 
-  test("seeding writes skill_files rows and marks the skill complex", () => {
-    const artifacts = getSkillByName("artifacts", "swarm");
+  test("seeding writes skill_files rows and marks the skill complex", async () => {
+    const artifacts = await getSkillByName("artifacts", "swarm");
     expect(artifacts).toBeTruthy();
     if (!artifacts) return;
 
     expect(artifacts.isComplex).toBe(true);
 
-    const files = getSkillFiles(artifacts.id);
+    const files = await getSkillFiles(artifacts.id);
     expect(files.map((file) => file.path).sort()).toEqual([
       "examples/approval-flow.ts",
       "examples/hono-dashboard.ts",
@@ -137,15 +137,15 @@ describe("seeded skills with bundled files", () => {
     // Freshly seeded and untouched: upstream hashes to exactly the source.
     expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
 
-    const artifacts = getSkillByName("artifacts", "swarm");
+    const artifacts = await getSkillByName("artifacts", "swarm");
     if (!artifacts) throw new Error("artifacts skill missing");
-    const original = getSkillFiles(artifacts.id).find(
+    const original = (await getSkillFiles(artifacts.id)).find(
       (file) => file.path === "examples/hono-dashboard.ts",
     );
     if (!original) throw new Error("bundled example missing");
 
     // Simulate a user editing a bundled file through the skills API.
-    upsertSkillFile(artifacts.id, {
+    await upsertSkillFile(artifacts.id, {
       path: original.path,
       content: `${original.content}\n// edited by a user`,
     });
@@ -158,11 +158,11 @@ describe("seeded skills with bundled files", () => {
     expect(result.failed).toEqual([]);
     expect(result.skippedUserModified).toBeGreaterThan(0);
 
-    const after = getSkillFiles(artifacts.id).find((file) => file.path === original.path);
+    const after = (await getSkillFiles(artifacts.id)).find((file) => file.path === original.path);
     expect(after?.content).toContain("// edited by a user");
 
     // Restore so later tests see a pristine skill.
-    upsertSkillFile(artifacts.id, { path: original.path, content: original.content });
+    await upsertSkillFile(artifacts.id, { path: original.path, content: original.content });
   });
 
   test("a userInvocable flip registers as drift and is preserved", async () => {
@@ -172,19 +172,19 @@ describe("seeded skills with bundled files", () => {
 
     expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
 
-    const skill = getSkillByName("kv-storage", "swarm");
+    const skill = await getSkillByName("kv-storage", "swarm");
     if (!skill) throw new Error("kv-storage skill missing");
     expect(skill.userInvocable).toBe(true);
 
     // Simulate a user turning off slash-invocation through the skills API.
-    updateSkill(skill.id, { userInvocable: false });
+    await updateSkill(skill.id, { userInvocable: false });
 
     // The flip must move the upstream hash — otherwise the next source update
     // would classify the row as pristine and silently restore userInvocable.
     expect(await skillsSeeder.upstreamHash(item)).not.toBe(item.contentHash);
 
     // Restore so later tests see a pristine skill.
-    updateSkill(skill.id, { userInvocable: true });
+    await updateSkill(skill.id, { userInvocable: true });
     expect(await skillsSeeder.upstreamHash(item)).toBe(item.contentHash);
   });
 
@@ -194,18 +194,18 @@ describe("seeded skills with bundled files", () => {
     // format (no bundled-file section). The new seeder must still recognise it
     // as pristine and update it — not misread it as user-modified and skip it
     // forever, which would mean the merged content never reaches production.
-    const artifacts = getSkillByName("artifacts", "swarm");
+    const artifacts = await getSkillByName("artifacts", "swarm");
     if (!artifacts) throw new Error("artifacts skill missing");
 
     const legacyContent = "---\nname: artifacts\ndescription: old\n---\n\nold body\n";
-    updateSkill(artifacts.id, { content: legacyContent, isComplex: false });
-    for (const file of getSkillFiles(artifacts.id)) {
-      deleteSkillFile(artifacts.id, file.path);
+    await updateSkill(artifacts.id, { content: legacyContent, isComplex: false });
+    for (const file of await getSkillFiles(artifacts.id)) {
+      await deleteSkillFile(artifacts.id, file.path);
     }
 
     // Old-format hash: base only, no file section.
     const legacyHash = computeContentHash(`${legacyContent}\n\n# seed:systemDefault=1\n`);
-    recordSeedState("skill", "artifacts", legacyHash);
+    await recordSeedState("skill", "artifacts", legacyHash);
 
     const item = (await skillsSeeder.items()).find((candidate) => candidate.key === "artifacts");
     if (!item) throw new Error("artifacts seed item missing");
@@ -217,10 +217,10 @@ describe("seeded skills with bundled files", () => {
     expect(result.failed).toEqual([]);
     expect(result.skippedUserModified).toBe(0);
 
-    const upgraded = getSkillByName("artifacts", "swarm");
+    const upgraded = await getSkillByName("artifacts", "swarm");
     expect(upgraded?.isComplex).toBe(true);
     expect(upgraded?.content).not.toBe(legacyContent);
-    expect(getSkillFiles(upgraded?.id ?? "").length).toBe(4);
+    expect((await getSkillFiles(upgraded?.id ?? "")).length).toBe(4);
 
     // And it settles: the next run is a clean no-op.
     const second = await runSeeder(skillsSeeder, { quiet: true });
@@ -228,7 +228,7 @@ describe("seeded skills with bundled files", () => {
     expect(second.skippedUserModified).toBe(0);
   });
 
-  test("a failed bundled-file write leaves no partial skill row", () => {
+  test("a failed bundled-file write leaves no partial skill row", async () => {
     // Why this matters: if the row landed but file sync then threw, the harness
     // would catch the error and skip recording seed_state. The next boot would
     // see an unrecorded row whose hash — computed over files it does not have —
@@ -243,7 +243,7 @@ describe("seeded skills with bundled files", () => {
     // and size limits are module-level constants read at import time, so
     // setting SKILL_FILES_MAX_COUNT here would have no effect.
     const name = "zz-atomic-probe";
-    expect(getSkillByName(name, "swarm")).toBeNull();
+    expect(await getSkillByName(name, "swarm")).toBeNull();
 
     const poisoned = {
       key: name,
@@ -260,16 +260,16 @@ describe("seeded skills with bundled files", () => {
       },
     };
 
-    expect(() => skillsSeeder.apply(poisoned, "create")).toThrow();
+    await expect(skillsSeeder.apply(poisoned, "create")).rejects.toThrow();
 
     // The row must not survive the failed file write...
-    expect(getSkillByName(name, "swarm")).toBeNull();
+    expect(await getSkillByName(name, "swarm")).toBeNull();
     // ...and neither must the file that was written before the bad one.
-    expect(getSkillFiles(poisoned.key).length).toBe(0);
+    expect((await getSkillFiles(poisoned.key)).length).toBe(0);
   });
 
-  test("bundled files survive repeated filesystem syncs (the reconcile bug)", () => {
-    const artifacts = getSkillByName("artifacts", "swarm");
+  test("bundled files survive repeated filesystem syncs (the reconcile bug)", async () => {
+    const artifacts = await getSkillByName("artifacts", "swarm");
     expect(artifacts).toBeTruthy();
     if (!artifacts) return;
 
@@ -280,7 +280,7 @@ describe("seeded skills with bundled files", () => {
       isComplex: artifacts.isComplex,
       isEnabled: true,
       isActive: true,
-      files: getSkillFiles(artifacts.id).map((file) => ({
+      files: (await getSkillFiles(artifacts.id)).map((file) => ({
         path: file.path,
         content: file.content,
         isBinary: file.isBinary,

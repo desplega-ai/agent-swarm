@@ -41,7 +41,7 @@ function scheduleKeepaliveRun(trigger: "startup" | "interval" | "manual"): Promi
  */
 async function runKeepalive(trigger: "startup" | "interval" | "manual" = "manual"): Promise<void> {
   console.log(`[OAuth Keepalive] Running ${trigger} token refresh check`);
-  const authorizations = listKeepAliveAuthorizations();
+  const authorizations = await listKeepAliveAuthorizations();
   for (const authorization of authorizations) {
     const label = authorization.displayName?.trim() || authorization.provider;
     const named =

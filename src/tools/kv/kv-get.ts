@@ -50,7 +50,7 @@ export const registerKvGetTool = (server: McpServer) => {
       }),
     },
     async ({ key, namespace }, requestInfo) => {
-      const resolved = resolveNamespace(namespace, requestInfo);
+      const resolved = await resolveNamespace(namespace, requestInfo);
       if ("error" in resolved) {
         return toolErr(resolved.error, { data: { yourAgentId: requestInfo.agentId } });
       }
@@ -64,7 +64,7 @@ export const registerKvGetTool = (server: McpServer) => {
       // kv-get is exempt from the ctx-control spill (see CTX_CONTROL_EXEMPT_TOOLS):
       // it is the retrieval path for spilled values, so oversized entries go out
       // whole and the harness applies its own truncation.
-      const entry = getKv(resolved.namespace, key);
+      const entry = await getKv(resolved.namespace, key);
       return toolOk(
         entry
           ? `Found "${key}" in "${resolved.namespace}".`

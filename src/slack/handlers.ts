@@ -305,7 +305,7 @@ async function getThreadContext(
       }
     }
 
-    return rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
+    return await rewriteSlackMentions(formattedMessages.join("\n"), botUserId);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context:", error);
     return "";
@@ -565,7 +565,7 @@ export function registerMessageHandler(app: App): void {
     const routingThreadContext = msg.thread_ts
       ? { channelId: msg.channel, threadTs: msg.thread_ts }
       : undefined;
-    const matches = routeMessage(
+    const matches = await routeMessage(
       routingText,
       botUserId,
       botMentioned || isImplicitMention,
@@ -617,8 +617,8 @@ export function registerMessageHandler(app: App): void {
         fullTaskDescription = taskDescription;
       }
 
-      const lead = getLeadAgent();
-      const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+      const lead = await getLeadAgent();
+      const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
         agentId: lead?.id,
         source: "slack",
         slackChannelId: msg.channel,
@@ -692,7 +692,7 @@ export function registerMessageHandler(app: App): void {
     } = { assigned: [], queued: [], steered: [], failed: [] };
 
     for (const match of matches) {
-      const agent = getAgentById(match.agent.id);
+      const agent = await getAgentById(match.agent.id);
 
       if (!agent) {
         results.failed.push({ agentName: match.agent.name, reason: "not found" });
@@ -700,10 +700,10 @@ export function registerMessageHandler(app: App): void {
       }
 
       try {
-        const latestTask = getMostRecentTaskInThread(msg.channel, threadTs);
+        const latestTask = await getMostRecentTaskInThread(msg.channel, threadTs);
         if (agent.isLead) {
           const steering = msg.thread_ts
-            ? requestSlackThreadSteering({
+            ? await requestSlackThreadSteering({
                 channelId: msg.channel,
                 threadTs,
                 message: taskDescription,
@@ -720,7 +720,7 @@ export function registerMessageHandler(app: App): void {
             continue;
           }
 
-          const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+          const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
             agentId: agent.id,
             source: "slack",
             slackChannelId: msg.channel,
@@ -737,7 +737,7 @@ export function registerMessageHandler(app: App): void {
         }
 
         // Workers receive tasks as before
-        const task = createTaskWithSiblingAwareness(fullTaskDescription, {
+        const task = await createTaskWithSiblingAwareness(fullTaskDescription, {
           agentId: agent.id,
           source: "slack",
           slackChannelId: msg.channel,
@@ -750,7 +750,7 @@ export function registerMessageHandler(app: App): void {
         await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
-        const agentTasks = getTasksByAgentId(agent.id);
+        const agentTasks = await getTasksByAgentId(agent.id);
         const inProgressInThread = agentTasks.find(
           (t) => t.id !== task.id && t.status === "in_progress" && t.slackThreadTs === threadTs,
         );
@@ -834,11 +834,11 @@ export function registerMessageHandler(app: App): void {
         // (assignment → progress → completion all in one evolving tree message)
         if (resp?.ts) {
           for (const { taskId } of results.assigned) {
-            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+            await registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
           }
           // Also register queued tasks so they appear in the tree when they start
           for (const { taskId } of results.queued) {
-            registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
+            await registerTreeMessage(taskId, msg.channel, threadTs, resp.ts);
           }
         }
       }

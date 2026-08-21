@@ -9,7 +9,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   handleComment,
   handlePullRequestReview,
@@ -50,7 +50,7 @@ beforeAll(async () => {
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   initDb(TEST_DB_PATH);
-  createAgent({
+  await createAgent({
     id: "lead-inline-test",
     name: "InlineTestLead",
     status: "idle",
@@ -69,7 +69,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await ensureTemplatesRegistered();
   setReviewCommentsRetryDelayForTests(() => {});
-  getDb().prepare("DELETE FROM agent_tasks").run();
+  await getDbClient().run("DELETE FROM agent_tasks");
 });
 
 // ── Helpers ──
@@ -151,10 +151,10 @@ function mockFetchWithComments(comments: TestInlineComment[]): ReturnType<typeof
   return fetchSpy.mockImplementationOnce(async () => commentsResponse(comments));
 }
 
-function getLastTaskText(): string | undefined {
-  const row = getDb()
-    .prepare<{ task: string }, never>("SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1")
-    .get();
+async function getLastTaskText(): Promise<string | undefined> {
+  const row = await getDbClient().get<{ task: string }>(
+    "SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1",
+  );
   return row?.task;
 }
 
@@ -183,7 +183,7 @@ describe("inline review comment surfacing", () => {
     fetchSpy.mockRestore();
 
     expect(result.created).toBe(true);
-    const text = getLastTaskText();
+    const text = await getLastTaskText();
     expect(text).toBeDefined();
     expect(text).toContain("src/domain_tables.go:77");
     expect(text).toContain("This logic looks wrong");
@@ -210,7 +210,7 @@ describe("inline review comment surfacing", () => {
     expect(result.created).toBe(true);
     fetchSpy.mockRestore();
 
-    const text = getLastTaskText();
+    const text = await getLastTaskText();
     expect(text).toContain("src/domain_tables.go:77");
     expect(text).toContain("This logic looks wrong");
     expect(text).not.toContain("Inline comments could NOT be auto-fetched");
@@ -250,7 +250,7 @@ describe("inline review comment surfacing", () => {
     const result = await handlePullRequestReview(event);
 
     expect(result.created).toBe(true);
-    expectDegradedBlock(getLastTaskText());
+    expectDegradedBlock(await getLastTaskText());
   });
 
   test("non-2xx review-scoped fetch: degraded block is present", async () => {
@@ -270,7 +270,7 @@ describe("inline review comment surfacing", () => {
 
     // Task should still be created even if the inline comments fetch fails
     expect(result.created).toBe(true);
-    const text = getLastTaskText();
+    const text = await getLastTaskText();
     expect(text).toContain("Needs work");
     expectDegradedBlock(text);
     expect(text).not.toContain("Inline review comments (");
@@ -299,7 +299,7 @@ describe("inline review comment surfacing", () => {
     fetchSpy.mockRestore();
 
     expect(result.created).toBe(true);
-    const text = getLastTaskText();
+    const text = await getLastTaskText();
     expect(text).toContain("config/table-renderers.json:7");
     expect(text).toContain("Why is this hardcoded?");
     expect(text).toContain("Inline review comments (1)");
@@ -342,7 +342,7 @@ describe("inline review comment surfacing", () => {
     fetchSpy.mockRestore();
 
     expect(result.created).toBe(true);
-    const text = getLastTaskText();
+    const text = await getLastTaskText();
     expect(text).toBeDefined();
     // Both pages of inline comments must appear in the task
     expect(text).toContain("src/domain_tables.go:77"); // page 1 comment
@@ -362,9 +362,9 @@ describe("inline review comment surfacing", () => {
     fetchSpy.mockRestore();
 
     expect(reviewResult.created).toBe(true);
-    const taskCountAfterReview = getDb()
-      .prepare<{ n: number }, never>("SELECT COUNT(*) AS n FROM agent_tasks")
-      .get()!.n;
+    const taskCountAfterReview = (await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM agent_tasks",
+    ))!.n;
     expect(taskCountAfterReview).toBe(1);
 
     // Step 2: GitHub also delivers the same inline comments as individual
@@ -390,9 +390,9 @@ describe("inline review comment surfacing", () => {
     expect(commentResult.created).toBe(false);
 
     // Total tasks must still be exactly 1 — no double-spawn
-    const taskCountAfter = getDb()
-      .prepare<{ n: number }, never>("SELECT COUNT(*) AS n FROM agent_tasks")
-      .get()!.n;
+    const taskCountAfter = (await getDbClient().get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM agent_tasks",
+    ))!.n;
     expect(taskCountAfter).toBe(1);
   });
 });

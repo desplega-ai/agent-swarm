@@ -1,6 +1,6 @@
 import {
   getCompletedStepNodeIds,
-  getDb,
+  getDbClient,
   getStuckApprovalRuns,
   getStuckWaitRuns,
   getStuckWorkflowRuns,
@@ -9,16 +9,17 @@ import {
   getWorkflowRunStep,
   resolveApprovalRequest,
   updateWorkflowRun,
-  updateWorkflowRunStep,
 } from "../be/db";
-import { checkpointStep } from "./checkpoint";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
-import { getSuccessors } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { ExecutorRegistry } from "./executors/registry";
 import { getSecretInputKeys } from "./input";
 import { finalizeOrWait, resumeWaitState } from "./resume";
-import { completeTaskStepAndResolveSuccessors } from "./task-step-routing";
+import {
+  checkpointPortStepAndResolveSuccessors,
+  completeTaskStepAndResolveSuccessors,
+  failStepAndRunIfWaiting,
+} from "./task-step-routing";
 
 /**
  * Recover incomplete workflow runs on server startup.
@@ -58,25 +59,25 @@ export async function recoverIncompleteRuns(registry: ExecutorRegistry): Promise
 async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
   // Query for all running runs by scanning steps
   // We need to find runs where status = 'running' and figure out which nodes to resume
-  const runningRunIds = getRunIdsByStatus("running");
+  const runningRunIds = await getRunIdsByStatus("running");
   let recovered = 0;
 
   for (const runId of runningRunIds) {
     try {
-      const run = getWorkflowRun(runId);
+      const run = await getWorkflowRun(runId);
       if (!run || run.status !== "running") continue;
 
-      const workflow = getWorkflow(run.workflowId);
+      const workflow = await getWorkflow(run.workflowId);
       if (!workflow) continue;
 
-      const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+      const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
       const ctx = (run.context ?? {}) as Record<string, unknown>;
 
       // Find the next nodes that are ready to execute
       const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
       if (readyNodes.length === 0) {
         // All nodes completed or nothing is ready — mark as completed
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           context: ctx,
           finishedAt: new Date().toISOString(),
@@ -107,31 +108,25 @@ async function recoverRunningRuns(registry: ExecutorRegistry): Promise<number> {
  * while the server was down.
  */
 async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckWorkflowRuns();
+  const stuckRuns = await getStuckWorkflowRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {
     try {
-      const run = getWorkflowRun(stuck.runId);
-      const workflow = getWorkflow(stuck.workflowId);
+      const run = await getWorkflowRun(stuck.runId);
+      const workflow = await getWorkflow(stuck.workflowId);
       if (!run || run.status !== "waiting" || !workflow) continue;
 
       const taskCompleted = stuck.taskStatus === "completed";
       if (!taskCompleted && (workflow.definition.onNodeFailure ?? "fail") === "fail") {
         // Preserve the fail-fast recovery policy for failed/cancelled tasks.
+        // Claimed: this sweep runs on every heartbeat, so the live task.failed
+        // bus event may already have routed this step — a blind write here
+        // would kill a run that is already advancing.
         const reason =
           stuck.taskStatus === "failed" ? "Task failed (recovered)" : "Task cancelled (recovered)";
-        const now = new Date().toISOString();
-        updateWorkflowRunStep(stuck.stepId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
-        updateWorkflowRun(stuck.runId, {
-          status: "failed",
-          error: reason,
-          finishedAt: now,
-        });
+        const claimed = await failStepAndRunIfWaiting(stuck.stepId, stuck.runId, reason);
+        if (!claimed) continue;
         recovered++;
         continue;
       }
@@ -145,9 +140,9 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
           ? parseRecoveredTaskOutput(stuck.taskOutput)
           : `${FAILED_TASK_OUTPUT_PREFIX} ${reason}] This node failed or was cancelled.`,
       };
-      const step = getWorkflowRunStep(stuck.stepId);
+      const step = await getWorkflowRunStep(stuck.stepId);
       if (!step) continue;
-      const routing = completeTaskStepAndResolveSuccessors(
+      const routing = await completeTaskStepAndResolveSuccessors(
         workflow.definition,
         stuck.runId,
         step,
@@ -155,9 +150,10 @@ async function recoverWaitingRuns(registry: ExecutorRegistry): Promise<number> {
         ctx,
         taskCompleted ? undefined : reason,
       );
+      if (!routing.claimed) continue;
       if (routing.foreachChild && !routing.joined) {
         // The parent remains waiting until another child closes the join.
-        finalizeOrWait(stuck.runId);
+        await finalizeOrWait(stuck.runId);
       } else {
         // Always walk normal-task successors, even when empty, so walkGraph's
         // finalization tail persists context and partial/retry failure state.
@@ -197,13 +193,13 @@ function parseRecoveredTaskOutput(output: string | null): unknown {
  * while the server was down.
  */
 async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckApprovalRuns();
+  const stuckRuns = await getStuckApprovalRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {
     try {
-      const run = getWorkflowRun(stuck.runId);
-      const workflow = getWorkflow(stuck.workflowId);
+      const run = await getWorkflowRun(stuck.runId);
+      const workflow = await getWorkflow(stuck.workflowId);
       if (!run || !workflow) continue;
 
       let approvalStatus = stuck.approvalStatus;
@@ -211,7 +207,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
 
       // If still pending but expired, auto-reject
       if (approvalStatus === "pending" && stuck.expiresAt) {
-        resolveApprovalRequest(stuck.approvalId, {
+        await resolveApprovalRequest(stuck.approvalId, {
           status: "timeout",
         });
         approvalStatus = "timeout";
@@ -232,31 +228,34 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
         responses,
       };
 
-      checkpointStep(
+      // Use port-based routing to determine correct successors. Claimed: the
+      // live approval.resolved bus event may have routed this step between
+      // the sweep snapshot and here — routing it twice would create duplicate
+      // successor steps and duplicate spawned tasks.
+      const routing = await checkpointPortStepAndResolveSuccessors(
+        workflow.definition,
         stuck.runId,
         stuck.stepId,
         stuck.nodeId,
-        { output: stepOutput, nextPort },
+        stepOutput,
+        nextPort,
         ctx,
       );
-      updateWorkflowRun(stuck.runId, { status: "running" });
+      if (!routing.claimed) continue;
 
-      // Use port-based routing to determine correct successors
-      const successors = getSuccessors(workflow.definition, stuck.nodeId, nextPort);
-
-      if (successors.length > 0) {
+      if (routing.successors.length > 0) {
         const secretKeys = getSecretInputKeys(workflow.input);
         await walkGraph(
           workflow.definition,
           stuck.runId,
           ctx,
-          successors,
+          routing.successors,
           registry,
           workflow.id,
           secretKeys,
         );
       } else {
-        finalizeOrWait(stuck.runId);
+        await finalizeOrWait(stuck.runId);
       }
       recovered++;
     } catch (err) {
@@ -280,7 +279,7 @@ async function recoverApprovalWaitingRuns(registry: ExecutorRegistry): Promise<n
  * for fired event waits).
  */
 async function recoverWaitStates(registry: ExecutorRegistry): Promise<number> {
-  const stuckRuns = getStuckWaitRuns();
+  const stuckRuns = await getStuckWaitRuns();
   let recovered = 0;
 
   for (const stuck of stuckRuns) {
@@ -320,9 +319,10 @@ function safeJsonParse(s: string): unknown {
 /**
  * Get run IDs by status. Simple query since there's no dedicated function for this.
  */
-function getRunIdsByStatus(status: string): string[] {
-  const rows = getDb()
-    .prepare<{ id: string }, [string]>("SELECT id FROM workflow_runs WHERE status = ?")
-    .all(status);
+async function getRunIdsByStatus(status: string): Promise<string[]> {
+  const rows = await getDbClient().query<{ id: string }>(
+    "SELECT id FROM workflow_runs WHERE status = ?",
+    [status],
+  );
   return rows.map((r) => r.id);
 }

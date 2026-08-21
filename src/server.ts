@@ -266,9 +266,9 @@ export function isScriptsOnlyMcp(): boolean {
   return resolveScriptsOnlyMode({ env: process.env.SCRIPTS_ONLY_MCP });
 }
 
-export function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolean } = {}) {
+export async function createServer(opts: { scriptsOnly?: boolean; fullSurface?: boolean } = {}) {
   // Reload env
-  loadGlobalConfigsIntoEnv(true);
+  await loadGlobalConfigsIntoEnv(true);
 
   // Capability flags shape the externally exposed MCP tool list only. Internal
   // full-surface consumers (the scripts SDK bridge, drift-check tests) pass

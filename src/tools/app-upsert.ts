@@ -55,7 +55,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -70,20 +70,20 @@ export const registerAppUpsertTool = (server: McpServer) => {
 
       if (input.appId) {
         const appId = input.appId;
-        const existing = getApp(appId);
+        const existing = await getApp(appId);
         if (!existing) {
           return toolErr(`App ${appId} not found.`, {
             data: { appId, url: `/apps/${appId}` },
           });
         }
         return withAppDefinitionLock(appId, async () => {
-          const lockedExisting = getApp(appId);
+          const lockedExisting = await getApp(appId);
           if (!lockedExisting) {
             return toolErr(`App ${appId} not found.`, {
               data: { appId, url: `/apps/${appId}` },
             });
           }
-          const parsed = parseAppDefinition(input.definition, {
+          const parsed = await parseAppDefinition(input.definition, {
             currentAppId: appId,
             resolveApp: getApp,
             writerAgentId: requestInfo.agentId,
@@ -95,7 +95,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
               data: { issues: parsed.issues },
             });
           }
-          let app: ReturnType<typeof updateApp>;
+          let app: Awaited<ReturnType<typeof updateApp>>;
           let migration: AppMigrationReport;
           try {
             const migrated = await migrateAppSchema({
@@ -107,9 +107,9 @@ export const registerAppUpsertTool = (server: McpServer) => {
               nextDefinition: parsed.definition,
               migration: input.migration,
               forceElementBreak: input.forceElementBreak,
-              snapshot: () => {
+              snapshot: async () => {
                 try {
-                  snapshotApp(appId, requestInfo.agentId);
+                  await snapshotApp(appId, requestInfo.agentId);
                 } catch {
                   throw new AppSnapshotFailure();
                 }
@@ -150,7 +150,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
         return toolErr("migration requires appId; new apps have no rows to migrate.");
       if (input.forceElementBreak)
         return toolErr("forceElementBreak requires appId; new apps have no consumers to break.");
-      const parsed = parseAppDefinition(input.definition, {
+      const parsed = await parseAppDefinition(input.definition, {
         resolveApp: getApp,
         writerAgentId: requestInfo.agentId,
       });
@@ -160,7 +160,7 @@ export const registerAppUpsertTool = (server: McpServer) => {
           data: { issues: parsed.issues },
         });
       }
-      const app = createApp({
+      const app = await createApp({
         name: input.name,
         description: input.description,
         definition: parsed.definition,

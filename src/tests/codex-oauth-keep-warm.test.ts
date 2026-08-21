@@ -178,7 +178,7 @@ describe("POST /api/oauth/keep-warm/codex", () => {
 
   it("skips a slot with an active codex-auth-watch bench marker", async () => {
     const keySuffix = "c-old"; // last 5 of accountId (no chatgpt_user_id in this fixture's access token)
-    upsertKv({
+    await upsertKv({
       namespace: "codex-auth-watch",
       key: `bench:${keySuffix}`,
       value: "1",

@@ -58,7 +58,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     const { db } = this.deps;
 
     // 1. Idempotency: check if a task was already created for this step
-    const existingTask = db.getTaskByWorkflowRunStepId(meta.stepId);
+    const existingTask = await db.getTaskByWorkflowRunStepId(meta.stepId);
     if (existingTask) {
       if (existingTask.status === "completed") {
         return {
@@ -84,7 +84,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     let effectiveVcsRepo = config.vcsRepo;
     let effectiveKey: string | undefined;
     if (meta.workflowId) {
-      const workflow = db.getWorkflow(meta.workflowId);
+      const workflow = await db.getWorkflow(meta.workflowId);
       if (workflow) {
         if (!effectiveDir && workflow.dir) effectiveDir = workflow.dir;
         if (!effectiveVcsRepo && workflow.vcsRepo) effectiveVcsRepo = workflow.vcsRepo;
@@ -93,7 +93,7 @@ export class AgentTaskExecutor extends BaseExecutor<
     }
 
     // 3. Create the task (config is already deep-interpolated by the engine)
-    const { description: taskDescription, options: taskOptions } = withSiblingAwareness(
+    const { description: taskDescription, options: taskOptions } = await withSiblingAwareness(
       config.template,
       {
         key: effectiveKey,
@@ -115,7 +115,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },
     );
-    const task = db.createTaskExtended(taskDescription, taskOptions);
+    const task = await db.createTaskExtended(taskDescription, taskOptions);
 
     // 4. Return async result — engine will pause the workflow
     return {

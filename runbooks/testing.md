@@ -20,3 +20,4 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 1. **Frontend PRs require a qa-use session with screenshots.** Enforced by `.github/workflows/merge-gate.yml`.
 2. **Plan-mode verification steps must reference real commands** from `LOCAL_TESTING.md` — invented commands break agent runs.
 3. **Memory tests are not optional** when touching memory code — all four files in [memory-system.md](./memory-system.md).
+4. **Never hard-code a test port.** CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `listenOnFreePort(server)` / `getFreePort()` / `waitForServer()` from `src/tests/test-net.ts`. Commands, the preload template cache, and the `--changed` pre-push hook are in [LOCAL_TESTING.md](../LOCAL_TESTING.md).

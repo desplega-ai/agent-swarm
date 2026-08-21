@@ -22,7 +22,7 @@ function triggerDataSummary(triggerData: unknown): string | undefined {
     : serialized;
 }
 
-function slimRun(run: ReturnType<typeof listWorkflowRunsPage>["runs"][number]) {
+function slimRun(run: Awaited<ReturnType<typeof listWorkflowRunsPage>>["runs"][number]) {
   return {
     id: run.id,
     workflowId: run.workflowId,
@@ -35,7 +35,9 @@ function slimRun(run: ReturnType<typeof listWorkflowRunsPage>["runs"][number]) {
   };
 }
 
-function renderRuns(runs: ReturnType<typeof listWorkflowRunsPage>["runs"]): string | undefined {
+function renderRuns(
+  runs: Awaited<ReturnType<typeof listWorkflowRunsPage>>["runs"],
+): string | undefined {
   if (runs.length === 0) return undefined;
   return runs
     .map((run) => {
@@ -71,15 +73,15 @@ export const listWorkflowRunsInputSchema = z.object({
 
 type ListWorkflowRunsArgs = z.infer<typeof listWorkflowRunsInputSchema>;
 
-export function listWorkflowRunsHandler({
+export async function listWorkflowRunsHandler({
   workflowId,
   status,
   limit = DEFAULT_RUN_LIMIT,
   offset = 0,
   includeContext = false,
-}: ListWorkflowRunsArgs): SwarmToolResult {
+}: ListWorkflowRunsArgs): Promise<SwarmToolResult> {
   try {
-    const { runs, page } = listWorkflowRunsPage(workflowId, {
+    const { runs, page } = await listWorkflowRunsPage(workflowId, {
       status,
       limit,
       offset,
@@ -116,6 +118,6 @@ export const registerListWorkflowRunsTool = (server: McpServer) => {
           .optional(),
       }),
     },
-    async (args) => listWorkflowRunsHandler(args),
+    async (args) => await listWorkflowRunsHandler(args),
   );
 };

@@ -67,14 +67,14 @@ export async function acceptSteerHandler(
     return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
   }
 
-  const steering = getSteeringMessageById(steeringMessageId);
+  const steering = await getSteeringMessageById(steeringMessageId);
   if (!steering) {
     return toolErr(`Steering message "${steeringMessageId}" not found.`, {
       data: { yourAgentId: ctx.agentId },
     });
   }
 
-  const task = getTaskById(steering.taskId);
+  const task = await getTaskById(steering.taskId);
   if (!task) {
     return toolErr(`Task "${steering.taskId}" for this steering message no longer exists.`, {
       data: { yourAgentId: ctx.agentId },
@@ -107,7 +107,7 @@ export async function acceptSteerHandler(
   }
 
   const safeNote = note ? scrubSecrets(note) : undefined;
-  const updated = markSteeringHandled(steeringMessageId, safeNote);
+  const updated = await markSteeringHandled(steeringMessageId, safeNote);
   if (!updated) {
     return toolErr(`Steering message cannot be acknowledged from status "${steering.status}".`, {
       data: { yourAgentId: ctx.agentId },

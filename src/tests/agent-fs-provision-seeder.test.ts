@@ -62,8 +62,8 @@ function restoreEnv(): void {
   }
 }
 
-function configValue(key: string): string | undefined {
-  return getSwarmConfigs({ scope: "global", key })[0]?.value;
+async function configValue(key: string): Promise<string | undefined> {
+  return (await getSwarmConfigs({ scope: "global", key }))[0]?.value;
 }
 
 function createFetchStub(
@@ -178,17 +178,17 @@ describe("agent-fs provisioning seeder", () => {
     process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
     process.env.AGENT_FS_EMAIL_DOMAIN = "agents.example.test";
 
-    createUser({
+    await createUser({
       name: "Designer User",
       email: `designer-${suffix}@example.test`,
       role: "Customer",
     });
-    createUser({
+    await createUser({
       name: "Operator User",
       email: `operator-${suffix}@example.test`,
       role: "Operator",
     });
-    createUser({
+    await createUser({
       name: "Explicit Viewer User",
       email: `viewer-${suffix}@example.test`,
       role: "read-only contractor",
@@ -200,14 +200,14 @@ describe("agent-fs provisioning seeder", () => {
 
     expect(result.failed).toEqual([]);
     expect(result.created).toBe(1);
-    expect(configValue("API_AGENT_FS_API_KEY")).toBe("afs-admin-key");
-    expect(getSwarmConfigs({ scope: "global", key: "API_AGENT_FS_API_KEY" })[0]?.encrypted).toBe(
-      true,
-    );
-    expect(configValue("AGENT_FS_API_KEY")).toBeUndefined();
-    expect(configValue("AGENT_FS_DEFAULT_ORG_ID")).toBe("shared-org");
-    expect(configValue("AGENT_FS_SHARED_ORG_ID")).toBe("shared-org");
-    expect(configValue("AGENT_FS_DEFAULT_DRIVE_ID")).toBe("shared-drive");
+    expect(await configValue("API_AGENT_FS_API_KEY")).toBe("afs-admin-key");
+    expect(
+      (await getSwarmConfigs({ scope: "global", key: "API_AGENT_FS_API_KEY" }))[0]?.encrypted,
+    ).toBe(true);
+    expect(await configValue("AGENT_FS_API_KEY")).toBeUndefined();
+    expect(await configValue("AGENT_FS_DEFAULT_ORG_ID")).toBe("shared-org");
+    expect(await configValue("AGENT_FS_SHARED_ORG_ID")).toBe("shared-org");
+    expect(await configValue("AGENT_FS_DEFAULT_DRIVE_ID")).toBe("shared-drive");
     expect(process.env.API_AGENT_FS_API_KEY).toBe("afs-admin-key");
 
     const register = records.find((r) => r.path === "/auth/register");
@@ -244,39 +244,39 @@ describe("agent-fs provisioning seeder", () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
     process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
       value: "afs-admin-key",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_ORG_ID",
       value: "shared-org",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_DRIVE_ID",
       value: "shared-drive",
     });
 
-    createUser({
+    await createUser({
       name: "Taras Founder",
       email: `taras-founder-${suffix}@example.test`,
       role: "co-founder, CTO",
     });
-    createUser({
+    await createUser({
       name: "Eze Founder",
       email: `eze-founder-${suffix}@example.test`,
       role: "co-founder, CEO",
     });
-    createUser({
+    await createUser({
       name: "Designer Human",
       email: `designer-${suffix}@example.test`,
       role: "designer",
     });
-    createUser({
+    await createUser({
       name: "Unknown Human",
       email: `whatever-${suffix}@example.test`,
       role: "whatever",
@@ -313,34 +313,34 @@ describe("agent-fs provisioning seeder", () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
     process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
       value: "afs-admin-key",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_ORG_ID",
       value: "shared-org",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_DRIVE_ID",
       value: "shared-drive",
     });
 
-    createUser({
+    await createUser({
       name: "Viewer Human",
       email: `viewer-${suffix}@example.test`,
       role: "Viewer",
     });
-    createUser({
+    await createUser({
       name: "Read Only Human",
       email: `read-only-${suffix}@example.test`,
       role: "read only",
     });
-    createUser({
+    await createUser({
       name: "Guest Human",
       email: `guest-${suffix}@example.test`,
       role: "guest",
@@ -377,27 +377,27 @@ describe("agent-fs provisioning seeder", () => {
     const explicitViewer = `explicit-viewer-${suffix}@example.test`;
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
     process.env.AGENT_FS_REGISTER_EMAIL = "admin@example.test";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
       value: "afs-admin-key",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_ORG_ID",
       value: "shared-org",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_DRIVE_ID",
       value: "shared-drive",
     });
 
-    createUser({ name: "Existing Admin", email: existingAdmin, role: "Customer" });
-    createUser({ name: "Existing Editor", email: existingEditor, role: "Designer" });
-    createUser({ name: "Existing Viewer", email: existingViewer, role: "Whatever" });
-    createUser({ name: "Explicit Viewer", email: explicitViewer, role: "Guest" });
+    await createUser({ name: "Existing Admin", email: existingAdmin, role: "Customer" });
+    await createUser({ name: "Existing Editor", email: existingEditor, role: "Designer" });
+    await createUser({ name: "Existing Viewer", email: existingViewer, role: "Whatever" });
+    await createUser({ name: "Explicit Viewer", email: explicitViewer, role: "Guest" });
 
     const records: RequestRecord[] = [];
     setAgentFsProvisionFetchForTests(
@@ -427,28 +427,28 @@ describe("agent-fs provisioning seeder", () => {
     const suffix = crypto.randomUUID().slice(0, 8);
     process.env.AGENT_FS_API_URL = "https://agent-fs.example.test/";
     process.env.AGENT_FS_EMAIL_DOMAIN = "agents.example.test";
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "API_AGENT_FS_API_KEY",
       value: "afs-admin-key",
       isSecret: true,
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_ORG_ID",
       value: "shared-org",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_SHARED_ORG_ID",
       value: "shared-org",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "global",
       key: "AGENT_FS_DEFAULT_DRIVE_ID",
       value: "shared-drive",
     });
-    const worker = createAgent({
+    const worker = await createAgent({
       name: "Credential Worker",
       description: "Worker with custom agent-fs email",
       role: "worker",
@@ -457,7 +457,7 @@ describe("agent-fs provisioning seeder", () => {
       maxTasks: 1,
       capabilities: [],
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: worker.id,
       key: "AGENT_EMAIL",
@@ -477,11 +477,13 @@ describe("agent-fs provisioning seeder", () => {
       orgId: "shared-org",
       driveId: "shared-drive",
     });
-    const agentKey = getSwarmConfigs({
-      scope: "agent",
-      scopeId: worker.id,
-      key: "AGENT_FS_API_KEY",
-    })[0];
+    const agentKey = (
+      await getSwarmConfigs({
+        scope: "agent",
+        scopeId: worker.id,
+        key: "AGENT_FS_API_KEY",
+      })
+    )[0];
     expect(agentKey?.value).toBe("afs-agent-key");
     expect(agentKey?.encrypted).toBe(true);
     expect(records.find((r) => r.path === "/auth/register")?.body).toEqual({

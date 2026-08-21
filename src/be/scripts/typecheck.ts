@@ -399,13 +399,14 @@ export interface ScriptContext {
 export type ScriptMain = (args: any, ctx: ScriptContext) => unknown | Promise<unknown>;
 `;
 
-export function scriptSdkTypesWithGeneratedApis(
+export async function scriptSdkTypesWithGeneratedApis(
   apiTypes = getScriptApiTypes(),
   mcpTypes = getScriptMcpTypes(),
-  appTypes = getScriptAppTypes(),
-): string {
-  if (!appTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
-  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${appTypes}\n`;
+  appTypes?: string,
+): Promise<string> {
+  const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
+  if (!resolvedAppTypes) return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n`;
+  return `${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}\n`;
 }
 
 const STDLIB_MODULE_TYPES = `
@@ -450,13 +451,14 @@ export const SCRIPT_STDLIB_TYPES = stdlibTypesFor(SCRIPT_SDK_TYPES);
  * not exist in that module scope ("Cannot find name 'ScriptApiRegistry'") and
  * `ctx.api.<slug>` completions break in the editor.
  */
-export function scriptStdlibTypesWithGeneratedApis(
+export async function scriptStdlibTypesWithGeneratedApis(
   apiTypes = getScriptApiTypes(),
   mcpTypes = getScriptMcpTypes(),
-  appTypes = getScriptAppTypes(),
-): string {
-  if (!appTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
-  return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${appTypes}`);
+  appTypes?: string,
+): Promise<string> {
+  const resolvedAppTypes = appTypes ?? (await getScriptAppTypes());
+  if (!resolvedAppTypes) return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}`);
+  return stdlibTypesFor(`${SCRIPT_SDK_TYPES}\n${apiTypes}\n${mcpTypes}\n${resolvedAppTypes}`);
 }
 
 /**
@@ -930,10 +932,10 @@ function toStructured(diag: ts.Diagnostic): ScriptDiagnostic {
   };
 }
 
-export function typecheckScript(
+export async function typecheckScript(
   source: string,
   context: ScriptTypeContext = {},
-): ScriptTypecheckResult {
+): Promise<ScriptTypecheckResult> {
   const options: ts.CompilerOptions = {
     allowImportingTsExtensions: true,
     lib: ["lib.es2022.d.ts"],
@@ -948,10 +950,10 @@ export function typecheckScript(
 
   const apiTypes = getScriptApiTypes(context);
   const mcpTypes = getScriptMcpTypes(context);
-  const appTypes = getScriptAppTypes(context);
-  const sdkTypes = scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
+  const appTypes = await getScriptAppTypes(context);
+  const sdkTypes = await scriptSdkTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes);
   const stdlibTypes = appTypes
-    ? scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
+    ? await scriptStdlibTypesWithGeneratedApis(apiTypes, mcpTypes, appTypes)
     : SCRIPT_STDLIB_TYPES;
   const files = new Map<string, string>([
     [USER_FILE, source],

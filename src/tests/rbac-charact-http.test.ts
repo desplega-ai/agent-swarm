@@ -46,6 +46,7 @@ import { resetFileStorageProviderForTests } from "../fs/registry";
 import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-charact-http.sqlite";
 const TEST_FS_DIR = "./test-rbac-charact-http-data";
@@ -60,13 +61,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 // Full production pipeline: auth via handleCore, then handleFs
@@ -124,17 +118,17 @@ beforeAll(async () => {
 
   initDb(TEST_DB_PATH);
   pipelineServer = createPipelineServer(API_KEY);
-  pipelinePort = await listen(pipelineServer);
+  pipelinePort = await listenOnFreePort(pipelineServer);
   bareServer = createNoAuthContextServer();
-  barePort = await listen(bareServer);
+  barePort = await listenOnFreePort(bareServer);
 
-  assigneeId = createAgent({ name: "rbac-fs-assignee", isLead: false, status: "idle" }).id;
-  creatorId = createAgent({ name: "rbac-fs-creator", isLead: false, status: "idle" }).id;
-  outsiderId = createAgent({ name: "rbac-fs-outsider", isLead: false, status: "idle" }).id;
-  leadId = createAgent({ name: "rbac-fs-lead", isLead: true, status: "idle" }).id;
+  assigneeId = (await createAgent({ name: "rbac-fs-assignee", isLead: false, status: "idle" })).id;
+  creatorId = (await createAgent({ name: "rbac-fs-creator", isLead: false, status: "idle" })).id;
+  outsiderId = (await createAgent({ name: "rbac-fs-outsider", isLead: false, status: "idle" })).id;
+  leadId = (await createAgent({ name: "rbac-fs-lead", isLead: true, status: "idle" })).id;
 
-  const user = createUser({ name: "RBAC FS User" });
-  userToken = mintToken(user.id, "rbac-charact", ACTOR).plaintext;
+  const user = await createUser({ name: "RBAC FS User" });
+  userToken = (await mintToken(user.id, "rbac-charact", ACTOR)).plaintext;
 });
 
 afterAll(async () => {
@@ -150,11 +144,13 @@ afterAll(async () => {
 beforeEach(async () => {
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   resetFileStorageProviderForTests();
-  taskId = createTaskExtended("rbac fs charact task", {
-    agentId: assigneeId,
-    creatorAgentId: creatorId,
-    source: "mcp",
-  }).id;
+  taskId = (
+    await createTaskExtended("rbac fs charact task", {
+      agentId: assigneeId,
+      creatorAgentId: creatorId,
+      source: "mcp",
+    })
+  ).id;
 });
 
 const DENY_BODY = { error: "Caller cannot mutate this task's files" };
@@ -235,7 +231,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     const res = await bareUpload({ agentId: outsiderId });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("missing X-Agent-ID (no auth, no agent) is denied with 403", async () => {
@@ -255,7 +251,7 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
     });
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual(DENY_BODY);
-    expect(getTaskAttachments(taskId)).toHaveLength(1);
+    expect(await getTaskAttachments(taskId)).toHaveLength(1);
   });
 
   test("DELETE: assignee agent can delete", async () => {
@@ -267,6 +263,6 @@ describe("canMutateTask — agent-identity branches (auth context unset)", () =>
       agentId: assigneeId,
     });
     expect(res.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 });

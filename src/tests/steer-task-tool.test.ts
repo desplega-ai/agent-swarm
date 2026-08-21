@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getSteeringMessagesForTask,
   initDb,
   startTask,
@@ -41,20 +41,20 @@ function structured(result: { structuredContent?: unknown }) {
   };
 }
 
-function runningClaudeTask(creatorAgentId?: string, requestedByUserId?: string) {
-  const worker = createAgent({
+async function runningClaudeTask(creatorAgentId?: string, requestedByUserId?: string) {
+  const worker = await createAgent({
     name: "Claude steering worker",
     isLead: false,
     status: "busy",
     maxTasks: 10,
     harnessProvider: "claude",
   });
-  const task = createTaskExtended("steer this task", {
+  const task = await createTaskExtended("steer this task", {
     agentId: worker.id,
     creatorAgentId,
     requestedByUserId,
   });
-  expect(startTask(task.id)?.status).toBe("in_progress");
+  expect((await startTask(task.id))?.status).toBe("in_progress");
   return task;
 }
 
@@ -97,31 +97,36 @@ afterAll(async () => {
   await removeDbFiles();
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM task_steering_messages").run();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM users").run();
+beforeEach(async () => {
+  const db = getDbClient();
+  await db.run("DELETE FROM task_steering_messages");
+  await db.run("DELETE FROM agent_tasks");
+  await db.run("DELETE FROM agents");
+  await db.run("DELETE FROM users");
   delete process.env.RBAC_ENABLED;
 });
 
 describe("steer-task MCP tool", () => {
   test("defaults mode to queue and permits a lead or task creator but not an unrelated agent", async () => {
-    const lead = createAgent({ name: "Steering lead", isLead: true, status: "busy", maxTasks: 10 });
-    const creator = createAgent({
+    const lead = await createAgent({
+      name: "Steering lead",
+      isLead: true,
+      status: "busy",
+      maxTasks: 10,
+    });
+    const creator = await createAgent({
       name: "Task creator",
       isLead: false,
       status: "busy",
       maxTasks: 10,
     });
-    const unrelated = createAgent({
+    const unrelated = await createAgent({
       name: "Unrelated worker",
       isLead: false,
       status: "busy",
       maxTasks: 10,
     });
-    const task = runningClaudeTask(creator.id);
+    const task = await runningClaudeTask(creator.id);
 
     const leadResult = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
@@ -140,7 +145,7 @@ describe("steer-task MCP tool", () => {
       outcome: "queued",
       effectiveMode: "queue",
     });
-    expect(getSteeringMessagesForTask(task.id)[0]).toMatchObject({
+    expect((await getSteeringMessagesForTask(task.id))[0]).toMatchObject({
       mode: "queue",
       source: "mcp",
       createdByKind: "agent",
@@ -164,8 +169,13 @@ describe("steer-task MCP tool", () => {
   });
 
   test("reports degraded output by default and returns an error when fail is requested", async () => {
-    const lead = createAgent({ name: "Degrade lead", isLead: true, status: "busy", maxTasks: 10 });
-    const task = runningClaudeTask();
+    const lead = await createAgent({
+      name: "Degrade lead",
+      isLead: true,
+      status: "busy",
+      maxTasks: 10,
+    });
+    const task = await runningClaudeTask();
 
     const degraded = await callSteer(ownerCtx({ agentId: lead.id }), {
       taskId: task.id,
@@ -205,8 +215,8 @@ describe("steer-task MCP tool", () => {
   });
 
   test("user surface admits the creator and denies a user without the steering grant", async () => {
-    const owner = createUser({ name: "Steering owner" });
-    const task = runningClaudeTask(undefined, owner.id);
+    const owner = await createUser({ name: "Steering owner" });
+    const task = await runningClaudeTask(undefined, owner.id);
     const handler = userToolHandler(createUserServer(owner));
 
     const allowed = (await handler(
@@ -215,9 +225,10 @@ describe("steer-task MCP tool", () => {
     )) as { structuredContent?: unknown };
     expect(structured(allowed)).toMatchObject({ success: true, outcome: "queued" });
 
-    getDb()
-      .prepare("DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?")
-      .run(owner.id);
+    await getDbClient().run(
+      "DELETE FROM principal_roles WHERE principalType = 'user' AND principalId = ?",
+      [owner.id],
+    );
     process.env.RBAC_ENABLED = "true";
     const denied = (await handler(
       { taskId: task.id, message: "this must be denied", mode: "queue" },

@@ -61,7 +61,7 @@ export const registerAppPatchTool = (server: McpServer) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -74,10 +74,10 @@ export const registerAppPatchTool = (server: McpServer) => {
       });
       if (!decision.allow) return toolErr(decision.reason);
 
-      const existing = getApp(input.appId);
+      const existing = await getApp(input.appId);
       if (!existing) return toolErr(`App ${input.appId} not found.`);
       return withAppDefinitionLock(input.appId, async () => {
-        const lockedExisting = getApp(input.appId);
+        const lockedExisting = await getApp(input.appId);
         if (!lockedExisting) return toolErr(`App ${input.appId} not found.`);
         if (appDefinitionNeedsRepair(lockedExisting)) {
           return toolErr("Definition needs repair.", {
@@ -92,7 +92,7 @@ export const registerAppPatchTool = (server: McpServer) => {
             data: { issues: patch.issues },
           });
         }
-        const parsed = parseAppDefinition(patch.definition, {
+        const parsed = await parseAppDefinition(patch.definition, {
           currentAppId: input.appId,
           resolveApp: getApp,
           writerAgentId: requestInfo.agentId,
@@ -105,7 +105,7 @@ export const registerAppPatchTool = (server: McpServer) => {
           });
         }
 
-        let app: ReturnType<typeof updateApp>;
+        let app: Awaited<ReturnType<typeof updateApp>>;
         let migration: AppMigrationReport;
         try {
           const migrated = await migrateAppSchema({
@@ -115,9 +115,9 @@ export const registerAppPatchTool = (server: McpServer) => {
             nextDefinition: parsed.definition,
             migration: input.migration,
             forceElementBreak: input.forceElementBreak,
-            snapshot: () => {
+            snapshot: async () => {
               try {
-                snapshotApp(input.appId, requestInfo.agentId);
+                await snapshotApp(input.appId, requestInfo.agentId);
               } catch {
                 throw new AppSnapshotFailure();
               }

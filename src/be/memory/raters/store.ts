@@ -1,5 +1,5 @@
 import { ensure } from "@desplega.ai/business-use";
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import { type RatingEvent, REFERENCES_SOURCE_MAX_LENGTH, sanitizeReferencesSource } from "./types";
 
 /**
@@ -44,15 +44,14 @@ export class ExplicitSelfDuplicateError extends Error {
   }
 }
 
-export function applyRating(
+export async function applyRating(
   events: RatingEvent[],
   ctx: ApplyRatingContext = {},
-): ApplyRatingResult {
+): Promise<ApplyRatingResult> {
   if (events.length === 0) {
     return { applied: 0, rejected: [] };
   }
 
-  const db = getDb();
   const accepted: { event: RatingEvent; sanitizedReferencesSource: string | null }[] = [];
   const rejected: ApplyRatingResult["rejected"] = [];
 
@@ -93,47 +92,40 @@ export function applyRating(
 
   // One transaction for the whole batch. SQLite WAL handles concurrent
   // writers — Beta updates are commutative, so racing applies converge.
-  const updateMemory = db.prepare(
-    "UPDATE agent_memory SET alpha = alpha + ?, beta = beta + ? WHERE id = ?",
-  );
-  const checkExists = db.prepare<{ id: string }, [string]>(
-    "SELECT id FROM agent_memory WHERE id = ?",
-  );
-  const insertRating = db.prepare(
-    `INSERT INTO memory_rating
+  const UPDATE_MEMORY_SQL =
+    "UPDATE agent_memory SET alpha = alpha + ?, beta = beta + ? WHERE id = ?";
+  const CHECK_EXISTS_SQL = "SELECT id FROM agent_memory WHERE id = ?";
+  const INSERT_RATING_SQL = `INSERT INTO memory_rating
        (id, memoryId, taskId, source, signal, weight, reasoning, createdAt, contextKey)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   // Step-6 §3 — UPSERT the edge with the SAME deltas as the memory row.
   // The `- 1.0` corrections in DO UPDATE undo the default-prior offset that
   // the INSERT arm baked into excluded.alpha/excluded.beta. Net effect: on
   // insert, alpha/beta start at `1 + delta`; on update, the existing
   // (alpha, beta) simply gain (delta_alpha, delta_beta).
-  const upsertEdge = db.prepare(
-    `INSERT INTO agent_memory_edge (from_id, to_id, type, alpha, beta, createdAt)
+  const UPSERT_EDGE_SQL = `INSERT INTO agent_memory_edge (from_id, to_id, type, alpha, beta, createdAt)
      VALUES (?, ?, 'references-source', ?, ?, ?)
      ON CONFLICT(from_id, to_id, type) DO UPDATE SET
        alpha = alpha + excluded.alpha - 1.0,
-       beta  = beta  + excluded.beta  - 1.0`,
-  );
+       beta  = beta  + excluded.beta  - 1.0`;
 
   type AppliedEntry = { event: RatingEvent; sanitizedReferencesSource: string | null };
 
-  const applyTx = db.transaction(() => {
+  const { applied, lateRejects, appliedEvents } = await getDbClient().transaction(async (tx) => {
     let applied = 0;
     const lateRejects: ApplyRatingResult["rejected"] = [];
     const appliedEvents: AppliedEntry[] = [];
     for (const { event, sanitizedReferencesSource } of accepted) {
-      const exists = checkExists.get(event.memoryId);
+      const exists = await tx.get<{ id: string }>(CHECK_EXISTS_SQL, [event.memoryId]);
       if (!exists) {
         lateRejects.push({ event, reason: "memoryId not found in agent_memory" });
         continue;
       }
       const alphaDelta = Math.max(0, event.signal) * event.weight;
       const betaDelta = Math.max(0, -event.signal) * event.weight;
-      updateMemory.run(alphaDelta, betaDelta, event.memoryId);
+      await tx.run(UPDATE_MEMORY_SQL, [alphaDelta, betaDelta, event.memoryId]);
       try {
-        insertRating.run(
+        await tx.run(INSERT_RATING_SQL, [
           crypto.randomUUID(),
           event.memoryId,
           ctx.taskId ?? null,
@@ -143,7 +135,7 @@ export function applyRating(
           event.reasoning ?? null,
           new Date().toISOString(),
           ctx.contextKey ?? null,
-        );
+        ]);
       } catch (err) {
         // Partial unique index on (taskId, memoryId) WHERE source='explicit-self'
         // is the only constraint that can fire here.
@@ -156,21 +148,19 @@ export function applyRating(
         throw err;
       }
       if (sanitizedReferencesSource !== null) {
-        upsertEdge.run(
+        await tx.run(UPSERT_EDGE_SQL, [
           event.memoryId,
           sanitizedReferencesSource,
           1.0 + alphaDelta,
           1.0 + betaDelta,
           new Date().toISOString(),
-        );
+        ]);
       }
       appliedEvents.push({ event, sanitizedReferencesSource });
       applied += 1;
     }
     return { applied, lateRejects, appliedEvents };
   });
-
-  const { applied, lateRejects, appliedEvents } = applyTx();
 
   // Business-use instrumentation — emit ONE `memory_rated` event in the `task`
   // flow per applied rating. Placed OUTSIDE the transaction (per CLAUDE.md BU

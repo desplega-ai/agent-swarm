@@ -8,7 +8,7 @@ import {
 } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { handleApps } from "../http/apps";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { registerAppQueryTool } from "../tools/app-query";
@@ -55,14 +55,14 @@ function pagesDefinition() {
   };
 }
 
-function parseIssues(definition: unknown): Array<{ path: string; message: string }> {
-  const result = parseAppDefinition(definition);
+async function parseIssues(definition: unknown): Promise<Array<{ path: string; message: string }>> {
+  const result = await parseAppDefinition(definition);
   expect(result.success).toBe(false);
   return result.success ? [] : result.issues;
 }
 
-function expectIssue(definition: unknown, path: string, message?: string): void {
-  expect(parseIssues(definition)).toContainEqual({
+async function expectIssue(definition: unknown, path: string, message?: string): Promise<void> {
+  expect(await parseIssues(definition)).toContainEqual({
     path,
     message: message === undefined ? expect.any(String) : message,
   });
@@ -130,7 +130,7 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-spike4-worker", isLead: false, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-spike4-worker", isLead: false, status: "idle" });
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -138,9 +138,9 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -154,72 +154,72 @@ afterAll(async () => {
 });
 
 describe("Spike 4 definition normalization", () => {
-  test("rejects legacy singular page definitions", () => {
+  test("rejects legacy singular page definitions", async () => {
     const legacy = {
       models: structuredClone(issueDefinition.models),
       queries: structuredClone(issueDefinition.queries),
       page: structuredClone(issueDefinition.pages.main),
     };
-    expectIssue(
+    await expectIssue(
       legacy,
       "page",
       "legacy singular page is no longer supported — define pages plus defaultPage",
     );
   });
 
-  test("requires pages and defaultPage", () => {
-    expectIssue(
+  test("requires pages and defaultPage", async () => {
+    await expectIssue(
       { ...pagesDefinition(), page: structuredClone(issueDefinition.pages.main) },
       "page",
     );
     const neither = pagesDefinition() as Record<string, unknown>;
     delete neither.pages;
     delete neither.defaultPage;
-    expectIssue(neither, "pages");
+    await expectIssue(neither, "pages");
   });
 
-  test("rejects reserved page param names", () => {
+  test("rejects reserved page param names", async () => {
     for (const name of ["mode", "apiUrl", "apiKey", "email", "name"]) {
       const definition = pagesDefinition();
       definition.pages.main.params = { [name]: { kind: "string" } };
-      expectIssue(definition, `pages.main.params.${name}`, "reserved param name");
+      await expectIssue(definition, `pages.main.params.${name}`, "reserved param name");
     }
   });
 
-  test("requires valid page and param names and an exact single-key $param filter", () => {
+  test("requires valid page and param names and an exact single-key $param filter", async () => {
     const badPage = pagesDefinition() as any;
     badPage.pages.BadPage = badPage.pages.main;
     delete badPage.pages.main;
     badPage.defaultPage = "BadPage";
-    expectIssue(badPage, "pages.BadPage");
+    await expectIssue(badPage, "pages.BadPage");
 
     const badParam = pagesDefinition() as any;
     badParam.pages.main.params = { BadParam: {} };
-    expectIssue(badParam, "pages.main.params.BadParam");
+    await expectIssue(badParam, "pages.main.params.BadParam");
 
     const badFilter = pagesDefinition() as any;
     badFilter.queries.allIssues.filter = {
       issueId: { $param: "issueId", extra: true },
     };
-    expectIssue(badFilter, "queries.allIssues.filter.issueId");
+    await expectIssue(badFilter, "queries.allIssues.filter.issueId");
   });
 
-  test("rejects unknown page and page-param keys instead of stripping them", () => {
+  test("rejects unknown page and page-param keys instead of stripping them", async () => {
     const badPage = pagesDefinition() as any;
     badPage.pages.main.typo = true;
-    expectIssue(badPage, "pages.main");
+    await expectIssue(badPage, "pages.main");
 
     const badParam = pagesDefinition() as any;
     badParam.pages.detail.params.issueId.requird = true;
-    expectIssue(badParam, "pages.detail.params.issueId");
+    await expectIssue(badParam, "pages.detail.params.issueId");
   });
 });
 
 describe("Spike 4 page validation", () => {
-  test("prefixes tree issues per page and keeps route refs page-local", () => {
+  test("prefixes tree issues per page and keeps route refs page-local", async () => {
     const definition = pagesDefinition();
     definition.pages.detail.root = "missing";
-    expectIssue(definition, "pages.detail.root");
+    await expectIssue(definition, "pages.detail.root");
 
     const valid = pagesDefinition();
     valid.pages.detail.elements = {
@@ -234,17 +234,17 @@ describe("Spike 4 page validation", () => {
         props: { content: { $state: "/route/params/issueId" } },
       },
     };
-    expect(parseAppDefinition(valid).success).toBe(true);
+    expect((await parseAppDefinition(valid)).success).toBe(true);
 
     const invalid = structuredClone(valid);
     invalid.pages.main.elements.root = {
       type: "Text",
       props: { content: { $state: "/route/params/issueId" } },
     };
-    expectIssue(invalid, "pages.main.elements.root.props.content");
+    await expectIssue(invalid, "pages.main.elements.root.props.content");
   });
 
-  test("keeps form and UI ids page-local", () => {
+  test("keeps form and UI ids page-local", async () => {
     const definition = pagesDefinition();
     definition.pages.main.elements = {
       root: { type: "Stack", props: {}, children: ["formRef", "uiRef"] },
@@ -270,7 +270,7 @@ describe("Spike 4 page validation", () => {
       search: { type: "SearchInput", props: { id: "detailSearch" } },
     };
 
-    const issues = parseIssues(definition);
+    const issues = await parseIssues(definition);
     expect(issues).toContainEqual(
       expect.objectContaining({ path: "pages.main.elements.formRef.props.content" }),
     );
@@ -279,7 +279,7 @@ describe("Spike 4 page validation", () => {
     );
   });
 
-  test("captures state refs in comparison objects and nested logical conditions", () => {
+  test("captures state refs in comparison objects and nested logical conditions", async () => {
     const definition = pagesDefinition();
     definition.pages.main.elements.root = {
       type: "Container",
@@ -291,30 +291,30 @@ describe("Spike 4 page validation", () => {
         ],
       },
     };
-    expectIssue(definition, "pages.main.elements.root.visible.$and.1.$or.0");
+    await expectIssue(definition, "pages.main.elements.root.visible.$and.1.$or.0");
   });
 
-  test("rejects visible shapes the renderer silently ignores", () => {
+  test("rejects visible shapes the renderer silently ignores", async () => {
     const wrapperNot = pagesDefinition() as any;
     wrapperNot.pages.main.elements.root = {
       ...rootElement,
       visible: { not: { $state: "/queries/allIssues/data/0/id" } },
     };
-    expectIssue(wrapperNot, "pages.main.elements.root.visible");
+    await expectIssue(wrapperNot, "pages.main.elements.root.visible");
 
     const multiComparison = pagesDefinition() as any;
     multiComparison.pages.main.elements.root = {
       ...rootElement,
       visible: { $state: "/queries/allIssues/loading", eq: true, neq: false },
     };
-    expectIssue(multiComparison, "pages.main.elements.root.visible");
+    await expectIssue(multiComparison, "pages.main.elements.root.visible");
 
     const nonBooleanNot = pagesDefinition() as any;
     nonBooleanNot.pages.main.elements.root = {
       ...rootElement,
       visible: { $state: "/queries/allIssues/loading", not: "yes" },
     };
-    expectIssue(nonBooleanNot, "pages.main.elements.root.visible.not");
+    await expectIssue(nonBooleanNot, "pages.main.elements.root.visible.not");
 
     const negationFlag = pagesDefinition() as any;
     negationFlag.pages.main.elements.root = {
@@ -326,10 +326,10 @@ describe("Spike 4 page validation", () => {
         ],
       },
     };
-    expect(parseAppDefinition(negationFlag).success).toBe(true);
+    expect((await parseAppDefinition(negationFlag)).success).toBe(true);
   });
 
-  test("validates app.navigate targets, supplied params, and required params", () => {
+  test("validates app.navigate targets, supplied params, and required params", async () => {
     const definition = pagesDefinition();
     definition.pages.main.elements.root = {
       type: "Table",
@@ -348,35 +348,38 @@ describe("Spike 4 page validation", () => {
         ],
       },
     };
-    expect(parseAppDefinition(definition).success).toBe(true);
+    expect((await parseAppDefinition(definition)).success).toBe(true);
 
     const action = (candidate: ReturnType<typeof pagesDefinition>) =>
       (candidate.pages.main.elements.root as any).props.rowActions[0].actions[0].params;
 
     const unknown = structuredClone(definition);
     action(unknown).page = "missing";
-    expectIssue(unknown, "pages.main.elements.root.props.rowActions.0.actions.0.params.page");
+    await expectIssue(unknown, "pages.main.elements.root.props.rowActions.0.actions.0.params.page");
 
     const inherited = structuredClone(definition);
     action(inherited).page = "toString";
-    expectIssue(inherited, "pages.main.elements.root.props.rowActions.0.actions.0.params.page");
+    await expectIssue(
+      inherited,
+      "pages.main.elements.root.props.rowActions.0.actions.0.params.page",
+    );
 
     const undeclared = structuredClone(definition);
     action(undeclared).params.extra = "x";
-    expectIssue(
+    await expectIssue(
       undeclared,
       "pages.main.elements.root.props.rowActions.0.actions.0.params.params.extra",
     );
 
     const missing = structuredClone(definition);
     delete action(missing).params.issueId;
-    expectIssue(
+    await expectIssue(
       missing,
       "pages.main.elements.root.props.rowActions.0.actions.0.params.params.issueId",
     );
   });
 
-  test("requires referenced query params and Drawer params on the containing page", () => {
+  test("requires referenced query params and Drawer params on the containing page", async () => {
     const definition = pagesDefinition();
     definition.queries.issueDetail = {
       model: "issue",
@@ -394,7 +397,7 @@ describe("Spike 4 page validation", () => {
         fields: [{ key: "title" }],
       },
     };
-    const issues = parseIssues(definition);
+    const issues = await parseIssues(definition);
     expect(issues).toContainEqual(
       expect.objectContaining({ path: "pages.main.elements.root.props.param" }),
     );
@@ -403,14 +406,14 @@ describe("Spike 4 page validation", () => {
     );
   });
 
-  test("requires Drawer param to be a literal string", () => {
+  test("requires Drawer param to be a literal string", async () => {
     const definition = pagesDefinition();
     definition.pages.main.params = { panel: { kind: "string" } };
     definition.pages.main.elements.root = {
       type: "Drawer",
       props: { param: { $state: "/route/params/panel" } },
     };
-    expectIssue(
+    await expectIssue(
       definition,
       "pages.main.elements.root.props.param",
       "Drawer param must be a literal route param name (not a binding)",
@@ -419,8 +422,8 @@ describe("Spike 4 page validation", () => {
 });
 
 describe("Spike 4 definition merge patches", () => {
-  test("rejects legacy page patches with canonical guidance", () => {
-    const parsed = parseAppDefinition(issueDefinition);
+  test("rejects legacy page patches with canonical guidance", async () => {
+    const parsed = await parseAppDefinition(issueDefinition);
     if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
     expect(applyAppDefinitionPatch(parsed.definition, { page: { root: "other" } })).toEqual({
       success: false,
@@ -433,7 +436,7 @@ describe("Spike 4 definition merge patches", () => {
     });
   });
 
-  test("treats page elements and param declarations as atomic entries", () => {
+  test("treats page elements and param declarations as atomic entries", async () => {
     const definition = pagesDefinition();
     definition.pages.main.elements.root = {
       type: "Stack",
@@ -465,7 +468,7 @@ describe("Spike 4 definition merge patches", () => {
     expect(patched.pages.main.params.panel).toEqual({ required: true });
   });
 
-  test("null-deletes a non-default page but rejects deleting the default page", () => {
+  test("null-deletes a non-default page but rejects deleting the default page", async () => {
     const definition = pagesDefinition();
     const deleted = applyAppDefinitionPatch(definition as any, { pages: { detail: null } });
     expect(deleted.success).toBe(true);
@@ -606,7 +609,7 @@ describe("Spike 4 parameterized named queries", () => {
     expect(rows.status).toBe(200);
     expect(rows.body.rows).toEqual([expect.objectContaining({ slug: "two", createdBy: actor })]);
 
-    expectIssue(
+    await expectIssue(
       {
         models: { record: { columns: { createdBy: { kind: "string" } } } },
         pages: { main: page() },

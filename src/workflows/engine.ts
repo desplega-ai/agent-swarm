@@ -2,6 +2,7 @@ import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
+  getDbClient,
   getLatestStepForNode,
   getStepByIdempotencyKey,
   getStepCountForNode,
@@ -74,16 +75,16 @@ export async function startWorkflowExecution(
   }
 
   // Cooldown check
-  if (workflow.cooldown && shouldSkipCooldown(workflow.id, workflow.cooldown)) {
+  if (workflow.cooldown && (await shouldSkipCooldown(workflow.id, workflow.cooldown))) {
     const runId = crypto.randomUUID();
-    createWorkflowRun({
+    await createWorkflowRun({
       id: runId,
       workflowId: workflow.id,
       triggerType: options.triggerType ?? "manual",
       triggerData,
       createdBy: options.requestedByUserId,
     });
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "skipped",
       error: "cooldown",
       finishedAt: new Date().toISOString(),
@@ -92,7 +93,7 @@ export async function startWorkflowExecution(
   }
 
   const runId = crypto.randomUUID();
-  createWorkflowRun({
+  await createWorkflowRun({
     id: runId,
     workflowId: workflow.id,
     triggerType: options.triggerType ?? "manual",
@@ -118,10 +119,10 @@ export async function startWorkflowExecution(
 
   if (workflow.input) {
     try {
-      const resolved = resolveInputs(workflow.input);
+      const resolved = await resolveInputs(workflow.input);
       Object.assign(ctx, { input: resolved });
     } catch (err) {
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         status: "failed",
         error: `Input resolution failed: ${err}`,
         finishedAt: new Date().toISOString(),
@@ -177,7 +178,7 @@ export async function walkGraph(
   if (!options.requestedByUserId) {
     options = {
       ...options,
-      requestedByUserId: getWorkflowRun(runId)?.createdBy,
+      requestedByUserId: (await getWorkflowRun(runId))?.createdBy,
     };
   }
   let nodeExecutionCount = 0;
@@ -188,7 +189,7 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
-  const completedNodeIds = new Set(getCompletedStepNodeIds(runId));
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
@@ -204,7 +205,7 @@ export async function walkGraph(
       // but only the parent aggregate belongs in workflow context or routing.
       if (resolveForeachParent(def, nodeId)) continue;
 
-      const step = getLatestStepForNode(runId, nodeId);
+      const step = await getLatestStepForNode(runId, nodeId);
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
         const node = def.nodes.find((n) => n.id === nodeId);
@@ -236,9 +237,9 @@ export async function walkGraph(
   // This prevents runaway workflows (e.g. infinite loop-backs) from consuming
   // unbounded resources. Checked here so it covers initial walks AND async
   // resumes (resumeFromTaskCompletion, handleTaskFailure, retry-poller).
-  const allSteps = getWorkflowRunStepsByRunId(runId);
+  const allSteps = await getWorkflowRunStepsByRunId(runId);
   if (allSteps.length >= getMaxWorkflowStepsPerRun()) {
-    updateWorkflowRun(runId, {
+    await updateWorkflowRun(runId, {
       status: "failed",
       error: `Circuit breaker: run exceeded ${getMaxWorkflowStepsPerRun()} total steps (WORKFLOW_MAX_STEPS_PER_RUN)`,
       finishedAt: new Date().toISOString(),
@@ -286,7 +287,7 @@ export async function walkGraph(
   while (pendingNodes.length > 0) {
     nodeExecutionCount += pendingNodes.length;
     if (nodeExecutionCount > maxIterations()) {
-      updateWorkflowRun(runId, {
+      await updateWorkflowRun(runId, {
         status: "failed",
         error: `Max node executions (${maxIterations()}) exceeded — possible infinite loop`,
         finishedAt: new Date().toISOString(),
@@ -316,7 +317,7 @@ export async function walkGraph(
         // Check if the run was already marked failed in DB (e.g., executor error).
         // If so, stop immediately. If not (mustPass validation), skip this
         // node's successors but continue processing other branches.
-        const currentRun = getWorkflowRun(runId);
+        const currentRun = await getWorkflowRun(runId);
         if (currentRun?.status === "failed") return;
         continue;
       }
@@ -362,9 +363,16 @@ export async function walkGraph(
   // No more nodes to execute — check if the run should be completed.
   // Stay in current state if any steps are still waiting (async tasks
   // pending) or have pending retries.
-  const run = getWorkflowRun(runId);
-  if (run && run.status === "running") {
-    const finalSteps = getWorkflowRunStepsByRunId(runId);
+  //
+  // Read, guard, step snapshot and write share one transaction (same shape as
+  // finalizeOrWait): a cancel committing in between would otherwise be
+  // overwritten from a stale snapshot, resurrecting the run as `completed` or
+  // parking it in `waiting` with no waiting step left to ever finalize it.
+  await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || run.status !== "running") return;
+
+    const finalSteps = await getWorkflowRunStepsByRunId(runId);
     const hasWaitingSteps = finalSteps.some((s) => s.status === "waiting");
     const hasPendingRetries = finalSteps.some(
       (s) => s.status === "failed" && s.nextRetryAt != null,
@@ -381,12 +389,12 @@ export async function walkGraph(
 
     if (hasWaitingSteps) {
       // Async tasks still in progress — set back to waiting for next event
-      updateWorkflowRun(runId, { status: "waiting" });
+      await updateWorkflowRun(runId, { status: "waiting" });
     } else if (!hasPendingRetries) {
       if (failedSteps.length > 0 && !hasCompletedSteps) {
         // All branches failed — mark run as failed
         const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "failed",
           error: `All branches failed. Failed nodes: ${failedNodeIds}`,
           context: ctx,
@@ -396,21 +404,21 @@ export async function walkGraph(
         // Partial failure — some branches succeeded, some failed.
         // Mark as completed with error noting partial failure.
         const failedNodeIds = failedSteps.map((s) => s.nodeId).join(", ");
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           error: `Partial failure: nodes [${failedNodeIds}] failed (mustPass validation), but other branches completed successfully`,
           context: ctx,
           finishedAt: new Date().toISOString(),
         });
       } else {
-        updateWorkflowRun(runId, {
+        await updateWorkflowRun(runId, {
           status: "completed",
           context: ctx,
           finishedAt: new Date().toISOString(),
         });
       }
     }
-  }
+  });
 }
 
 /**
@@ -450,54 +458,66 @@ async function executeStep(
   secretKeys: Set<string> = new Set(),
   options: WorkflowExecutionOptions = {},
 ): Promise<StepResult> {
-  // Use iteration-aware idempotency key to support loops.
-  // Count existing steps for this node to determine the current iteration.
-  const iteration = getStepCountForNode(runId, node.id);
-  const idempotencyKey = `${runId}:${node.id}:${iteration}`;
+  // Use iteration-aware idempotency key to support loops. The iteration
+  // count, the dedup read, and the step insert commit together — and the key
+  // rides the INSERT itself — so the UNIQUE(idempotencyKey) index arbitrates
+  // concurrent executions of the same node instead of an orphan step row
+  // committing before a follow-up key UPDATE throws.
+  const dedup = await getDbClient().transaction(async () => {
+    // Count existing steps for this node to determine the current iteration.
+    const iteration = await getStepCountForNode(runId, node.id);
+    const idempotencyKey = `${runId}:${node.id}:${iteration}`;
 
-  // 1. Memoization / deduplication check (within same iteration)
-  const existingStep = getStepByIdempotencyKey(idempotencyKey);
-  if (existingStep) {
-    if (existingStep.status === "completed") {
+    // 1. Memoization / deduplication check (within same iteration)
+    const existingStep = await getStepByIdempotencyKey(idempotencyKey);
+    if (
+      existingStep &&
+      (existingStep.status === "completed" || existingStep.status === "waiting")
+    ) {
+      return { existingStep, stepId: existingStep.id, deduped: true };
+    }
+    // For "pending" or "failed" steps, fall through to re-execute
+
+    // 2. Create step
+    // Redact resolved secret values from the persisted input so credentials
+    // stored in `ctx.input` (resolved via `secret.*` or sensitive `${ENV}`
+    // references) don't leak through `get-workflow-run` or any other reader of
+    // the `workflow_run_steps` table. The live `ctx` is untouched — executors
+    // still see real values.
+    const latestForeachStep =
+      node.type === "foreach" ? await getLatestStepForNode(runId, node.id) : undefined;
+    const reusableForeachStep =
+      latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
+        ? latestForeachStep
+        : undefined;
+    const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
+    if (!reusableForeachStep) {
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: node.id,
+        nodeType: node.type,
+        input: redactSecretsForStorage(ctx, secretKeys),
+        idempotencyKey,
+      });
+    }
+    return { existingStep, stepId, deduped: false };
+  });
+
+  if (dedup.deduped && dedup.existingStep) {
+    if (dedup.existingStep.status === "completed") {
       // Inject stored output into context
-      ctx[node.id] = existingStep.output;
+      ctx[node.id] = dedup.existingStep.output;
       // For memoized steps, return all successors (no port — use default)
       const successors = getSuccessors(def, node.id);
       return { outcome: "completed", successors };
     }
-    if (existingStep.status === "waiting") {
-      // Step already exists and is waiting for async completion (e.g., agent-task).
-      // Don't create a duplicate — just report as waiting.
-      return { outcome: "waiting", successors: [] };
-    }
-    // For "pending" or "failed" steps, fall through to re-execute
+    // Step already exists and is waiting for async completion (e.g., agent-task).
+    // Don't create a duplicate — just report as waiting.
+    return { outcome: "waiting", successors: [] };
   }
-
-  // 2. Create step
-  // Redact resolved secret values from the persisted input so credentials
-  // stored in `ctx.input` (resolved via `secret.*` or sensitive `${ENV}`
-  // references) don't leak through `get-workflow-run` or any other reader of
-  // the `workflow_run_steps` table. The live `ctx` is untouched — executors
-  // still see real values.
-  const latestForeachStep =
-    node.type === "foreach" ? getLatestStepForNode(runId, node.id) : undefined;
-  const reusableForeachStep =
-    latestForeachStep && !FOREACH_TERMINAL_STEP_STATUSES.has(latestForeachStep.status)
-      ? latestForeachStep
-      : undefined;
-  const stepId = reusableForeachStep?.id ?? crypto.randomUUID();
-  if (!reusableForeachStep) {
-    createWorkflowRunStep({
-      id: stepId,
-      runId,
-      nodeId: node.id,
-      nodeType: node.type,
-      input: redactSecretsForStorage(ctx, secretKeys),
-    });
-
-    // Set idempotency key
-    updateWorkflowRunStep(stepId, { idempotencyKey });
-  }
+  const existingStep = dedup.existingStep;
+  const stepId = dedup.stepId;
 
   // 3. Get executor
   const executor = registry.get(node.type);
@@ -513,7 +533,7 @@ async function executeStep(
     );
     if (inputErrors.length > 0) {
       const errorMsg = `Input schema validation failed: ${inputErrors.join("; ")}`;
-      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      await checkpointStepFailure(runId, stepId, errorMsg, 0);
       throw new Error(errorMsg);
     }
   }
@@ -529,7 +549,7 @@ async function executeStep(
 
   if (scriptBodyUnresolved && scriptBodyUnresolved.length > 0) {
     const errorMsg = scriptBodyInterpolationError(node.id, scriptBodyUnresolved);
-    checkpointStepFailure(runId, stepId, errorMsg, 0);
+    await checkpointStepFailure(runId, stepId, errorMsg, 0);
     return { outcome: "failed", successors: [] };
   }
 
@@ -537,7 +557,7 @@ async function executeStep(
     console.warn(
       `[workflow] Step ${node.id}: unresolved interpolation tokens: ${unresolved.join(", ")}`,
     );
-    updateWorkflowRunStep(stepId, {
+    await updateWorkflowRunStep(stepId, {
       diagnostics: JSON.stringify({ unresolvedTokens: unresolved }),
     });
   }
@@ -582,7 +602,7 @@ async function executeStep(
     // Apply retry policy if configured
     const retryPolicy = node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = checkpointStepFailure(
+    const { shouldRetry } = await checkpointStepFailure(
       runId,
       stepId,
       errorMsg,
@@ -601,7 +621,7 @@ async function executeStep(
   if (result.status === "failed") {
     const retryPolicy = node.retry || executor.retryPolicy;
     const currentRetryCount = existingStep?.retryCount || 0;
-    const { shouldRetry } = checkpointStepFailure(
+    const { shouldRetry } = await checkpointStepFailure(
       runId,
       stepId,
       result.error || "Executor returned failed status",
@@ -611,7 +631,7 @@ async function executeStep(
 
     // Persist output for observability even on failure (e.g. script nodes keep {exitCode, stdout, stderr})
     if (result.output !== undefined) {
-      updateWorkflowRunStep(stepId, { output: result.output });
+      await updateWorkflowRunStep(stepId, { output: result.output });
     }
 
     if (!shouldRetry) {
@@ -622,7 +642,7 @@ async function executeStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    checkpointStepWaiting(runId, stepId, ctx);
+    await checkpointStepWaiting(runId, stepId, ctx);
     return { outcome: "waiting", successors: [] };
   }
 
@@ -634,7 +654,7 @@ async function executeStep(
     );
     if (outputErrors.length > 0) {
       const errorMsg = `Output schema validation failed: ${outputErrors.join("; ")}`;
-      checkpointStepFailure(runId, stepId, errorMsg, 0);
+      await checkpointStepFailure(runId, stepId, errorMsg, 0);
       throw new Error(errorMsg);
     }
   }
@@ -646,7 +666,7 @@ async function executeStep(
 
     if (validationResult.outcome === "halt") {
       const errorMsg = "Validation failed (mustPass)";
-      checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
+      await checkpointStepFailure(runId, stepId, errorMsg, 0, undefined, { markRunFailed: false });
       return { outcome: "failed", successors: [] };
     }
 
@@ -659,7 +679,7 @@ async function executeStep(
       }
       const retryPolicy = node.validation.retry || node.retry;
       const currentRetryCount = existingStep?.retryCount || 0;
-      checkpointStepFailure(
+      await checkpointStepFailure(
         runId,
         stepId,
         "Validation failed, retrying",
@@ -684,7 +704,7 @@ async function executeStep(
   }
 
   // 9. Checkpoint success
-  checkpointStep(runId, stepId, node.id, result, ctx);
+  await checkpointStep(runId, stepId, node.id, result, ctx);
 
   // 10. Determine successors based on nextPort
   // If executor returned a specific port, use it. Otherwise, get all successors

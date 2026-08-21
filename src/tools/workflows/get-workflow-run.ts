@@ -14,7 +14,9 @@ function stepValuePreview(value: unknown): string | undefined {
     : serialized;
 }
 
-function renderSteps(steps: ReturnType<typeof getWorkflowRunStepsByRunId>): string | undefined {
+function renderSteps(
+  steps: Awaited<ReturnType<typeof getWorkflowRunStepsByRunId>>,
+): string | undefined {
   if (steps.length === 0) return undefined;
   return steps
     .map((step) => {
@@ -52,11 +54,11 @@ export const registerGetWorkflowRunTool = (server: McpServer) => {
     },
     async ({ id }) => {
       try {
-        const run = getWorkflowRun(id);
+        const run = await getWorkflowRun(id);
         if (!run) {
           return toolErr(`Workflow run not found: ${id}`, { data: { steps: [] } });
         }
-        const steps = getWorkflowRunStepsByRunId(id);
+        const steps = await getWorkflowRunStepsByRunId(id);
         return toolOk(`Run ${id} status: ${run.status}.`, {
           details: renderSteps(steps),
           data: { run, steps },

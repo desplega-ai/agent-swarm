@@ -30,23 +30,23 @@ const testApp = {
   scopes: "read,write",
 };
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  upsertOAuthApp("linear", testApp);
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("linear", testApp);
+  await upsertOAuthApp("jira", {
     ...testApp,
     tokenUrl: "https://example.com/jira/oauth/token",
   });
-  upsertOAuthApp("custom-provider", {
+  await upsertOAuthApp("custom-provider", {
     ...testApp,
     tokenUrl: "https://example.com/custom/oauth/token",
   });
 });
 
-beforeEach(() => {
-  deleteOAuthTokens("linear");
-  deleteOAuthTokens("jira");
-  deleteOAuthTokens("custom-provider");
+beforeEach(async () => {
+  await deleteOAuthTokens("linear");
+  await deleteOAuthTokens("jira");
+  await deleteOAuthTokens("custom-provider");
   globalThis.fetch = originalFetch;
   clearVolatileSecretsForTesting();
   refreshSecretScrubberCache();
@@ -68,7 +68,7 @@ afterAll(async () => {
 
 describe("resolveOAuthAccessToken", () => {
   test("registered MCP tool returns a seeded provider token", async () => {
-    storeOAuthTokens("custom-provider", {
+    await storeOAuthTokens("custom-provider", {
       accessToken: "mcp-tool-access-token-plain-value",
       refreshToken: "mcp-tool-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -171,7 +171,7 @@ describe("resolveOAuthAccessToken", () => {
 
   test("returns a fresh access token and registers it for scrubber redaction", async () => {
     const accessToken = "linear-access-token-plain-value-1234567890";
-    storeOAuthTokens("linear", {
+    await storeOAuthTokens("linear", {
       accessToken,
       refreshToken: "linear-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -191,7 +191,7 @@ describe("resolveOAuthAccessToken", () => {
   });
 
   test("supports any configured OAuth provider slug", async () => {
-    storeOAuthTokens("custom-provider", {
+    await storeOAuthTokens("custom-provider", {
       accessToken: "custom-provider-access-token-plain-value",
       refreshToken: "custom-provider-refresh-token",
       expiresAt: new Date(Date.now() + 3600_000).toISOString(),
@@ -204,7 +204,7 @@ describe("resolveOAuthAccessToken", () => {
   });
 
   test("refreshes Jira before returning a near-expiry token", async () => {
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "old-jira-access-token",
       refreshToken: "old-jira-refresh-token",
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -229,11 +229,11 @@ describe("resolveOAuthAccessToken", () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(result.accessToken).toBe("new-jira-access-token-plain-value");
-    expect(getOAuthTokens("jira")?.refreshToken).toBe("new-jira-refresh-token");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("new-jira-refresh-token");
   });
 
   test("rejects a near-expiry token when no refresh token is available", async () => {
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "stale-jira-access-token",
       refreshToken: null,
       expiresAt: new Date(Date.now() + 60_000).toISOString(),

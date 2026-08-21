@@ -199,16 +199,20 @@ function staticOAuthCallbackUri(): string {
   return `${getPublicMcpBaseUrl()}/api/oauth/callback`;
 }
 
-function decorateBindings(bindings: ScriptCredentialBindingRecord[]): BindingWithTokenStatus[] {
-  return bindings.map((binding) =>
-    binding.authKind === "oauth"
-      ? {
-          ...binding,
-          tokenStatus: binding.oauthAuthorizationId
-            ? getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
-            : "missing",
-        }
-      : binding,
+async function decorateBindings(
+  bindings: ScriptCredentialBindingRecord[],
+): Promise<BindingWithTokenStatus[]> {
+  return Promise.all(
+    bindings.map(async (binding) =>
+      binding.authKind === "oauth"
+        ? {
+            ...binding,
+            tokenStatus: binding.oauthAuthorizationId
+              ? await getOAuthBindingTokenStatus(binding.oauthAuthorizationId)
+              : "missing",
+          }
+        : binding,
+    ),
   );
 }
 
@@ -243,7 +247,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       // Gate EACH action behind the same verb its HTTP counterpart uses, so a
       // custom role granting only `credential-binding.manage` can't reach the
       // OAuth app/authorization powers this tool now exposes — powers the HTTP
@@ -276,11 +280,11 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         return toolErr(denyMessage, { data: { yourAgentId: requestInfo.agentId } });
       }
 
-      const currentBindings = () =>
-        decorateBindings(
-          listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
+      const currentBindings = async () =>
+        await decorateBindings(
+          await listRelationalCredentialBindings({ includeInactive: true, excludeManaged: true }),
         );
-      const bindings = currentBindings();
+      const bindings = await currentBindings();
 
       if (args.action === "oauth-app-upsert") {
         // A presetId fills endpoints/scopes/quirks; explicit fields still win.
@@ -329,7 +333,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         // The MCP surface has no by-id targeting, so every call creates a fresh
         // row (N apps per provider) rather than clobbering an existing one.
         const redirectUri = staticOAuthCallbackUri();
-        createOAuthApp(provider, {
+        await createOAuthApp(provider, {
           clientId: args.clientId,
           clientSecret: args.clientSecret,
           authorizeUrl,
@@ -364,7 +368,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
             provider,
             redirectUri,
             ...(hydrated ? { setupHints: hydrated.setupHints } : {}),
-            bindings: currentBindings(),
+            bindings: await currentBindings(),
           },
         });
       }
@@ -376,7 +380,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
           });
         }
 
-        const config = getOAuthProviderConfig(args.provider);
+        const config = await getOAuthProviderConfig(args.provider);
         if (!config) {
           return toolErr(`OAuth app ${args.provider} is not configured.`, {
             data: { yourAgentId: requestInfo.agentId, provider: args.provider, bindings },
@@ -408,13 +412,13 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
             data: { yourAgentId: requestInfo.agentId, bindings },
           });
         }
-        const appId = getOAuthAppIdByProvider(args.provider);
+        const appId = await getOAuthAppIdByProvider(args.provider);
         if (!appId) {
           return toolErr(`OAuth app ${args.provider} is not configured.`, {
             data: { yourAgentId: requestInfo.agentId, provider: args.provider, bindings },
           });
         }
-        const authorizations = listAuthorizationsForApp(appId).map((authorization) => ({
+        const authorizations = (await listAuthorizationsForApp(appId)).map((authorization) => ({
           id: authorization.id,
           label: authorization.label,
           accountEmail: authorization.accountEmail,
@@ -453,14 +457,14 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
       }
 
       if (args.action === "disable") {
-        const disabled = args.id ? disableCredentialBinding(args.id) : null;
+        const disabled = args.id ? await disableCredentialBinding(args.id) : null;
         if (!disabled) {
           return toolErr("Credential binding id not found.", {
             data: { yourAgentId: requestInfo.agentId, bindings },
           });
         }
 
-        const nextBindings = currentBindings();
+        const nextBindings = await currentBindings();
         return toolOk(`Credential binding ${disabled.configKey} disabled.`, {
           details: renderBindingsList(nextBindings),
           data: { yourAgentId: requestInfo.agentId, bindings: nextBindings },
@@ -519,7 +523,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         oauthAuthorizationId: args.oauthAuthorizationId,
       });
 
-      upsertCredentialBinding({
+      await upsertCredentialBinding({
         id: args.id,
         configKey: nextBinding.configKey,
         allowedHosts: nextBinding.allowedHosts,
@@ -531,7 +535,7 @@ export const registerCredentialBindingsTool = (server: McpServer) => {
         authKind: nextBinding.authKind,
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
       });
-      const nextBindings = currentBindings();
+      const nextBindings = await currentBindings();
 
       return toolOk(`Credential binding ${args.configKey} saved.`, {
         details: renderBindingsList(nextBindings),

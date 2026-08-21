@@ -90,10 +90,12 @@ let agentItems: Array<{ id: string; name: string }>;
 beforeAll(async () => {
   await removeDbFiles();
   initDb(TEST_DB_PATH);
-  agentItems = ["Ada", "Babbage", "Curie"].map((name) => {
-    const agent = createAgent({ name, status: "idle" });
-    return { id: agent.id, name };
-  });
+  agentItems = await Promise.all(
+    ["Ada", "Babbage", "Curie"].map(async (name) => {
+      const agent = await createAgent({ name, status: "idle" });
+      return { id: agent.id, name };
+    }),
+  );
 });
 
 afterAll(async () => {
@@ -104,28 +106,32 @@ afterAll(async () => {
 describe("workflow foreach", () => {
   test("waits for all children, preserves item order, and runs the successor", async () => {
     const { bus, registry } = createRegistry(true);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
-    const childSteps = foreachChildren(runId);
+    const childSteps = await foreachChildren(runId);
     expect(childSteps).toHaveLength(3);
     expect(
-      childSteps.map((step) => getTaskByWorkflowRunStepId(step.id)?.task.split("\n").at(-1)),
+      await Promise.all(
+        childSteps.map(async (step) =>
+          (await getTaskByWorkflowRunStepId(step.id))?.task.split("\n").at(-1),
+        ),
+      ),
     ).toEqual(["Reflect Ada at 0", "Reflect Babbage at 1", "Reflect Curie at 2"]);
 
     await completeChild(runId, childSteps[0]!.id, "first", bus);
-    expect(getWorkflowRun(runId)?.status).not.toBe("completed");
-    expect(stepByNodeId(runId, "after")).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.status).not.toBe("completed");
+    expect(await stepByNodeId(runId, "after")).toBeUndefined();
 
     await completeChild(runId, childSteps[1]!.id, "second", bus);
-    expect(getWorkflowRun(runId)?.status).not.toBe("completed");
-    expect(stepByNodeId(runId, "after")).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.status).not.toBe("completed");
+    expect(await stepByNodeId(runId, "after")).toBeUndefined();
 
     await completeChild(runId, childSteps[2]!.id, "third", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
 
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
-    const aggregate = getContext(runId).reflect as {
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ itemKey: string; output: { taskOutput: string } }>;
       okCount: number;
       failedCount: number;
@@ -140,35 +146,37 @@ describe("workflow foreach", () => {
     ]);
     expect(aggregate.okCount).toBe(3);
     expect(aggregate.failedCount).toBe(0);
-    expect(Object.keys(getContext(runId)).some((key) => key.startsWith("reflect#"))).toBe(false);
+    expect(Object.keys(await getContext(runId)).some((key) => key.startsWith("reflect#"))).toBe(
+      false,
+    );
   });
 
   test("empty over completes synchronously and still runs the successor", async () => {
     const { registry } = createRegistry(false);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(workflow, { items: [] }, registry);
 
-    expect(getWorkflowRun(runId)?.status).toBe("completed");
-    expect(foreachChildren(runId)).toHaveLength(0);
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
-    expect(getContext(runId).reflect).toEqual({ results: [], okCount: 0, failedCount: 0 });
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect(await foreachChildren(runId)).toHaveLength(0);
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
+    expect((await getContext(runId)).reflect).toEqual({ results: [], okCount: 0, failedCount: 0 });
   });
 
   test("onNodeFailure continue aggregates a failed child and completes", async () => {
     const { bus, registry } = createRegistry(true);
     const items = agentItems.slice(0, 2);
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       ...foreachDefinition(),
       onNodeFailure: "continue",
     });
     const runId = await startWorkflowExecution(workflow, { items }, registry);
-    const children = foreachChildren(runId);
+    const children = await foreachChildren(runId);
 
     await completeChild(runId, children[0]!.id, "ok", bus);
     await failChild(runId, children[1]!.id, "reflection broke", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
 
-    const aggregate = getContext(runId).reflect as {
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ status: string; output: { taskOutput: string } }>;
       okCount: number;
       failedCount: number;
@@ -178,19 +186,19 @@ describe("workflow foreach", () => {
     expect(aggregate.results[1]?.status).toBe("failed");
     expect(aggregate.results[1]?.output.taskOutput).toStartWith("[FAILED: reflection broke]");
     // The failure is explicit metadata on the completed child, not just output text.
-    expect(stepById(runId, children[1]!.id)?.error).toBe("reflection broke");
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
+    expect((await stepById(runId, children[1]!.id))?.error).toBe("reflection broke");
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
   });
 
   test("a successful child whose output text starts with [FAILED: is not misclassified", async () => {
     const { bus, registry } = createRegistry(true);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 1) },
       registry,
     );
-    const child = foreachChildren(runId)[0]!;
+    const child = (await foreachChildren(runId))[0]!;
 
     // A legitimate completion quoting a log line — user-controlled text, not the
     // continue-on-failure marker. Only step.error may mark a completed child failed.
@@ -200,9 +208,9 @@ describe("workflow foreach", () => {
       "[FAILED: 3 assertions] was the CI summary I analyzed",
       bus,
     );
-    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
 
-    const aggregate = getContext(runId).reflect as {
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ status: string }>;
       okCount: number;
       failedCount: number;
@@ -241,15 +249,15 @@ describe("workflow foreach", () => {
         },
       ],
     };
-    const workflow = makeWorkflow(definition);
+    const workflow = await makeWorkflow(definition);
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 1) },
       registry,
     );
 
-    const child = foreachChildren(runId)[0]!;
-    const task = getTaskByWorkflowRunStepId(child.id)!;
+    const child = (await foreachChildren(runId))[0]!;
+    const task = (await getTaskByWorkflowRunStepId(child.id))!;
     expect(task.task.split("\n").at(-1)).toBe(`leak: name:${agentItems[0]!.name}`);
     expect(child.diagnostics).toContain("seed.message");
   });
@@ -281,85 +289,85 @@ describe("workflow foreach", () => {
         },
       ],
     };
-    const workflow = makeWorkflow(definition);
+    const workflow = await makeWorkflow(definition);
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 2) },
       registry,
     );
-    expect(foreachChildren(runId)).toHaveLength(2);
+    expect(await foreachChildren(runId)).toHaveLength(2);
 
     // Simulate a transient fan-out failure recorded for the retry poller: the
     // parent step failed before any child survived, run is failed, retry due.
-    for (const child of foreachChildren(runId)) {
-      db.getDb().prepare("DELETE FROM agent_tasks WHERE workflowRunStepId = ?").run(child.id);
-      db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
+    for (const child of await foreachChildren(runId)) {
+      await db.getDbClient().run("DELETE FROM agent_tasks WHERE workflowRunStepId = ?", [child.id]);
+      await db.getDbClient().run("DELETE FROM workflow_run_steps WHERE id = ?", [child.id]);
     }
-    const parent = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parent.id, {
+    const parent = (await stepByNodeId(runId, "reflect"))!;
+    await db.updateWorkflowRunStep(parent.id, {
       status: "failed",
       error: "transient dispatch failure",
       nextRetryAt: new Date(Date.now() - 1000).toISOString(),
     });
-    db.updateWorkflowRun(runId, { status: "failed" });
+    await db.updateWorkflowRun(runId, { status: "failed" });
 
     try {
       startRetryPoller(registry, 10);
       // Without buildNodeInterpolationCtx on the retry path, {{items}} resolves to
       // "" from raw run.context, the config schema rejects it, and no child is
       // ever re-dispatched.
-      await waitFor(() => foreachChildren(runId).length === 2);
-      await waitFor(() => getWorkflowRun(runId)?.status === "waiting");
+      await waitFor(async () => (await foreachChildren(runId)).length === 2);
+      await waitFor(async () => (await getWorkflowRun(runId))?.status === "waiting");
     } finally {
       stopRetryPoller();
     }
-    expect(stepByNodeId(runId, "reflect")?.status).toBe("waiting");
-    expect(taskCountForForeachChildren(runId)).toBe(2);
+    expect((await stepByNodeId(runId, "reflect"))?.status).toBe("waiting");
+    expect(await taskCountForForeachChildren(runId)).toBe(2);
   });
 
   test("re-walk after partial completion does not duplicate children or tasks", async () => {
     const { bus, registry } = createRegistry(true);
     const definition = foreachDefinition();
-    const workflow = makeWorkflow(definition);
+    const workflow = await makeWorkflow(definition);
     const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
-    const children = foreachChildren(runId);
+    const children = await foreachChildren(runId);
 
     await completeChild(runId, children[0]!.id, "done", bus);
-    const completedBefore = stepById(runId, children[0]!.id)!;
-    const parentBefore = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parentBefore.id, { status: "running" });
-    const ctx = getContext(runId);
+    const completedBefore = (await stepById(runId, children[0]!.id))!;
+    const parentBefore = (await stepByNodeId(runId, "reflect"))!;
+    await db.updateWorkflowRunStep(parentBefore.id, { status: "running" });
+    const ctx = await getContext(runId);
     await walkGraph(definition, runId, ctx, [definition.nodes[0]!], registry, workflow.id);
 
-    const childrenAfterRewalk = foreachChildren(runId);
+    const childrenAfterRewalk = await foreachChildren(runId);
     expect(childrenAfterRewalk).toHaveLength(3);
     expect(childrenAfterRewalk.map((step) => step.id)).toEqual(children.map((step) => step.id));
-    expect(taskCountForForeachChildren(runId)).toBe(3);
-    const completedAfter = stepById(runId, children[0]!.id)!;
+    expect(await taskCountForForeachChildren(runId)).toBe(3);
+    const completedAfter = (await stepById(runId, children[0]!.id))!;
     expect(completedAfter.output).toEqual(completedBefore.output);
     expect(completedAfter.finishedAt).toBe(completedBefore.finishedAt);
     expect(
-      getWorkflowRunStepsByRunId(runId).filter((step) => step.nodeId === "reflect"),
+      (await getWorkflowRunStepsByRunId(runId)).filter((step) => step.nodeId === "reflect"),
     ).toHaveLength(1);
   });
 
   test("recovery closes a join when tasks completed while listeners were down", async () => {
     const { registry } = createRegistry(false);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
     const taskIds: string[] = [];
-    for (const [index, step] of foreachChildren(runId).entries()) {
-      const task = getTaskByWorkflowRunStepId(step.id)!;
+    for (const [index, step] of (await foreachChildren(runId)).entries()) {
+      const task = (await getTaskByWorkflowRunStepId(step.id))!;
       taskIds.push(task.id);
-      completeTask(task.id, JSON.stringify({ recovered: index }));
+      await completeTask(task.id, JSON.stringify({ recovered: index }));
     }
 
     const recovered = await recoverIncompleteRuns(registry);
     expect(recovered).toBe(3);
-    expect(getWorkflowRun(runId)?.status).toBe("completed");
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
-    const aggregate = getContext(runId).reflect as {
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ output: { taskId: string } }>;
     };
     expect(aggregate.results).toHaveLength(3);
@@ -369,43 +377,43 @@ describe("workflow foreach", () => {
   test("retryFailedRun resolves a failed synthetic child to its foreach parent", async () => {
     const { bus, registry } = createRegistry(true);
     const items = agentItems.slice(0, 1);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(workflow, { items }, registry);
-    const child = foreachChildren(runId)[0]!;
-    const originalTask = getTaskByWorkflowRunStepId(child.id)!;
+    const child = (await foreachChildren(runId))[0]!;
+    const originalTask = (await getTaskByWorkflowRunStepId(child.id))!;
 
     await failChild(runId, child.id, "retry me", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "failed");
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "failed");
 
     await expect(retryFailedRun(runId, registry)).resolves.toBeUndefined();
-    const replacementTask = getTaskByWorkflowRunStepId(child.id);
+    const replacementTask = await getTaskByWorkflowRunStepId(child.id);
     expect(replacementTask).not.toBeNull();
     expect(replacementTask?.id).not.toBe(originalTask.id);
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     await completeChild(runId, child.id, "retried", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
-    expect((getContext(runId).reflect as { okCount: number }).okCount).toBe(1);
-    expect(stepById(runId, child.id)?.error).toBeUndefined();
-    expect(getWorkflowRun(runId)?.error).toBeUndefined();
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
+    expect(((await getContext(runId)).reflect as { okCount: number }).okCount).toBe(1);
+    expect((await stepById(runId, child.id))?.error).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.error).toBeUndefined();
   });
 
   test("stale events from a superseded task cannot fail or complete a retried step", async () => {
     const { bus, registry } = createRegistry(true);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 1) },
       registry,
     );
-    const child = foreachChildren(runId)[0]!;
-    const originalTask = getTaskByWorkflowRunStepId(child.id)!;
+    const child = (await foreachChildren(runId))[0]!;
+    const originalTask = (await getTaskByWorkflowRunStepId(child.id))!;
 
     await failChild(runId, child.id, "first attempt broke", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "failed");
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "failed");
     await retryFailedRun(runId, registry);
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
 
     // failTask's own after-commit bus emit lands on a later tick and can arrive
     // AFTER the retry re-dispatched the step with a new task (the exact sequence
@@ -425,12 +433,12 @@ describe("workflow foreach", () => {
     });
     await Bun.sleep(20);
 
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
-    expect(stepById(runId, child.id)?.status).toBe("waiting");
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+    expect((await stepById(runId, child.id))?.status).toBe("waiting");
 
     await completeChild(runId, child.id, "real retry output", bus);
-    await waitFor(() => getWorkflowRun(runId)?.status === "completed");
-    const aggregate = getContext(runId).reflect as {
+    await waitFor(async () => (await getWorkflowRun(runId))?.status === "completed");
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ output: { taskOutput: string } }>;
     };
     expect(aggregate.results[0]?.output.taskOutput).toBe("real retry output");
@@ -438,7 +446,7 @@ describe("workflow foreach", () => {
 
   test("nodes can reference their own run via the run.id context builtin", async () => {
     const { registry } = createRegistry(false);
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "receipt",
@@ -450,24 +458,24 @@ describe("workflow foreach", () => {
     });
     const runId = await startWorkflowExecution(workflow, {}, registry);
 
-    expect(getWorkflowRun(runId)?.status).toBe("completed");
-    expect((stepByNodeId(runId, "receipt")?.output as { message: string }).message).toBe(
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect(((await stepByNodeId(runId, "receipt"))?.output as { message: string }).message).toBe(
       `run ${runId}`,
     );
   });
 
   test("late task cancellation cannot resurrect a cancelled run", async () => {
     const { bus, registry } = createRegistry(true);
-    const workflow = makeWorkflow({ ...foreachDefinition(), onNodeFailure: "continue" });
+    const workflow = await makeWorkflow({ ...foreachDefinition(), onNodeFailure: "continue" });
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 1) },
       registry,
     );
-    const child = foreachChildren(runId)[0]!;
-    const task = getTaskByWorkflowRunStepId(child.id)!;
+    const child = (await foreachChildren(runId))[0]!;
+    const task = (await getTaskByWorkflowRunStepId(child.id))!;
 
-    cancelWorkflowRun(runId, "stop now");
+    await cancelWorkflowRun(runId, "stop now");
     bus.emit("task.cancelled", {
       taskId: task.id,
       workflowRunId: runId,
@@ -475,29 +483,29 @@ describe("workflow foreach", () => {
     });
     await Bun.sleep(10);
 
-    expect(getWorkflowRun(runId)?.status).toBe("cancelled");
-    expect(stepById(runId, child.id)?.status).toBe("cancelled");
-    expect(stepByNodeId(runId, "after")).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.status).toBe("cancelled");
+    expect((await stepById(runId, child.id))?.status).toBe("cancelled");
+    expect(await stepByNodeId(runId, "after")).toBeUndefined();
   });
 
   test("recovery continues an offline failed child and closes the foreach join", async () => {
     const { registry } = createRegistry(false);
-    const workflow = makeWorkflow({ ...foreachDefinition(), onNodeFailure: "continue" });
+    const workflow = await makeWorkflow({ ...foreachDefinition(), onNodeFailure: "continue" });
     const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
-    const children = foreachChildren(runId);
+    const children = await foreachChildren(runId);
 
-    const failedTask = getTaskByWorkflowRunStepId(children[0]!.id)!;
-    failTask(failedTask.id, "offline failure");
+    const failedTask = (await getTaskByWorkflowRunStepId(children[0]!.id))!;
+    await failTask(failedTask.id, "offline failure");
     for (const [index, child] of children.slice(1).entries()) {
-      const task = getTaskByWorkflowRunStepId(child.id)!;
-      completeTask(task.id, `offline-${index}`);
+      const task = (await getTaskByWorkflowRunStepId(child.id))!;
+      await completeTask(task.id, `offline-${index}`);
     }
 
     const recovered = await recoverIncompleteRuns(registry);
     expect(recovered).toBe(3);
-    expect(getWorkflowRun(runId)?.status).toBe("completed");
-    expect(stepByNodeId(runId, "after")?.status).toBe("completed");
-    const aggregate = getContext(runId).reflect as {
+    expect((await getWorkflowRun(runId))?.status).toBe("completed");
+    expect((await stepByNodeId(runId, "after"))?.status).toBe("completed");
+    const aggregate = (await getContext(runId)).reflect as {
       results: Array<{ status: string; output: { taskOutput: string } }>;
       okCount: number;
       failedCount: number;
@@ -512,22 +520,22 @@ describe("workflow foreach", () => {
 
   test("failed recovery rows prevent completed siblings from resurrecting a fail-fast run", async () => {
     const { registry } = createRegistry(false);
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 2) },
       registry,
     );
-    const children = foreachChildren(runId);
-    failTask(getTaskByWorkflowRunStepId(children[0]!.id)!.id, "offline failure");
-    completeTask(getTaskByWorkflowRunStepId(children[1]!.id)!.id, "offline success");
+    const children = await foreachChildren(runId);
+    await failTask((await getTaskByWorkflowRunStepId(children[0]!.id))!.id, "offline failure");
+    await completeTask((await getTaskByWorkflowRunStepId(children[1]!.id))!.id, "offline success");
 
     const recovered = await recoverIncompleteRuns(registry);
     expect(recovered).toBe(1);
-    expect(getWorkflowRun(runId)?.status).toBe("failed");
-    expect(stepById(runId, children[0]!.id)?.status).toBe("failed");
-    expect(stepById(runId, children[1]!.id)?.status).toBe("waiting");
-    expect(stepByNodeId(runId, "after")).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.status).toBe("failed");
+    expect((await stepById(runId, children[0]!.id))?.status).toBe("failed");
+    expect((await stepById(runId, children[1]!.id))?.status).toBe("waiting");
+    expect(await stepByNodeId(runId, "after")).toBeUndefined();
   });
 
   test("foreach fails before dispatch when its children exceed the run step limit", async () => {
@@ -535,14 +543,14 @@ describe("workflow foreach", () => {
     process.env.WORKFLOW_MAX_STEPS_PER_RUN = "3";
     try {
       const { registry } = createRegistry(false);
-      const workflow = makeWorkflow(foreachDefinition());
+      const workflow = await makeWorkflow(foreachDefinition());
       const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
-      expect(getWorkflowRun(runId)?.status).toBe("failed");
-      expect(stepByNodeId(runId, "reflect")?.status).toBe("failed");
-      expect(stepByNodeId(runId, "reflect")?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
-      expect(foreachChildren(runId)).toHaveLength(0);
-      expect(taskCountForForeachChildren(runId)).toBe(0);
+      expect((await getWorkflowRun(runId))?.status).toBe("failed");
+      expect((await stepByNodeId(runId, "reflect"))?.status).toBe("failed");
+      expect((await stepByNodeId(runId, "reflect"))?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
+      expect(await foreachChildren(runId)).toHaveLength(0);
+      expect(await taskCountForForeachChildren(runId)).toBe(0);
     } finally {
       if (originalLimit === undefined) {
         delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
@@ -560,13 +568,13 @@ describe("workflow foreach", () => {
     process.env.WORKFLOW_MAX_STEPS_PER_RUN = "4";
     try {
       const { registry } = createRegistry(false);
-      const workflow = makeWorkflow(foreachDefinition());
+      const workflow = await makeWorkflow(foreachDefinition());
       const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
-      expect(getWorkflowRun(runId)?.status).toBe("failed");
-      expect(stepByNodeId(runId, "reflect")?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
-      expect(foreachChildren(runId)).toHaveLength(0);
-      expect(taskCountForForeachChildren(runId)).toBe(0);
+      expect((await getWorkflowRun(runId))?.status).toBe("failed");
+      expect((await stepByNodeId(runId, "reflect"))?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
+      expect(await foreachChildren(runId)).toHaveLength(0);
+      expect(await taskCountForForeachChildren(runId)).toBe(0);
     } finally {
       if (originalLimit === undefined) {
         delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
@@ -599,18 +607,20 @@ describe("workflow foreach", () => {
           },
         ],
       };
-      const workflow = makeWorkflow(definition);
+      const workflow = await makeWorkflow(definition);
       const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
-      expect(getWorkflowRun(runId)?.status).toBe("waiting");
-      expect(stepByNodeId(runId, "reflect")?.status).toBe("waiting");
-      expect(foreachChildren(runId)).toHaveLength(3);
+      expect((await getWorkflowRun(runId))?.status).toBe("waiting");
+      expect((await stepByNodeId(runId, "reflect"))?.status).toBe("waiting");
+      expect(await foreachChildren(runId)).toHaveLength(3);
 
       // One item beyond the cap must still be refused.
       process.env.WORKFLOW_MAX_STEPS_PER_RUN = "3";
       const secondRun = await startWorkflowExecution(workflow, { items: agentItems }, registry);
-      expect(getWorkflowRun(secondRun)?.status).toBe("failed");
-      expect(stepByNodeId(secondRun, "reflect")?.error).toContain("WORKFLOW_MAX_STEPS_PER_RUN");
+      expect((await getWorkflowRun(secondRun))?.status).toBe("failed");
+      expect((await stepByNodeId(secondRun, "reflect"))?.error).toContain(
+        "WORKFLOW_MAX_STEPS_PER_RUN",
+      );
     } finally {
       if (originalLimit === undefined) {
         delete process.env.WORKFLOW_MAX_STEPS_PER_RUN;
@@ -640,43 +650,43 @@ describe("workflow foreach", () => {
         },
       ],
     };
-    const workflow = makeWorkflow(definition);
+    const workflow = await makeWorkflow(definition);
     const runId = await startWorkflowExecution(
       workflow,
       { items: agentItems.slice(0, 2) },
       registry,
     );
-    expect(foreachChildren(runId)).toHaveLength(2);
+    expect(await foreachChildren(runId)).toHaveLength(2);
 
     // Reset to a pre-checkpoint world: no children, parent failed and retry-due,
     // and a persisted context WITHOUT the walkGraph-hydrated `run` key.
-    for (const child of foreachChildren(runId)) {
-      db.getDb().prepare("DELETE FROM agent_tasks WHERE workflowRunStepId = ?").run(child.id);
-      db.getDb().prepare("DELETE FROM workflow_run_steps WHERE id = ?").run(child.id);
+    for (const child of await foreachChildren(runId)) {
+      await db.getDbClient().run("DELETE FROM agent_tasks WHERE workflowRunStepId = ?", [child.id]);
+      await db.getDbClient().run("DELETE FROM workflow_run_steps WHERE id = ?", [child.id]);
     }
-    const parent = stepByNodeId(runId, "reflect")!;
-    db.updateWorkflowRunStep(parent.id, {
+    const parent = (await stepByNodeId(runId, "reflect"))!;
+    await db.updateWorkflowRunStep(parent.id, {
       status: "failed",
       error: "transient dispatch failure",
       nextRetryAt: new Date(Date.now() - 1000).toISOString(),
     });
-    db.updateWorkflowRun(runId, {
+    await db.updateWorkflowRun(runId, {
       status: "failed",
       context: { trigger: { items: agentItems.slice(0, 2) } },
     });
 
     try {
       startRetryPoller(registry, 10);
-      await waitFor(() => foreachChildren(runId).length === 2);
+      await waitFor(async () => (await foreachChildren(runId)).length === 2);
     } finally {
       stopRetryPoller();
     }
-    const redispatched = db
-      .getDb()
-      .prepare(
+    const redispatched = await db
+      .getDbClient()
+      .query<{ task: string }>(
         "SELECT t.task FROM agent_tasks t JOIN workflow_run_steps s ON s.id = t.workflowRunStepId WHERE s.runId = ?",
-      )
-      .all(runId) as Array<{ task: string }>;
+        [runId],
+      );
     expect(redispatched).toHaveLength(2);
     for (const row of redispatched) {
       expect(row.task).toContain(`RetryRun ${runId}`);
@@ -722,11 +732,11 @@ describe("workflow foreach", () => {
     let childRowsAtFirstDispatch: number | null = null;
     const wrappedDb: ExecutorDependencies["db"] = {
       ...db,
-      getTaskByWorkflowRunStepId: (stepId: string) => {
+      getTaskByWorkflowRunStepId: async (stepId: string) => {
         if (childRowsAtFirstDispatch === null) {
-          const step = db.getWorkflowRunStep(stepId);
+          const step = await db.getWorkflowRunStep(stepId);
           if (step) {
-            childRowsAtFirstDispatch = getWorkflowRunStepsByRunId(step.runId).filter((s) =>
+            childRowsAtFirstDispatch = (await getWorkflowRunStepsByRunId(step.runId)).filter((s) =>
               s.nodeId.startsWith("reflect#"),
             ).length;
           }
@@ -745,12 +755,12 @@ describe("workflow foreach", () => {
     registry.register(new AgentTaskExecutor(deps));
     registry.register(new RecordExecutor(deps));
 
-    const workflow = makeWorkflow(foreachDefinition());
+    const workflow = await makeWorkflow(foreachDefinition());
     const runId = await startWorkflowExecution(workflow, { items: agentItems }, registry);
 
     expect(childRowsAtFirstDispatch).toBe(3);
-    expect(foreachChildren(runId)).toHaveLength(3);
-    expect(taskCountForForeachChildren(runId)).toBe(3);
+    expect(await foreachChildren(runId)).toHaveLength(3);
+    expect(await taskCountForForeachChildren(runId)).toBe(3);
   });
 
   test("the retry poller keeps a re-dispatched async step waiting instead of routing successors", async () => {
@@ -765,7 +775,7 @@ describe("workflow foreach", () => {
     registry.register(flaky);
     registry.register(new RecordExecutor(deps));
 
-    const workflow = makeWorkflow({
+    const workflow = await makeWorkflow({
       nodes: [
         {
           id: "dispatch",
@@ -784,16 +794,16 @@ describe("workflow foreach", () => {
     try {
       startRetryPoller(registry, 10);
       await waitFor(() => flaky.attempts === 2);
-      await waitFor(() => getWorkflowRun(runId)?.status === "waiting");
+      await waitFor(async () => (await getWorkflowRun(runId))?.status === "waiting");
     } finally {
       stopRetryPoller();
     }
 
     // The second attempt returned the async marker — the step is waiting on task
     // events again, and the successor must not have run off the marker object.
-    expect(stepByNodeId(runId, "dispatch")?.status).toBe("waiting");
-    expect(stepByNodeId(runId, "after")).toBeUndefined();
-    expect(getWorkflowRun(runId)?.status).toBe("waiting");
+    expect((await stepByNodeId(runId, "dispatch"))?.status).toBe("waiting");
+    expect(await stepByNodeId(runId, "after")).toBeUndefined();
+    expect((await getWorkflowRun(runId))?.status).toBe("waiting");
   });
 
   test("definition validation rejects node-level outputSchema and validation on foreach", () => {
@@ -1032,37 +1042,36 @@ function foreachDefinition(): WorkflowDefinition {
   };
 }
 
-function makeWorkflow(definition: WorkflowDefinition): Workflow {
+function makeWorkflow(definition: WorkflowDefinition): Promise<Workflow> {
   return createWorkflow({
     name: `foreach-${crypto.randomUUID()}`,
     definition,
   });
 }
 
-function foreachChildren(runId: string) {
-  return getWorkflowRunStepsByRunId(runId).filter((step) => step.nodeId.startsWith("reflect#"));
-}
-
-function stepByNodeId(runId: string, nodeId: string) {
-  return getWorkflowRunStepsByRunId(runId).find((step) => step.nodeId === nodeId);
-}
-
-function taskCountForForeachChildren(runId: string): number {
-  return (
-    db
-      .getDb()
-      .prepare<{ count: number }, [string]>(
-        `SELECT COUNT(*) AS count
-         FROM agent_tasks at
-         JOIN workflow_run_steps wrs ON wrs.id = at.workflowRunStepId
-         WHERE wrs.runId = ? AND wrs.nodeId LIKE 'reflect#%'`,
-      )
-      .get(runId)?.count ?? 0
+async function foreachChildren(runId: string) {
+  return (await getWorkflowRunStepsByRunId(runId)).filter((step) =>
+    step.nodeId.startsWith("reflect#"),
   );
 }
 
-function getContext(runId: string): Record<string, unknown> {
-  return (getWorkflowRun(runId)?.context ?? {}) as Record<string, unknown>;
+async function stepByNodeId(runId: string, nodeId: string) {
+  return (await getWorkflowRunStepsByRunId(runId)).find((step) => step.nodeId === nodeId);
+}
+
+async function taskCountForForeachChildren(runId: string): Promise<number> {
+  const row = await db.getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) AS count
+         FROM agent_tasks at
+         JOIN workflow_run_steps wrs ON wrs.id = at.workflowRunStepId
+         WHERE wrs.runId = ? AND wrs.nodeId LIKE 'reflect#%'`,
+    [runId],
+  );
+  return row?.count ?? 0;
+}
+
+async function getContext(runId: string): Promise<Record<string, unknown>> {
+  return ((await getWorkflowRun(runId))?.context ?? {}) as Record<string, unknown>;
 }
 
 async function completeChild(
@@ -1071,15 +1080,15 @@ async function completeChild(
   output: string,
   bus: InProcessEventBus,
 ): Promise<void> {
-  const task = getTaskByWorkflowRunStepId(stepId)!;
-  completeTask(task.id, output);
+  const task = (await getTaskByWorkflowRunStepId(stepId))!;
+  await completeTask(task.id, output);
   bus.emit("task.completed", {
     taskId: task.id,
     output,
     workflowRunId: runId,
     workflowRunStepId: stepId,
   });
-  await waitFor(() => stepById(runId, stepId)?.status === "completed");
+  await waitFor(async () => (await stepById(runId, stepId))?.status === "completed");
 }
 
 async function failChild(
@@ -1088,28 +1097,28 @@ async function failChild(
   reason: string,
   bus: InProcessEventBus,
 ): Promise<void> {
-  const task = getTaskByWorkflowRunStepId(stepId)!;
-  failTask(task.id, reason);
+  const task = (await getTaskByWorkflowRunStepId(stepId))!;
+  await failTask(task.id, reason);
   bus.emit("task.failed", {
     taskId: task.id,
     failureReason: reason,
     workflowRunId: runId,
     workflowRunStepId: stepId,
   });
-  await waitFor(() => {
-    const status = stepById(runId, stepId)?.status;
+  await waitFor(async () => {
+    const status = (await stepById(runId, stepId))?.status;
     return status === "completed" || status === "failed";
   });
 }
 
-function stepById(runId: string, stepId: string) {
-  return getWorkflowRunStepsByRunId(runId).find((step) => step.id === stepId);
+async function stepById(runId: string, stepId: string) {
+  return (await getWorkflowRunStepsByRunId(runId)).find((step) => step.id === stepId);
 }
 
-async function waitFor(predicate: () => boolean): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await Bun.sleep(10);
   }
   throw new Error("Timed out waiting for workflow state");

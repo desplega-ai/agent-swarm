@@ -12,15 +12,14 @@ import { Webhook } from "svix";
 import { slackContextKey } from "../tasks/context-key";
 import { MAX_PROFILE_FILE_LENGTH } from "../utils/constants";
 import { SOUL_MD_MAX_CHARS } from "../utils/identity-field-budget";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = Number(
-  process.env.HTTP_API_INTEGRATION_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
-);
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-http-integration-${Date.now()}.sqlite`;
 // Keep local-fs uploads out of the repo's ./data/fs (the provider default —
 // the attachment test was leaking data/fs/tasks/<id>/ into the worktree).
 const TEST_FS_DIR = `/tmp/test-http-integration-fs-${Date.now()}`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const TEST_API_KEY = "test-http-integration-key";
 
 let serverProc: Subprocess;
@@ -63,20 +62,6 @@ const put = (p: string, o?: Parameters<typeof api>[2]) => api("PUT", p, o);
 const patch = (p: string, o?: Parameters<typeof api>[2]) => api("PATCH", p, o);
 const del = (p: string, o?: Parameters<typeof api>[2]) => api("DELETE", p, o);
 
-async function waitForServer(url: string, timeoutMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {
-      // not ready yet
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
-
 // ---------------------------------------------------------------------------
 // Shared state — IDs created during tests for cross-test references
 // ---------------------------------------------------------------------------
@@ -97,6 +82,8 @@ const ids = {
 // ---------------------------------------------------------------------------
 
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
   // Clean up any leftover test DB
   try {
     await unlink(TEST_DB_PATH);
@@ -127,7 +114,7 @@ beforeAll(async () => {
   });
 
   await waitForServer(`${BASE}/health`);
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   if (serverProc) {
@@ -1883,11 +1870,9 @@ describe("AgentMail Webhooks (disabled)", () => {
 });
 
 describe("AgentMail Webhooks (with filters)", () => {
-  const AGENTMAIL_PORT = Number(
-    process.env.AGENTMAIL_INTEGRATION_TEST_PORT ?? 30000 + Math.floor(Math.random() * 20000),
-  );
+  let AGENTMAIL_PORT = 0;
   const AGENTMAIL_DB = `/tmp/test-agentmail-${Date.now()}.sqlite`;
-  const AGENTMAIL_BASE = `http://localhost:${AGENTMAIL_PORT}`;
+  let AGENTMAIL_BASE = "";
   const WEBHOOK_SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // test-only secret
   let agentmailProc: Subprocess;
 
@@ -1957,6 +1942,8 @@ describe("AgentMail Webhooks (with filters)", () => {
   }
 
   beforeAll(async () => {
+    AGENTMAIL_PORT = await getFreePort();
+    AGENTMAIL_BASE = `http://localhost:${AGENTMAIL_PORT}`;
     try {
       await unlink(AGENTMAIL_DB);
     } catch {}
@@ -1993,7 +1980,7 @@ describe("AgentMail Webhooks (with filters)", () => {
       headers: { "Content-Type": "application/json", "x-agent-id": randomUUID() },
       body: JSON.stringify({ name: "TestLead", isLead: true }),
     });
-  }, 20000);
+  }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (agentmailProc) {

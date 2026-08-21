@@ -54,14 +54,14 @@ function renderEndpointsList(endpoints: RawEndpoint[]): string | undefined {
     .join("\n");
 }
 
-function requireScriptApiPermission(
+async function requireScriptApiPermission(
   requestInfo: RequestInfo,
   verb: PermissionVerb,
   message: string,
-): SwarmToolResult | null {
+): Promise<SwarmToolResult | null> {
   if (!requestInfo.agentId) return toolErr(SCRIPT_TRANSPORT_ERROR);
 
-  const agent = getAgentById(requestInfo.agentId);
+  const agent = await getAgentById(requestInfo.agentId);
   const decision = can({
     principal: {
       kind: "agent",
@@ -99,7 +99,7 @@ export const registerScriptApisTool = (server: McpServer) => {
         let endpoints = (raw?.apis ?? []).map(maskToken);
 
         if (args.includeSecrets) {
-          const denied = requireScriptApiPermission(
+          const denied = await requireScriptApiPermission(
             requestInfo,
             "script.api.read.secrets",
             "Only lead agents can reveal script API bearer tokens.",
@@ -133,7 +133,7 @@ export const registerScriptApisTool = (server: McpServer) => {
       }
 
       if (args.action === "create") {
-        const denied = requireScriptApiPermission(
+        const denied = await requireScriptApiPermission(
           requestInfo,
           "script.api.create",
           "Only lead agents can create script API endpoints.",
@@ -167,7 +167,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "rotate") {
         if (!args.endpointId) return toolErr("endpointId is required for rotate.");
-        const denied = requireScriptApiPermission(
+        const denied = await requireScriptApiPermission(
           requestInfo,
           "script.api.rotate",
           "Only lead agents can rotate script API bearer tokens.",
@@ -196,7 +196,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "update") {
         if (!args.endpointId) return toolErr("endpointId is required for update.");
-        const denied = requireScriptApiPermission(
+        const denied = await requireScriptApiPermission(
           requestInfo,
           "script.api.update",
           "Only lead agents can update script API endpoints.",
@@ -214,7 +214,7 @@ export const registerScriptApisTool = (server: McpServer) => {
 
       if (args.action === "delete") {
         if (!args.endpointId) return toolErr("endpointId is required for delete.");
-        const denied = requireScriptApiPermission(
+        const denied = await requireScriptApiPermission(
           requestInfo,
           "script.api.delete",
           "Only lead agents can delete script API endpoints.",

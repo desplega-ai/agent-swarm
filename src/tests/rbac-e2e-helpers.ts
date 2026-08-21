@@ -12,9 +12,12 @@
 import { Database } from "bun:sqlite";
 import { openSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { getFreePort } from "./test-net";
+
+// Re-exported for the suites that imported it from here before test-net.ts existed.
+export { getFreePort };
 
 export const REPO_ROOT = join(import.meta.dir, "../..");
 export const E2E_API_KEY = "rbac-e2e-key";
@@ -22,23 +25,6 @@ export const E2E_API_KEY = "rbac-e2e-key";
 export const LEAD = "11111111-1111-4111-8111-111111111111";
 export const WORKER_A = "22222222-2222-4222-8222-222222222222";
 export const WORKER_B = "33333333-3333-4333-8333-333333333333";
-
-export function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.once("error", reject);
-    srv.listen(0, () => {
-      const address = srv.address();
-      if (address === null || typeof address === "string") {
-        srv.close();
-        reject(new Error("could not determine free port"));
-        return;
-      }
-      const port = address.port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
 
 export type SwarmServer = {
   proc: ReturnType<typeof Bun.spawn>;

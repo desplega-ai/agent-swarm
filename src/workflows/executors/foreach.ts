@@ -78,7 +78,7 @@ export class ForeachExecutor extends BaseExecutor<
     }
 
     const agentTaskExecutor = new AgentTaskExecutor(this.deps);
-    const runSteps = this.deps.db.getWorkflowRunStepsByRunId(meta.runId);
+    const runSteps = await this.deps.db.getWorkflowRunStepsByRunId(meta.runId);
     const childStepsByNodeId = new Map(
       runSteps
         .filter((step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId)
@@ -94,7 +94,7 @@ export class ForeachExecutor extends BaseExecutor<
     // before any child is dispatched — but only when there IS a post-join walk: a
     // terminal foreach (no successors) just closes the join and finalizes, so an
     // exact-cap fan-out is allowed there.
-    const workflow = this.deps.db.getWorkflow(meta.workflowId);
+    const workflow = await this.deps.db.getWorkflow(meta.workflowId);
     const hasSuccessors = workflow
       ? getSuccessors(workflow.definition, meta.nodeId).length > 0
       : true;
@@ -115,14 +115,14 @@ export class ForeachExecutor extends BaseExecutor<
       const childNodeId = `${meta.nodeId}#${itemKey}`;
       if (childStepsByNodeId.has(childNodeId)) continue;
       const childStepId = crypto.randomUUID();
-      const childStep = this.deps.db.createWorkflowRunStep({
+      const childStep = await this.deps.db.createWorkflowRunStep({
         id: childStepId,
         runId: meta.runId,
         nodeId: childNodeId,
         nodeType: "agent-task",
         input: { itemKey, index },
       });
-      this.deps.db.updateWorkflowRunStep(childStepId, {
+      await this.deps.db.updateWorkflowRunStep(childStepId, {
         idempotencyKey: `${meta.runId}:${childNodeId}:0`,
       });
       childStepsByNodeId.set(childNodeId, childStep);
@@ -146,16 +146,16 @@ export class ForeachExecutor extends BaseExecutor<
         console.warn(
           `[workflow] Step ${childNodeId}: unresolved interpolation tokens: ${childInterpolation.unresolved.join(", ")}`,
         );
-        this.deps.db.updateWorkflowRunStep(childStep.id, {
+        await this.deps.db.updateWorkflowRunStep(childStep.id, {
           diagnostics: JSON.stringify({ unresolvedTokens: childInterpolation.unresolved }),
         });
       }
 
-      const linkedTask = this.deps.db.getTaskByWorkflowRunStepId(childStep.id);
+      const linkedTask = await this.deps.db.getTaskByWorkflowRunStepId(childStep.id);
       if (linkedTask?.status === "failed" || linkedTask?.status === "cancelled") {
         // A retry needs a fresh task. Detaching the stale terminal task keeps the
         // executor's one-task-per-step de-duplication deterministic and scoped.
-        this.deps.db.detachTaskFromWorkflowRunStep(linkedTask.id);
+        await this.deps.db.detachTaskFromWorkflowRunStep(linkedTask.id);
       }
 
       const childResult = await agentTaskExecutor.run({
@@ -171,9 +171,9 @@ export class ForeachExecutor extends BaseExecutor<
         throw new Error(childResult.error ?? `foreach child "${itemKey}" failed to start`);
       }
       if ("async" in childResult) {
-        this.deps.db.updateWorkflowRunStep(childStep.id, { status: "waiting" });
+        await this.deps.db.updateWorkflowRunStep(childStep.id, { status: "waiting" });
       } else {
-        this.deps.db.updateWorkflowRunStep(childStep.id, {
+        await this.deps.db.updateWorkflowRunStep(childStep.id, {
           status: "completed",
           output: normalizeExistingTaskOutput(childResult.output),
           finishedAt: new Date().toISOString(),
@@ -181,9 +181,9 @@ export class ForeachExecutor extends BaseExecutor<
       }
     }
 
-    const childSteps = this.deps.db
-      .getWorkflowRunStepsByRunId(meta.runId)
-      .filter((step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId);
+    const childSteps = (await this.deps.db.getWorkflowRunStepsByRunId(meta.runId)).filter(
+      (step) => parseSyntheticNodeId(step.nodeId)?.parentNodeId === meta.nodeId,
+    );
     if (childSteps.every((step) => FOREACH_TERMINAL_STEP_STATUSES.has(step.status))) {
       return { status: "success", output: buildForeachAggregate(childSteps) };
     }

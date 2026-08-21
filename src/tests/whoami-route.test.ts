@@ -21,6 +21,7 @@ import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-whoami-route.sqlite";
 const API_KEY = "test-api-key";
@@ -45,13 +46,6 @@ function createTestServer(): Server {
   });
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 function cleanupDb() {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -68,7 +62,7 @@ describe("GET /api/whoami", () => {
     cleanupDb();
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(() => {
@@ -91,8 +85,8 @@ describe("GET /api/whoami", () => {
   });
 
   test("active user token resolves to its bound user", async () => {
-    const user = createUser({ name: "Whoami User", email: "whoami@example.com" });
-    const { plaintext } = mintToken(user.id, "rest", ACTOR);
+    const user = await createUser({ name: "Whoami User", email: "whoami@example.com" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(200);
@@ -103,18 +97,18 @@ describe("GET /api/whoami", () => {
   });
 
   test("revoked token is rejected at auth (401)", async () => {
-    const user = createUser({ name: "Revoked User" });
-    const { plaintext, tokenId } = mintToken(user.id, "rest", ACTOR);
-    revokeToken(tokenId, ACTOR);
+    const user = await createUser({ name: "Revoked User" });
+    const { plaintext, tokenId } = await mintToken(user.id, "rest", ACTOR);
+    await revokeToken(tokenId, ACTOR);
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);
   });
 
   test("suspended user's token is rejected at auth (401)", async () => {
-    const user = createUser({ name: "Suspended User" });
-    const { plaintext } = mintToken(user.id, "rest", ACTOR);
-    updateUser(user.id, { status: "suspended" });
+    const user = await createUser({ name: "Suspended User" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
+    await updateUser(user.id, { status: "suspended" });
 
     const res = await whoami(plaintext);
     expect(res.status).toBe(401);

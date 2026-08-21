@@ -45,8 +45,8 @@ beforeAll(async () => {
   process.env.NODE_ENV = "production";
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "mcp-ssrf-lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "mcp-ssrf-worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "mcp-ssrf-lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "mcp-ssrf-worker", isLead: false, status: "idle" });
   routeServer = createServer(async (req, res) => {
     const url = req.url ?? "/";
     const pathEnd = url.indexOf("?");
@@ -126,7 +126,7 @@ describe("MCP server proxy SSRF guard", () => {
     ["loopback hostname", "https://localhost/mcp"],
     ["link-local IP", "https://169.254.169.254/latest/meta-data"],
   ])("rejects a %s URL before the MCP client fetches", async (_kind, url) => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: `unsafe-${crypto.randomUUID()}`,
       transport: "http",
       url,
@@ -142,7 +142,7 @@ describe("MCP server proxy SSRF guard", () => {
   });
 
   test("permits a public MCP URL and revalidates every outbound MCP request", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: `public-${crypto.randomUUID()}`,
       transport: "http",
       url: "https://mcp.example.com/streamable",

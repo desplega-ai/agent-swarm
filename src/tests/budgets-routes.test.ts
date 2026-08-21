@@ -14,7 +14,7 @@ import {
 } from "node:http";
 import {
   closeDb,
-  getDb,
+  getDbClient,
   getLogsByEventType,
   initDb,
   recordBudgetRefusalNotification,
@@ -22,6 +22,7 @@ import {
 import { handleBudgets } from "../http/budgets";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-budgets-routes.sqlite";
 const API_KEY = "test-budget-secret-key";
@@ -34,13 +35,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -65,7 +59,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {
@@ -74,11 +68,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM budgets").run();
-  db.prepare("DELETE FROM agent_log WHERE eventType LIKE 'budget.%'").run();
-  db.prepare("DELETE FROM budget_refusal_notifications").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM agent_log WHERE eventType LIKE 'budget.%'");
+  await client.run("DELETE FROM budget_refusal_notifications");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -225,7 +219,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
         body: JSON.stringify({ dailyBudgetUsd: 7 }),
       });
 
-      const logs = getLogsByEventType("budget.upserted");
+      const logs = await getLogsByEventType("budget.upserted");
       expect(logs.length).toBe(2);
 
       // Logs land within the same millisecond so the DESC-by-createdAt order
@@ -253,7 +247,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
 
     test("GET /api/budgets/refusals returns recent refusals newest first", async () => {
       // Seed three refusals across two days/agents.
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-old",
         date: "2026-04-26",
         agentId: "agent-A",
@@ -263,7 +257,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
       });
       // Force a small gap so createdAt ordering is deterministic.
       await new Promise((r) => setTimeout(r, 5));
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-mid",
         date: "2026-04-27",
         agentId: "agent-B",
@@ -272,7 +266,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
         globalBudgetUsd: 40,
       });
       await new Promise((r) => setTimeout(r, 5));
-      recordBudgetRefusalNotification({
+      await recordBudgetRefusalNotification({
         taskId: "task-new",
         date: "2026-04-28",
         agentId: "agent-A",
@@ -296,7 +290,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
 
     test("GET /api/budgets/refusals respects limit query param", async () => {
       for (let i = 0; i < 5; i++) {
-        recordBudgetRefusalNotification({
+        await recordBudgetRefusalNotification({
           taskId: `task-${i}`,
           date: "2026-04-28",
           agentId: "agent-A",
@@ -318,7 +312,7 @@ describe("Phase 6 — /api/budgets REST surface", () => {
       });
       await authedFetch(`/api/budgets/agent/${agentId}`, { method: "DELETE" });
 
-      const logs = getLogsByEventType("budget.deleted");
+      const logs = await getLogsByEventType("budget.deleted");
       expect(logs.length).toBe(1);
       const meta = JSON.parse(logs[0].metadata!);
       expect(meta.scope).toBe("agent");

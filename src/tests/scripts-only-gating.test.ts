@@ -7,12 +7,13 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { closeDb, createAgent, getDb, initDb, upsertSwarmConfig } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { _resetAutoReloadForTests, flushPendingIntegrationsReload } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { getBasePrompt } from "../prompts/base-prompt";
 import { createServer } from "../server";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-only-gating.sqlite";
 const SCRIPT_TOOL_NAMES = [
@@ -36,19 +37,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("no port");
-  return address.port;
 }
 
 function createTestServer(): Server {
@@ -189,7 +177,7 @@ beforeAll(async () => {
   closeDb();
   initDb(TEST_DB_PATH);
   server = createTestServer();
-  baseUrl = `http://127.0.0.1:${await listen(server)}`;
+  baseUrl = `http://127.0.0.1:${await listenOnFreePort(server, "127.0.0.1")}`;
 });
 
 afterAll(async () => {
@@ -207,7 +195,7 @@ beforeEach(async () => {
   savedSlackAppToken = process.env.SLACK_APP_TOKEN;
   process.env.SLACK_BOT_TOKEN = "test-bot-token";
   process.env.SLACK_APP_TOKEN = "test-app-token";
-  getDb().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
+  await getDbClient().run("DELETE FROM swarm_config WHERE key = 'SCRIPTS_ONLY_MCP'");
 });
 
 afterEach(() => {
@@ -236,18 +224,18 @@ describe("resolveScriptsOnlyMode", () => {
 
 describe("scripts-only MCP gating", () => {
   test("uses the full surface with no environment override or config row", async () => {
-    const agent = createAgent({ name: "full-surface-agent", isLead: false, status: "idle" });
+    const agent = await createAgent({ name: "full-surface-agent", isLead: false, status: "idle" });
 
     expectFullSurface(await listTools(agent.id));
   });
 
   test("isolates concurrent environment overrides across MCP handshakes", async () => {
-    const scriptsOnlyAgent = createAgent({
+    const scriptsOnlyAgent = await createAgent({
       name: "concurrent-scripts-only-agent",
       isLead: false,
       status: "idle",
     });
-    const fullSurfaceAgent = createAgent({
+    const fullSurfaceAgent = await createAgent({
       name: "concurrent-full-surface-agent",
       isLead: false,
       status: "idle",
@@ -263,17 +251,17 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("gates one configured agent without affecting another", async () => {
-    const scriptsOnlyAgent = createAgent({
+    const scriptsOnlyAgent = await createAgent({
       name: "scripts-only-agent",
       isLead: false,
       status: "idle",
     });
-    const fullSurfaceAgent = createAgent({
+    const fullSurfaceAgent = await createAgent({
       name: "neighbor-agent",
       isLead: false,
       status: "idle",
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: scriptsOnlyAgent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -285,15 +273,19 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("uses a global config row when the agent has no override", async () => {
-    const agent = createAgent({ name: "global-scripts-only-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
+    const agent = await createAgent({
+      name: "global-scripts-only-agent",
+      isLead: false,
+      status: "idle",
+    });
+    await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
     expect(await listTools(agent.id)).toEqual(SCRIPT_TOOL_NAMES);
   });
 
   test("gives a non-empty environment override precedence over an agent row", async () => {
-    const agent = createAgent({ name: "env-wins-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({
+    const agent = await createAgent({ name: "env-wins-agent", isLead: false, status: "idle" });
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -303,8 +295,8 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("treats an empty environment value as unset", async () => {
-    const agent = createAgent({ name: "empty-env-agent", isLead: false, status: "idle" });
-    upsertSwarmConfig({
+    const agent = await createAgent({ name: "empty-env-agent", isLead: false, status: "idle" });
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: agent.id,
       key: "SCRIPTS_ONLY_MCP",
@@ -314,11 +306,11 @@ describe("scripts-only MCP gating", () => {
   });
 
   test("keeps the scripts SDK bridge's explicit full surface", async () => {
-    upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
+    await upsertSwarmConfig({ scope: "global", key: "SCRIPTS_ONLY_MCP", value: "true" });
 
-    await withScriptsOnlyMcpEnv("true", () => {
+    await withScriptsOnlyMcpEnv("true", async () => {
       const tools = (
-        createServer({ scriptsOnly: false }) as unknown as {
+        (await createServer({ scriptsOnly: false })) as unknown as {
           _registeredTools: RegisteredTool;
         }
       )._registeredTools;

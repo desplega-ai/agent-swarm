@@ -39,7 +39,7 @@ describe("script SDK allowlist", () => {
     // The scripts SDK bridge always builds a full-surface server (capability
     // flags shape the external MCP tool list only) — mirror that here so the
     // drift check spans every allowlisted tool.
-    const server = createServer({ fullSurface: true });
+    const server = await createServer({ fullSurface: true });
     registeredTools = (server as unknown as { _registeredTools: Record<string, unknown> })
       ._registeredTools;
   });
@@ -239,15 +239,14 @@ describe("mcp-bridge allowlist gate", () => {
     initDb(TEST_DB_PATH);
     prevApiKey = process.env.AGENT_SWARM_API_KEY;
     process.env.AGENT_SWARM_API_KEY = API_KEY;
-    createAgent({
+    await createAgent({
       id: "test-agent-bridge",
       name: "test-agent-bridge",
       isLead: false,
       status: "idle",
     });
-    oversizedTaskId = createTask(
-      "test-agent-bridge",
-      `large-script-sdk-task:${"x".repeat(20_000)}`,
+    oversizedTaskId = (
+      await createTask("test-agent-bridge", `large-script-sdk-task:${"x".repeat(20_000)}`)
     ).id;
   });
 

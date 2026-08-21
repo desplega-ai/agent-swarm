@@ -80,16 +80,16 @@ describe("seed-scripts catalog", () => {
     }
   });
 
-  test("every catalog script passes the import allowlist and the script typecheck", () => {
+  test("every catalog script passes the import allowlist and the script typecheck", async () => {
     const failures: string[] = [];
     for (const s of SEED_SCRIPTS) {
       const imports = validateScriptImports(s.source);
       if (!imports.ok) failures.push(`${s.name}: import — ${imports.diagnostic}`);
-      const tc = typecheckScript(s.source);
+      const tc = await typecheckScript(s.source);
       if (!tc.ok) failures.push(`${s.name}: typecheck — ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  }, 10_000);
+  }, 60_000); // typechecks every seed script; 9.7 s on a loaded 4-core CI runner under --parallel=4
 
   test("every catalog script exposes a documented default export", () => {
     for (const s of SEED_SCRIPTS) {
@@ -157,7 +157,7 @@ describe("seed-scripts catalog", () => {
       result.created + result.updated + result.skippedUnchanged + result.skippedUserModified,
     ).toBe(SEED_SCRIPTS.length);
 
-    const globals = listScripts({ scope: "global" });
+    const globals = await listScripts({ scope: "global" });
     for (const s of SEED_SCRIPTS) {
       const row = globals.find((g) => g.name === s.name);
       expect(row, `${s.name} was not seeded`).toBeDefined();
@@ -166,7 +166,7 @@ describe("seed-scripts catalog", () => {
       expect(row?.isScratch).toBe(false);
       expect(row?.typeChecked).toBe(true);
     }
-  });
+  }, 30_000); // typechecks every seed script with tsc; slow under --parallel load
 
   test("re-seeding is idempotent — pristine, unchanged scripts are skipped", async () => {
     const result = await runSeeder(scriptsSeeder, { quiet: true });
@@ -203,7 +203,7 @@ describe("seed-scripts catalog", () => {
     expect(result.skippedUnchanged).toBe(SEED_SCRIPTS.length - 1);
 
     // The user's edit survived — the seed did not clobber it.
-    const row = getScript({ name: target.name, scope: "global" });
+    const row = await getScript({ name: target.name, scope: "global" });
     expect(row?.source).toBe(userSource);
   });
 
@@ -959,11 +959,11 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
 
     const failures: string[] = [];
     for (const s of SEED_SCRIPTS) {
-      const tc = typecheckScript(s.source);
+      const tc = await typecheckScript(s.source);
       if (!tc.ok) failures.push(`${s.name}: ${tc.diagnostics.join(" | ")}`);
     }
     expect(failures).toEqual([]);
-  });
+  }, 60_000); // typechecks every catalog script; ~10 s on a loaded 4-core CI runner under --parallel=4
 
   test("typecheck fails when zod is not staged — the production gap, now guarded", async () => {
     // An empty SCRIPT_TYPES_DIR simulates the compiled binary BEFORE this fix:
@@ -972,7 +972,7 @@ describe("script typecheck resolves zod in compiled-binary mode", () => {
     const empty = await makeTmpDir();
     process.env[ENV_KEY] = empty;
 
-    const result = typecheckScript(SEED_SCRIPTS[0].source);
+    const result = await typecheckScript(SEED_SCRIPTS[0].source);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.diagnostics.join(" ")).toContain("TS2307");

@@ -70,9 +70,9 @@ describe("update-profile authorization", () => {
     closeDb();
     initDb(TEST_DB_PATH);
 
-    createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
-    createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
+    await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: OTHER_WORKER_ID, name: "Other Worker", isLead: false, status: "idle" });
 
     server = new McpServer({ name: "test-update-profile-auth", version: "1.0.0" });
     registerUpdateProfileTool(server);
@@ -103,7 +103,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.agent?.role).toBe("Senior Developer");
 
     // Verify DB was updated
-    const agent = getAgentById(WORKER_ID);
+    const agent = await getAgentById(WORKER_ID);
     expect(agent?.role).toBe("Senior Developer");
   });
 
@@ -120,7 +120,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.message).toContain("Only lead agents");
 
     // Verify DB was NOT updated
-    const agent = getAgentById(OTHER_WORKER_ID);
+    const agent = await getAgentById(OTHER_WORKER_ID);
     expect(agent?.role).not.toBe("Hacked Role");
   });
 
@@ -137,7 +137,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.message).toContain("own");
 
     // Verify DB was updated
-    const agent = getAgentById(OTHER_WORKER_ID);
+    const agent = await getAgentById(OTHER_WORKER_ID);
     expect(agent?.description).toBe("I updated myself");
   });
 
@@ -167,7 +167,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
 
     // Verify the context version has the correct changeSource
-    const version = getLatestContextVersion(WORKER_ID, "soulMd");
+    const version = await getLatestContextVersion(WORKER_ID, "soulMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("lead_coaching");
     expect(version!.changedByAgentId).toBe(LEAD_ID);
@@ -181,7 +181,7 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
 
     // Verify the context version has the correct changeSource
-    const version = getLatestContextVersion(WORKER_ID, "soulMd");
+    const version = await getLatestContextVersion(WORKER_ID, "soulMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("self_edit");
     expect(version!.changedByAgentId).toBe(WORKER_ID);
@@ -196,13 +196,13 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.message).toContain("own");
 
-    const version = getLatestContextVersion(WORKER_ID, "identityMd");
+    const version = await getLatestContextVersion(WORKER_ID, "identityMd");
     expect(version).not.toBeNull();
     expect(version!.changeSource).toBe("self_edit");
   });
 
   test("rejects setupScript with invalid bash syntax before updating DB", async () => {
-    const before = getAgentById(WORKER_ID)?.setupScript;
+    const before = (await getAgentById(WORKER_ID))?.setupScript;
 
     const result = await callUpdateProfile(server, WORKER_ID, {
       setupScript: "if true; then\n  echo missing-fi\n",
@@ -211,12 +211,12 @@ describe("update-profile authorization", () => {
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("Invalid setupScript");
 
-    const agent = getAgentById(WORKER_ID);
+    const agent = await getAgentById(WORKER_ID);
     expect(agent?.setupScript).toBe(before);
   });
 
   test("rejected combined name and identity update leaves the name unchanged", async () => {
-    const before = getAgentById(WORKER_ID);
+    const before = await getAgentById(WORKER_ID);
 
     const result = await callUpdateProfile(server, WORKER_ID, {
       name: "Partially Renamed Worker",
@@ -225,7 +225,7 @@ describe("update-profile authorization", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("Update rejected for soulMd");
-    const after = getAgentById(WORKER_ID);
+    const after = await getAgentById(WORKER_ID);
     expect(after?.name).toBe(before?.name);
     expect(after?.soulMd).toBe(before?.soulMd);
   });
@@ -256,7 +256,7 @@ describe("update-profile authorization", () => {
 
     try {
       process.env.AGENT_ID = WORKER_ID;
-      expect(deleteAgent(WORKER_ID)).toBe(true);
+      expect(await deleteAgent(WORKER_ID)).toBe(true);
 
       const result = await callUpdateProfile(server, WORKER_ID, {
         soulMd: "must not reach the workspace",

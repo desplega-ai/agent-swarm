@@ -24,7 +24,7 @@ export function resetLinear(): void {
   initialized = false;
 }
 
-export function initLinear(): boolean {
+export async function initLinear(): Promise<boolean> {
   if (initialized) return isLinearEnabled();
   initialized = true;
 
@@ -49,7 +49,7 @@ export function initLinear(): boolean {
   // possible since the row is user-manageable after the carve-out removal, and
   // runtime keys a future Linear flow may add). Seeded actor/keepAlive win.
   // Mirrors initJira's preserve-on-update behavior (it omits metadata entirely).
-  const existing = getOAuthApp("linear");
+  const existing = await getOAuthApp("linear");
   const existingMetadata = (() => {
     try {
       const parsed = JSON.parse(existing?.metadata || "{}");
@@ -59,7 +59,7 @@ export function initLinear(): boolean {
     }
   })();
 
-  upsertOAuthApp("linear", {
+  await upsertOAuthApp("linear", {
     clientId,
     clientSecret,
     authorizeUrl: "https://linear.app/oauth/authorize",

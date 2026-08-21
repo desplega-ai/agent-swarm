@@ -29,7 +29,7 @@ async function main() {
   // but the generated SDK covers the full tool universe — a disabled server
   // rejects task_steer at call time with a clear 403.
   process.env.STEERING_ENABLED = "true";
-  const server = createServer({ fullSurface: true });
+  const server = await createServer({ fullSurface: true });
   const tools = (server as unknown as { _registeredTools: RegisteredTools })._registeredTools;
   const missing = SDK_ALLOWLIST.map((name) => mcpToolNameForSdkMethod(name)).filter(
     (name) => !(name in tools),
@@ -42,7 +42,7 @@ async function main() {
   await Bun.$`mkdir -p src/scripts-runtime/types`;
   await Bun.write(
     "src/scripts-runtime/types/swarm-sdk.d.ts",
-    `declare module "swarm-sdk" {\n${scriptSdkTypesWithGeneratedApis().replace(/^/gm, "  ")}\n}\n`,
+    `declare module "swarm-sdk" {\n${(await scriptSdkTypesWithGeneratedApis()).replace(/^/gm, "  ")}\n}\n`,
   );
   await Bun.write("src/scripts-runtime/types/stdlib.d.ts", SCRIPT_STDLIB_TYPES.trimStart());
   await Bun.$`bunx biome format --write src/scripts-runtime/types/swarm-sdk.d.ts src/scripts-runtime/types/stdlib.d.ts`;

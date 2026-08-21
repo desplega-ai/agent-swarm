@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, getKv, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, getKv, initDb } from "../be/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
@@ -182,7 +182,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(fakeEmbeddingProvider);
-  workerId = createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" }).id;
+  workerId = (await createAgent({ name: "scripts-mcp-worker", isLead: false, status: "idle" })).id;
   process.env.MCP_BASE_URL = "http://scripts-mcp-e2e.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -211,10 +211,11 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM scripts");
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM scripts");
+  await client.run("DELETE FROM script_run_journal");
+  await client.run("DELETE FROM script_runs");
 });
 
 describe("script_ MCP HTTP proxy tools", () => {
@@ -313,7 +314,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(text).toContain(`kv://${overflowNamespace}/`);
 
     const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
-    const stored = getKv(overflowNamespace, key);
+    const stored = await getKv(overflowNamespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: {
         ok: boolean;
@@ -370,7 +371,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     const overflowNamespace = mcpOverflowNamespace(workerId);
     const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
     const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
-    const stored = getKv(overflowNamespace, key);
+    const stored = await getKv(overflowNamespace, key);
     const canonical = JSON.parse(String(stored?.value)) as {
       outcome: {
         data: { data: { result: Array<{ index: number; text: string }> } };

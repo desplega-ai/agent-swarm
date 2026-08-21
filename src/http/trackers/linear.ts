@@ -135,8 +135,10 @@ const linearDisconnect = route({
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildLinearStatusPayload(req: IncomingMessage): z.infer<typeof LinearStatusSchema> {
-  const tokens = getOAuthTokens("linear");
+async function buildLinearStatusPayload(
+  req: IncomingMessage,
+): Promise<z.infer<typeof LinearStatusSchema>> {
+  const tokens = await getOAuthTokens("linear");
   const baseUrl = deriveApiBaseUrl(req);
 
   return {
@@ -209,7 +211,7 @@ export async function handleLinearTracker(
       return true;
     }
 
-    linearStatus.respond(res, 200, buildLinearStatusPayload(req));
+    linearStatus.respond(res, 200, await buildLinearStatusPayload(req));
     return true;
   }
 
@@ -223,8 +225,8 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const authorizationId = getDefaultAuthorizationIdForProvider("linear");
-    const authorization = authorizationId ? getAuthorizationById(authorizationId) : null;
+    const authorizationId = await getDefaultAuthorizationIdForProvider("linear");
+    const authorization = authorizationId ? await getAuthorizationById(authorizationId) : null;
     if (!authorization?.refreshToken) {
       res.writeHead(409, { "Content-Type": "application/json" });
       res.end(
@@ -245,7 +247,7 @@ export async function handleLinearTracker(
       return true;
     }
 
-    linearRefresh.respond(res, 200, buildLinearStatusPayload(req));
+    linearRefresh.respond(res, 200, await buildLinearStatusPayload(req));
     return true;
   }
 
@@ -287,13 +289,13 @@ export async function handleLinearTracker(
       return true;
     }
 
-    const tokens = getOAuthTokens("linear");
+    const tokens = await getOAuthTokens("linear");
     let revoked = false;
     if (tokens?.accessToken) {
       revoked = await revokeLinearToken(tokens.accessToken);
     }
 
-    deleteOAuthTokens("linear");
+    await deleteOAuthTokens("linear");
 
     console.log(`[Linear] Disconnected: revoke=${revoked}, tokens cleared`);
 

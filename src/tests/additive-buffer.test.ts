@@ -33,10 +33,13 @@ describe("createAdditiveBuffer", () => {
     buf.cancel("k1");
   });
 
+  // Debounce windows here are wide (hundreds of ms) on purpose: under
+  // `bun test --parallel` on a loaded runner a 5 ms sleep can take 20+ ms, and a
+  // 20 ms window then flushes between "rapid" enqueues.
   test("three rapid enqueues coalesce into one flush", async () => {
     const flushes: string[][] = [];
     const buf = createAdditiveBuffer<string>({
-      timeoutMs: 20,
+      timeoutMs: 200,
       onFlush: (items) => {
         flushes.push([...items]);
       },
@@ -51,7 +54,7 @@ describe("createAdditiveBuffer", () => {
     expect(buf.count("k")).toBe(3);
 
     // Wait for debounce to elapse
-    await sleep(50);
+    await sleep(500);
 
     expect(flushes.length).toBe(1);
     expect(flushes[0]).toEqual(["a", "b", "c"]);
@@ -61,20 +64,20 @@ describe("createAdditiveBuffer", () => {
   test("enqueue resets the timer", async () => {
     const flushes: number[][] = [];
     const buf = createAdditiveBuffer<number>({
-      timeoutMs: 30,
+      timeoutMs: 300,
       onFlush: (items) => {
         flushes.push([...items]);
       },
     });
 
     buf.enqueue("k", 1);
-    await sleep(20); // 20 < 30, timer would have NOT fired
+    await sleep(150); // 150 < 300, timer would have NOT fired
     buf.enqueue("k", 2); // resets
-    await sleep(20); // another 20 < 30
+    await sleep(150); // another 150 < 300
     buf.enqueue("k", 3); // resets again
 
     expect(flushes.length).toBe(0);
-    await sleep(60);
+    await sleep(600);
     expect(flushes.length).toBe(1);
     expect(flushes[0]).toEqual([1, 2, 3]);
   });

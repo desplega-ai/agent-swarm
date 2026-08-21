@@ -13,7 +13,7 @@ import {
   listWorkflowRuns,
   listWorkflowRunsPage,
   listWorkflows,
-  updateWorkflow,
+  type updateWorkflow,
   withFavoriteFlags,
 } from "../be/db";
 import {
@@ -32,17 +32,13 @@ import {
   WorkflowVersionSchema,
 } from "../types";
 import { getExecutorRegistry, startWorkflowExecution } from "../workflows";
-import {
-  applyDefinitionPatch,
-  definitionNodeIds,
-  generateEdges,
-  validateDefinition,
-} from "../workflows/definition";
+import { definitionNodeIds, generateEdges, validateDefinition } from "../workflows/definition";
 import { TriggerSchemaError } from "../workflows/engine";
 import { validateJsonSchema } from "../workflows/json-schema-validator";
+import { patchWorkflowDefinition } from "../workflows/patch-definition";
 import { cancelWorkflowRun, retryFailedRun } from "../workflows/resume";
 import { handleWebhookTrigger, WebhookError } from "../workflows/triggers";
-import { snapshotWorkflow } from "../workflows/version";
+import { snapshotAndUpdateWorkflow } from "../workflows/version";
 import { resolveHttpFavoriteOwner } from "./favorite-owner";
 import { route } from "./route-def";
 import { jsonError, parseBody, triggerSchemaErrorResponse } from "./utils";
@@ -473,7 +469,7 @@ export async function handleWorkflows(
   if (getWorkflowVersionRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowVersionRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const version = getWorkflowVersion(parsed.params.id, parsed.params.version);
+    const version = await getWorkflowVersion(parsed.params.id, parsed.params.version);
     if (!version) {
       res.writeHead(404);
       res.end();
@@ -486,13 +482,13 @@ export async function handleWorkflows(
   if (listWorkflowVersionsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowVersionsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const versions = getWorkflowVersions(parsed.params.id);
+    const versions = await getWorkflowVersions(parsed.params.id);
     listWorkflowVersionsRoute.respond(res, 200, { versions });
     return true;
   }
@@ -500,7 +496,7 @@ export async function handleWorkflows(
   if (listWorkflowsRoute.match(req.method, pathSegments)) {
     const parsed = await listWorkflowsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     const filters = {
       enabled: parsed.query.enabled,
       consecutiveErrorsMin: parsed.query.consecutiveErrorsMin,
@@ -513,13 +509,16 @@ export async function handleWorkflows(
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(listWorkflows(filters), { favoriteScope, itemType: "workflow" }),
+        await withFavoriteFlags(await listWorkflows(filters), {
+          favoriteScope,
+          itemType: "workflow",
+        }),
       );
     } else {
       listWorkflowsRoute.respond(
         res,
         200,
-        withFavoriteFlags(listWorkflows(filters, { slim: true }), {
+        await withFavoriteFlags(await listWorkflows(filters, { slim: true }), {
           favoriteScope,
           itemType: "workflow",
         }),
@@ -539,10 +538,12 @@ export async function handleWorkflows(
       return true;
     }
 
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let key: string | undefined;
     try {
-      key = parsed.body.key ? authorizeAssetKeyWrite(parsed.body.key, trustedUserId) : undefined;
+      key = parsed.body.key
+        ? await authorizeAssetKeyWrite(parsed.body.key, trustedUserId)
+        : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);
@@ -551,7 +552,7 @@ export async function handleWorkflows(
       throw error;
     }
 
-    const workflow = createWorkflow(
+    const workflow = await createWorkflow(
       {
         key,
         name: parsed.body.name,
@@ -564,7 +565,7 @@ export async function handleWorkflows(
         dir: parsed.body.dir,
         vcsRepo: parsed.body.vcsRepo,
         createdByAgentId: myAgentId ?? undefined,
-        createdBy: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+        createdBy: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       },
       "api",
     );
@@ -575,7 +576,7 @@ export async function handleWorkflows(
   if (getWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -583,8 +584,11 @@ export async function handleWorkflows(
     }
     // Include auto-generated edges for UI rendering
     const edges = generateEdges(workflow.definition);
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
-    const [decorated] = withFavoriteFlags([workflow], { favoriteScope, itemType: "workflow" });
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
+    const [decorated] = await withFavoriteFlags([workflow], {
+      favoriteScope,
+      itemType: "workflow",
+    });
     getWorkflowRoute.respond(res, 200, { ...(decorated ?? workflow), edges });
     return true;
   }
@@ -595,47 +599,32 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id, nodeId } = parsed.params;
 
-    const existing = getWorkflow(id);
-    if (!existing) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-
+    const updatedBy0 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     // Convert single-node patch to bulk patch format
-    const patchResult = applyDefinitionPatch(existing.definition, {
-      update: [{ nodeId, node: parsed.body }],
+    const result = await patchWorkflowDefinition({
+      id,
+      patch: { update: [{ nodeId, node: parsed.body }] },
+      registry: getExecutorRegistry(),
+      snapshotAgentId: myAgentId,
+      snapshotOptional: true,
+      updates: { updatedBy: updatedBy0 },
     });
-    if (patchResult.errors.length > 0) {
-      jsonError(res, patchResult.errors.join("; "), 400);
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        res.writeHead(404);
+        res.end();
+        return true;
+      }
+      jsonError(
+        res,
+        result.reason === "patch"
+          ? result.errors.join("; ")
+          : `Invalid definition: ${result.errors.join("; ")}`,
+        400,
+      );
       return true;
     }
-
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
-      legacyNodeIds: definitionNodeIds(existing.definition),
-    });
-    if (!validation.valid) {
-      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
-      return true;
-    }
-
-    try {
-      snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update
-    }
-
-    const updatedBy0 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
-    const workflow = updateWorkflow(id, {
-      definition: patchResult.definition,
-      updatedBy: updatedBy0,
-    });
-    if (!workflow) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-    patchWorkflowNodeRoute.respond(res, 200, workflow);
+    patchWorkflowNodeRoute.respond(res, 200, result.workflow);
     return true;
   }
 
@@ -644,40 +633,11 @@ export async function handleWorkflows(
     if (!parsed) return true;
     const { id } = parsed.params;
 
-    const existing = getWorkflow(id);
-    if (!existing) {
-      res.writeHead(404);
-      res.end();
-      return true;
-    }
-
-    const patchResult = applyDefinitionPatch(existing.definition, parsed.body);
-    if (patchResult.errors.length > 0) {
-      jsonError(res, patchResult.errors.join("; "), 400);
-      return true;
-    }
-
-    const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
-      legacyNodeIds: definitionNodeIds(existing.definition),
-    });
-    if (!validation.valid) {
-      jsonError(res, `Invalid definition: ${validation.errors.join("; ")}`, 400);
-      return true;
-    }
-
-    try {
-      snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update
-    }
-
-    const updatedBy1 = resolveHttpAuditUserId(req, myAgentId);
-    const updateArgs: Parameters<typeof updateWorkflow>[1] = {
-      definition: patchResult.definition,
-    };
+    const updatedBy1 = await resolveHttpAuditUserId(req, myAgentId);
+    const updateArgs: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
     if (parsed.body.key !== undefined) {
       try {
-        updateArgs.key = authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
+        updateArgs.key = await authorizeAssetKeyWrite(parsed.body.key, updatedBy1);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -692,13 +652,31 @@ export async function handleWorkflows(
     if (updatedBy1 !== null) {
       updateArgs.updatedBy = updatedBy1;
     }
-    const workflow = updateWorkflow(id, updateArgs);
-    if (!workflow) {
-      res.writeHead(404);
-      res.end();
+
+    const result = await patchWorkflowDefinition({
+      id,
+      patch: parsed.body,
+      registry: getExecutorRegistry(),
+      snapshotAgentId: myAgentId,
+      snapshotOptional: true,
+      updates: updateArgs,
+    });
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        res.writeHead(404);
+        res.end();
+        return true;
+      }
+      jsonError(
+        res,
+        result.reason === "patch"
+          ? result.errors.join("; ")
+          : `Invalid definition: ${result.errors.join("; ")}`,
+        400,
+      );
       return true;
     }
-    patchWorkflowRoute.respond(res, 200, workflow);
+    patchWorkflowRoute.respond(res, 200, result.workflow);
     return true;
   }
 
@@ -709,7 +687,7 @@ export async function handleWorkflows(
     const body = parsed.body;
 
     // Check workflow exists before snapshotting
-    const existing = getWorkflow(id);
+    const existing = await getWorkflow(id);
     if (!existing) {
       res.writeHead(404);
       res.end();
@@ -727,18 +705,11 @@ export async function handleWorkflows(
       }
     }
 
-    // Create version snapshot before applying update
-    try {
-      snapshotWorkflow(id, myAgentId);
-    } catch {
-      // Snapshot failure should not block the update — log and continue
-    }
-
-    const updatedBy2 = resolveHttpAuditUserId(req, myAgentId) ?? undefined;
+    const updatedBy2 = (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined;
     let key: string | undefined;
     if (body.key !== undefined) {
       try {
-        key = authorizeAssetKeyWrite(body.key, updatedBy2);
+        key = await authorizeAssetKeyWrite(body.key, updatedBy2);
       } catch (error) {
         if (error instanceof AssetKeyAuthorizationError) {
           jsonError(res, error.message, error.statusCode);
@@ -747,20 +718,27 @@ export async function handleWorkflows(
         throw error;
       }
     }
-    const workflow = updateWorkflow(id, {
-      key,
-      name: body.name,
-      description: body.description,
-      definition: body.definition,
-      triggers: body.triggers,
-      cooldown: body.cooldown === null ? null : body.cooldown,
-      input: body.input === null ? null : body.input,
-      triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
-      dir: body.dir === null ? null : body.dir,
-      vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
-      enabled: body.enabled,
-      updatedBy: updatedBy2,
-    });
+    // Snapshot + update in one transaction: concurrent full updates would
+    // otherwise allocate the same version, and the loser's edit would commit
+    // with no history row. Snapshot failure still does not block the update.
+    const { workflow } = await snapshotAndUpdateWorkflow(
+      id,
+      {
+        key,
+        name: body.name,
+        description: body.description,
+        definition: body.definition,
+        triggers: body.triggers,
+        cooldown: body.cooldown === null ? null : body.cooldown,
+        input: body.input === null ? null : body.input,
+        triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
+        dir: body.dir === null ? null : body.dir,
+        vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
+        enabled: body.enabled,
+        updatedBy: updatedBy2,
+      },
+      { changedByAgentId: myAgentId, snapshotOptional: true },
+    );
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -774,7 +752,7 @@ export async function handleWorkflows(
     const parsed = await deleteWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      const deleted = deleteWorkflow(parsed.params.id, "api");
+      const deleted = await deleteWorkflow(parsed.params.id, "api");
       res.writeHead(deleted ? 204 : 404);
     } catch (err) {
       jsonError(res, String(err), 500);
@@ -787,7 +765,7 @@ export async function handleWorkflows(
   if (validateTriggerRoute.match(req.method, pathSegments)) {
     const parsed = await validateTriggerRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -815,7 +793,7 @@ export async function handleWorkflows(
   if (triggerWorkflowRoute.match(req.method, pathSegments)) {
     const parsed = await triggerWorkflowRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const workflow = getWorkflow(parsed.params.id);
+    const workflow = await getWorkflow(parsed.params.id);
     if (!workflow) {
       res.writeHead(404);
       res.end();
@@ -830,7 +808,7 @@ export async function handleWorkflows(
     try {
       runId = await startWorkflowExecution(workflow, body, getExecutorRegistry(), {
         triggerType: "api",
-        requestedByUserId: resolveHttpAuditUserId(req, myAgentId) ?? undefined,
+        requestedByUserId: (await resolveHttpAuditUserId(req, myAgentId)) ?? undefined,
       });
     } catch (err) {
       if (err instanceof TriggerSchemaError) {
@@ -841,7 +819,7 @@ export async function handleWorkflows(
     }
 
     // Check if skipped due to cooldown
-    const run = getWorkflowRun(runId);
+    const run = await getWorkflowRun(runId);
     const skipped = run?.status === "skipped";
 
     triggerWorkflowRoute.respond(res, 201, { runId, skipped });
@@ -854,7 +832,7 @@ export async function handleWorkflows(
     const paginationRequested =
       parsed.query?.limit !== undefined || parsed.query?.offset !== undefined;
     if (paginationRequested) {
-      const page = listWorkflowRunsPage(parsed.params.id, {
+      const page = await listWorkflowRunsPage(parsed.params.id, {
         status: parsed.query?.status,
         limit: parsed.query?.limit ?? 20,
         offset: parsed.query?.offset ?? 0,
@@ -864,7 +842,7 @@ export async function handleWorkflows(
     }
     // Preserve the pre-pagination response for the UI when limit/offset are
     // omitted: a bare array containing every matching run.
-    const runs = listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
+    const runs = await listWorkflowRuns(parsed.params.id, { status: parsed.query?.status });
     listWorkflowRunsRoute.respond(res, 200, runs);
     return true;
   }
@@ -872,13 +850,13 @@ export async function handleWorkflows(
   if (getWorkflowRunRoute.match(req.method, pathSegments)) {
     const parsed = await getWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const run = getWorkflowRun(parsed.params.id);
+    const run = await getWorkflowRun(parsed.params.id);
     if (!run) {
       res.writeHead(404);
       res.end();
       return true;
     }
-    const steps = getWorkflowRunStepsByRunId(parsed.params.id);
+    const steps = await getWorkflowRunStepsByRunId(parsed.params.id);
     getWorkflowRunRoute.respond(res, 200, { run, steps });
     return true;
   }
@@ -902,7 +880,7 @@ export async function handleWorkflows(
     const parsed = await cancelWorkflowRunRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
     try {
-      cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
+      await cancelWorkflowRun(parsed.params.id, parsed.body?.reason);
     } catch (err) {
       jsonError(res, String(err), 400);
       return true;

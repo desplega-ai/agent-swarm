@@ -302,7 +302,10 @@ type FinalizeContext = {
   agentId: string | undefined;
   callOrigin: RequestInfo["callOrigin"];
 };
-type FinalizeMiddleware = (result: SwarmToolResult, ctx: FinalizeContext) => SwarmToolResult;
+type FinalizeMiddleware = (
+  result: SwarmToolResult,
+  ctx: FinalizeContext,
+) => SwarmToolResult | Promise<SwarmToolResult>;
 
 const scrubMiddleware: FinalizeMiddleware = (result) =>
   result.allowSecretEgress ? result : scrubObject(result);
@@ -576,7 +579,7 @@ function truncateArraysInPlace(
   return render();
 }
 
-const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
+const ctxControlMiddleware: FinalizeMiddleware = async (result, ctx) => {
   // Calls made through ctx.swarm.* execute inside a script sandbox, so their
   // response never enters the model's context. The script SDK has a separate,
   // much higher hard response limit to protect the sandbox heap.
@@ -604,8 +607,8 @@ const ctxControlMiddleware: FinalizeMiddleware = (result, ctx) => {
     // column and this direct server-side helper have no declared size limit.
     // Sweep the whole per-agent namespace family so expired rows from inactive
     // agents do not wait for their owner to spill again.
-    sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
-    upsertKv({
+    await sweepExpiredKvPrefix(MCP_OVERFLOW_NAMESPACE);
+    await upsertKv({
       namespace,
       key,
       value: storedValue,
@@ -662,13 +665,13 @@ const FINALIZE_PIPELINE: FinalizeMiddleware[] = [
  * structuredContent is ALWAYS present (opencode's SDK client throws when a
  * declared outputSchema has no structuredContent).
  */
-export function finalizeSwarmToolResult(
+export async function finalizeSwarmToolResult(
   toolName: string,
   result: SwarmToolResult,
   requestInfo: Pick<RequestInfo, "agentId"> & Partial<Pick<RequestInfo, "callOrigin">> = {
     agentId: undefined,
   },
-): CallToolResult {
+): Promise<CallToolResult> {
   let r = result;
   if (!r.message?.trim()) {
     console.warn(`[mcp] tool ${toolName} returned an empty message — every tool must summarize`);
@@ -680,7 +683,7 @@ export function finalizeSwarmToolResult(
     };
   }
   for (const middleware of FINALIZE_PIPELINE) {
-    r = middleware(r, {
+    r = await middleware(r, {
       toolName,
       agentId: requestInfo.agentId,
       callOrigin: requestInfo.callOrigin ?? "mcp",
@@ -760,7 +763,7 @@ export const createToolRegistrar = (server: McpServer) => {
                 meta: Meta,
               ) => SwarmToolResult | Promise<SwarmToolResult>
             )(requestInfo, meta);
-            const result = finalizeSwarmToolResult(name, outcome, requestInfo);
+            const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
             span.setAttributes(toolResultAttributes(result));
             return result;
           },
@@ -783,7 +786,7 @@ export const createToolRegistrar = (server: McpServer) => {
               meta: Meta,
             ) => SwarmToolResult | Promise<SwarmToolResult>
           )(args, requestInfo, meta);
-          const result = finalizeSwarmToolResult(name, outcome, requestInfo);
+          const result = await finalizeSwarmToolResult(name, outcome, requestInfo);
           span.setAttributes(toolResultAttributes(result));
           return result;
         },

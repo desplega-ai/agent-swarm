@@ -32,7 +32,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
 
       // If installing for another agent, must be lead
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",
@@ -50,7 +50,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
         }
       }
 
-      const skill = getSkillById(args.skillId);
+      const skill = await getSkillById(args.skillId);
       if (!skill) {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
@@ -60,7 +60,7 @@ export const registerSkillInstallTool = (server: McpServer) => {
       }
 
       try {
-        const agentSkill = installSkill(targetAgentId, args.skillId);
+        const agentSkill = await installSkill(targetAgentId, args.skillId);
         return toolOk(`Installed skill "${skill.name}".`, {
           details: `Installed skill "${skill.name}" for agent ${targetAgentId}.`,
           data: { yourAgentId: requestInfo.agentId, agentSkill },

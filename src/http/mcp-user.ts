@@ -5,6 +5,7 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { resolveUserByToken } from "@/be/users";
 import { createUserServer } from "@/server-user";
 import type { User } from "@/types";
+import { setRequestAuth } from "@/utils/request-auth-context";
 import { closeIdleMcpTransports, type McpTransportActivity, markMcpTransportActivity } from "./mcp";
 
 function unauthorized(res: ServerResponse): true {
@@ -20,10 +21,10 @@ function extractBearer(req: IncomingMessage): string | null {
   return token.startsWith("aswt_") ? token : null;
 }
 
-function resolveActiveUser(req: IncomingMessage): User | null {
+async function resolveActiveUser(req: IncomingMessage): Promise<User | null> {
   const token = extractBearer(req);
   if (!token) return null;
-  const user = resolveUserByToken(token);
+  const user = await resolveUserByToken(token);
   if (!user || user.status !== "active") return null;
   return user;
 }
@@ -41,8 +42,12 @@ export async function handleMcpUser(
     return false;
   }
 
-  const user = resolveActiveUser(req);
+  const user = await resolveActiveUser(req);
   if (!user) return unauthorized(res);
+  // Install the resolved user as the request's ambient auth so DB audit
+  // columns (created_by on tasks made through the user MCP) attribute to the
+  // human behind the token instead of NULL.
+  setRequestAuth(req, { kind: "user", userId: user.id, user });
 
   if (sessionId && transports[sessionId] && sessionUsers[sessionId] !== user.id) {
     return unauthorized(res);

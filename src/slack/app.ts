@@ -63,12 +63,12 @@ export async function startSlackApp(): Promise<void> {
   if (app) {
     // Establish the durable cutoff before Socket Mode can deliver new asks.
     const { isSlackRenderV2Enabled } = await import("./render-v2");
-    if (isSlackRenderV2Enabled()) ensureSlackRenderV2Activation();
+    if (isSlackRenderV2Enabled()) await ensureSlackRenderV2Activation();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
 
     // Start watching for task completions
-    startTaskWatcher();
+    await startTaskWatcher();
   }
 }
 

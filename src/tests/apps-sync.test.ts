@@ -8,7 +8,7 @@ import {
 } from "node:http";
 import { parseAppDefinition } from "../apps/definition";
 import { type AppRow, createAppRow, patchAppRow } from "../apps/row-store";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { upsertScriptConnection } from "../be/script-connections";
 import { upsertScriptByName } from "../be/scripts/db";
 import { handleApps } from "../http/apps";
@@ -168,8 +168,8 @@ function issueAt(
 }
 
 /** Model definition for direct row-store calls (the HTTP path re-reads it anyway). */
-function modelOf(definition: Definition, model: string) {
-  const parsed = parseAppDefinition(definition);
+async function modelOf(definition: Definition, model: string) {
+  const parsed = await parseAppDefinition(definition);
   if (!parsed.success) throw new Error(JSON.stringify(parsed.issues));
   const resolved = parsed.definition.models[model];
   if (!resolved) throw new Error(`unknown model ${model}`);
@@ -185,8 +185,8 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   // The writer agent IS the lead: owner-less global sources resolve run-as to
   // the lead, and only that identity (or the operator) may wire them.
-  createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: true, status: "idle" });
-  createAgent({ id: OTHER_AGENT_ID, name: "apps-sync-other", isLead: false, status: "idle" });
+  await createAgent({ id: AGENT_ID, name: "apps-sync-worker", isLead: true, status: "idle" });
+  await createAgent({ id: OTHER_AGENT_ID, name: "apps-sync-other", isLead: false, status: "idle" });
 
   const fixture = {
     source: "export default function run() { return { records: [] }; }",
@@ -255,9 +255,9 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${address.port}`;
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
-  getDb().run("DELETE FROM apps");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries WHERE namespace LIKE 'apps:%'");
+  await getDbClient().run("DELETE FROM apps");
 });
 
 afterAll(async () => {
@@ -1039,7 +1039,7 @@ describe("apps sync row envelope and read-only enforcement", () => {
 
   test("a source-managed write without an envelope is refused outright", async () => {
     const appId = await appWithRows();
-    const model = modelOf(definition(), "issue");
+    const model = await modelOf(definition(), "issue");
     await expect(
       createAppRow(appId, "issue", model, { issueKey: "42" }, { allowSourceManaged: true }),
     ).rejects.toThrow("allowSourceManaged writes must carry an envelope");
@@ -1047,7 +1047,7 @@ describe("apps sync row envelope and read-only enforcement", () => {
 
   test("a source-managed write stamps the envelope and round-trips it", async () => {
     const appId = await appWithRows();
-    const model = modelOf(definition(), "issue");
+    const model = await modelOf(definition(), "issue");
     const row = await createAppRow(
       appId,
       "issue",
@@ -1077,7 +1077,7 @@ describe("apps sync row envelope and read-only enforcement", () => {
 
   test("a source-managed patch may rewrite bound columns and re-stamp the envelope", async () => {
     const appId = await appWithRows();
-    const model = modelOf(definition(), "issue");
+    const model = await modelOf(definition(), "issue");
     const row = await createAppRow(
       appId,
       "issue",
@@ -1109,7 +1109,7 @@ describe("apps sync row envelope and read-only enforcement", () => {
 
   test("named queries filter on stale and app rows sort by syncedAt", async () => {
     const appId = await appWithRows();
-    const model = modelOf(definition(), "issue");
+    const model = await modelOf(definition(), "issue");
     await createAppRow(
       appId,
       "issue",
@@ -1204,14 +1204,14 @@ describe("apps sync source edits as schema changes", () => {
   }
 
   /** Seed the row shape only the sync engine may write. */
-  function seedSyncedRow(
+  async function seedSyncedRow(
     appId: string,
     definition: Definition,
     values: Record<string, unknown>,
     source = "gh",
     syncedAt = "2026-08-06T10:00:00.000Z",
   ): Promise<AppRow> {
-    return createAppRow(appId, "issue", modelOf(definition, "issue"), values, {
+    return createAppRow(appId, "issue", await modelOf(definition, "issue"), values, {
       allowSourceManaged: true,
       envelope: { source, syncedAt, stale: false },
       actor: `sync:${source}`,

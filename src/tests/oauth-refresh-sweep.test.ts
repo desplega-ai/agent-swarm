@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import {
   getAuthorizationById,
   getDefaultAuthorizationIdForProvider,
@@ -10,9 +10,9 @@ import {
 } from "../be/db-queries/oauth";
 import { sweepOAuthTokenRefresh } from "../be/oauth-refresh-sweep";
 
-function authorizationStatus(provider: string): string | undefined {
-  const id = getDefaultAuthorizationIdForProvider(provider);
-  return id ? getAuthorizationById(id)?.status : undefined;
+async function authorizationStatus(provider: string): Promise<string | undefined> {
+  const id = await getDefaultAuthorizationIdForProvider(provider);
+  return id ? (await getAuthorizationById(id))?.status : undefined;
 }
 
 const TEST_DB_PATH = "./test-oauth-refresh-sweep.sqlite";
@@ -30,11 +30,11 @@ function appConfig(provider: string) {
   };
 }
 
-function seedTokens(
+async function seedTokens(
   provider: string,
   opts: { expiresInMs: number; refreshToken?: string | null } = { expiresInMs: 3_600_000 },
-): void {
-  storeOAuthTokens(provider, {
+): Promise<void> {
+  await storeOAuthTokens(provider, {
     accessToken: `${provider}-old-access-token`,
     refreshToken: opts.refreshToken === undefined ? `${provider}-refresh-token` : opts.refreshToken,
     expiresAt: new Date(Date.now() + opts.expiresInMs).toISOString(),
@@ -42,15 +42,14 @@ function seedTokens(
   });
 }
 
-function backdateTokenRow(provider: string, ageMs: number): void {
+async function backdateTokenRow(provider: string, ageMs: number): Promise<void> {
   const backdated = new Date(Date.now() - ageMs).toISOString();
-  getDb()
-    .query(
-      `UPDATE oauth_authorizations SET updatedAt = ?
+  await getDbClient().run(
+    `UPDATE oauth_authorizations SET updatedAt = ?
        WHERE appId = (SELECT id FROM oauth_apps WHERE provider = ? AND mcpServerId IS NULL LIMIT 1)
          AND label = 'default'`,
-    )
-    .run(backdated, provider);
+    [backdated, provider],
+  );
 }
 
 type CapturedTokenRequest = { url: string; body: string };
@@ -85,11 +84,11 @@ beforeAll(() => {
   initDb(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   globalThis.fetch = originalFetch;
-  getDb().run("DELETE FROM oauth_refresh_locks");
-  getDb().run("DELETE FROM oauth_authorizations");
-  getDb().run("DELETE FROM oauth_apps");
+  await getDbClient().run("DELETE FROM oauth_refresh_locks");
+  await getDbClient().run("DELETE FROM oauth_authorizations");
+  await getDbClient().run("DELETE FROM oauth_apps");
 });
 
 afterAll(async () => {
@@ -102,8 +101,8 @@ afterAll(async () => {
 
 describe("sweepOAuthTokenRefresh", () => {
   test("refreshes a row whose access token expires within 30 minutes", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000 }); // expires in 10 min
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000 }); // expires in 10 min
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
@@ -112,28 +111,28 @@ describe("sweepOAuthTokenRefresh", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0]?.url).toBe("https://oauth.vendor_a.test/token");
     expect(captured[0]?.body).toContain("grant_type=refresh_token");
-    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
   });
 
   test("skips rows with no refresh token", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000, refreshToken: null });
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 10 * 60 * 1000, refreshToken: null });
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
 
     expect(result).toEqual({ checked: 1, refreshed: 0, skipped: 1, failed: [] });
     expect(captured).toHaveLength(0);
-    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("vendor_a-old-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("vendor_a-old-access-token");
   });
 
   test("skips a non-expiring (NULL expiry) row instead of proactively refreshing it", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
     // GitHub-preset shape: a live token WITH a refresh token but NO expiry.
     // NULL expiry means "does not expire" — the sweep must not treat it as
     // expiring, must not refresh it proactively, and must never mark it
     // refresh-failed.
-    storeOAuthTokens("vendor_a", {
+    await storeOAuthTokens("vendor_a", {
       accessToken: "vendor_a-old-access-token",
       refreshToken: "vendor_a-refresh-token",
       expiresAt: null,
@@ -145,13 +144,13 @@ describe("sweepOAuthTokenRefresh", () => {
 
     expect(result).toEqual({ checked: 1, refreshed: 0, skipped: 1, failed: [] });
     expect(captured).toHaveLength(0);
-    expect(authorizationStatus("vendor_a")).toBe("active");
-    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("vendor_a-old-access-token");
+    expect(await authorizationStatus("vendor_a")).toBe("active");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("vendor_a-old-access-token");
   });
 
   test("skips fresh rows that are neither expiring nor stale", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 }); // expires in 24h, just updated
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 }); // expires in 24h, just updated
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
@@ -161,24 +160,24 @@ describe("sweepOAuthTokenRefresh", () => {
   });
 
   test("keep-alives a stale row even when the access token is far from expiry", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
-    seedTokens("vendor_a", { expiresInMs: 30 * 24 * 60 * 60 * 1000 }); // expires in 30 days
-    backdateTokenRow("vendor_a", 8 * 24 * 60 * 60 * 1000); // untouched for 8 days
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await seedTokens("vendor_a", { expiresInMs: 30 * 24 * 60 * 60 * 1000 }); // expires in 30 days
+    await backdateTokenRow("vendor_a", 8 * 24 * 60 * 60 * 1000); // untouched for 8 days
 
     const captured = mockTokenEndpoint();
     const result = await sweepOAuthTokenRefresh();
 
     expect(result).toEqual({ checked: 1, refreshed: 1, skipped: 0, failed: [] });
     expect(captured).toHaveLength(1);
-    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
   });
 
   test("survives a failing provider and still refreshes the others", async () => {
     // "a_broken" sorts before "b_healthy", proving the sweep continues past a failure.
-    upsertOAuthApp("a_broken", appConfig("a_broken"));
-    upsertOAuthApp("b_healthy", appConfig("b_healthy"));
-    seedTokens("a_broken", { expiresInMs: 10 * 60 * 1000 });
-    seedTokens("b_healthy", { expiresInMs: 10 * 60 * 1000 });
+    await upsertOAuthApp("a_broken", appConfig("a_broken"));
+    await upsertOAuthApp("b_healthy", appConfig("b_healthy"));
+    await seedTokens("a_broken", { expiresInMs: 10 * 60 * 1000 });
+    await seedTokens("b_healthy", { expiresInMs: 10 * 60 * 1000 });
 
     const captured = mockTokenEndpoint(["https://oauth.a_broken.test/token"]);
     const result = await sweepOAuthTokenRefresh();
@@ -191,50 +190,48 @@ describe("sweepOAuthTokenRefresh", () => {
       "https://oauth.a_broken.test/token",
       "https://oauth.b_healthy.test/token",
     ]);
-    expect(getOAuthTokens("a_broken")?.accessToken).toBe("a_broken-old-access-token");
-    expect(getOAuthTokens("b_healthy")?.accessToken).toBe("new-access-token");
+    expect((await getOAuthTokens("a_broken"))?.accessToken).toBe("a_broken-old-access-token");
+    expect((await getOAuthTokens("b_healthy"))?.accessToken).toBe("new-access-token");
     // A failing refresh persists refresh-failed on the authorization; the
     // healthy one stays active.
-    expect(authorizationStatus("a_broken")).toBe("refresh-failed");
-    expect(authorizationStatus("b_healthy")).toBe("active");
+    expect(await authorizationStatus("a_broken")).toBe("refresh-failed");
+    expect(await authorizationStatus("b_healthy")).toBe("active");
   });
 
   test("a refresh-failed authorization stays in the sweep and heals on the next pass", async () => {
-    upsertOAuthApp("vendor_a", appConfig("vendor_a"));
+    await upsertOAuthApp("vendor_a", appConfig("vendor_a"));
     // Not expiring on its own — the only reason it should be swept is the
     // persisted refresh-failed status.
-    seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 });
+    await seedTokens("vendor_a", { expiresInMs: 24 * 60 * 60 * 1000 });
 
     // Pass 1: provider is down → status flips to refresh-failed.
     mockTokenEndpoint(["https://oauth.vendor_a.test/token"]);
     // Force a first failure via a near-expiry token so the sweep attempts it.
-    getDb()
-      .query(
-        `UPDATE oauth_authorizations SET expiresAt = ?
+    await getDbClient().run(
+      `UPDATE oauth_authorizations SET expiresAt = ?
          WHERE appId = (SELECT id FROM oauth_apps WHERE provider = 'vendor_a' AND mcpServerId IS NULL LIMIT 1)
            AND label = 'default'`,
-      )
-      .run(new Date(Date.now() + 60 * 1000).toISOString());
+      [new Date(Date.now() + 60 * 1000).toISOString()],
+    );
     const first = await sweepOAuthTokenRefresh();
     expect(first.failed).toHaveLength(1);
-    expect(authorizationStatus("vendor_a")).toBe("refresh-failed");
+    expect(await authorizationStatus("vendor_a")).toBe("refresh-failed");
 
     // Bump expiry far into the future so the ONLY reason to sweep is the
     // refresh-failed status, proving failed rows are retried each pass.
-    getDb()
-      .query(
-        `UPDATE oauth_authorizations SET expiresAt = ?
+    await getDbClient().run(
+      `UPDATE oauth_authorizations SET expiresAt = ?
          WHERE appId = (SELECT id FROM oauth_apps WHERE provider = 'vendor_a' AND mcpServerId IS NULL LIMIT 1)
            AND label = 'default'`,
-      )
-      .run(new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+      [new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()],
+    );
 
     // Pass 2: provider recovers → refresh succeeds → status back to active.
     mockTokenEndpoint();
     const second = await sweepOAuthTokenRefresh();
     expect(second.refreshed).toBe(1);
     expect(second.failed).toHaveLength(0);
-    expect(authorizationStatus("vendor_a")).toBe("active");
-    expect(getOAuthTokens("vendor_a")?.accessToken).toBe("new-access-token");
+    expect(await authorizationStatus("vendor_a")).toBe("active");
+    expect((await getOAuthTokens("vendor_a"))?.accessToken).toBe("new-access-token");
   });
 });

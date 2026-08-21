@@ -9,10 +9,10 @@ import {
 import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-actions-endpoint.sqlite";
-const TEST_PORT = 13062;
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 
 interface ActionListResponse {
   actions: Array<{
@@ -44,7 +44,8 @@ describe("GET /api/pages/actions — JSON-page action allowlist", () => {
     process.env.DB_PATH = TEST_DB_PATH;
     initDb();
     server = createTestServer();
-    await new Promise<void>((r) => server.listen(TEST_PORT, r));
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

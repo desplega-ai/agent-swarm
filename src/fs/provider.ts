@@ -5,7 +5,13 @@ import type {
   VersionedFileStorageProvider,
 } from "./capabilities";
 
-export type FilesErrorCode = "NotFound" | "Unauthorized" | "Conflict" | "ReadOnly" | "Provider";
+export type FilesErrorCode =
+  | "NotFound"
+  | "Unauthorized"
+  | "Conflict"
+  | "ReadOnly"
+  | "Provider"
+  | "Timeout";
 
 export class FilesError extends Error {
   readonly code: FilesErrorCode;
@@ -155,6 +161,14 @@ export function fileObjectFromHeaders(
 export function normalizeFilesError(error: unknown): FilesError {
   if (error instanceof FilesError) {
     return error;
+  }
+  // A deadline that fired anywhere below us (our own AbortController, or an
+  // AbortSignal.timeout a caller passed in) must not surface as a generic
+  // provider fault: the route maps "Timeout" to 504, everything else to 500.
+  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+    return new FilesError("Timeout", error.message || "File provider request timed out", {
+      cause: error,
+    });
   }
   return new FilesError(
     "Provider",

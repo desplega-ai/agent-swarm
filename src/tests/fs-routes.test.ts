@@ -21,6 +21,7 @@ import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { formatAttachmentsBlockForSlack } from "../slack/blocks";
 import { attachmentContentDisposition } from "../utils/content-disposition";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
 const TEST_FS_DIR = "./test-fs-routes-data";
@@ -34,13 +35,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -74,9 +68,9 @@ beforeAll(async () => {
 
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 
-  const agent = createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -92,10 +86,12 @@ afterAll(async () => {
 beforeEach(async () => {
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   resetFileStorageProviderForTests();
-  taskId = createTaskExtended("fs route task", {
-    agentId,
-    source: "mcp",
-  }).id;
+  taskId = (
+    await createTaskExtended("fs route task", {
+      agentId,
+      source: "mcp",
+    })
+  ).id;
 });
 
 function url(path: string): string {
@@ -187,7 +183,7 @@ describe("/api/fs REST", () => {
     expect(attachment.kind).toBe("shared-fs");
     expect(attachment.intent).toBe("input");
 
-    const rows = getTaskAttachments(taskId);
+    const rows = await getTaskAttachments(taskId);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(attachment.id);
 
@@ -203,7 +199,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("operator API key can upload and delete without X-Agent-ID for dashboard use", async () => {
@@ -219,7 +215,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("download resolves the row's stored key, not a reconstructed tasks/<id>/<name>", async () => {
@@ -230,7 +226,7 @@ describe("/api/fs REST", () => {
     await mkdir(dirname(onDisk), { recursive: true });
     await writeFile(onDisk, "resolved via stored key");
 
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "report.md",
@@ -250,7 +246,7 @@ describe("/api/fs REST", () => {
     const onDisk = join(TEST_FS_DIR, storedKey);
     await mkdir(dirname(onDisk), { recursive: true });
     await writeFile(onDisk, "report");
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "PR analytics backfill — dry-run report",
@@ -276,7 +272,7 @@ describe("/api/fs REST", () => {
     await mkdir(dirname(decoy), { recursive: true });
     await writeFile(decoy, "unrelated decoy — must survive");
 
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "notes.md",
@@ -295,13 +291,13 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
     // The decoy file was never resolved, so it must still exist.
     expect(await Bun.file(decoy).text()).toBe("unrelated decoy — must survive");
   });
 
   test("deleting a url pointer removes the row without a provider call", async () => {
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "PR #42",
@@ -316,13 +312,13 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("deleting a provider-backed row whose blob is already gone still clears the pointer", async () => {
     // stored key points at a local-fs object that does not exist → provider NotFound.
     // Because the key is the row's real key, NotFound means truly gone → row cleared.
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "vanished.txt",
@@ -336,11 +332,11 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
-  test("provider-aware renderers keep local-fs on swarm URLs and agent-fs on live URLs", () => {
-    const local = insertTaskAttachment({
+  test("provider-aware renderers keep local-fs on swarm URLs and agent-fs on live URLs", async () => {
+    const local = await insertTaskAttachment({
       taskId,
       agentId,
       name: "local.txt",
@@ -349,7 +345,7 @@ describe("/api/fs REST", () => {
       providerId: "local-fs",
       providerKey: "tasks/x/local.txt",
     });
-    const agentFs = insertTaskAttachment({
+    const agentFs = await insertTaskAttachment({
       taskId,
       agentId,
       name: "agent.txt",
@@ -364,5 +360,38 @@ describe("/api/fs REST", () => {
     const block = formatAttachmentsBlockForSlack([local, agentFs]);
     expect(block).toContain(`/api/fs/tasks/${taskId}/files/${local.id}/raw`);
     expect(block).toContain("live.agent-fs.dev/file/~/org_1/drive_1/tasks/x/agent.txt");
+  });
+
+  test("upload against a stalled agent-fs provider answers 504", async () => {
+    // A server that accepts the connection and never answers, i.e. exactly the
+    // stall that used to hang task creation until the socket gave up.
+    const stalled = createHttpServer(() => {});
+    const stalledPort = await listenOnFreePort(stalled);
+
+    process.env.AGENT_FS_API_URL = `http://localhost:${stalledPort}`;
+    process.env.API_AGENT_FS_API_KEY = "af_test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "200";
+    resetFileStorageProviderForTests();
+
+    try {
+      const res = await authedFetch(`/api/fs/tasks/${taskId}/files?name=stalled.txt`, {
+        method: "POST",
+        body: Buffer.from("never lands"),
+        headers: { "Content-Type": "text/plain" },
+      });
+      expect(res.status).toBe(504);
+      expect(((await res.json()) as { error: string }).error).toContain("did not respond");
+      expect(await getTaskAttachments(taskId)).toEqual([]);
+    } finally {
+      delete process.env.AGENT_FS_API_URL;
+      delete process.env.API_AGENT_FS_API_KEY;
+      delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+      delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+      delete process.env.AGENT_FS_REQUEST_TIMEOUT_MS;
+      resetFileStorageProviderForTests();
+      await new Promise<void>((resolve) => stalled.close(() => resolve()));
+    }
   });
 });

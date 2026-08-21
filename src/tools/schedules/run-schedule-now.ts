@@ -38,9 +38,9 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
@@ -57,7 +57,7 @@ export const registerRunScheduleNowTool = (server: McpServer) => {
         await runScheduleNow(schedule.id);
 
         // Re-fetch to get updated lastRunAt
-        const updated = getScheduledTaskById(schedule.id);
+        const updated = await getScheduledTaskById(schedule.id);
 
         return toolOk(`Executed schedule "${schedule.name}".`, {
           details: `Task created. Next regular run: ${updated?.nextRunAt || "not scheduled"}`,

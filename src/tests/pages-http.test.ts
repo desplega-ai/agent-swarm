@@ -11,10 +11,10 @@ import { closeDb, initDb } from "../be/db";
 import { handlePages } from "../http/pages";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { Page } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pages-http.sqlite";
-const TEST_PORT = 13037;
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -46,9 +46,8 @@ describe("Pages HTTP API", () => {
     initDb(TEST_DB_PATH);
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {

@@ -1,4 +1,4 @@
-import { getDb } from "./be/db";
+import { getDbClient } from "./be/db";
 import { getSlackApp } from "./slack/app";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
@@ -25,13 +25,13 @@ let alarmActive = false;
  * Read the queue denominator and oldest age in one snapshot. Tasks with unmet
  * dependencies are excluded because a worker cannot start them yet.
  */
-export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
-  const oldest = getDb()
-    .prepare<
-      { claimableCount: number; oldestTaskId: string | null; oldestClaimableAt: string | null },
-      []
-    >(
-      `WITH queued AS (
+export async function getQueueStallSnapshot(now = new Date()): Promise<QueueStallSnapshot> {
+  const oldest = await getDbClient().get<{
+    claimableCount: number;
+    oldestTaskId: string | null;
+    oldestClaimableAt: string | null;
+  }>(
+    `WITH queued AS (
          SELECT
            t.id,
            t.dependsOn,
@@ -83,21 +83,21 @@ export function getQueueStallSnapshot(now = new Date()): QueueStallSnapshot {
          (SELECT COUNT(*) FROM claimable) AS claimableCount,
          (SELECT id FROM oldest) AS oldestTaskId,
          (SELECT claimableAt FROM oldest) AS oldestClaimableAt`,
-    )
-    .get();
+  );
 
   const pickupCutoff = new Date(now.getTime() - QUEUE_STALL_THRESHOLD_MS).toISOString();
   const recentPickupCount =
-    getDb()
-      .prepare<{ count: number }, [string]>(
+    (
+      await getDbClient().get<{ count: number }>(
         `SELECT COUNT(*) AS count
          FROM agent_log
          WHERE eventType IN ('task_status_change', 'task_claimed')
            AND oldValue IN ('pending', 'unassigned')
            AND newValue = 'in_progress'
            AND createdAt >= ?`,
+        [pickupCutoff],
       )
-      .get(pickupCutoff)?.count ?? 0;
+    )?.count ?? 0;
 
   const oldestClaimableAt = oldest?.oldestClaimableAt ?? null;
   return {
@@ -144,7 +144,7 @@ export async function checkQueueStall(
   now = new Date(),
   notify: QueueStallNotifier = notifySlack,
 ): Promise<QueueStallSnapshot> {
-  const snapshot = getQueueStallSnapshot(now);
+  const snapshot = await getQueueStallSnapshot(now);
   const stalled = isQueueStalled(snapshot);
 
   if (stalled && !alarmActive) {

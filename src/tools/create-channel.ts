@@ -38,7 +38,7 @@ export const registerCreateChannelTool = (server: McpServer) => {
       }
 
       // Check if channel already exists
-      const existing = getChannelByName(name);
+      const existing = await getChannelByName(name);
       if (existing) {
         return toolErr(`Channel "${name}" already exists.`, {
           data: { yourAgentId: requestInfo.agentId, channel: existing },

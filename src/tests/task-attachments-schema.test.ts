@@ -5,7 +5,7 @@ import {
   createAgent,
   createTaskExtended,
   deleteTaskAttachment,
-  getDb,
+  getDbClient,
   getTaskAttachments,
   initDb,
   insertTaskAttachment,
@@ -29,7 +29,7 @@ describe("task_attachments provider-agnostic metadata", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "Provider Attachment Worker",
       description: "Test agent for provider attachment metadata",
       role: "worker",
@@ -50,17 +50,17 @@ describe("task_attachments provider-agnostic metadata", () => {
     }
   });
 
-  function newTask(label: string) {
-    return createTaskExtended(label, {
+  async function newTask(label: string) {
+    return await createTaskExtended(label, {
       agentId,
       source: "mcp",
       priority: 50,
     });
   }
 
-  test("insertTaskAttachment defaults provider fields and serializes capabilities", () => {
-    const task = newTask("provider defaults");
-    const stored = insertTaskAttachment({
+  test("insertTaskAttachment defaults provider fields and serializes capabilities", async () => {
+    const task = await newTask("provider defaults");
+    const stored = await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "report.md",
@@ -75,22 +75,21 @@ describe("task_attachments provider-agnostic metadata", () => {
     expect(TaskAttachmentSchema.safeParse(stored).success).toBe(true);
   });
 
-  test("legacy-shaped rows with null provider fields are readable after migration defaults", () => {
-    const task = newTask("legacy provider row");
+  test("legacy-shaped rows with null provider fields are readable after migration defaults", async () => {
+    const task = await newTask("legacy provider row");
     const id = crypto.randomUUID();
-    getDb()
-      .prepare(
-        `INSERT INTO task_attachments
+    await getDbClient().run(
+      `INSERT INTO task_attachments
            (id, task_id, agent_id, name, kind, path, provider_id, provider_key, is_primary)
          VALUES (?, ?, ?, ?, 'agent-fs', ?, NULL, NULL, 0)`,
-      )
-      .run(id, task.id, agentId, "legacy.txt", "/legacy/legacy.txt");
+      [id, task.id, agentId, "legacy.txt", "/legacy/legacy.txt"],
+    );
 
-    const row = getTaskAttachments(task.id)[0];
+    const row = (await getTaskAttachments(task.id))[0];
     expect(row.providerId).toBeUndefined();
     expect(row.providerKey).toBeUndefined();
 
-    const inserted = insertTaskAttachment({
+    const inserted = await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "legacy-copy.txt",
@@ -101,9 +100,9 @@ describe("task_attachments provider-agnostic metadata", () => {
     expect(inserted.providerKey).toBe("/legacy/shared.txt");
   });
 
-  test("deleteTaskAttachment removes a row", () => {
-    const task = newTask("delete attachment");
-    const stored = insertTaskAttachment({
+  test("deleteTaskAttachment removes a row", async () => {
+    const task = await newTask("delete attachment");
+    const stored = await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "delete.txt",
@@ -111,14 +110,14 @@ describe("task_attachments provider-agnostic metadata", () => {
       url: "https://example.com/delete.txt",
     });
 
-    expect(deleteTaskAttachment(stored.id)).toBe(true);
-    expect(deleteTaskAttachment(stored.id)).toBe(false);
-    expect(getTaskAttachments(task.id)).toEqual([]);
+    expect(await deleteTaskAttachment(stored.id)).toBe(true);
+    expect(await deleteTaskAttachment(stored.id)).toBe(false);
+    expect(await getTaskAttachments(task.id)).toEqual([]);
   });
 
-  test("replaceTaskAttachment swaps metadata while preserving task ownership", () => {
-    const task = newTask("replace attachment");
-    const stored = insertTaskAttachment({
+  test("replaceTaskAttachment swaps metadata while preserving task ownership", async () => {
+    const task = await newTask("replace attachment");
+    const stored = await insertTaskAttachment({
       taskId: task.id,
       agentId,
       name: "old.txt",
@@ -126,7 +125,7 @@ describe("task_attachments provider-agnostic metadata", () => {
       url: "https://example.com/old.txt",
     });
 
-    const replaced = replaceTaskAttachment(stored.id, {
+    const replaced = await replaceTaskAttachment(stored.id, {
       agentId,
       name: "new.txt",
       kind: "agent-fs",

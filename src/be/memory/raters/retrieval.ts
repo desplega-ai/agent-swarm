@@ -1,5 +1,5 @@
 import { ensure } from "@desplega.ai/business-use";
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import type { MemoryRetrievalSource } from "@/be/memory/types";
 
 /**
@@ -32,30 +32,27 @@ export type RetrievalExtras = {
   eventType?: "search" | "get";
 };
 
-export function recordRetrievals(
+export async function recordRetrievals(
   taskId: string | undefined,
   agentId: string,
   results: RetrievalRecord[],
   sessionId?: string,
   extras?: RetrievalExtras,
-): void {
+): Promise<void> {
   if (!taskId || results.length === 0) return;
 
-  const db = getDb();
-  const insert = db.prepare(
-    `INSERT INTO memory_retrieval
+  const insertSql = `INSERT INTO memory_retrieval
        (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, contextKey, intent, eventType, retrievalId, rank, retrievalSource)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
   const now = new Date().toISOString();
   const retrievalId = crypto.randomUUID();
   const contextKey = extras?.contextKey ?? null;
   const intent = extras?.intent ?? null;
   const eventType = extras?.eventType ?? "search";
 
-  db.transaction(() => {
+  await getDbClient().transaction(async (tx) => {
     for (const [rank, r] of results.entries()) {
-      insert.run(
+      await tx.run(insertSql, [
         crypto.randomUUID(),
         taskId,
         agentId,
@@ -69,9 +66,9 @@ export function recordRetrievals(
         retrievalId,
         rank,
         r.retrievalSource ?? null,
-      );
+      ]);
     }
-  })();
+  });
 
   // Business-use instrumentation — one `memory_retrieved` event per call,
   // OUTSIDE the transaction. Validator self-contained.
@@ -94,12 +91,11 @@ export function recordRetrievals(
   });
 }
 
-export function getRetrievalsForTask(
+export async function getRetrievalsForTask(
   taskId: string,
-): { memoryId: string; similarity: number | null }[] {
-  return getDb()
-    .prepare<{ memoryId: string; similarity: number | null }, [string]>(
-      "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
-    )
-    .all(taskId);
+): Promise<{ memoryId: string; similarity: number | null }[]> {
+  return getDbClient().query<{ memoryId: string; similarity: number | null }>(
+    "SELECT memoryId, similarity FROM memory_retrieval WHERE taskId = ?",
+    [taskId],
+  );
 }

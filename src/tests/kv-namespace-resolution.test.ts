@@ -9,11 +9,12 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDbClient, initDb } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { githubContextKey, linearContextKey, slackContextKey } from "../tasks/context-key";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-ns-resolution.sqlite";
 const API_KEY = "test-kv-ns-key";
@@ -26,13 +27,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 let server: Server;
@@ -53,8 +47,8 @@ beforeAll(async () => {
       res.end("Not Found");
     }
   });
-  port = await listen(server);
-  const a = createAgent({ name: "kv-ns-test", isLead: false, status: "idle" });
+  port = await listenOnFreePort(server);
+  const a = await createAgent({ name: "kv-ns-test", isLead: false, status: "idle" });
   agentId = a.id;
 });
 
@@ -64,8 +58,8 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries");
 });
 
 function url(path: string): string {
@@ -91,7 +85,7 @@ function authedPut(
 describe("kv namespace resolution — header precedence", () => {
   test("X-Source-Task-Id with Slack contextKey wins", async () => {
     const ns = slackContextKey({ channelId: "CABC", threadTs: "1700000000.000001" });
-    const task = createTaskExtended("slack-test", {
+    const task = await createTaskExtended("slack-test", {
       agentId,
       source: "mcp",
       slackChannelId: "CABC",
@@ -110,7 +104,7 @@ describe("kv namespace resolution — header precedence", () => {
 
   test("X-Source-Task-Id with Linear contextKey wins", async () => {
     const ns = linearContextKey({ issueIdentifier: "DES-99" });
-    const task = createTaskExtended("linear-test", {
+    const task = await createTaskExtended("linear-test", {
       agentId,
       source: "mcp",
       contextKey: ns,
@@ -131,7 +125,7 @@ describe("kv namespace resolution — header precedence", () => {
       kind: "pr",
       number: 999,
     });
-    const task = createTaskExtended("gh-test", {
+    const task = await createTaskExtended("gh-test", {
       agentId,
       source: "mcp",
       contextKey: ns,

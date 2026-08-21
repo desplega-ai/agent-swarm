@@ -7,7 +7,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   initDb,
   updateTaskClaudeSessionId,
 } from "../be/db";
@@ -17,7 +17,9 @@ const TEST_DB_PATH = "./test-task-lifecycle-telemetry.sqlite";
 const WORKER_ID = "bbbb0000-0000-4000-8000-000000000002";
 
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
+  // The post-commit telemetry hook runs through DbClient.afterCommit and then
+  // chains an async verify read, so one microtask turn no longer covers it.
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 async function removeTestDb(): Promise<void> {
@@ -38,7 +40,7 @@ describe("task lifecycle telemetry", () => {
     closeDb();
     await removeTestDb();
     initDb(TEST_DB_PATH);
-    createAgent({ id: WORKER_ID, name: "Telemetry Worker", isLead: false, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Telemetry Worker", isLead: false, status: "idle" });
 
     calls = [];
     taskEventSpy = spyOn(telemetry, "taskEvent").mockImplementation((event, props) => {
@@ -53,7 +55,7 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits task.created from createTaskExtended after the task is committed", async () => {
-    const task = createTaskExtended("create telemetry", {
+    const task = await createTaskExtended("create telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
       tags: ["telemetry"],
@@ -78,15 +80,15 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("does not emit task.created when an enclosing transaction rolls back", async () => {
-    const txn = getDb().transaction(() => {
-      createTaskExtended("rolled back telemetry", {
-        agentId: WORKER_ID,
-        source: "mcp",
-      });
-      throw new Error("rollback");
-    });
-
-    expect(() => txn()).toThrow("rollback");
+    await expect(
+      getDbClient().transaction(async () => {
+        await createTaskExtended("rolled back telemetry", {
+          agentId: WORKER_ID,
+          source: "mcp",
+        });
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
 
     await flushMicrotasks();
 
@@ -94,14 +96,14 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits terminal lifecycle events from universal status helpers", async () => {
-    const completedTask = createTaskExtended("complete telemetry", {
+    const completedTask = await createTaskExtended("complete telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
     });
     await flushMicrotasks();
     calls = [];
 
-    completeTask(completedTask.id, "done");
+    await completeTask(completedTask.id, "done");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -111,14 +113,14 @@ describe("task lifecycle telemetry", () => {
     });
     expect(typeof calls[0]?.props.durationMs).toBe("number");
 
-    const failedTask = createTaskExtended("fail telemetry", {
+    const failedTask = await createTaskExtended("fail telemetry", {
       agentId: WORKER_ID,
       source: "mcp",
     });
     await flushMicrotasks();
     calls = [];
 
-    failTask(failedTask.id, "nope");
+    await failTask(failedTask.id, "nope");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -128,14 +130,14 @@ describe("task lifecycle telemetry", () => {
     });
     expect(typeof calls[0]?.props.durationMs).toBe("number");
 
-    const cancelledTask = createTaskExtended("cancel telemetry", {
+    const cancelledTask = await createTaskExtended("cancel telemetry", {
       agentId: WORKER_ID,
       source: "api",
     });
     await flushMicrotasks();
     calls = [];
 
-    cancelTask(cancelledTask.id, "not needed");
+    await cancelTask(cancelledTask.id, "not needed");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);
@@ -152,12 +154,12 @@ describe("task lifecycle telemetry", () => {
   });
 
   test("emits structured task provider and harness context instead of tags", async () => {
-    const task = createTaskExtended("complete telemetry with harness context", {
+    const task = await createTaskExtended("complete telemetry with harness context", {
       agentId: WORKER_ID,
       source: "mcp",
       tags: ["telemetry"],
     });
-    updateTaskClaudeSessionId(
+    await updateTaskClaudeSessionId(
       task.id,
       "provider-session-1",
       "codex",
@@ -169,7 +171,7 @@ describe("task lifecycle telemetry", () => {
     await flushMicrotasks();
     calls = [];
 
-    completeTask(task.id, "done");
+    await completeTask(task.id, "done");
     await flushMicrotasks();
 
     expect(calls).toHaveLength(1);

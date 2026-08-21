@@ -5,7 +5,7 @@ import { readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { createAgent, deleteSwarmConfig, getDb, upsertSwarmConfig } from "../be/db";
+import { createAgent, deleteSwarmConfig, getDbClient, upsertSwarmConfig } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import {
   fetchOpenapiSpec,
@@ -259,7 +259,7 @@ beforeEach(() => {
   setOpenapiSpecFetchForTesting(fixtureOpenapiFetch);
 });
 
-afterEach(() => {
+afterEach(async () => {
   setOpenapiSpecFetchForTesting(null);
   openapiSpecFixtures.clear();
   globalThis.fetch = originalFetch;
@@ -270,28 +270,28 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
-  const db = getDb();
+  const dbClient = getDbClient();
   for (const id of createdConnectionIds.splice(0)) {
-    db.run("DELETE FROM script_connections WHERE id = ?", id);
+    await dbClient.run("DELETE FROM script_connections WHERE id = ?", [id]);
   }
   for (const id of createdBindingIds.splice(0)) {
-    db.run("DELETE FROM script_credential_bindings WHERE id = ?", id);
+    await dbClient.run("DELETE FROM script_credential_bindings WHERE id = ?", [id]);
   }
   for (const id of createdConfigIds.splice(0)) {
-    deleteSwarmConfig(id);
+    await deleteSwarmConfig(id);
   }
   removeDbFiles(MIGRATION_REBUILD_DB_PATH);
 });
 
 describe("script connections", () => {
   test("relational credential bindings are resolved before legacy JSON config", async () => {
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "REL_VENDOR_KEY",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:REL_VENDOR_KEY]",
     });
     createdBindingIds.push(binding.id);
-    const secretConfig = upsertSwarmConfig({
+    const secretConfig = await upsertSwarmConfig({
       scope: "global",
       key: "REL_VENDOR_KEY",
       value: "rel-secret",
@@ -310,15 +310,15 @@ describe("script connections", () => {
     );
   });
 
-  test("credential binding upsert is idempotent by binding identity", () => {
-    const first = upsertCredentialBinding({
+  test("credential binding upsert is idempotent by binding identity", async () => {
+    const first = await upsertCredentialBinding({
       configKey: "IDEMPOTENT_VENDOR_KEY",
       allowedHosts: ["old.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:IDEMPOTENT_VENDOR_KEY]",
     });
     createdBindingIds.push(first.id);
 
-    const second = upsertCredentialBinding({
+    const second = await upsertCredentialBinding({
       configKey: "IDEMPOTENT_VENDOR_KEY",
       allowedHosts: ["new.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:IDEMPOTENT_VENDOR_KEY]",
@@ -329,7 +329,7 @@ describe("script connections", () => {
   });
 
   test("OpenAPI connections generate full ctx.api method, args, and response types", async () => {
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "TYPE_VENDOR_KEY",
       allowedHosts: ["api.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:TYPE_VENDOR_KEY]",
@@ -368,7 +368,7 @@ describe("script connections", () => {
       export default main;
     `;
 
-    expect(typecheckScript(source)).toEqual({ ok: true });
+    expect(await typecheckScript(source)).toEqual({ ok: true });
     expect(connection.generatedTypes).toContain(
       "getRepo(args: VendorApiGetRepoArgs, options: ScriptApiRawOptions): Promise<ScriptApiRawResult>;",
     );
@@ -450,7 +450,7 @@ describe("script connections", () => {
   });
 
   test("GraphQL connections generate ctx.api descriptor and graphql method types", async () => {
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "GRAPHQL_VENDOR_KEY",
       allowedHosts: ["countries.vendor.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:GRAPHQL_VENDOR_KEY]",
@@ -510,7 +510,7 @@ describe("script connections", () => {
       export default main;
     `;
 
-    expect(typecheckScript(source)).toEqual({ ok: true });
+    expect(await typecheckScript(source)).toEqual({ ok: true });
   });
 
   test("migration 112 rebuild preserves existing script connection rows", () => {
@@ -999,11 +999,10 @@ describe("script connections", () => {
         }),
       ).rejects.toThrow(/valid JSON|valid YAML|JSON specs only/);
 
-      const stored = getDb()
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) AS count FROM script_connections WHERE slug = ?",
-        )
-        .get(`badContentVendor${suffix}`);
+      const stored = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM script_connections WHERE slug = ?",
+        [`badContentVendor${suffix}`],
+      );
       expect(stored?.count).toBe(0);
     } finally {
       server.stop();
@@ -1014,7 +1013,7 @@ describe("script connections", () => {
     const suffix = crypto.randomUUID().replace(/-/g, "");
     const slug = `agentHeaderVendor${suffix}`;
     const configKey = `AGENT_HEADER_VENDOR_KEY_${suffix}`;
-    const lead = createAgent({
+    const lead = await createAgent({
       name: `script-connections-lead-${crypto.randomUUID()}`,
       isLead: true,
       status: "idle",
@@ -1038,30 +1037,28 @@ describe("script connections", () => {
 
     expect(result.structuredContent.success).toBe(true);
 
-    const db = getDb();
-    const connectionRow = db
-      .prepare<
-        {
-          id: string;
-          credential_binding_id: string | null;
-          created_by: string | null;
-          updated_by: string | null;
-        },
-        [string]
-      >(
-        "SELECT id, credential_binding_id, created_by, updated_by FROM script_connections WHERE slug = ?",
-      )
-      .get(slug);
+    const dbClient = getDbClient();
+    const connectionRow = await dbClient.get<{
+      id: string;
+      credential_binding_id: string | null;
+      created_by: string | null;
+      updated_by: string | null;
+    }>(
+      "SELECT id, credential_binding_id, created_by, updated_by FROM script_connections WHERE slug = ?",
+      [slug],
+    );
     expect(connectionRow).toBeDefined();
     expect(connectionRow?.created_by).toBeNull();
     expect(connectionRow?.updated_by).toBeNull();
     createdConnectionIds.push(connectionRow!.id);
 
-    const bindingRow = db
-      .prepare<{ id: string; created_by: string | null; updated_by: string | null }, [string]>(
-        "SELECT id, created_by, updated_by FROM script_credential_bindings WHERE config_key = ?",
-      )
-      .get(configKey);
+    const bindingRow = await dbClient.get<{
+      id: string;
+      created_by: string | null;
+      updated_by: string | null;
+    }>("SELECT id, created_by, updated_by FROM script_credential_bindings WHERE config_key = ?", [
+      configKey,
+    ]);
     expect(bindingRow).toBeDefined();
     expect(bindingRow?.id).toBe(connectionRow?.credential_binding_id);
     expect(bindingRow?.created_by).toBeNull();
@@ -1074,7 +1071,7 @@ describe("script connections", () => {
     try {
       const suffix = crypto.randomUUID().replace(/-/g, "");
       const slug = `toolUrlVendor${suffix}`;
-      const lead = createAgent({
+      const lead = await createAgent({
         name: `script-connections-tool-url-lead-${crypto.randomUUID()}`,
         isLead: true,
         status: "idle",
@@ -1095,9 +1092,10 @@ describe("script connections", () => {
       };
 
       expect(upsertResult.structuredContent.success).toBe(true);
-      const row = getDb()
-        .prepare<{ id: string }, [string]>("SELECT id FROM script_connections WHERE slug = ?")
-        .get(slug);
+      const row = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM script_connections WHERE slug = ?",
+        [slug],
+      );
       expect(row).toBeDefined();
       createdConnectionIds.push(row!.id);
 
@@ -1110,11 +1108,12 @@ describe("script connections", () => {
       };
 
       expect(refreshResult.structuredContent.success).toBe(true);
-      const refreshed = getDb()
-        .prepare<{ openapi_spec_etag: string | null; generated_types: string | null }, [string]>(
-          "SELECT openapi_spec_etag, generated_types FROM script_connections WHERE id = ?",
-        )
-        .get(row!.id);
+      const refreshed = await getDbClient().get<{
+        openapi_spec_etag: string | null;
+        generated_types: string | null;
+      }>("SELECT openapi_spec_etag, generated_types FROM script_connections WHERE id = ?", [
+        row!.id,
+      ]);
       expect(refreshed?.openapi_spec_etag).toBe('"v2"');
       expect(refreshed?.generated_types).toContain("toolListOrgRepos");
     } finally {
@@ -1126,7 +1125,7 @@ describe("script connections", () => {
     const suffix = crypto.randomUUID().replace(/-/g, "");
     const slug = `toolGraphql${suffix}`;
     const configKey = `TOOL_GRAPHQL_KEY_${suffix}`;
-    const lead = createAgent({
+    const lead = await createAgent({
       name: `script-connections-tool-graphql-lead-${crypto.randomUUID()}`,
       isLead: true,
       status: "idle",
@@ -1148,29 +1147,24 @@ describe("script connections", () => {
     };
 
     expect(result.structuredContent.success).toBe(true);
-    const row = getDb()
-      .prepare<
-        {
-          id: string;
-          kind: string;
-          credential_binding_id: string | null;
-          generated_types: string | null;
-        },
-        [string]
-      >(
-        `SELECT id, kind, credential_binding_id, generated_types
+    const row = await getDbClient().get<{
+      id: string;
+      kind: string;
+      credential_binding_id: string | null;
+      generated_types: string | null;
+    }>(
+      `SELECT id, kind, credential_binding_id, generated_types
          FROM script_connections WHERE slug = ?`,
-      )
-      .get(slug);
+      [slug],
+    );
     expect(row?.kind).toBe("graphql");
     expect(row?.generated_types).toContain("graphql<T = JsonValue>");
     createdConnectionIds.push(row!.id);
 
-    const bindingRow = getDb()
-      .prepare<{ id: string; allowed_hosts_json: string }, [string]>(
-        "SELECT id, allowed_hosts_json FROM script_credential_bindings WHERE config_key = ?",
-      )
-      .get(configKey);
+    const bindingRow = await getDbClient().get<{ id: string; allowed_hosts_json: string }>(
+      "SELECT id, allowed_hosts_json FROM script_credential_bindings WHERE config_key = ?",
+      [configKey],
+    );
     expect(bindingRow?.id).toBe(row?.credential_binding_id);
     expect(bindingRow?.allowed_hosts_json).toBe(JSON.stringify(["graphql.vendor.test"]));
     createdBindingIds.push(bindingRow!.id);
@@ -1188,7 +1182,7 @@ describe("script connections", () => {
         return Response.json({ full_name: "desplega-ai/agent-swarm", private: false });
       },
     });
-    const binding = upsertCredentialBinding({
+    const binding = await upsertCredentialBinding({
       configKey: "RUNTIME_VENDOR_KEY",
       allowedHosts: [`127.0.0.1:${server.port}`],
       headerTemplate: "Authorization: Bearer [REDACTED:RUNTIME_VENDOR_KEY]",

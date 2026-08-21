@@ -21,16 +21,16 @@ import {
   deleteSwarmConfigByKey,
   getAgentById,
   getAgentHarnessProviders,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   initDb,
   setAgentHarnessProvider,
   upsertSwarmConfig,
 } from "../be/db";
 import { handleAgentRegister, handleAgentsRest } from "../http/agents";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-agents-harness-provider.sqlite";
-const TEST_PORT = 13059 + (process.pid % 1000);
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -63,15 +63,14 @@ function makeTestServer(): Server {
 }
 
 let server: Server;
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = makeTestServer();
-  await new Promise<void>((resolve) => {
-    server.listen(TEST_PORT, () => resolve());
-  });
+  const port = await listenOnFreePort(server);
+  baseUrl = `http://localhost:${port}`;
 });
 
 afterAll(async () => {
@@ -82,25 +81,24 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Each test starts on an empty agents table.
-  getDb().prepare("DELETE FROM agents").run();
-  getDb().prepare("DELETE FROM swarm_config").run();
+  await getDbClient().run("DELETE FROM agents");
+  await getDbClient().run("DELETE FROM swarm_config");
 });
 
 // ─── Migration: column exists ────────────────────────────────────────────────
 
 describe("migration 054_agent_harness_provider", () => {
-  test("`harness_provider` column exists on the `agents` table", () => {
-    const cols = getDb()
-      .prepare<{ name: string }, []>(`PRAGMA table_info(agents)`)
-      .all()
-      .map((r) => r.name);
+  test("`harness_provider` column exists on the `agents` table", async () => {
+    const cols = (await getDbClient().query<{ name: string }>(`PRAGMA table_info(agents)`)).map(
+      (r) => r.name,
+    );
     expect(cols).toContain("harness_provider");
   });
 
-  test("existing agent rows default to NULL `harness_provider`", () => {
-    const a = createAgent({
+  test("existing agent rows default to NULL `harness_provider`", async () => {
+    const a = await createAgent({
       name: "legacy-agent",
       isLead: false,
       status: "idle",
@@ -113,19 +111,19 @@ describe("migration 054_agent_harness_provider", () => {
 // ─── DB helpers ──────────────────────────────────────────────────────────────
 
 describe("DB helpers", () => {
-  test("setAgentHarnessProvider writes and returns the updated row", () => {
-    const a = createAgent({ name: "a1", isLead: false, status: "idle", capabilities: [] });
+  test("setAgentHarnessProvider writes and returns the updated row", async () => {
+    const a = await createAgent({ name: "a1", isLead: false, status: "idle", capabilities: [] });
     expect(a.harnessProvider).toBeNull();
 
-    const updated = setAgentHarnessProvider(a.id, "codex");
+    const updated = await setAgentHarnessProvider(a.id, "codex");
     expect(updated?.harnessProvider).toBe("codex");
 
-    const fetched = getAgentById(a.id);
+    const fetched = await getAgentById(a.id);
     expect(fetched?.harnessProvider).toBe("codex");
   });
 
-  test("setAgentHarnessProvider can clear the column with null", () => {
-    const a = createAgent({
+  test("setAgentHarnessProvider can clear the column with null", async () => {
+    const a = await createAgent({
       name: "a-clear",
       isLead: false,
       status: "idle",
@@ -134,40 +132,40 @@ describe("DB helpers", () => {
     });
     expect(a.harnessProvider).toBe("claude");
 
-    const updated = setAgentHarnessProvider(a.id, null);
+    const updated = await setAgentHarnessProvider(a.id, null);
     expect(updated?.harnessProvider).toBeNull();
   });
 
-  test("setAgentHarnessProvider returns null when agent not found", () => {
-    const result = setAgentHarnessProvider("nonexistent-id", "claude");
+  test("setAgentHarnessProvider returns null when agent not found", async () => {
+    const result = await setAgentHarnessProvider("nonexistent-id", "claude");
     expect(result).toBeNull();
   });
 
-  test("getAgentHarnessProviders aggregates by provider, excluding NULL", () => {
-    createAgent({
+  test("getAgentHarnessProviders aggregates by provider, excluding NULL", async () => {
+    await createAgent({
       name: "x1",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "claude",
     });
-    createAgent({
+    await createAgent({
       name: "x2",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "claude",
     });
-    createAgent({
+    await createAgent({
       name: "x3",
       isLead: false,
       status: "idle",
       capabilities: [],
       harnessProvider: "codex",
     });
-    createAgent({ name: "x4", isLead: false, status: "idle", capabilities: [] }); // NULL — excluded
+    await createAgent({ name: "x4", isLead: false, status: "idle", capabilities: [] }); // NULL — excluded
 
-    const counts = getAgentHarnessProviders();
+    const counts = await getAgentHarnessProviders();
     expect(counts).toEqual([
       { provider: "claude", count: 2 },
       { provider: "codex", count: 1 },
@@ -191,7 +189,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
     });
     expect(res.status).toBe(201);
 
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("claude");
   });
 
@@ -212,7 +210,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("codex");
   });
 
@@ -235,7 +233,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
 
     // Existing value preserved (so PATCH overrides aren't clobbered by
     // older workers re-registering without the field).
-    const row = getAgentById(agentId);
+    const row = await getAgentById(agentId);
     expect(row?.harnessProvider).toBe("claude");
   });
 
@@ -257,7 +255,7 @@ describe("POST /api/agents — worker registration pushes harness_provider", () 
 
 describe("PATCH /api/agents/:id/harness-provider", () => {
   test("updates the column on a known agent", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-1",
       isLead: false,
       status: "idle",
@@ -271,12 +269,12 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(a.id);
+    const row = await getAgentById(a.id);
     expect(row?.harnessProvider).toBe("codex");
   });
 
   test("rejects unknown provider names with 400", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-2",
       isLead: false,
       status: "idle",
@@ -301,7 +299,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
   });
 
   test("PATCH also upserts swarm_config (scope=agent) so the worker reconciles", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "patch-target-3",
       isLead: false,
       status: "idle",
@@ -315,7 +313,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const harnessRow = rows.find((r) => r.key === "HARNESS_PROVIDER");
     expect(harnessRow?.value).toBe("codex");
 
@@ -327,7 +325,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
     });
     expect(res2.status).toBe(200);
 
-    const rows2 = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows2 = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const harnessRow2 = rows2.find((r) => r.key === "HARNESS_PROVIDER");
     expect(harnessRow2?.value).toBe("claude");
     expect(rows2.filter((r) => r.key === "HARNESS_PROVIDER")).toHaveLength(1);
@@ -336,7 +334,7 @@ describe("PATCH /api/agents/:id/harness-provider", () => {
 
 describe("PATCH /api/agents/:id/runtime", () => {
   test("updates harness_provider and agent-scoped runtime config rows", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "runtime-target-1",
       isLead: false,
       status: "idle",
@@ -350,16 +348,16 @@ describe("PATCH /api/agents/:id/runtime", () => {
     });
     expect(res.status).toBe(200);
 
-    const row = getAgentById(a.id);
+    const row = await getAgentById(a.id);
     expect(row?.harnessProvider).toBe("codex");
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "HARNESS_PROVIDER")?.value).toBe("codex");
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")?.value).toBe("gpt-5.4");
   });
 
   test("rejects non-local harnesses for runtime editing", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "runtime-target-2",
       isLead: false,
       status: "idle",
@@ -379,7 +377,7 @@ describe("PATCH /api/agents/:id/runtime", () => {
 
 describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
   test("happy path: sets REASONING_EFFORT_OVERRIDE for a supported harness/model", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-1",
       isLead: false,
       status: "idle",
@@ -397,13 +395,13 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     const effortRow = rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE");
     expect(effortRow?.value).toBe("high");
   });
 
   test("validation failure: rejects xhigh on a non-max Codex model with 400 + allowed array", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-2",
       isLead: false,
       status: "idle",
@@ -433,12 +431,12 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     expect(body.allowed).not.toContain("xhigh");
 
     // No row was written for the rejected value.
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
   });
 
   test("clearing: reasoning_effort: null removes the REASONING_EFFORT_OVERRIDE row", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-3",
       isLead: false,
       status: "idle",
@@ -457,7 +455,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(setRes.status).toBe(200);
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       )?.value,
     ).toBe("medium");
@@ -474,12 +472,12 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(clearRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
   });
 
   test("symmetric fix: model: null removes the MODEL_OVERRIDE row (regression coverage)", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-4",
       isLead: false,
       status: "idle",
@@ -494,8 +492,9 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(setRes.status).toBe(200);
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find((r) => r.key === "MODEL_OVERRIDE")
-        ?.value,
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
+        (r) => r.key === "MODEL_OVERRIDE",
+      )?.value,
     ).toBe("gpt-5.4");
 
     // Prior to this phase, there was no way to clear MODEL_OVERRIDE via the
@@ -508,14 +507,14 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(clearRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")).toBeUndefined();
     // HARNESS_PROVIDER is untouched by the model clear.
     expect(rows.find((r) => r.key === "HARNESS_PROVIDER")?.value).toBe("codex");
   });
 
   test("omitted reasoning_effort leaves an existing override untouched", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-5",
       isLead: false,
       status: "idle",
@@ -540,12 +539,12 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(res.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")?.value).toBe("low");
   });
 
   test("reasoning_effort-only PATCH (model omitted) validates against the persisted MODEL_OVERRIDE, not an empty string", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "reasoning-target-6",
       isLead: false,
       status: "idle",
@@ -570,7 +569,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
     });
     expect(effortOnlyRes.status).toBe(200);
 
-    const rows = getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
     expect(rows.find((r) => r.key === "REASONING_EFFORT_OVERRIDE")?.value).toBe("xhigh");
     // Model is unaffected since it was omitted.
     expect(rows.find((r) => r.key === "MODEL_OVERRIDE")?.value).toBe("gpt-5.1-codex-max");
@@ -581,7 +580,7 @@ describe("PATCH /api/agents/:id/runtime — reasoning_effort", () => {
 
 describe("PUT /api/agents/:id/credential-status — reasoningEffort echo", () => {
   test("latest_model.reasoningEffort merges into cred_status", async () => {
-    const a = createAgent({
+    const a = await createAgent({
       name: "cred-status-reasoning-1",
       isLead: false,
       status: "idle",
@@ -617,19 +616,23 @@ describe("PUT /api/agents/:id/credential-status — reasoningEffort echo", () =>
 // ─── deleteSwarmConfigByKey helper (Phase 2) ────────────────────────────────
 
 describe("deleteSwarmConfigByKey", () => {
-  test("no-ops (returns false) when no matching row exists", () => {
-    const result = deleteSwarmConfigByKey("agent", "no-such-agent", "REASONING_EFFORT_OVERRIDE");
+  test("no-ops (returns false) when no matching row exists", async () => {
+    const result = await deleteSwarmConfigByKey(
+      "agent",
+      "no-such-agent",
+      "REASONING_EFFORT_OVERRIDE",
+    );
     expect(result).toBe(false);
   });
 
-  test("removes an existing row and returns true", () => {
-    const a = createAgent({
+  test("removes an existing row and returns true", async () => {
+    const a = await createAgent({
       name: "delete-by-key-target",
       isLead: false,
       status: "idle",
       capabilities: [],
     });
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: a.id,
       key: "REASONING_EFFORT_OVERRIDE",
@@ -637,32 +640,38 @@ describe("deleteSwarmConfigByKey", () => {
       description: "test setup",
     });
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       ),
     ).toBeDefined();
 
-    const result = deleteSwarmConfigByKey("agent", a.id, "REASONING_EFFORT_OVERRIDE");
+    const result = await deleteSwarmConfigByKey("agent", a.id, "REASONING_EFFORT_OVERRIDE");
     expect(result).toBe(true);
 
     expect(
-      getSwarmConfigs({ scope: "agent", scopeId: a.id }).find(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
         (r) => r.key === "REASONING_EFFORT_OVERRIDE",
       ),
     ).toBeUndefined();
   });
 
-  test("global scope: removes a row looked up with scopeId ignored (NULL-safe)", () => {
-    upsertSwarmConfig({
+  test("global scope: removes a row looked up with scopeId ignored (NULL-safe)", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "GLOBAL_TEST_DELETE_BY_KEY",
       value: "x",
       description: "test setup",
     });
-    const result = deleteSwarmConfigByKey("global", "irrelevant", "GLOBAL_TEST_DELETE_BY_KEY");
+    const result = await deleteSwarmConfigByKey(
+      "global",
+      "irrelevant",
+      "GLOBAL_TEST_DELETE_BY_KEY",
+    );
     expect(result).toBe(true);
     expect(
-      getSwarmConfigs({ scope: "global" }).find((r) => r.key === "GLOBAL_TEST_DELETE_BY_KEY"),
+      (await getSwarmConfigs({ scope: "global" })).find(
+        (r) => r.key === "GLOBAL_TEST_DELETE_BY_KEY",
+      ),
     ).toBeUndefined();
   });
 });

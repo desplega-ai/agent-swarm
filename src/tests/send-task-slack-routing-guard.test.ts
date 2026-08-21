@@ -50,8 +50,8 @@ beforeAll(async () => {
   }
   closeDb();
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "Routing Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Routing Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Routing Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Routing Worker", isLead: false, status: "idle" });
 });
 
 afterAll(async () => {
@@ -72,7 +72,7 @@ describe("send-task: Slack-routing coherence guard", () => {
       channelId: "D0ATCHCQR4M",
       threadTs: "1783596696.921879",
     });
-    const parentTask = createTaskExtended("parent task in Gerard's DM", {
+    const parentTask = await createTaskExtended("parent task in Gerard's DM", {
       slackChannelId: "D0ATCHCQR4M",
       slackThreadTs: "1783596696.921879",
       slackUserId: "U03QP36M2V7",
@@ -99,7 +99,7 @@ describe("send-task: Slack-routing coherence guard", () => {
   });
 
   test("explicit channel matches the parent's but explicit thread diverges → rejected, names both threads", async () => {
-    const parentTask = createTaskExtended("parent task in a channel", {
+    const parentTask = await createTaskExtended("parent task in a channel", {
       slackChannelId: "C_SAME_CHANNEL",
       slackThreadTs: "111.111",
     });
@@ -124,7 +124,7 @@ describe("send-task: Slack-routing coherence guard", () => {
   });
 
   test("overrideSlackContext: true allows a deliberate same-channel, different-thread dispatch", async () => {
-    const parentTask = createTaskExtended("parent task in a channel", {
+    const parentTask = await createTaskExtended("parent task in a channel", {
       slackChannelId: "C_SAME_CHANNEL_OVERRIDE",
       slackThreadTs: "111.111",
     });
@@ -144,13 +144,13 @@ describe("send-task: Slack-routing coherence guard", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.slackChannelId).toBe("C_SAME_CHANNEL_OVERRIDE");
     expect(created?.slackThreadTs).toBe("999.999");
   });
 
   test("overrideSlackContext: true allows the deliberate cross-channel dispatch", async () => {
-    const parentTask = createTaskExtended("parent task", {
+    const parentTask = await createTaskExtended("parent task", {
       slackChannelId: "C_ORIGINAL",
       slackThreadTs: "111.111",
     });
@@ -170,14 +170,14 @@ describe("send-task: Slack-routing coherence guard", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.slackChannelId).toBe("C_ESCALATION");
     expect(created?.slackThreadTs).toBe("222.222");
   });
 
   test("overrideSlackContext survives the DB residual-mismatch guard when the parent carries a contextKey", async () => {
     const contextKey = slackContextKey({ channelId: "C_ORIGINAL_CTX", threadTs: "111.111" });
-    const parentTask = createTaskExtended("parent task with contextKey", {
+    const parentTask = await createTaskExtended("parent task with contextKey", {
       slackChannelId: "C_ORIGINAL_CTX",
       slackThreadTs: "111.111",
       contextKey,
@@ -198,7 +198,7 @@ describe("send-task: Slack-routing coherence guard", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     // Without overrideSlackContext propagating into createTaskExtended, the
     // DB's residual-mismatch normalization would silently pull this back to
     // the parent's contextKey channel — defeating the deliberate override.
@@ -207,7 +207,7 @@ describe("send-task: Slack-routing coherence guard", () => {
   });
 
   test("explicit Slack unit identical to parent's → accepted, no behavior change", async () => {
-    const parentTask = createTaskExtended("parent task same channel", {
+    const parentTask = await createTaskExtended("parent task same channel", {
       slackChannelId: "C_SAME",
       slackThreadTs: "333.333",
     });
@@ -245,7 +245,7 @@ describe("send-task: Slack-routing coherence guard", () => {
   });
 
   test("no Slack fields at all → accepted (inheritance path)", async () => {
-    const parentTask = createTaskExtended("parent for inheritance", {
+    const parentTask = await createTaskExtended("parent for inheritance", {
       slackChannelId: "C_INHERIT",
       slackThreadTs: "444.444",
     });
@@ -259,13 +259,13 @@ describe("send-task: Slack-routing coherence guard", () => {
 
     const s = structuredOf(result);
     expect(s.success).toBe(true);
-    const created = getTaskById(s.task!.id);
+    const created = await getTaskById(s.task!.id);
     expect(created?.slackChannelId).toBe("C_INHERIT");
     expect(created?.slackThreadTs).toBe("444.444");
   });
 
   test("direct-assign path is guarded identically to the pool path", async () => {
-    const parentTask = createTaskExtended("parent for direct assign", {
+    const parentTask = await createTaskExtended("parent for direct assign", {
       slackChannelId: "C_DIRECT_PARENT",
       slackThreadTs: "555.555",
     });
@@ -289,7 +289,7 @@ describe("send-task: Slack-routing coherence guard", () => {
   });
 
   test("offerMode path is guarded identically to the pool path", async () => {
-    const parentTask = createTaskExtended("parent for offer", {
+    const parentTask = await createTaskExtended("parent for offer", {
       slackChannelId: "C_OFFER_PARENT",
       slackThreadTs: "666.666",
     });

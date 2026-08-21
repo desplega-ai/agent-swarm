@@ -15,7 +15,7 @@ import {
   getAllSessionCosts,
   getAttributionByPerson,
   getDashboardCostSummary,
-  getDb,
+  getDbClient,
   getSessionCostSummary,
   getSessionCostsByAgentId,
   getSessionCostsByTaskId,
@@ -25,9 +25,9 @@ import {
   UNATTRIBUTED_USER_ID,
 } from "../be/db";
 import type { SessionCost } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-costs.sqlite";
-const TEST_PORT = 13016;
 
 // Helper to parse path segments
 function getPathSegments(url: string): string[] {
@@ -68,7 +68,7 @@ async function handleRequest(
     }
 
     try {
-      const cost = createSessionCost({
+      const cost = await createSessionCost({
         sessionId: parsedBody.sessionId,
         taskId: parsedBody.taskId || undefined,
         agentId: parsedBody.agentId,
@@ -107,7 +107,7 @@ async function handleRequest(
         },
       };
     }
-    const summary = getSessionCostSummary({
+    const summary = await getSessionCostSummary({
       startDate: queryParams.get("startDate") || undefined,
       endDate: queryParams.get("endDate") || undefined,
       agentId: queryParams.get("agentId") || undefined,
@@ -123,7 +123,7 @@ async function handleRequest(
     pathSegments[1] === "session-costs" &&
     pathSegments[2] === "dashboard"
   ) {
-    const dashboardCosts = getDashboardCostSummary();
+    const dashboardCosts = await getDashboardCostSummary();
     return { status: 200, body: dashboardCosts };
   }
 
@@ -143,18 +143,18 @@ async function handleRequest(
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId, limit);
+      costs = await getSessionCostsByTaskId(taskId, limit);
     } else if (startDate || endDate) {
-      costs = getSessionCostsFiltered({
+      costs = await getSessionCostsFiltered({
         agentId: agentId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         limit,
       });
     } else if (agentId) {
-      costs = getSessionCostsByAgentId(agentId, limit);
+      costs = await getSessionCostsByAgentId(agentId, limit);
     } else {
-      costs = getAllSessionCosts(limit);
+      costs = await getAllSessionCosts(limit);
     }
 
     return { status: 200, body: { costs } };
@@ -183,7 +183,7 @@ function createTestServer(): Server {
 
 describe("Session Costs API", () => {
   let server: Server;
-  const baseUrl = `http://localhost:${TEST_PORT}`;
+  let baseUrl = "";
   let testAgent: { id: string };
 
   beforeAll(async () => {
@@ -198,7 +198,7 @@ describe("Session Costs API", () => {
     initDb(TEST_DB_PATH);
 
     // Create a test agent
-    testAgent = createAgent({
+    testAgent = await createAgent({
       name: "Test Cost Agent",
       isLead: false,
       status: "idle",
@@ -206,12 +206,9 @@ describe("Session Costs API", () => {
 
     // Start test server
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => {
-        console.log(`Test server listening on port ${TEST_PORT}`);
-        resolve();
-      });
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
+    console.log(`Test server listening on port ${port}`);
   });
 
   afterAll(async () => {
@@ -234,8 +231,8 @@ describe("Session Costs API", () => {
   });
 
   describe("Database Functions", () => {
-    test("should create and retrieve session cost by agentId", () => {
-      const cost = createSessionCost({
+    test("should create and retrieve session cost by agentId", async () => {
+      const cost = await createSessionCost({
         sessionId: "db-test-session-1",
         agentId: testAgent.id,
         totalCostUsd: 0.05,
@@ -258,15 +255,15 @@ describe("Session Costs API", () => {
       expect(cost.cacheWriteTokens).toBe(0);
 
       // Retrieve by agentId
-      const costs = getSessionCostsByAgentId(testAgent.id);
+      const costs = await getSessionCostsByAgentId(testAgent.id);
       expect(costs.length).toBeGreaterThanOrEqual(1);
       expect(costs.find((c) => c.id === cost.id)).toBeDefined();
     });
 
-    test("should create session cost with taskId", () => {
-      const task = createTaskExtended("Test task for session cost");
+    test("should create session cost with taskId", async () => {
+      const task = await createTaskExtended("Test task for session cost");
 
-      const cost = createSessionCost({
+      const cost = await createSessionCost({
         sessionId: "db-test-session-2",
         taskId: task.id,
         agentId: testAgent.id,
@@ -279,14 +276,14 @@ describe("Session Costs API", () => {
       expect(cost.taskId).toBe(task.id);
 
       // Retrieve by taskId
-      const costs = getSessionCostsByTaskId(task.id);
+      const costs = await getSessionCostsByTaskId(task.id);
       expect(costs.length).toBe(1);
       expect(costs[0]?.sessionId).toBe("db-test-session-2");
       expect(costs[0]?.totalCostUsd).toBe(0.1);
     });
 
-    test("should create session cost with all optional fields", () => {
-      const cost = createSessionCost({
+    test("should create session cost with all optional fields", async () => {
+      const cost = await createSessionCost({
         sessionId: "db-test-session-3",
         agentId: testAgent.id,
         totalCostUsd: 0.25,
@@ -307,10 +304,10 @@ describe("Session Costs API", () => {
       expect(cost.isError).toBe(true);
     });
 
-    test("should retrieve all session costs with limit", () => {
+    test("should retrieve all session costs with limit", async () => {
       // Create multiple costs
       for (let i = 0; i < 5; i++) {
-        createSessionCost({
+        await createSessionCost({
           sessionId: `db-test-batch-${i}`,
           agentId: testAgent.id,
           totalCostUsd: 0.01 * (i + 1),
@@ -320,15 +317,15 @@ describe("Session Costs API", () => {
         });
       }
 
-      const costs = getAllSessionCosts(3);
+      const costs = await getAllSessionCosts(3);
       expect(costs.length).toBe(3);
     });
 
-    test("should order session costs by createdAt DESC", () => {
-      const agent2 = createAgent({ name: "Cost Order Agent", isLead: false, status: "idle" });
+    test("should order session costs by createdAt DESC", async () => {
+      const agent2 = await createAgent({ name: "Cost Order Agent", isLead: false, status: "idle" });
 
       // Create costs with slight delays to ensure different timestamps
-      createSessionCost({
+      await createSessionCost({
         sessionId: "order-test-1",
         agentId: agent2.id,
         totalCostUsd: 0.01,
@@ -337,7 +334,7 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "order-test-2",
         agentId: agent2.id,
         totalCostUsd: 0.02,
@@ -346,7 +343,7 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      const costs = getSessionCostsByAgentId(agent2.id);
+      const costs = await getSessionCostsByAgentId(agent2.id);
       expect(costs.length).toBe(2);
       // Most recent should be first
       expect(costs[0]?.sessionId).toBe("order-test-2");
@@ -429,7 +426,7 @@ describe("Session Costs API", () => {
     });
 
     test("should return 201 on successful POST with all fields", async () => {
-      const task = createTaskExtended("API test task for cost");
+      const task = await createTaskExtended("API test task for cost");
 
       const response = await fetch(`${baseUrl}/api/session-costs`, {
         method: "POST",
@@ -503,7 +500,11 @@ describe("Session Costs API", () => {
 
     test("should filter session costs by agentId", async () => {
       // Create a unique agent for this test
-      const uniqueAgent = createAgent({ name: "Filter Test Agent", isLead: false, status: "idle" });
+      const uniqueAgent = await createAgent({
+        name: "Filter Test Agent",
+        isLead: false,
+        status: "idle",
+      });
 
       // Create costs for this agent via API
       await fetch(`${baseUrl}/api/session-costs`, {
@@ -525,7 +526,7 @@ describe("Session Costs API", () => {
     });
 
     test("should filter session costs by taskId", async () => {
-      const task = createTaskExtended("Filter test task");
+      const task = await createTaskExtended("Filter test task");
 
       // Create cost for this task via API
       await fetch(`${baseUrl}/api/session-costs`, {
@@ -575,8 +576,8 @@ describe("Session Costs API", () => {
   });
 
   describe("Zod Schema Validation", () => {
-    test("session cost object should match SessionCost type structure", () => {
-      const cost = createSessionCost({
+    test("session cost object should match SessionCost type structure", async () => {
+      const cost = await createSessionCost({
         sessionId: "schema-test-session",
         agentId: testAgent.id,
         totalCostUsd: 0.12,
@@ -609,8 +610,8 @@ describe("Session Costs API", () => {
       expect(cost.taskId === undefined || typeof cost.taskId === "string").toBe(true);
     });
 
-    test("session cost should have valid UUID id", () => {
-      const cost = createSessionCost({
+    test("session cost should have valid UUID id", async () => {
+      const cost = await createSessionCost({
         sessionId: "uuid-test-session",
         agentId: testAgent.id,
         totalCostUsd: 0.01,
@@ -624,8 +625,8 @@ describe("Session Costs API", () => {
       expect(cost.id).toMatch(uuidRegex);
     });
 
-    test("session cost createdAt should be valid ISO datetime", () => {
-      const cost = createSessionCost({
+    test("session cost createdAt should be valid ISO datetime", async () => {
+      const cost = await createSessionCost({
         sessionId: "datetime-test-session",
         agentId: testAgent.id,
         totalCostUsd: 0.01,
@@ -712,7 +713,7 @@ describe("Session Costs API", () => {
 
     test("should compute total tokens correctly in queries", async () => {
       // Create a session cost with known token values
-      const agent = createAgent({ name: "Token Query Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Token Query Agent", isLead: false, status: "idle" });
 
       await fetch(`${baseUrl}/api/session-costs`, {
         method: "POST",
@@ -783,10 +784,10 @@ describe("Session Costs API", () => {
   });
 
   describe("Database: getSessionCostsFiltered", () => {
-    test("should filter by date range", () => {
-      const agent = createAgent({ name: "Filter DB Agent", isLead: false, status: "idle" });
+    test("should filter by date range", async () => {
+      const agent = await createAgent({ name: "Filter DB Agent", isLead: false, status: "idle" });
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "filtered-db-1",
         agentId: agent.id,
         totalCostUsd: 0.1,
@@ -797,7 +798,7 @@ describe("Session Costs API", () => {
 
       // All records created today, so filtering with today's date should return them
       const today = new Date().toISOString().slice(0, 10);
-      const results = getSessionCostsFiltered({
+      const results = await getSessionCostsFiltered({
         agentId: agent.id,
         startDate: today,
       });
@@ -806,19 +807,23 @@ describe("Session Costs API", () => {
       expect(results.every((r) => r.agentId === agent.id)).toBe(true);
     });
 
-    test("should return empty for future date range", () => {
-      const results = getSessionCostsFiltered({
+    test("should return empty for future date range", async () => {
+      const results = await getSessionCostsFiltered({
         startDate: "2099-01-01",
       });
 
       expect(results.length).toBe(0);
     });
 
-    test("should respect limit parameter", () => {
-      const agent = createAgent({ name: "Filter Limit Agent", isLead: false, status: "idle" });
+    test("should respect limit parameter", async () => {
+      const agent = await createAgent({
+        name: "Filter Limit Agent",
+        isLead: false,
+        status: "idle",
+      });
 
       for (let i = 0; i < 5; i++) {
-        createSessionCost({
+        await createSessionCost({
           sessionId: `filter-limit-${i}`,
           agentId: agent.id,
           totalCostUsd: 0.01,
@@ -828,16 +833,16 @@ describe("Session Costs API", () => {
         });
       }
 
-      const results = getSessionCostsFiltered({ agentId: agent.id, limit: 2 });
+      const results = await getSessionCostsFiltered({ agentId: agent.id, limit: 2 });
       expect(results.length).toBe(2);
     });
   });
 
   describe("Database: getSessionCostSummary", () => {
-    test("should return totals, daily, and byAgent", () => {
-      const agent = createAgent({ name: "Summary DB Agent", isLead: false, status: "idle" });
+    test("should return totals, daily, and byAgent", async () => {
+      const agent = await createAgent({ name: "Summary DB Agent", isLead: false, status: "idle" });
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "summary-db-1",
         agentId: agent.id,
         totalCostUsd: 0.5,
@@ -851,7 +856,7 @@ describe("Session Costs API", () => {
       });
 
       const today = new Date().toISOString().slice(0, 10);
-      const summary = getSessionCostSummary({
+      const summary = await getSessionCostSummary({
         agentId: agent.id,
         startDate: today,
         groupBy: "both",
@@ -865,24 +870,24 @@ describe("Session Costs API", () => {
       expect(summary.byAgent.length).toBeGreaterThanOrEqual(1);
     });
 
-    test("should return only daily when groupBy=day", () => {
-      const summary = getSessionCostSummary({ groupBy: "day" });
+    test("should return only daily when groupBy=day", async () => {
+      const summary = await getSessionCostSummary({ groupBy: "day" });
 
       expect(summary.totals).toBeDefined();
       expect(summary.daily.length).toBeGreaterThanOrEqual(1);
       expect(summary.byAgent.length).toBe(0);
     });
 
-    test("should return only byAgent when groupBy=agent", () => {
-      const summary = getSessionCostSummary({ groupBy: "agent" });
+    test("should return only byAgent when groupBy=agent", async () => {
+      const summary = await getSessionCostSummary({ groupBy: "agent" });
 
       expect(summary.totals).toBeDefined();
       expect(summary.daily.length).toBe(0);
       expect(summary.byAgent.length).toBeGreaterThanOrEqual(1);
     });
 
-    test("should return empty results for future date range", () => {
-      const summary = getSessionCostSummary({
+    test("should return empty results for future date range", async () => {
+      const summary = await getSessionCostSummary({
         startDate: "2099-01-01",
         groupBy: "both",
       });
@@ -894,13 +899,13 @@ describe("Session Costs API", () => {
       expect(summary.byUser.length).toBe(0);
     });
 
-    test("byUser splits requester spend from unattributed spend", () => {
-      const agent = createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "ByUser Requester" });
-      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
-      const autonomous = createTaskExtended("Heartbeat task");
+    test("byUser splits requester spend from unattributed spend", async () => {
+      const agent = await createAgent({ name: "ByUser Agent", isLead: false, status: "idle" });
+      const user = await createUser({ name: "ByUser Requester" });
+      const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = await createTaskExtended("Heartbeat task");
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "by-user-attributed",
         taskId: attributed.id,
         agentId: agent.id,
@@ -909,7 +914,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "by-user-unattributed",
         taskId: autonomous.id,
         agentId: agent.id,
@@ -919,7 +924,7 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
+      const summary = await getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
 
       expect(summary.daily.length).toBe(0);
       expect(summary.byAgent.length).toBe(0);
@@ -933,13 +938,13 @@ describe("Session Costs API", () => {
       expect(summary.totals.totalCostUsd).toBeCloseTo(1.0, 5);
     });
 
-    test("userId filter selects one requester, and `unattributed` selects the rest", () => {
-      const agent = createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "UserFilter Requester" });
-      const attributed = createTaskExtended("Requested task", { requestedByUserId: user.id });
-      const autonomous = createTaskExtended("Autonomous task");
+    test("userId filter selects one requester, and `unattributed` selects the rest", async () => {
+      const agent = await createAgent({ name: "UserFilter Agent", isLead: false, status: "idle" });
+      const user = await createUser({ name: "UserFilter Requester" });
+      const attributed = await createTaskExtended("Requested task", { requestedByUserId: user.id });
+      const autonomous = await createTaskExtended("Autonomous task");
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "user-filter-attributed",
         taskId: attributed.id,
         agentId: agent.id,
@@ -948,7 +953,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "user-filter-unattributed",
         taskId: autonomous.id,
         agentId: agent.id,
@@ -958,12 +963,16 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      const mine = getSessionCostSummary({ agentId: agent.id, userId: user.id, groupBy: "user" });
+      const mine = await getSessionCostSummary({
+        agentId: agent.id,
+        userId: user.id,
+        groupBy: "user",
+      });
       expect(mine.totals.totalCostUsd).toBeCloseTo(0.4, 5);
       expect(mine.byUser.length).toBe(1);
       expect(mine.byUser[0]?.userId).toBe(user.id);
 
-      const none = getSessionCostSummary({
+      const none = await getSessionCostSummary({
         agentId: agent.id,
         userId: UNATTRIBUTED_USER_ID,
         groupBy: "user",
@@ -974,81 +983,86 @@ describe("Session Costs API", () => {
       expect(none.byUser[0]?.userId).toBe(null);
     });
 
-    test("attributableCostUsd excludes structurally-human-free cost from the coverage denominator", () => {
-      const agent = createAgent({ name: "Denominator Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "Denominator Requester" });
-      const workflowUser = createUser({ name: "Workflow Schedule Requester" });
-      const humanWork = createTaskExtended("Human-requested work", { requestedByUserId: user.id });
+    test("attributableCostUsd excludes structurally-human-free cost from the coverage denominator", async () => {
+      const agent = await createAgent({ name: "Denominator Agent", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Denominator Requester" });
+      const workflowUser = await createUser({ name: "Workflow Schedule Requester" });
+      const humanWork = await createTaskExtended("Human-requested work", {
+        requestedByUserId: user.id,
+      });
       // Structurally human-free: no human requester belongs on a heartbeat-checklist
       // task by construction, even though this row carries one (a stale/inherited
       // id) — it must be excluded from BOTH sides of the coverage ratio.
-      const heartbeat = createTaskExtended("Heartbeat checklist", {
+      const heartbeat = await createTaskExtended("Heartbeat checklist", {
         taskType: "heartbeat-checklist",
         requestedByUserId: user.id,
       });
-      const legacyHeartbeat = createTaskExtended("Legacy heartbeat", {
+      const legacyHeartbeat = await createTaskExtended("Legacy heartbeat", {
         taskType: "heartbeat",
         requestedByUserId: user.id,
       });
-      const tagOnlyHeartbeat = createTaskExtended("Tag-only heartbeat", {
+      const tagOnlyHeartbeat = await createTaskExtended("Tag-only heartbeat", {
         tags: ["heartbeat"],
         requestedByUserId: user.id,
       });
-      const scheduled = createTaskExtended("Scheduled run", { source: "schedule" });
-      const scheduledChild = createTaskExtended("Autonomous schedule child", {
+      const scheduled = await createTaskExtended("Scheduled run", { source: "schedule" });
+      const scheduledChild = await createTaskExtended("Autonomous schedule child", {
         parentTaskId: scheduled.id,
       });
-      const scheduledGrandchild = createTaskExtended("Autonomous schedule grandchild", {
+      const scheduledGrandchild = await createTaskExtended("Autonomous schedule grandchild", {
         parentTaskId: scheduledChild.id,
       });
-      const scheduledHumanHandoff = createTaskExtended("Schedule handed to a human", {
+      const scheduledHumanHandoff = await createTaskExtended("Schedule handed to a human", {
         parentTaskId: scheduled.id,
         requestedByUserId: user.id,
       });
-      const humanScheduled = createTaskExtended("Human-created scheduled run", {
+      const humanScheduled = await createTaskExtended("Human-created scheduled run", {
         source: "schedule",
         requestedByUserId: user.id,
       });
-      const workflow = createWorkflow({
+      const workflow = await createWorkflow({
         name: `denominator-workflow-${crypto.randomUUID()}`,
         definition: { nodes: [] },
       });
-      const autonomousWorkflowSchedule = createScheduledTask({
+      const autonomousWorkflowSchedule = await createScheduledTask({
         name: `denominator-autonomous-workflow-schedule-${crypto.randomUUID()}`,
         intervalMs: 60_000,
         targetType: "workflow",
         workflowId: workflow.id,
       });
-      const autonomousWorkflowRun = createWorkflowRun({
+      const autonomousWorkflowRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
         triggerType: "schedule",
         triggerData: { scheduleId: autonomousWorkflowSchedule.id },
       });
-      const autonomousWorkflowRoot = createTaskExtended("Autonomous scheduled workflow root", {
-        source: "workflow",
-        workflowRunId: autonomousWorkflowRun.id,
-      });
-      const humanWorkflowSchedule = createScheduledTask({
+      const autonomousWorkflowRoot = await createTaskExtended(
+        "Autonomous scheduled workflow root",
+        {
+          source: "workflow",
+          workflowRunId: autonomousWorkflowRun.id,
+        },
+      );
+      const humanWorkflowSchedule = await createScheduledTask({
         name: `denominator-human-workflow-schedule-${crypto.randomUUID()}`,
         intervalMs: 60_000,
         targetType: "workflow",
         workflowId: workflow.id,
         createdBy: workflowUser.id,
       });
-      const humanWorkflowRun = createWorkflowRun({
+      const humanWorkflowRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
         triggerType: "schedule",
         triggerData: { scheduleId: humanWorkflowSchedule.id },
         createdBy: workflowUser.id,
       });
-      const humanWorkflowRoot = createTaskExtended("Human-created scheduled workflow root", {
+      const humanWorkflowRoot = await createTaskExtended("Human-created scheduled workflow root", {
         source: "workflow",
         workflowRunId: humanWorkflowRun.id,
         requestedByUserId: workflowUser.id,
       });
-      const manualWorkflowRun = createWorkflowRun({
+      const manualWorkflowRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
         // Caller-controlled trigger data can mimic the scheduled payload; the
@@ -1061,14 +1075,14 @@ describe("Session Costs API", () => {
           firedAt: new Date().toISOString(),
         },
       });
-      const manualWorkflowRoot = createTaskExtended("Requester-less manual workflow root", {
+      const manualWorkflowRoot = await createTaskExtended("Requester-less manual workflow root", {
         source: "workflow",
         workflowRunId: manualWorkflowRun.id,
       });
       // Historical classification must not depend on the live schedule row.
-      expect(deleteScheduledTask(autonomousWorkflowSchedule.id)).toBe(true);
+      expect(await deleteScheduledTask(autonomousWorkflowSchedule.id)).toBe(true);
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-human",
         taskId: humanWork.id,
         agentId: agent.id,
@@ -1077,7 +1091,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-heartbeat",
         taskId: heartbeat.id,
         agentId: agent.id,
@@ -1086,7 +1100,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-legacy-heartbeat",
         taskId: legacyHeartbeat.id,
         agentId: agent.id,
@@ -1095,7 +1109,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-scheduled",
         taskId: scheduled.id,
         agentId: agent.id,
@@ -1104,7 +1118,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-tag-only-heartbeat",
         taskId: tagOnlyHeartbeat.id,
         agentId: agent.id,
@@ -1113,7 +1127,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-human-scheduled",
         taskId: humanScheduled.id,
         agentId: agent.id,
@@ -1122,7 +1136,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-scheduled-grandchild",
         taskId: scheduledGrandchild.id,
         agentId: agent.id,
@@ -1131,7 +1145,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-scheduled-human-handoff",
         taskId: scheduledHumanHandoff.id,
         agentId: agent.id,
@@ -1140,7 +1154,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-autonomous-workflow-root",
         taskId: autonomousWorkflowRoot.id,
         agentId: agent.id,
@@ -1149,7 +1163,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-human-workflow-root",
         taskId: humanWorkflowRoot.id,
         agentId: agent.id,
@@ -1158,7 +1172,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "denom-manual-workflow-root",
         taskId: manualWorkflowRoot.id,
         agentId: agent.id,
@@ -1168,7 +1182,7 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "both" });
+      const summary = await getSessionCostSummary({ agentId: agent.id, groupBy: "both" });
 
       expect(summary.totals.totalCostUsd).toBeCloseTo(71.0, 5);
       // Direct human work, a human-created schedule, and an explicitly
@@ -1192,12 +1206,16 @@ describe("Session Costs API", () => {
       );
       expect(summary.byUser.find((row) => row.userId === null)?.costUsd).toBeCloseTo(44.0, 5);
 
-      const mine = getSessionCostSummary({ agentId: agent.id, userId: user.id, groupBy: "user" });
+      const mine = await getSessionCostSummary({
+        agentId: agent.id,
+        userId: user.id,
+        groupBy: "user",
+      });
       expect(mine.totals.totalCostUsd).toBeCloseTo(16.0, 5);
       expect(mine.byUser).toHaveLength(1);
       expect(mine.byUser[0]?.userId).toBe(user.id);
 
-      const autonomous = getSessionCostSummary({
+      const autonomous = await getSessionCostSummary({
         agentId: agent.id,
         userId: UNATTRIBUTED_USER_ID,
         groupBy: "user",
@@ -1206,33 +1224,33 @@ describe("Session Costs API", () => {
       expect(autonomous.byUser).toHaveLength(1);
       expect(autonomous.byUser[0]?.userId).toBe(null);
 
-      const attribution = getAttributionByPerson({});
+      const attribution = await getAttributionByPerson({});
       const workflowPerson = attribution.find((row) => row.userId === workflowUser.id);
       // Of the two workflow roots above, only the one launched by the
       // human-created schedule belongs in the per-person report.
       expect(workflowPerson?.problemsInitiated).toBe(1);
     });
 
-    test("inherited requesters do not end human-free propagation", () => {
-      const agent = createAgent({
+    test("inherited requesters do not end human-free propagation", async () => {
+      const agent = await createAgent({
         name: "Inherited Requester Agent",
         isLead: false,
         status: "idle",
       });
-      const user = createUser({ name: "Inherited Requester" });
-      const heartbeat = createTaskExtended("Stale attributed heartbeat", {
+      const user = await createUser({ name: "Inherited Requester" });
+      const heartbeat = await createTaskExtended("Stale attributed heartbeat", {
         taskType: "heartbeat-checklist",
         requestedByUserId: user.id,
       });
-      const inheritedChild = createTaskExtended("Autonomous heartbeat child", {
+      const inheritedChild = await createTaskExtended("Autonomous heartbeat child", {
         parentTaskId: heartbeat.id,
       });
-      const explicitHandoff = createTaskExtended("Explicit human handoff", {
+      const explicitHandoff = await createTaskExtended("Explicit human handoff", {
         parentTaskId: heartbeat.id,
         requestedByUserId: user.id,
       });
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "inherited-requester-child",
         taskId: inheritedChild.id,
         agentId: agent.id,
@@ -1241,7 +1259,7 @@ describe("Session Costs API", () => {
         numTurns: 1,
         model: "opus",
       });
-      createSessionCost({
+      await createSessionCost({
         sessionId: "explicit-requester-handoff",
         taskId: explicitHandoff.id,
         agentId: agent.id,
@@ -1251,7 +1269,7 @@ describe("Session Costs API", () => {
         model: "opus",
       });
 
-      const summary = getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
+      const summary = await getSessionCostSummary({ agentId: agent.id, groupBy: "user" });
       expect(summary.totals.totalCostUsd).toBe(5);
       expect(summary.totals.attributedCostUsd).toBe(3);
       expect(summary.totals.attributableCostUsd).toBe(3);
@@ -1262,8 +1280,8 @@ describe("Session Costs API", () => {
   });
 
   describe("Database: getDashboardCostSummary", () => {
-    test("should return costToday and costMtd", () => {
-      const result = getDashboardCostSummary();
+    test("should return costToday and costMtd", async () => {
+      const result = await getDashboardCostSummary();
 
       expect(typeof result.costToday).toBe("number");
       expect(typeof result.costMtd).toBe("number");
@@ -1274,9 +1292,9 @@ describe("Session Costs API", () => {
 
   describe("GET /api/session-costs with date filtering", () => {
     test("should filter by startDate", async () => {
-      const agent = createAgent({ name: "Date Filter Agent", isLead: false, status: "idle" });
+      const agent = await createAgent({ name: "Date Filter Agent", isLead: false, status: "idle" });
 
-      createSessionCost({
+      await createSessionCost({
         sessionId: "date-filter-1",
         agentId: agent.id,
         totalCostUsd: 0.05,
@@ -1367,36 +1385,40 @@ describe("Session Costs API", () => {
   });
 
   describe("Database: getAttributionByPerson", () => {
-    test("excludes inherited requesters below human-free roots from reach", () => {
-      const rootAgent = createAgent({ name: "Reach Root Agent", isLead: false, status: "idle" });
-      const inheritedAgent = createAgent({
+    test("excludes inherited requesters below human-free roots from reach", async () => {
+      const rootAgent = await createAgent({
+        name: "Reach Root Agent",
+        isLead: false,
+        status: "idle",
+      });
+      const inheritedAgent = await createAgent({
         name: "Reach Inherited Agent",
         isLead: false,
         status: "idle",
       });
-      const handoffAgent = createAgent({
+      const handoffAgent = await createAgent({
         name: "Reach Handoff Agent",
         isLead: false,
         status: "idle",
       });
-      const user = createUser({ name: "Reach Requester" });
-      createTaskExtended("Human root", {
+      const user = await createUser({ name: "Reach Requester" });
+      await createTaskExtended("Human root", {
         requestedByUserId: user.id,
         agentId: rootAgent.id,
         source: "slack",
         vcsRepo: "example/human-root",
       });
-      const heartbeat = createTaskExtended("Heartbeat root", {
+      const heartbeat = await createTaskExtended("Heartbeat root", {
         requestedByUserId: user.id,
         taskType: "heartbeat-checklist",
       });
-      createTaskExtended("Inherited autonomous child", {
+      await createTaskExtended("Inherited autonomous child", {
         parentTaskId: heartbeat.id,
         agentId: inheritedAgent.id,
         source: "jira",
         vcsRepo: "example/autonomous",
       });
-      createTaskExtended("Explicit handoff child", {
+      await createTaskExtended("Explicit handoff child", {
         parentTaskId: heartbeat.id,
         requestedByUserId: user.id,
         agentId: handoffAgent.id,
@@ -1404,26 +1426,34 @@ describe("Session Costs API", () => {
         vcsRepo: "example/handoff",
       });
 
-      const mine = getAttributionByPerson({}).find((row) => row.userId === user.id);
+      const mine = (await getAttributionByPerson({})).find((row) => row.userId === user.id);
       expect(mine?.problemsInitiated).toBe(1);
       expect(mine?.agentsReached).toBe(2);
       expect(mine?.reposReached).toBe(2);
       expect(mine?.surfacesReached).toBe(2);
     });
 
-    test("counts root tasks only, and reach across the full task tree", () => {
-      const agentA = createAgent({ name: "Attribution Agent A", isLead: false, status: "idle" });
-      const agentB = createAgent({ name: "Attribution Agent B", isLead: false, status: "idle" });
-      const user = createUser({ name: "Attribution Requester" });
+    test("counts root tasks only, and reach across the full task tree", async () => {
+      const agentA = await createAgent({
+        name: "Attribution Agent A",
+        isLead: false,
+        status: "idle",
+      });
+      const agentB = await createAgent({
+        name: "Attribution Agent B",
+        isLead: false,
+        status: "idle",
+      });
+      const user = await createUser({ name: "Attribution Requester" });
 
-      const root = createTaskExtended("Root problem", {
+      const root = await createTaskExtended("Root problem", {
         requestedByUserId: user.id,
         vcsRepo: "desplega-ai/agent-swarm",
         agentId: agentA.id,
       });
       // Fan-out child of the same root — must NOT inflate problemsInitiated,
       // but DOES count toward reach (a second agent engaged).
-      createTaskExtended("Fan-out child", {
+      await createTaskExtended("Fan-out child", {
         requestedByUserId: user.id,
         parentTaskId: root.id,
         agentId: agentB.id,
@@ -1431,26 +1461,26 @@ describe("Session Costs API", () => {
       });
       // Structurally human-free despite a (stale) requester — excluded from
       // both problemsInitiated and reach.
-      createTaskExtended("Heartbeat noise", {
+      await createTaskExtended("Heartbeat noise", {
         requestedByUserId: user.id,
         taskType: "heartbeat-checklist",
       });
-      createTaskExtended("Legacy heartbeat noise", {
+      await createTaskExtended("Legacy heartbeat noise", {
         requestedByUserId: user.id,
         taskType: "heartbeat",
       });
-      createTaskExtended("Tag-only heartbeat noise", {
+      await createTaskExtended("Tag-only heartbeat noise", {
         requestedByUserId: user.id,
         tags: ["heartbeat"],
       });
-      createTaskExtended("Human-created schedule", {
+      await createTaskExtended("Human-created schedule", {
         requestedByUserId: user.id,
         source: "schedule",
         agentId: agentA.id,
         vcsRepo: "desplega-ai/agent-swarm",
       });
 
-      const rows = getAttributionByPerson({});
+      const rows = await getAttributionByPerson({});
       const mine = rows.find((r) => r.userId === user.id);
       expect(mine).toBeDefined();
       expect(mine?.problemsInitiated).toBe(2);
@@ -1459,91 +1489,95 @@ describe("Session Costs API", () => {
       expect(mine?.firstPassYield).toBe(null);
     });
 
-    test("counts GitHub PR and GitLab MR evidence as shipped", () => {
-      const agent = createAgent({ name: "Shipped Agent", isLead: false, status: "idle" });
-      const user = createUser({ name: "Shipped Requester" });
+    test("counts GitHub PR and GitLab MR evidence as shipped", async () => {
+      const agent = await createAgent({ name: "Shipped Agent", isLead: false, status: "idle" });
+      const user = await createUser({ name: "Shipped Requester" });
 
-      const shippedViaAttachment = createTaskExtended("Shipped via attachment", {
+      const shippedViaAttachment = await createTaskExtended("Shipped via attachment", {
         requestedByUserId: user.id,
       });
-      const attachmentChild = createTaskExtended("Child with shipping evidence", {
+      const attachmentChild = await createTaskExtended("Child with shipping evidence", {
         parentTaskId: shippedViaAttachment.id,
         requestedByUserId: user.id,
       });
-      insertTaskAttachment({
+      await insertTaskAttachment({
         taskId: attachmentChild.id,
         agentId: agent.id,
         name: "PR",
         kind: "url",
         url: "https://github.com/desplega-ai/agent-swarm/pull/1234",
       });
-      completeTask(shippedViaAttachment.id);
+      await completeTask(shippedViaAttachment.id);
 
-      const shippedViaOutput = createTaskExtended("Shipped via output fallback", {
+      const shippedViaOutput = await createTaskExtended("Shipped via output fallback", {
         requestedByUserId: user.id,
       });
-      completeTask(
+      await completeTask(
         shippedViaOutput.id,
         "Opened https://github.com/desplega-ai/agent-swarm/pull/5678",
       );
 
-      const shippedViaGitLabAttachment = createTaskExtended("Shipped via GitLab attachment", {
+      const shippedViaGitLabAttachment = await createTaskExtended("Shipped via GitLab attachment", {
         requestedByUserId: user.id,
         vcsProvider: "gitlab",
       });
-      const gitLabAttachmentChild = createTaskExtended("Child with GitLab shipping evidence", {
-        parentTaskId: shippedViaGitLabAttachment.id,
-        requestedByUserId: user.id,
-      });
-      insertTaskAttachment({
+      const gitLabAttachmentChild = await createTaskExtended(
+        "Child with GitLab shipping evidence",
+        {
+          parentTaskId: shippedViaGitLabAttachment.id,
+          requestedByUserId: user.id,
+        },
+      );
+      await insertTaskAttachment({
         taskId: gitLabAttachmentChild.id,
         agentId: agent.id,
         name: "MR",
         kind: "url",
         url: "https://gitlab.example.com/group/project/-/merge_requests/1234",
       });
-      completeTask(shippedViaGitLabAttachment.id);
+      await completeTask(shippedViaGitLabAttachment.id);
 
-      const shippedViaGitLabOutput = createTaskExtended("Shipped via GitLab output", {
+      const shippedViaGitLabOutput = await createTaskExtended("Shipped via GitLab output", {
         requestedByUserId: user.id,
         vcsProvider: "gitlab",
       });
-      completeTask(
+      await completeTask(
         shippedViaGitLabOutput.id,
         "Opened https://gitlab.internal/group/project/-/merge_requests/5678",
       );
 
-      const notShipped = createTaskExtended("Not shipped", { requestedByUserId: user.id });
-      completeTask(notShipped.id, "Just some notes, no PR");
+      const notShipped = await createTaskExtended("Not shipped", { requestedByUserId: user.id });
+      await completeTask(notShipped.id, "Just some notes, no PR");
 
-      const rows = getAttributionByPerson({});
+      const rows = await getAttributionByPerson({});
       const mine = rows.find((r) => r.userId === user.id);
       expect(mine?.problemsInitiated).toBe(5);
       expect(mine?.problemsShipped).toBe(4);
     });
 
-    test("respects the date range filter", () => {
-      const user = createUser({ name: "Date Range Requester" });
-      const inRange = createTaskExtended("In range", { requestedByUserId: user.id });
-      getDb()
-        .prepare("UPDATE agent_tasks SET createdAt = ? WHERE id = ?")
-        .run("2026-08-19T23:59:59.000Z", inRange.id);
+    test("respects the date range filter", async () => {
+      const user = await createUser({ name: "Date Range Requester" });
+      const inRange = await createTaskExtended("In range", { requestedByUserId: user.id });
+      await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        "2026-08-19T23:59:59.000Z",
+        inRange.id,
+      ]);
 
-      const past = getAttributionByPerson({ endDate: "2026-08-18" });
+      const past = await getAttributionByPerson({ endDate: "2026-08-18" });
       expect(past.find((r) => r.userId === user.id)).toBeUndefined();
 
-      const present = getAttributionByPerson({
+      const present = await getAttributionByPerson({
         startDate: "2026-08-19",
         endDate: "2026-08-19",
       });
       expect(present.find((r) => r.userId === user.id)?.problemsInitiated).toBe(1);
     });
 
-    test("seeds task traversal with the report's root predicates", () => {
-      const prepareSpy = spyOn(getDb(), "prepare");
+    test("seeds task traversal with the report's root predicates", async () => {
+      const querySpy = spyOn(getDbClient(), "query");
       try {
-        getAttributionByPerson({ startDate: "2026-08-19", endDate: "2026-08-19" });
-        const call = prepareSpy.mock.calls.find(([sql]) =>
+        await getAttributionByPerson({ startDate: "2026-08-19", endDate: "2026-08-19" });
+        const call = querySpy.mock.calls.find(([sql]) =>
           String(sql).includes("task_tree(rootId, taskId, output)"),
         );
         const sql = String(call?.[0] ?? "");
@@ -1560,7 +1594,7 @@ describe("Session Costs API", () => {
         );
         expect(sql.match(/\?/g)).toHaveLength(2);
 
-        const reachCall = prepareSpy.mock.calls.find(([preparedSql]) =>
+        const reachCall = querySpy.mock.calls.find(([preparedSql]) =>
           String(preparedSql).includes("task_ancestry("),
         );
         const reachSql = String(reachCall?.[0] ?? "");
@@ -1572,7 +1606,7 @@ describe("Session Costs API", () => {
         expect(reachSql).toContain("JOIN task_ancestry child ON parent.id = child.parentTaskId");
         expect(reachSql.match(/\?/g)).toHaveLength(2);
       } finally {
-        prepareSpy.mockRestore();
+        querySpy.mockRestore();
       }
     });
   });

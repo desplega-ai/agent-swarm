@@ -62,13 +62,13 @@ export async function steerTaskHandler(
   }
 
   const agentId = ctx.kind === "owner" ? ctx.agentId : undefined;
-  const task = getTaskById(taskId);
+  const task = await getTaskById(taskId);
   if (!task) {
     return toolErr(`Task "${taskId}" not found.`, { data: { yourAgentId: agentId } });
   }
 
   if (ctx.kind === "owner") {
-    const callerAgent = getAgentById(ctx.agentId!);
+    const callerAgent = await getAgentById(ctx.agentId!);
     if (!callerAgent) {
       return toolErr("Caller agent not found.", { data: { yourAgentId: agentId } });
     }
@@ -94,7 +94,7 @@ export async function steerTaskHandler(
   }
 
   try {
-    const result = requestSteering({
+    const result = await requestSteering({
       taskId,
       message,
       mode,

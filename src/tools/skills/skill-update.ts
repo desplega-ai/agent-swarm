@@ -42,13 +42,13 @@ export const registerSkillUpdateTool = (server: McpServer) => {
       }
 
       try {
-        const existing = getSkillById(args.skillId);
+        const existing = await getSkillById(args.skillId);
         if (!existing) {
           return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
         }
 
         // Only owner or lead can update
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const updateDecision = can({
           principal: {
             kind: "agent",
@@ -114,7 +114,7 @@ export const registerSkillUpdateTool = (server: McpServer) => {
           updates.scope = args.scope;
         }
 
-        const skill = updateSkill(args.skillId, updates);
+        const skill = await updateSkill(args.skillId, updates);
         if (!skill) {
           return toolErr("Update failed.", {
             details: "Failed to update skill.",

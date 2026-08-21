@@ -10,10 +10,11 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-recompute-all-providers.sqlite";
 const API_KEY = "test-recompute-all";
@@ -26,13 +27,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -57,9 +51,9 @@ let testAgent: { id: string };
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "recompute-all-test", isLead: false, status: "idle" });
+  testAgent = await createAgent({ name: "recompute-all-test", isLead: false, status: "idle" });
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {
@@ -68,12 +62,12 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM session_costs").run();
+afterEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
   // Wipe everything we explicitly inserted (effective_from > 0); leave the
   // migration-046 codex seeds alone.
-  db.prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
@@ -107,15 +101,15 @@ interface CostResponse {
   };
 }
 
-function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
-  insertPricingRow({
+async function seedTwoClassRates(provider: string, model: string, inputRate = 1, outputRate = 10) {
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "input",
     effectiveFrom: 1,
     pricePerMillionUsd: inputRate,
   });
-  insertPricingRow({
+  await insertPricingRow({
     provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
     model,
     tokenClass: "output",
@@ -135,18 +129,18 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
     "gemini",
   ] as const) {
     test(`provider=${provider} with seeded rows → costSource='pricing-table'`, async () => {
-      seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
+      await seedTwoClassRates(provider, `${provider}-test-model`, 2, 10);
       // The payload below explicitly says 75% of writes used a 1h TTL. Phase 3
       // treats a missing 1h row as unpriced, so seed both cache classes at a
       // zero rate to keep this test focused on provider coverage.
-      insertPricingRow({
+      await insertPricingRow({
         provider,
         model: `${provider}-test-model`,
         tokenClass: "cache_write",
         effectiveFrom: 1,
         pricePerMillionUsd: 0,
       });
-      insertPricingRow({
+      await insertPricingRow({
         provider,
         model: `${provider}-test-model`,
         tokenClass: "cache_write_1h",
@@ -228,7 +222,7 @@ describe("Phase 2 — POST /api/session-costs recompute fires for every provider
 
 describe("Migration 128 — modelBreakdown persistence", () => {
   test("breakdown + harness fields survive the DB round-trip through GET", async () => {
-    seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
+    await seedTwoClassRates("claude", "claude-breakdown-model", 2, 10);
     const models = [
       {
         model: "claude-breakdown-model",
@@ -285,9 +279,10 @@ describe("Migration 128 — modelBreakdown persistence", () => {
       }),
     });
     expect(post.status).toBe(201);
-    getDb()
-      .prepare("UPDATE session_costs SET modelBreakdown = ? WHERE sessionId = ?")
-      .run("{not json", "breakdown-corrupt");
+    await getDbClient().run("UPDATE session_costs SET modelBreakdown = ? WHERE sessionId = ?", [
+      "{not json",
+      "breakdown-corrupt",
+    ]);
 
     const res = await authedFetch(`/api/session-costs?agentId=${testAgent.id}`);
     expect(res.status).toBe(200);

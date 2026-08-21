@@ -17,7 +17,7 @@ import { listRelationalCredentialBindings } from "./script-connections";
 // resolution now reads exclusively from the relational table — including the
 // auto-managed bindings that back embedded connection auth.
 class RelationalCredentialBindingStore implements CredentialBindingStore {
-  listActiveBindings(context: CredentialBindingStoreContext): CredentialBinding[] {
+  listActiveBindings(context: CredentialBindingStoreContext): Promise<CredentialBinding[]> {
     return listRelationalCredentialBindings(context);
   }
 }
@@ -33,7 +33,7 @@ export async function buildScriptCredentialBindingsWithFailures(input: {
   agentId?: string;
   repoId?: string;
 }): Promise<{ egressSecrets: EgressSecretEntry[]; failedBindings: FailedCredentialBinding[] }> {
-  const resolvedConfigs = getResolvedConfig(input.agentId, input.repoId);
+  const resolvedConfigs = await getResolvedConfig(input.agentId, input.repoId);
   const configMap = new Map(resolvedConfigs.map((config) => [config.key, config.value]));
   const broker = new CredentialBroker(
     new RelationalCredentialBindingStore(),

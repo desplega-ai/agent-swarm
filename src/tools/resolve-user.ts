@@ -105,8 +105,8 @@ export const resolveUserInputSchema = z
     { message: "Provide either (kind + externalId), email, userId, or name" },
   );
 
-function profileResult(user: User): SwarmToolResult {
-  const externalIds = getUserIdentities(user.id);
+async function profileResult(user: User): Promise<SwarmToolResult> {
+  const externalIds = await getUserIdentities(user.id);
   const payload = { ...user, externalIds };
   return toolOk(`Resolved user "${user.name}" (${user.id}).`, {
     details: JSON.stringify(payload, null, 2),
@@ -144,30 +144,30 @@ export const registerResolveUserTool = (server: McpServer) => {
     },
     async ({ kind, externalId, email, userId, name }) => {
       if (kind && externalId) {
-        const resolution = resolveIdentity(kind, externalId);
+        const resolution = await resolveIdentity(kind, externalId);
         if (resolution.status === "unknown") return unknownResult(kind, externalId);
-        const user = findUserById(resolution.userId);
+        const user = await findUserById(resolution.userId);
         if (!user) return unknownResult(kind, externalId);
         return profileResult(user);
       }
 
       if (email) {
-        const resolution = resolveIdentityByEmail(email);
+        const resolution = await resolveIdentityByEmail(email);
         if (resolution.status === "unknown") return unknownResult("email", email);
-        const user = findUserById(resolution.userId);
+        const user = await findUserById(resolution.userId);
         if (!user) return unknownResult("email", email);
         return profileResult(user);
       }
 
       if (userId) {
-        const user = findUserById(userId);
+        const user = await findUserById(userId);
         if (!user) return unknownResult("userId", userId);
         return profileResult(user);
       }
 
       // name is guaranteed set here — the schema refine requires one of the
       // four branches, and the three above are exhausted.
-      const matches = findUsersByName(name ?? "");
+      const matches = await findUsersByName(name ?? "");
       if (matches.length === 0) return unknownResult("name", name ?? "");
       const [only] = matches;
       if (matches.length === 1 && only) return profileResult(only);

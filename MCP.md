@@ -144,6 +144,9 @@ SDK allowlist instead), and HTTP REST routes are generally not gated.
   - [slack-read](#slack-read)
   - [slack-post](#slack-post)
   - [slack-start-thread](#slack-start-thread)
+  - [slack-create-channel](#slack-create-channel)
+  - [slack-invite-to-channel](#slack-invite-to-channel)
+  - [slack-archive-channel](#slack-archive-channel)
   - [slack-list-channels](#slack-list-channels)
   - [slack-upload-file](#slack-upload-file)
   - [slack-download-file](#slack-download-file)
@@ -344,7 +347,7 @@ Provider-agnostic reverse lookup: (kind, externalId) → user, e.g. {kind: 'slac
 
 **Manage user profiles**
 
-Create, update, delete, or list user profiles in the user registry. Identities are managed via an `identities: [{kind, externalId}]` array (declarative — update computes diff). Lead-only.
+Create, update, delete, or list user profiles in the user registry. Identities are managed via an `identities: [{kind, externalId}]` array (declarative — update computes diff). comms is the merge-safe way to set communication preferences; metadata replaces the whole blob. Lead-only.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
@@ -361,16 +364,17 @@ Create, update, delete, or list user profiles in the user registry. Identities a
 | `dailyBudgetUsd` | `number` | No | - | Daily budget in USD (null clears the cap) |
 | `status` | `invited \| active \| suspended` | No | - | User status — invited / active / suspended |
 | `metadata` | `object` | No | - | Free-form JSON metadata (null clears the field) |
+| `comms` | `object` | No | - | Merge-safe write to metadata.comms without touching sibling metadata keys; null removes only the comms key. When metadata is also provided, it is applied first and replaces the whole blob. |
 
 ### db-query
 
 **Execute database query**
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Results capped at 100 rows.
+Execute a read-only SQL query against the swarm database (SQLite). Available to all authenticated agents — be aware results may include secrets (oauth_tokens, configs). Runs in a short-lived child process with a wall-clock budget by default (fails gracefully with a timeout or a 429-style concurrency error rather than freezing); results capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) regardless of how many the query matched. See the sql parameter's description for which tables are unsafe to read whole, and the db-query-guidance skill for config knobs.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `sql` | `string` | No | - | SQL query (read-only only — writes are rejected) |
+| `sql` | `string` | No | - | Read-only SQL query (writes are rejected). Runs with a wall-clock budget in a bounded child process by default, and results are capped at a default row count (operator-configurable via `DB_QUERY_MCP_MAX_ROWS`) — a query is safe to try even against a huge table. session_logs, agent_log, events, and task_context_snapshots are too large to read whole: filter on an indexed column (session_logs: taskId/sessionId; agent_log: agentId/taskId/eventType/createdAt) and add a LIMIT, don't COUNT(*)/SUM(...)/typeof() across the table, and don't split a large read into rowid chunks — each chunk still reads every row in its range. See the db-query-guidance skill for the operator config knobs (timeout, row cap, concurrency cap) if a query keeps timing out or getting rejected. |
 | `query` | `string` | No | - | Deprecated runtime alias for sql. |
 | `params` | `array` | No | [] | Query parameters |
 
@@ -1737,6 +1741,38 @@ Post a new top-level message to a Slack channel and return its ts so the caller 
 | `channelId` | `string` | Yes | - | The Slack channel ID to post to. |
 | `message` | `string` | Yes | - | The message content to post. |
 | `blocks` | `array` | No | - | Optional Block Kit blocks. When omitted, a mrkdwn section is generated. |
+
+### slack-create-channel
+
+**Create a Slack channel**
+
+Creates a public or private Slack channel. The supplied name is normalized to Slack's channel-name rules, and the normalized name is returned. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `name` | `string` | Yes | - | The desired Slack channel name. |
+| `isPrivate` | `boolean` | No | false | Whether to create a private channel. Defaults to false. |
+
+### slack-invite-to-channel
+
+**Invite users to a Slack channel**
+
+Invites one or more workspace users to a Slack channel. Users who are already in the channel are treated as a successful no-op. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID. |
+| `userIds` | `array` | Yes | - | Slack user IDs to invite (up to 100). |
+
+### slack-archive-channel
+
+**Archive a Slack channel**
+
+Archives a Slack channel. Channels that are already archived are treated as a successful no-op, while Slack's general channel cannot be archived. Requires lead privileges.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `channelId` | `string` | Yes | - | The Slack channel ID to archive. |
 
 ### slack-list-channels
 

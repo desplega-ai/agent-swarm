@@ -71,25 +71,25 @@ async function removeTestDb(): Promise<void> {
   }
 }
 
-function createRunningTask(
+async function createRunningTask(
   label: string,
   provider: ProviderName = "pi",
   slackContext?: { channelId: string; threadTs: string },
 ) {
-  const agent = createAgent({
+  const agent = await createAgent({
     name: `${label} agent`,
     isLead: true,
     status: "busy",
     maxTasks: 10,
     harnessProvider: provider,
   });
-  const task = createTaskExtended(label, {
+  const task = await createTaskExtended(label, {
     agentId: agent.id,
     source: slackContext ? "slack" : "api",
     slackChannelId: slackContext?.channelId,
     slackThreadTs: slackContext?.threadTs,
   });
-  expect(startTask(task.id)?.status).toBe("in_progress");
+  expect((await startTask(task.id))?.status).toBe("in_progress");
   return { agent, task };
 }
 
@@ -157,12 +157,12 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("rejects new requests with 403 before looking up or creating rows", async () => {
-    await withSteeringDisabled(() => {
-      const { task } = createRunningTask("disabled request");
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+    await withSteeringDisabled(async () => {
+      const { task } = await createRunningTask("disabled request");
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
       let thrown: unknown;
       try {
-        requestSteering({ taskId: task.id, message: "do not create a row" });
+        await requestSteering({ taskId: task.id, message: "do not create a row" });
       } catch (error) {
         thrown = error;
       }
@@ -171,7 +171,7 @@ describe("STEERING_ENABLED opt-in", () => {
         message: "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
         statusCode: 403,
       });
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
     });
   });
 
@@ -199,29 +199,31 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("removes steering MCP tools when disabled and restores them when enabled", async () => {
-    await withSteeringDisabled(() => {
-      const serverTools = registeredTools(createServer({ fullSurface: true }));
-      const userTools = registeredTools(createUserServer(createUser({ name: "disabled user" })));
+    await withSteeringDisabled(async () => {
+      const serverTools = registeredTools(await createServer({ fullSurface: true }));
+      const userTools = registeredTools(
+        createUserServer(await createUser({ name: "disabled user" })),
+      );
       expect(serverTools["steer-task"]).toBeUndefined();
       expect(serverTools["accept-steer"]).toBeUndefined();
       expect(userTools["steer-task"]).toBeUndefined();
     });
 
-    const serverTools = registeredTools(createServer({ fullSurface: true }));
-    const userTools = registeredTools(createUserServer(createUser({ name: "enabled user" })));
+    const serverTools = registeredTools(await createServer({ fullSurface: true }));
+    const userTools = registeredTools(createUserServer(await createUser({ name: "enabled user" })));
     expect(serverTools["steer-task"]).toBeDefined();
     expect(serverTools["accept-steer"]).toBeDefined();
     expect(userTools["steer-task"]).toBeDefined();
   });
 
-  test("registers steering tools with core capability alone (no task-pool)", () => {
+  test("registers steering tools with core capability alone (no task-pool)", async () => {
     // Steering delivery works on directly-assigned tasks, so the acknowledge
     // path must not depend on the optional task-pool capability — otherwise
     // delivered messages could never reach `handled` on core-only deployments.
     const previous = process.env.CAPABILITIES;
     process.env.CAPABILITIES = "core";
     try {
-      const serverTools = registeredTools(createServer());
+      const serverTools = registeredTools(await createServer());
       expect(serverTools["accept-steer"]).toBeDefined();
       expect(serverTools["steer-task"]).toBeDefined();
       expect(serverTools["task-action"]).toBeUndefined();
@@ -231,15 +233,15 @@ describe("STEERING_ENABLED opt-in", () => {
   });
 
   test("keeps history reads and all worker drain callbacks available", async () => {
-    const { agent, task } = createRunningTask("disabled drain callbacks");
-    const delivered = createSteeringMessage({
+    const { agent, task } = await createRunningTask("disabled drain callbacks");
+    const delivered = await createSteeringMessage({
       taskId: task.id,
       body: "deliver this",
       mode: "queue",
       source: "api",
       createdByKind: "system",
     });
-    const undeliverable = createSteeringMessage({
+    const undeliverable = await createSteeringMessage({
       taskId: task.id,
       body: "promote this",
       mode: "queue",
@@ -323,18 +325,25 @@ describe("STEERING_ENABLED opt-in", () => {
     try {
       const channelId = `C_DISABLED_${crypto.randomUUID()}`;
       const threadTs = "1.0001";
-      const { task } = createRunningTask("disabled Slack steering", "pi", { channelId, threadTs });
+      const { task } = await createRunningTask("disabled Slack steering", "pi", {
+        channelId,
+        threadTs,
+      });
 
       await withSteeringDisabled(async () => {
         expect(
-          requestSlackThreadSteering({ channelId, threadTs, message: "take the fallback path" }),
+          await requestSlackThreadSteering({
+            channelId,
+            threadTs,
+            message: "take the fallback path",
+          }),
         ).toBeNull();
         bufferThreadMessage(channelId, threadTs, "create the normal follow-up", "U1", "1.0002");
         await instantFlush(`${channelId}:${threadTs}`);
       });
 
-      expect(getSteeringMessagesForTask(task.id)).toEqual([]);
-      expect(getChildTasks(task.id)).toHaveLength(1);
+      expect(await getSteeringMessagesForTask(task.id)).toEqual([]);
+      expect(await getChildTasks(task.id)).toHaveLength(1);
     } finally {
       restoreEnv("SLACK_THREAD_STEERING", previousMode);
       restoreEnv("SLACK_THREAD_STEERING_MODE", previousDeliveryMode);

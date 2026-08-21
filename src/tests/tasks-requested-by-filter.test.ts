@@ -18,6 +18,7 @@ import {
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-tasks-requested-by-filter.sqlite";
 
@@ -33,14 +34,16 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    agentId = createAgent({
-      id: "requested-by-filter-agent",
-      name: "Requested By Filter Agent",
-      isLead: false,
-      status: "idle",
-    }).id;
-    userAId = createUser({ name: "User A", email: "user-a@example.com" }).id;
-    userBId = createUser({ name: "User B", email: "user-b@example.com" }).id;
+    agentId = (
+      await createAgent({
+        id: "requested-by-filter-agent",
+        name: "Requested By Filter Agent",
+        isLead: false,
+        status: "idle",
+      })
+    ).id;
+    userAId = (await createUser({ name: "User A", email: "user-a@example.com" })).id;
+    userBId = (await createUser({ name: "User B", email: "user-b@example.com" })).id;
   });
 
   afterAll(async () => {
@@ -52,36 +55,42 @@ describe("getAllTasks / getTasksCount requestedByUserId filter", () => {
     }
   });
 
-  test("requestedByUserId=<id> filters to that requester's tasks only, list and count agree", () => {
-    const taskA = createTaskExtended("task for user A", { agentId, requestedByUserId: userAId });
-    const taskB = createTaskExtended("task for user B", { agentId, requestedByUserId: userBId });
-    const taskUnattributed = createTaskExtended("task with no requester", { agentId });
+  test("requestedByUserId=<id> filters to that requester's tasks only, list and count agree", async () => {
+    const taskA = await createTaskExtended("task for user A", {
+      agentId,
+      requestedByUserId: userAId,
+    });
+    const taskB = await createTaskExtended("task for user B", {
+      agentId,
+      requestedByUserId: userBId,
+    });
+    const taskUnattributed = await createTaskExtended("task with no requester", { agentId });
 
-    const listForA = getAllTasks({ requestedByUserId: userAId, includeHeartbeat: true });
+    const listForA = await getAllTasks({ requestedByUserId: userAId, includeHeartbeat: true });
     const ids = listForA.map((t) => t.id);
     expect(ids).toContain(taskA.id);
     expect(ids).not.toContain(taskB.id);
     expect(ids).not.toContain(taskUnattributed.id);
 
-    expect(getTasksCount({ requestedByUserId: userAId, includeHeartbeat: true })).toBe(
+    expect(await getTasksCount({ requestedByUserId: userAId, includeHeartbeat: true })).toBe(
       listForA.length,
     );
   });
 
-  test("requestedByUserIdIsNull returns only unattributed rows, list and count agree", () => {
-    const taskA = createTaskExtended("second task for user A", {
+  test("requestedByUserIdIsNull returns only unattributed rows, list and count agree", async () => {
+    const taskA = await createTaskExtended("second task for user A", {
       agentId,
       requestedByUserId: userAId,
     });
-    const taskUnattributed = createTaskExtended("second task with no requester", { agentId });
+    const taskUnattributed = await createTaskExtended("second task with no requester", { agentId });
 
-    const nullList = getAllTasks({ requestedByUserIdIsNull: true, includeHeartbeat: true });
+    const nullList = await getAllTasks({ requestedByUserIdIsNull: true, includeHeartbeat: true });
     const ids = nullList.map((t) => t.id);
     expect(ids).toContain(taskUnattributed.id);
     expect(ids).not.toContain(taskA.id);
     expect(nullList.every((t) => !t.requestedByUserId)).toBe(true);
 
-    expect(getTasksCount({ requestedByUserIdIsNull: true, includeHeartbeat: true })).toBe(
+    expect(await getTasksCount({ requestedByUserIdIsNull: true, includeHeartbeat: true })).toBe(
       nullList.length,
     );
   });
@@ -103,13 +112,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -136,14 +138,16 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
   beforeAll(async () => {
     await removeDbFiles(ROUTE_TEST_DB_PATH);
     initDb(ROUTE_TEST_DB_PATH);
-    routeAgentId = createAgent({
-      name: "route-requested-by-filter-agent",
-      isLead: false,
-      status: "idle",
-    }).id;
-    routeUserId = createUser({ name: "Route User", email: "route-user@example.com" }).id;
+    routeAgentId = (
+      await createAgent({
+        name: "route-requested-by-filter-agent",
+        isLead: false,
+        status: "idle",
+      })
+    ).id;
+    routeUserId = (await createUser({ name: "Route User", email: "route-user@example.com" })).id;
     server = createTestServer(ROUTE_API_KEY);
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(async () => {
@@ -162,11 +166,11 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
   }
 
   test("omitted param returns all rows (attributed and unattributed)", async () => {
-    const attributed = createTaskExtended("route test — attributed", {
+    const attributed = await createTaskExtended("route test — attributed", {
       agentId: routeAgentId,
       requestedByUserId: routeUserId,
     });
-    const unattributed = createTaskExtended("route test — unattributed", {
+    const unattributed = await createTaskExtended("route test — unattributed", {
       agentId: routeAgentId,
     });
 
@@ -179,11 +183,11 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
   });
 
   test("requestedByUserId=none returns only NULL rows", async () => {
-    const attributed = createTaskExtended("route test — attributed for none-filter", {
+    const attributed = await createTaskExtended("route test — attributed for none-filter", {
       agentId: routeAgentId,
       requestedByUserId: routeUserId,
     });
-    const unattributed = createTaskExtended("route test — unattributed for none-filter", {
+    const unattributed = await createTaskExtended("route test — unattributed for none-filter", {
       agentId: routeAgentId,
     });
 
@@ -197,7 +201,7 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
   });
 
   test("requestedByUserId=<unknown id> returns an empty list and zero total", async () => {
-    createTaskExtended("route test — attributed for unknown-id filter", {
+    await createTaskExtended("route test — attributed for unknown-id filter", {
       agentId: routeAgentId,
       requestedByUserId: routeUserId,
     });

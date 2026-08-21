@@ -170,7 +170,10 @@ export function createArtifactServer(opts: ArtifactServerOptions): ArtifactServe
         tunnel = null;
       }
       if (server) {
-        server.stop();
+        // Bun >= 1.4 makes stop() wait for in-flight requests and idle
+        // keep-alive connections. Callers stop on SIGINT/SIGTERM and then
+        // exit, so close active connections instead of waiting on a hung client.
+        await server.stop(true);
         server = null;
       }
     },

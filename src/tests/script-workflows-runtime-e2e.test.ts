@@ -1,12 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { closeDb, createAgent, getDb, initDb, listScriptRunJournalSteps } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, listScriptRunJournalSteps } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
@@ -25,17 +26,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-function listen(server: Server): Promise<number> {
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") reject(new Error("No server address"));
-      else resolve(address.port);
-    });
-  });
 }
 
 function closeServer(server: Server): Promise<void> {
@@ -98,7 +88,11 @@ beforeAll(async () => {
   process.env.SCRIPT_WORKFLOW_RUNTIME_DIR = WORKFLOW_RUNTIME_DIR;
   refreshSecretScrubberCache();
 
-  const agent = createAgent({ name: "script-workflow-e2e-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({
+    name: "script-workflow-e2e-worker",
+    isLead: false,
+    status: "idle",
+  });
   agentId = agent.id;
   server = createServer((req, res) => {
     route(req, res).catch((err) => {
@@ -106,7 +100,7 @@ beforeAll(async () => {
       res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
     });
   });
-  const port = await listen(server);
+  const port = await listenOnFreePort(server, "127.0.0.1");
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.MCP_BASE_URL = baseUrl;
 });
@@ -126,9 +120,9 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM script_run_journal");
+  await getDbClient().run("DELETE FROM script_runs");
 });
 
 describe("script workflow runtime", () => {
@@ -163,7 +157,7 @@ describe("script workflow runtime", () => {
       second: { result: 14, exitCode: 0 },
     });
 
-    const journal = listScriptRunJournalSteps(id);
+    const journal = await listScriptRunJournalSteps(id);
     expect(journal).toHaveLength(1);
     expect(journal[0]?.stepKey).toBe("double");
     expect(journal[0]?.stepType).toBe("swarm-script");
@@ -194,8 +188,13 @@ describe("script workflow runtime", () => {
     expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
   });
 
-  test("resource ulimits actually apply to the durable run's process tree", async () => {
-    const source = `
+  // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);
+  // Linux CI is the enforcing environment. Skip only unblocks local macOS
+  // pushes now that pre-push tests are blocking (#1216).
+  test.skipIf(process.platform === "darwin")(
+    "resource ulimits actually apply to the durable run's process tree",
+    async () => {
+      const source = `
       export default async function main() {
         const proc = Bun.spawnSync(["sh", "-c", "ulimit -v"]);
         const out = new TextDecoder().decode(proc.stdout).trim();
@@ -203,19 +202,20 @@ describe("script workflow runtime", () => {
       }
     `;
 
-    const created = await api("/api/script-runs", {
-      method: "POST",
-      body: JSON.stringify({ source, background: true }),
-    });
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
 
-    const run = await waitForRun(id);
-    expect(run.status).toBe("completed");
-    const ulimitV = (run.output as { ulimitV: string }).ulimitV;
-    expect(ulimitV).not.toBe("unlimited");
-    expect(Number(ulimitV)).toBeGreaterThan(0);
-  });
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      const ulimitV = (run.output as { ulimitV: string }).ulimitV;
+      expect(ulimitV).not.toBe("unlimited");
+      expect(Number(ulimitV)).toBeGreaterThan(0);
+    },
+  );
 
   test("POST /api/script-runs requires no bearer beyond normal auth — matches POST /api/scripts/run (any authenticated agent)", async () => {
     const created = await api("/api/script-runs", {

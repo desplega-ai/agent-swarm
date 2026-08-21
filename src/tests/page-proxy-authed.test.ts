@@ -15,29 +15,21 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = 19881;
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-page-proxy-authed-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const API_KEY = "test-page-proxy-authed-key";
 const PAGE_SECRET = "test-page-proxy-authed-secret";
 
 let serverProc: Subprocess;
 const agentId = randomUUID();
 
-async function waitForServer(url: string, timeoutMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {}
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
-
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
+
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
       await unlink(`${TEST_DB_PATH}${suffix}`);
@@ -84,7 +76,7 @@ beforeAll(async () => {
   if (reg.status !== 201 && reg.status !== 200) {
     throw new Error(`Failed to register agent: ${reg.status} ${await reg.text()}`);
   }
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   if (serverProc) {

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.134.0] - 2026-08-21
+
+### Added
+- **Lead agents can manage Slack channel lifecycles** (#1213) — new MCP tools create public or private channels, invite up to 100 workspace users, and archive channels with lead-only RBAC, idempotent membership handling, and clear scope-remediation errors.
+- **Operators have dedicated setup guides for model gateways and multi-runtime agents** (#1206, #1211) — the docs now cover OpenRouter-compatible gateway routing and the deployment, capacity, identity, and liveness model for multiple runtimes serving one logical agent.
+
+### Changed
+- **Database migration failures stop API startup** (#1215) — boot now fails before accepting traffic when a migration cannot complete instead of continuing against a partially upgraded schema.
+
+### Fixed
+- **Prompt-template reconciliation preserves intentional state** (#1209, #1212) — code-default drift is surfaced without overwriting stored defaults, while disabled templates and custom overrides keep their state across worker session reconciliation.
+- **Rotated configuration secrets are scrubbed immediately** (#1210) — the runtime refreshes the redaction cache as soon as a secret changes, preventing the previous value from leaking during the cache interval.
+- **Heartbeat recovery releases offers stranded on offline agents** (#1207) — offered tasks return to the claimable pool when their intended offeree is no longer online.
+
+## [1.133.1] - 2026-08-20
+
+### Added
+- **Agent prompts adapt to requester communication preferences** (#1197) — canonical requester profiles can supply language, tone, and verbosity guidance without changing the task payload.
+- **Agent details expose active runtime instances** (#1199) — operators can inspect per-process liveness and capacity behind a logical multi-runtime agent.
+
+### Changed
+- **Usage-attribution lookup is indexed** (#1201) — requester attribution retrieval avoids repeated full scans as task and session history grows.
+- **The Helm deployment tracks agent-fs 0.13.0** — the default backend image pin advances with the current shared-filesystem release.
+
+### Fixed
+- **Requester provenance survives usage attribution** (#1198) — human-initiated work remains tied to the canonical requester through reporting paths.
+- **Script SDK schedule listings preserve full task templates** (#1202) — catalog scripts no longer receive truncated schedule templates when listing scheduled work.
+- **Database query execution has a hard subprocess timeout** (#1192) — runaway diagnostic queries are terminated outside the API process instead of monopolizing it.
+
 ## [1.133.0] - 2026-08-20
 
 ### Added

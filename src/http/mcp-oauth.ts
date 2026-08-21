@@ -209,11 +209,11 @@ async function discoverForMcp(resourceUrl: string): Promise<DiscoveryResult | nu
   };
 }
 
-function getMcpOrError(
+async function getMcpOrError(
   res: ServerResponse,
   mcpServerId: string,
-): ReturnType<typeof getMcpServerById> | null {
-  const server = getMcpServerById(mcpServerId);
+): Promise<Awaited<ReturnType<typeof getMcpServerById>> | null> {
+  const server = await getMcpServerById(mcpServerId);
   if (!server) {
     jsonError(res, "MCP server not found", 404);
     return null;
@@ -447,7 +447,7 @@ async function withAuthorizeFlowLock<T>(key: string, fn: () => Promise<T>): Prom
 async function prepareAuthorizeFlow(
   res: ServerResponse,
   mcpServerId: string,
-  server: NonNullable<ReturnType<typeof getMcpServerById>>,
+  server: NonNullable<Awaited<ReturnType<typeof getMcpServerById>>>,
   q: AuthorizeFlowQuery,
 ): Promise<string | null> {
   const userId = q.userId ?? null;
@@ -459,11 +459,11 @@ async function prepareAuthorizeFlow(
 async function runAuthorizeFlow(
   res: ServerResponse,
   mcpServerId: string,
-  server: NonNullable<ReturnType<typeof getMcpServerById>>,
+  server: NonNullable<Awaited<ReturnType<typeof getMcpServerById>>>,
   q: AuthorizeFlowQuery,
   userId: string | null,
 ): Promise<string | null> {
-  let client = manualClientFromToken(getMcpOAuthToken(mcpServerId, userId));
+  let client = manualClientFromToken(await getMcpOAuthToken(mcpServerId, userId));
   let discovery: DiscoveryResult | null = null;
   let registrationEndpoint: string | null = null;
   // Only set when THIS call freshly registers (or otherwise knows the true
@@ -478,7 +478,7 @@ async function runAuthorizeFlow(
     // attempt (retrying before it's completed/GC'd). Discovery is still run
     // (cheap metadata GET, not a mutating registration) to get the current
     // authorize/token URLs and to confirm the AS identity hasn't moved.
-    const reusable = findReusableMcpOAuthClient(mcpServerId, userId);
+    const reusable = await findReusableMcpOAuthClient(mcpServerId, userId);
     discovery = await discoverForMcp(server.url!);
     if (!discovery) {
       jsonError(res, "MCP server does not require OAuth", 400);
@@ -623,7 +623,7 @@ async function runAuthorizeFlow(
     extraParams,
   });
 
-  insertMcpOAuthPending({
+  await insertMcpOAuthPending({
     state: built.state,
     mcpServerId,
     userId,
@@ -668,7 +668,7 @@ export async function completeMcpOAuthCallback(
 ): Promise<boolean> {
   const state = query.state;
   if (!state) return false;
-  const pending = consumeMcpOAuthPending(state);
+  const pending = await consumeMcpOAuthPending(state);
   if (!pending) return false;
 
   const dashboardBaseUrl = pending.finalRedirect ?? defaultFinalRedirect(pending.mcpServerId);
@@ -680,9 +680,9 @@ export async function completeMcpOAuthCallback(
     // orphaned pending row — a floor of 10 minutes, not a bound. Same
     // wrong-target guard as the exchange-failure path below.
     if (isInvalidClientError(query.error) || query.error === "unauthorized_client") {
-      const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+      const connected = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
-        invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
+        await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
     }
     const target = new URL(dashboardBaseUrl);
@@ -715,12 +715,12 @@ export async function completeMcpOAuthCallback(
       codeVerifier: pending.codeVerifier,
       resource: pending.resourceUrl,
     });
-    const existing = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+    const existing = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
     const clientSource =
       existing?.clientSource ??
       (pending.dcrClientId ? ("dcr" as const) : ("preregistered" as const));
 
-    upsertMcpOAuthToken({
+    await upsertMcpOAuthToken({
       mcpServerId: pending.mcpServerId,
       userId: pending.userId,
       accessToken: tokens.access_token,
@@ -749,7 +749,7 @@ export async function completeMcpOAuthCallback(
     });
 
     // Flip authMethod=oauth so resolveSecrets picks this up.
-    setMcpServerAuthMethod(pending.mcpServerId, "oauth");
+    await setMcpServerAuthMethod(pending.mcpServerId, "oauth");
 
     const target = new URL(dashboardBaseUrl);
     target.searchParams.set("oauth", "success");
@@ -766,9 +766,9 @@ export async function completeMcpOAuthCallback(
       // registered client (AS identity, redirect URI, or scope set moved),
       // the connected app still holds a different, working client_id, and
       // invalidating it would corrupt a working connection.
-      const connected = getMcpOAuthToken(pending.mcpServerId, pending.userId);
+      const connected = await getMcpOAuthToken(pending.mcpServerId, pending.userId);
       if (!connected || connected.dcrClientId === pending.dcrClientId) {
-        invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
+        await invalidateMcpOAuthClient(pending.mcpServerId, pending.userId);
       }
     }
     const target = new URL(dashboardBaseUrl);
@@ -809,14 +809,14 @@ export async function handleMcpOAuth(
     const parsed = await statusRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpServerById(parsed.params.mcpServerId);
+    const server = await getMcpServerById(parsed.params.mcpServerId);
     if (!server) {
       jsonError(res, "MCP server not found", 404);
       return true;
     }
 
     const userId = parsed.query.userId ?? null;
-    const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const token = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
 
     statusRoute.respond(res, 200, {
       mcpServerId: server.id,
@@ -848,7 +848,7 @@ export async function handleMcpOAuth(
     const parsed = await metadataRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -870,7 +870,7 @@ export async function handleMcpOAuth(
     const parsed = await authorizeRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -896,7 +896,7 @@ export async function handleMcpOAuth(
     const parsed = await authorizeUrlRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -921,7 +921,7 @@ export async function handleMcpOAuth(
     if (!parsed) return true;
 
     const userId = parsed.body?.userId ?? null;
-    const existing = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const existing = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
     if (!existing || !existing.refreshToken) {
       jsonError(res, "No refresh token available for this MCP server", 404);
       return true;
@@ -936,7 +936,7 @@ export async function handleMcpOAuth(
         refreshToken: existing.refreshToken,
         resource: existing.resourceUrl,
       });
-      applyMcpOAuthRefresh(existing.id, {
+      await applyMcpOAuthRefresh(existing.id, {
         accessToken: refreshed.access_token,
         refreshToken: refreshed.refresh_token ?? undefined,
         expiresAt: computeExpiresAt(refreshed.expires_in),
@@ -954,8 +954,8 @@ export async function handleMcpOAuth(
         // The provider has disowned this client — invalidate it so the next
         // /authorize call re-registers exactly once instead of continuing to
         // refresh against a client_id the provider now rejects.
-        invalidateMcpOAuthClient(parsed.params.mcpServerId, userId);
-        markMcpOAuthTokenStatus(existing.id, "error", message);
+        await invalidateMcpOAuthClient(parsed.params.mcpServerId, userId);
+        await markMcpOAuthTokenStatus(existing.id, "error", message);
       }
       jsonError(res, `Refresh failed: ${message}`, 500);
     }
@@ -968,7 +968,7 @@ export async function handleMcpOAuth(
     if (!parsed) return true;
 
     const userId = parsed.query.userId ?? null;
-    const token = getMcpOAuthToken(parsed.params.mcpServerId, userId);
+    const token = await getMcpOAuthToken(parsed.params.mcpServerId, userId);
     if (!token) {
       jsonError(res, "No token for this MCP server", 404);
       return true;
@@ -992,9 +992,9 @@ export async function handleMcpOAuth(
       }
     }
 
-    deleteMcpOAuthToken(parsed.params.mcpServerId, userId);
+    await deleteMcpOAuthToken(parsed.params.mcpServerId, userId);
     // Flip back to static so resolveSecrets stops trying to inject Bearer.
-    setMcpServerAuthMethod(parsed.params.mcpServerId, "static");
+    await setMcpServerAuthMethod(parsed.params.mcpServerId, "static");
     disconnectRoute.respond(res, 200, { ok: true });
     return true;
   }
@@ -1004,7 +1004,7 @@ export async function handleMcpOAuth(
     const parsed = await manualClientRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
 
-    const server = getMcpOrError(res, parsed.params.mcpServerId);
+    const server = await getMcpOrError(res, parsed.params.mcpServerId);
     if (!server) return true;
 
     try {
@@ -1076,7 +1076,7 @@ export async function handleMcpOAuth(
 
       // Write the provisional token row with status='error' until /authorize
       // completes. The callback flips status=connected on success.
-      upsertMcpOAuthToken({
+      await upsertMcpOAuthToken({
         mcpServerId: parsed.params.mcpServerId,
         accessToken: "pending",
         refreshToken: null,

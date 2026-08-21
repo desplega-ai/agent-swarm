@@ -14,6 +14,9 @@ jobs:
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     outputs:
       lint: ${{ steps.check.outputs.lint }}
       test: ${{ steps.check.outputs.test }}
@@ -71,8 +74,9 @@ jobs:
           # lint + tsc:check: biome runs on src/, tsc covers src/ (scripts excluded in tsconfig).
           # bunfig.toml (linker/test config), turbo.json, member manifests (root frozen
           # install), and the dep-graph inputs (.dependency-cruiser.cjs, plugin/) are all
-          # load-bearing for this job since the workspace migration.
-          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$)')
+          # load-bearing for this job since the workspace migration. The Dockerfiles
+          # feed the Bun version-pin check (check:bun-version).
+          LINT=$(match '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|turbo\.json$|konsistent\.json$|tsconfig\.json$|biome\.json$|\.dependency-cruiser\.cjs$|plugin/opencode-plugins/|apps/(ui|templates-ui)/package\.json$|Dockerfile$|Dockerfile\.worker$|scripts/check-bun-version\.ts$)')
 
           # tests: src/ + scripts that tests import + lockfile/tsconfig + bunfig ([test]
           # preload + pathIgnorePatterns) + member manifests (root frozen install).
@@ -131,6 +135,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -139,10 +146,17 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # bun.lock must stay deduped. A removable duplicate ships two copies of the
+      # same dep (Biome, zod and openai were the last offenders), so the version a
+      # given import resolves to depends on where in the tree it sits. Runs in
+      # milliseconds. Like the Bun version pin check it needs no timing series.
+      - name: Check for duplicate lockfile versions
+        run: bun dedupe --check
 
       - name: Run Biome linter
         id: lint
@@ -239,6 +253,42 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check async DB seam
+        id: async-db-seam
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-async-db-seam.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check floating promises
+        id: floating-promises
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-floating-promises.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Check promise sinks
+        id: promise-sinks
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bun scripts/check-promise-sinks.ts
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
       - name: Check API_KEY env-access boundary
         id: api-key-boundary
         run: |
@@ -313,6 +363,11 @@ jobs:
 
       - name: Check OpenAPI response-schema coverage
         run: bun scripts/check-openapi-response-coverage.ts
+
+      # Dockerfile `FROM oven/bun:<tag>` pins must equal package.json packageManager
+      # (the version setup-bun installs in every job above).
+      - name: Check Bun version pins
+        run: bun run check:bun-version
 
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
@@ -390,15 +445,64 @@ jobs:
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
 
+  # Resolve "the latest timings snapshot" ONCE per run and hand the same files
+  # to both shards as an artifact. The primary key never exists at restore time
+  # (save-timings creates it at the end of this run), so every restore goes
+  # through the prefix fallback, and that resolves to the newest matching cache
+  # at the moment of the call. If each shard restored on its own, a save landing
+  # between the two calls (main's ci.yml, another PR run) would give them
+  # different snapshots; --shard assigns files from the durations it is given,
+  # so the two shards would split two different lists (one file in both,
+  # another in neither) and the gate would stay green. Runs alongside
+  # detect-changes (~10 s, no checkout) so it adds nothing to the critical path.
+  # PR runs read main's entry via restore-keys; nothing on the very first run,
+  # when --shard splits by count. Listed in the gate's needs so a failure here
+  # cannot skip the test matrix silently.
+  restore-timings:
+    name: Restore test timings
+    runs-on: ubuntu-latest
+    # No checkout. Cache restore and artifact upload use the runner token.
+    permissions: {}
+    steps:
+      - name: Restore test timings
+        id: restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
+          restore-keys: bun-test-timings-
+
+      # The artifact must exist even on a cache miss (download-artifact fails on
+      # a missing name). The marker also records which snapshot this run used.
+      - name: Record the resolved snapshot
+        run: |
+          mkdir -p .bun-test-timings
+          echo "${{ steps.restore.outputs.cache-matched-key || 'none' }}" > .bun-test-timings/snapshot-key.txt
+          ls -la .bun-test-timings
+
+      # include-hidden-files: upload-artifact treats every path under a
+      # dot-directory as hidden and would upload nothing from .bun-test-timings.
+      - name: Hand the snapshot to the shards
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
+          include-hidden-files: true
+          retention-days: 1
+
   test:
-    name: Run Tests (${{ matrix.shard }}/4)
-    needs: detect-changes
+    name: Run Tests (${{ matrix.shard }}/2)
+    needs: [detect-changes, restore-timings]
     if: needs.detect-changes.outputs.test == 'true'
     runs-on: ubuntu-latest
+    # Checkout only. Cache + artifact steps use the runner token, and the
+    # ci-timings report uses its own secret, so GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2]
 
     steps:
       - name: Checkout repository
@@ -407,26 +511,52 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # The per-file durations resolved once by restore-timings (see that job for
+      # why both shards must read the SAME files). Each shard writes only its own
+      # durations to next/N.json; save-timings merges them into the next cache.
+      - name: Download test timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: timings-snapshot
+          path: .bun-test-timings
 
       - name: Run tests
         id: tests
         # apps/evals/ is excluded from the root run via bunfig.toml pathIgnorePatterns
         # (it's a separate bun package with its own deps + its own CI test step in
-        # the lint-and-typecheck job). Each shard gets its own runner because these
-        # tests start servers, subprocesses, and SQLite workers.
+        # the lint-and-typecheck job). --parallel=4 runs each test file in its own
+        # worker process (implies --isolate), 4 at a time per runner; the restored
+        # per-file durations balance files across the 2 shards by total time.
+        # --timeout 10000 matches ci.yml (main): 4 workers saturate the runner and
+        # bunfig.toml no longer sets a global retry.
         run: |
           start=$(date +%s%3N)
           set +e
-          bun run test:root -- --shard=${{ matrix.shard }}/4
+          mkdir -p .bun-test-timings/next
+          echo "timings snapshot: $(cat .bun-test-timings/snapshot-key.txt 2>/dev/null || echo none)"
+          # shellcheck disable=SC2046
+          bun run test:root -- --timeout 10000 --parallel=4 --shard=${{ matrix.shard }}/2 \
+            --update-timings --timings=.bun-test-timings/next/${{ matrix.shard }}.json \
+            $(ls .bun-test-timings/*.json 2>/dev/null | sed 's/^/--timings=/')
           code=$?
           set -e
           echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
+
+      - name: Upload this shard's test timings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-timings-${{ matrix.shard }}
+          path: .bun-test-timings/next/${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: ignore
 
       # Each shard reports independently. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
@@ -459,15 +589,42 @@ jobs:
               runId:$runId, runAttempt:$attempt, runUrl:$url, workflow:$wf,
               event:$event, actor:$actor,
               actions:[{name:"test:root", group:"tests", durationMs:$dur, status:$status,
-                        shard:{index:$idx, total:4}, job:("test (\($idx)/4)")}]}')
+                        shard:{index:$idx, total:2}, job:("test (\($idx)/2)")}]}')
           curl -sSf --max-time 60 -X POST https://api.desplega.agent-swarm.dev/api/x/script/MJlLzJEoRxWG \
             -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY"
+
+  # Merge the per-shard durations into one cache entry for the next run. Only
+  # after a fully green test matrix, so a crashed shard never poisons the split.
+  save-timings:
+    name: Save test timings
+    needs: test
+    if: needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    # No checkout. Same-run artifact download and cache save use the runner
+    # token, not GITHUB_TOKEN.
+    permissions: {}
+    steps:
+      - name: Download per-shard timings
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-timings-*
+          path: .bun-test-timings
+          merge-multiple: true
+
+      - name: Save merged timings
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .bun-test-timings
+          key: bun-test-timings-${{ github.run_id }}
 
   pi-skills-freshness:
     name: Pi-Skills Freshness Check
     needs: detect-changes
     if: needs.detect-changes.outputs.pi_skills == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -476,7 +633,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -496,6 +653,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.seed_skills == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -504,7 +664,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -531,6 +691,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.script_types == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -539,7 +702,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -552,13 +715,16 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.openapi == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Rebuild OpenAPI spec and check for drift
@@ -593,13 +759,16 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.vendored_openapi == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
       - name: Install dependencies
         run: bun install --frozen-lockfile
       - name: Check vendored OpenAPI determinism
@@ -610,6 +779,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     strategy:
       matrix:
@@ -728,6 +900,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -736,7 +911,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       # ui is now a Bun workspace member; the root install hoists its deps. Run the
       # ui-scoped scripts from the apps/ui/ directory against that shared node_modules.
@@ -828,6 +1003,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.templates_workflows == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -836,7 +1014,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -846,9 +1024,11 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
+    # No checkout, no API calls; the job only inspects `needs` results.
+    permissions: {}
 
     steps:
       - name: Check results

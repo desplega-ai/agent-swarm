@@ -1,8 +1,8 @@
 /**
  * Unit tests for DevinAdapter / DevinSession (`src/providers/devin-adapter.ts`).
  *
- * Uses a mock HTTP server (node:http) on port 13051 to simulate the Devin v3
- * API. The mock supports controllable responses per-endpoint so individual
+ * Uses a mock HTTP server (node:http) on an OS-assigned port to simulate the
+ * Devin v3 API. The mock supports controllable responses per-endpoint so individual
  * tests can drive the polling loop through different session lifecycle paths.
  *
  * Because the API client captures `DEVIN_API_BASE_URL` at module-load time,
@@ -14,9 +14,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
+import { listenOnFreePort } from "./test-net";
 
-const TEST_PORT = 13051;
-const TEST_BASE_URL = `http://localhost:${TEST_PORT}`;
+let TEST_BASE_URL = "";
 const ORG_ID = "org-adapter-test";
 const API_KEY = "cog_adapter_key";
 
@@ -195,16 +195,15 @@ beforeAll(async () => {
     savedEnv[key] = process.env[key];
   }
 
+  server = createServer(handler);
+  const port = await listenOnFreePort(server);
+  TEST_BASE_URL = `http://localhost:${port}`;
+
   // Set test env vars — must happen BEFORE module import.
   process.env.DEVIN_API_BASE_URL = TEST_BASE_URL;
   process.env.DEVIN_API_KEY = API_KEY;
   process.env.DEVIN_ORG_ID = ORG_ID;
   process.env.DEVIN_POLL_INTERVAL_MS = "50";
-
-  await new Promise<void>((resolve) => {
-    server = createServer(handler);
-    server.listen(TEST_PORT, () => resolve());
-  });
 
   const mod = await import("../providers/devin-adapter");
   DevinAdapter = mod.DevinAdapter;

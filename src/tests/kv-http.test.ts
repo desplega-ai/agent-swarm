@@ -10,12 +10,13 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, getDb, initDb, upsertKv } from "../be/db";
+import { closeDb, createAgent, createTaskExtended, getDbClient, initDb, upsertKv } from "../be/db";
 import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { mcpOverflowNamespace } from "../kv-overflow";
 import { slackContextKey as buildSlackContextKey } from "../tasks/context-key";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-http.sqlite";
 const API_KEY = "test-kv-key";
@@ -28,13 +29,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -64,11 +58,11 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 
-  const a = createAgent({ name: "kv-test-a", isLead: false, status: "idle" });
-  const b = createAgent({ name: "kv-test-b", isLead: false, status: "idle" });
-  const lead = createAgent({ name: "kv-test-lead", isLead: true, status: "idle" });
+  const a = await createAgent({ name: "kv-test-a", isLead: false, status: "idle" });
+  const b = await createAgent({ name: "kv-test-b", isLead: false, status: "idle" });
+  const lead = await createAgent({ name: "kv-test-lead", isLead: true, status: "idle" });
   agentId = a.id;
   otherAgentId = b.id;
   leadAgentId = lead.id;
@@ -77,7 +71,7 @@ beforeAll(async () => {
     channelId: "CKVTEST",
     threadTs: "1700000000.123456",
   });
-  const slackTask = createTaskExtended("kv test task", {
+  const slackTask = await createTaskExtended("kv test task", {
     agentId,
     source: "mcp",
     slackChannelId: "CKVTEST",
@@ -94,8 +88,8 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries");
 });
 
 function url(path: string): string {
@@ -303,7 +297,7 @@ describe("/api/kv REST — auth on writes", () => {
 
   test("MCP overflow namespace allows only its owning agent to read, list, or write", async () => {
     const namespace = mcpOverflowNamespace(otherAgentId);
-    upsertKv({
+    await upsertKv({
       namespace,
       key: "v1/private-tool/hash",
       value: "private business content",

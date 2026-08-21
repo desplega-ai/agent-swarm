@@ -10,7 +10,7 @@ import { getJiraMetadata } from "./metadata";
  */
 export async function getJiraAccessToken(): Promise<string> {
   await ensureToken("jira");
-  const tokens = getOAuthTokens("jira");
+  const tokens = await getOAuthTokens("jira");
   if (!tokens) {
     throw new Error("Jira not connected — no OAuth tokens stored");
   }
@@ -22,8 +22,8 @@ export async function getJiraAccessToken(): Promise<string> {
  *
  * Throws if the OAuth callback hasn't completed yet (no cloudId persisted).
  */
-export function getJiraCloudId(): string {
-  const meta = getJiraMetadata();
+export async function getJiraCloudId(): Promise<string> {
+  const meta = await getJiraMetadata();
   if (!meta.cloudId) {
     throw new Error("Jira cloudId not resolved — complete OAuth before calling Jira REST API");
   }
@@ -48,7 +48,7 @@ export async function jiraFetch(path: string, init?: RequestInit): Promise<Respo
   }
 
   const send = async (token: string): Promise<Response> => {
-    const cloudId = getJiraCloudId();
+    const cloudId = await getJiraCloudId();
     const url = `https://api.atlassian.com/ex/jira/${cloudId}${path}`;
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${token}`);

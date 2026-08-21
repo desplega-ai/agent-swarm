@@ -282,7 +282,7 @@ export async function handleSessionData(
     if (!parsed) return true;
 
     try {
-      createSessionLogs({
+      await createSessionLogs({
         taskId: parsed.body.taskId || undefined,
         sessionId: parsed.body.sessionId,
         iteration: parsed.body.iteration,
@@ -303,12 +303,12 @@ export async function handleSessionData(
   if (getSessionLogsByTask.match(req.method, pathSegments)) {
     const parsed = await getSessionLogsByTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.taskId);
+    const task = await getTaskById(parsed.params.taskId);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
-    const logs = getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
+    const logs = await getSessionLogsByTaskId(parsed.params.taskId, parsed.query?.limit);
     getSessionLogsByTask.respond(res, 200, { logs });
     return true;
   }
@@ -348,7 +348,7 @@ export async function handleSessionData(
       // Keep the adapter's report even when the pricing-table branch replaces
       // totalCostUsd with the server's canonical recomputation.
       const harnessCostUsd = parsed.body.totalCostUsd;
-      const recomputed = recomputeSessionCost(
+      const recomputed = await recomputeSessionCost(
         {
           provider: parsed.body.provider,
           model,
@@ -363,13 +363,13 @@ export async function handleSessionData(
           durationMs: parsed.body.durationMs,
           atEpochMs: parsed.body.createdAt ?? Date.now(),
         },
-        (provider, lookupModel, tokenClass, atEpochMs) =>
-          getActivePricingRow(provider, lookupModel, tokenClass, atEpochMs)?.pricePerMillionUsd ??
-          null,
+        async (provider, lookupModel, tokenClass, atEpochMs) =>
+          (await getActivePricingRow(provider, lookupModel, tokenClass, atEpochMs))
+            ?.pricePerMillionUsd ?? null,
       );
       const { totalCostUsd, costSource } = recomputed;
 
-      const cost = createSessionCost({
+      const cost = await createSessionCost({
         sessionId: parsed.body.sessionId,
         taskId: parsed.body.taskId || undefined,
         agentId: parsed.body.agentId,
@@ -419,7 +419,7 @@ export async function handleSessionData(
   if (getSessionCostSummaryRoute.match(req.method, pathSegments)) {
     const parsed = await getSessionCostSummaryRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const summary = getSessionCostSummary({
+    const summary = await getSessionCostSummary({
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
       agentId: parsed.query.agentId || undefined,
@@ -431,7 +431,7 @@ export async function handleSessionData(
   }
 
   if (getDashboardCosts.match(req.method, pathSegments)) {
-    const dashboardCosts = getDashboardCostSummary();
+    const dashboardCosts = await getDashboardCostSummary();
     getDashboardCosts.respond(res, 200, dashboardCosts);
     return true;
   }
@@ -439,7 +439,7 @@ export async function handleSessionData(
   if (getAttributionByPersonRoute.match(req.method, pathSegments)) {
     const parsed = await getAttributionByPersonRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const rows = getAttributionByPerson({
+    const rows = await getAttributionByPerson({
       startDate: parsed.query.startDate || undefined,
       endDate: parsed.query.endDate || undefined,
     });
@@ -455,18 +455,18 @@ export async function handleSessionData(
 
     let costs: SessionCost[];
     if (taskId) {
-      costs = getSessionCostsByTaskId(taskId, limit);
+      costs = await getSessionCostsByTaskId(taskId, limit);
     } else if (startDate || endDate) {
-      costs = getSessionCostsFiltered({
+      costs = await getSessionCostsFiltered({
         agentId: agentId || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         limit,
       });
     } else if (agentId) {
-      costs = getSessionCostsByAgentId(agentId, limit);
+      costs = await getSessionCostsByAgentId(agentId, limit);
     } else {
-      costs = getAllSessionCosts(limit);
+      costs = await getAllSessionCosts(limit);
     }
 
     listSessionCosts.respond(res, 200, { costs });

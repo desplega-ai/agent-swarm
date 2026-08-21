@@ -217,14 +217,14 @@ export const registerCreateScheduleTool = (server: McpServer) => {
       }
 
       // Check for duplicate name
-      const existing = getScheduledTaskByName(name);
+      const existing = await getScheduledTaskByName(name);
       if (existing) {
         return toolErr(`Schedule with name "${name}" already exists.`);
       }
 
       // Validate targetAgentId if provided
       if (targetAgentId) {
-        const agent = getAgentById(targetAgentId);
+        const agent = await getAgentById(targetAgentId);
         if (!agent) {
           return toolErr(`Target agent not found: ${targetAgentId}`);
         }
@@ -239,7 +239,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         if (!workflowId) {
           return toolErr("workflowId is required when targetType is 'workflow'.");
         }
-        if (!getWorkflow(workflowId)) {
+        if (!(await getWorkflow(workflowId))) {
           return toolErr(`Workflow not found: ${workflowId}`);
         }
       }
@@ -247,7 +247,7 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         if (!scriptName) {
           return toolErr("scriptName is required when targetType is 'script'.");
         }
-        if (!getScript({ name: scriptName, scope: "global" })) {
+        if (!(await getScript({ name: scriptName, scope: "global" }))) {
           return toolErr(`Script not found: ${scriptName}`);
         }
       }
@@ -270,10 +270,11 @@ export const registerCreateScheduleTool = (server: McpServer) => {
         }
 
         const createdBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
-        const assetKey = key ? authorizeAssetKeyWrite(key, createdBy) : undefined;
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
+        const assetKey = key ? await authorizeAssetKeyWrite(key, createdBy) : undefined;
 
-        const schedule = createScheduledTask({
+        const schedule = await createScheduledTask({
           key: assetKey,
           name,
           taskTemplate,

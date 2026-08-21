@@ -33,6 +33,9 @@ env:
 jobs:
   detect-version-change:
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
       version: ${{ steps.check.outputs.version }}
@@ -45,7 +48,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Check chart version sync
         run: bun run sync-chart-version --check
@@ -508,6 +511,10 @@ jobs:
   deploy:
     name: Deploy
     runs-on: ubuntu-latest
+    # Checkout + git fetch of origin/main only; the deploy step authenticates to
+    # Dokploy with its own secret, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     concurrency:
       group: agent-swarm-deploy
       cancel-in-progress: false
@@ -731,6 +738,10 @@ jobs:
   publish-e2b-templates:
     name: Publish E2B templates
     runs-on: ubuntu-latest
+    # Checkout only; the build/publish steps authenticate to E2B with
+    # E2B_API_KEY, not GITHUB_TOKEN.
+    permissions:
+      contents: read
     needs:
       - detect-version-change
       - merge-server
@@ -746,7 +757,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -843,7 +854,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -877,6 +888,23 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      # Third-party license inventory for the shipped (production) dependency
+      # set, attached to every release. `bun pm licenses` is Bun 1.4+. The
+      # inventory is informational: it must never block the release itself, so
+      # both steps are continue-on-error and the asset is attached only if it exists.
+      - name: Install dependencies (license inventory)
+        continue-on-error: true
+        run: bun install --frozen-lockfile
+
+      - name: Generate third-party license inventory
+        continue-on-error: true
+        run: bun pm licenses --prod --json > /tmp/third-party-licenses.json
 
       - name: Create GitHub Release
         env:
@@ -928,4 +956,5 @@ jobs:
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
             --generate-notes \
-            --verify-tag
+            --verify-tag \
+            $( [ -s /tmp/third-party-licenses.json ] && echo "/tmp/third-party-licenses.json#third-party-licenses.json" )

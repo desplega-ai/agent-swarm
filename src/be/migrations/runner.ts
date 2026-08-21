@@ -83,7 +83,7 @@ function repairRenumberedModelTiers(db: Database, migrations: Migration[]): void
       modelTiers.name,
       modelTiers.checksum,
     ]);
-  })();
+  }).immediate();
 }
 
 function shouldBootstrapInitialMigration(db: Database): boolean {
@@ -236,7 +236,7 @@ export function runMigrations(db: Database): void {
           "INSERT INTO _migrations (version, name, applied_at, checksum) VALUES (?, ?, ?, ?)",
           [migration.version, migration.name, new Date().toISOString(), migration.checksum],
         );
-      })();
+      }).immediate();
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(

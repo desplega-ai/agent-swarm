@@ -128,9 +128,44 @@ async function saveHistory(sessionKey: string, history: ToolCallRecord[]): Promi
 }
 
 /**
- * Detect if the current tool call is part of a repetitive loop.
+ * In-process queue per session key. `checkToolLoop` is a read-modify-write of
+ * the history file; two calls for the same session that overlap both read the
+ * same history and the later write drops the earlier call, so the repeat
+ * count undercounts and a real loop can slip past the threshold. The
+ * long-running callers (`claude-managed-adapter`, `swarm-events-shared`) fire
+ * it without awaiting, so the serialization has to live here, not at the
+ * call sites. Entries are removed once their chain drains so the map does not
+ * grow with every session the process has ever seen.
+ *
+ * Hook processes (`src/hooks/hook.ts`) are one call per process and run
+ * sequentially per session, so they never overlap in-process; a cross-process
+ * lock is out of scope here.
  */
-export async function checkToolLoop(
+const sessionQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Detect if the current tool call is part of a repetitive loop.
+ * Calls for the same `sessionKey` run strictly one after another, in call
+ * order, even when the caller does not await the returned promise.
+ */
+export function checkToolLoop(
+  sessionKey: string,
+  toolName: string,
+  toolInput: Record<string, unknown>,
+): Promise<LoopDetectionResult> {
+  const previous = sessionQueues.get(sessionKey) ?? Promise.resolve();
+  const run = previous
+    .catch(() => {})
+    .then(() => checkToolLoopUnserialized(sessionKey, toolName, toolInput));
+  sessionQueues.set(sessionKey, run);
+  const release = () => {
+    if (sessionQueues.get(sessionKey) === run) sessionQueues.delete(sessionKey);
+  };
+  run.then(release, release);
+  return run;
+}
+
+async function checkToolLoopUnserialized(
   sessionKey: string,
   toolName: string,
   toolInput: Record<string, unknown>,

@@ -2,7 +2,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   createLogEntry,
   getActivePricingRow,
-  getDb,
+  getDbClient,
   type InsertPricingRowInput,
   insertPricingRow,
 } from "./db";
@@ -39,19 +39,23 @@ function logPricingRefreshError(message: string, err: unknown): void {
   console.warn(scrubSecrets(`[pricing-refresh] ${message}: ${detail}`));
 }
 
-function insertChangedPricingRows(
+/**
+ * The per-row reads and writes go through the async client helpers; inside the
+ * transaction callback they are routed into the same open BEGIN.
+ */
+async function insertChangedPricingRows(
   rows: PricingSeedRow[],
   now: number,
-): {
+): Promise<{
   inserted: number;
   unchanged: number;
-} {
-  let inserted = 0;
-  let unchanged = 0;
+}> {
+  return await getDbClient().transaction(async () => {
+    let inserted = 0;
+    let unchanged = 0;
 
-  const tx = getDb().transaction((seedRows: PricingSeedRow[]) => {
-    for (const row of seedRows) {
-      const existing = getActivePricingRow(row.provider, row.model, row.tokenClass, now);
+    for (const row of rows) {
+      const existing = await getActivePricingRow(row.provider, row.model, row.tokenClass, now);
       if (existing?.pricePerMillionUsd === row.pricePerMillionUsd) {
         unchanged += 1;
         continue;
@@ -61,40 +65,38 @@ function insertChangedPricingRows(
         ...row,
         effectiveFrom: now,
       };
-      insertPricingRow(input);
+      await insertPricingRow(input);
       inserted += 1;
     }
-  });
 
-  tx(rows);
-  return { inserted, unchanged };
+    return { inserted, unchanged };
+  });
 }
 
-function prunePricingHistory(keepLatest = 2): number {
-  const result = getDb()
-    .prepare(
-      `DELETE FROM pricing
-       WHERE rowid IN (
-         SELECT rowid
-         FROM (
-           SELECT
-             rowid,
-             ROW_NUMBER() OVER (
-               PARTITION BY provider, model, token_class
-               ORDER BY effective_from DESC
-             ) AS rn
-           FROM pricing
-         )
-         WHERE rn > ?
-       )`,
-    )
-    .run(keepLatest);
+async function prunePricingHistory(keepLatest = 2): Promise<number> {
+  const result = await getDbClient().run(
+    `DELETE FROM pricing
+     WHERE rowid IN (
+       SELECT rowid
+       FROM (
+         SELECT
+           rowid,
+           ROW_NUMBER() OVER (
+             PARTITION BY provider, model, token_class
+             ORDER BY effective_from DESC
+           ) AS rn
+         FROM pricing
+       )
+       WHERE rn > ?
+     )`,
+    [keepLatest],
+  );
   return result.changes;
 }
 
-function auditPricingRefresh(result: PricingRefreshResult): void {
+async function auditPricingRefresh(result: PricingRefreshResult): Promise<void> {
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.refresh",
       newValue: `${result.status}: inserted=${result.inserted}; unchanged=${result.unchanged}; pruned=${result.pruned}`,
       metadata: {
@@ -111,9 +113,9 @@ function auditPricingRefresh(result: PricingRefreshResult): void {
   }
 }
 
-function auditPricingRefreshFailure(err: unknown): void {
+async function auditPricingRefreshFailure(err: unknown): Promise<void> {
   try {
-    createLogEntry({
+    await createLogEntry({
       eventType: "pricing.refresh.failed",
       newValue: scrubSecrets(err instanceof Error ? err.message : String(err)),
     });
@@ -139,7 +141,7 @@ export async function refreshPricingFromModelsDev(
       pruned: 0,
       etag: lastETag ?? undefined,
     };
-    auditPricingRefresh(result);
+    await auditPricingRefresh(result);
     logPricingRefresh("models.dev returned 304; pricing rows unchanged");
     return result;
   }
@@ -151,8 +153,8 @@ export async function refreshPricingFromModelsDev(
   const etag = response.headers.get("etag");
   updateLiveModelsCatalog(cache, now);
   const rows = buildModelsDevSeedRows(cache);
-  const { inserted, unchanged } = insertChangedPricingRows(rows, now);
-  const pruned = prunePricingHistory(2);
+  const { inserted, unchanged } = await insertChangedPricingRows(rows, now);
+  const pruned = await prunePricingHistory(2);
   lastETag = etag;
 
   const result: PricingRefreshResult = {
@@ -163,7 +165,7 @@ export async function refreshPricingFromModelsDev(
     pruned,
     etag: lastETag ?? undefined,
   };
-  auditPricingRefresh(result);
+  await auditPricingRefresh(result);
   logPricingRefresh(
     `refreshed ${rows.length} candidate row(s); inserted=${inserted}; unchanged=${unchanged}; pruned=${pruned}`,
   );
@@ -175,7 +177,7 @@ async function runPricingRefreshSafely(): Promise<void> {
     await refreshPricingFromModelsDev();
   } catch (err) {
     logPricingRefreshError("refresh failed", err);
-    auditPricingRefreshFailure(err);
+    await auditPricingRefreshFailure(err);
   }
 }
 

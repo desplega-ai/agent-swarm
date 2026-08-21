@@ -18,7 +18,10 @@ export class AssetKeyAuthorizationError extends Error {
  * write additionally requires that the path user exists and matches the
  * trusted user resolved from HTTP auth or an ownership-validated source task.
  */
-export function authorizeAssetKeyWrite(input: string, trustedUserId?: string | null): string {
+export async function authorizeAssetKeyWrite(
+  input: string,
+  trustedUserId?: string | null,
+): Promise<string> {
   let key: string;
   try {
     key = normalizeAssetKey(input);
@@ -31,7 +34,7 @@ export function authorizeAssetKeyWrite(input: string, trustedUserId?: string | n
 
   const parsed = parseAssetKey(key);
   if (parsed.root === "shared") return key;
-  if (!findUserById(parsed.userId)) {
+  if (!(await findUserById(parsed.userId))) {
     throw new AssetKeyAuthorizationError("Personal namespace user does not exist", 400);
   }
   if (!canWriteAssetKey(key, trustedUserId)) {

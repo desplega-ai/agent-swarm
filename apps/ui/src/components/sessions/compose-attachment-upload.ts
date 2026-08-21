@@ -5,6 +5,13 @@ export interface ComposeAttachmentUploadResult {
   failed: { file: File; error: Error }[];
 }
 
+/**
+ * How many attachment uploads may be in flight at once. Serial uploads made a
+ * multi-file compose take the sum of every round trip; 3 keeps the wall clock
+ * down without flooding the browser's per-host connection budget.
+ */
+export const COMPOSE_UPLOAD_CONCURRENCY = 3;
+
 export async function uploadComposeAttachments({
   taskId,
   files,
@@ -16,19 +23,29 @@ export async function uploadComposeAttachments({
 }): Promise<ComposeAttachmentUploadResult> {
   const failed: ComposeAttachmentUploadResult["failed"] = [];
   let uploaded = 0;
+  let next = 0;
 
-  for (const file of files) {
-    try {
-      await uploadTaskAttachment({ taskId, file, intent: "user-upload" });
-      uploaded += 1;
-      onUploaded?.(uploaded);
-    } catch (error) {
-      failed.push({
-        file,
-        error: error instanceof Error ? error : new Error("Upload failed"),
-      });
+  // Workers pull from one shared cursor, so a slow file never blocks the rest.
+  async function worker(): Promise<void> {
+    while (next < files.length) {
+      const file = files[next];
+      next += 1;
+      try {
+        await uploadTaskAttachment({ taskId, file, intent: "user-upload" });
+        uploaded += 1;
+        onUploaded?.(uploaded);
+      } catch (error) {
+        failed.push({
+          file,
+          error: error instanceof Error ? error : new Error("Upload failed"),
+        });
+      }
     }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(COMPOSE_UPLOAD_CONCURRENCY, files.length) }, () => worker()),
+  );
 
   return { uploaded, failed };
 }

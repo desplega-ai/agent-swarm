@@ -21,7 +21,7 @@ export const registerTrackerSyncStatusTool = (server: McpServer) => {
       }),
     },
     async (args, _requestInfo, _meta) => {
-      const syncs = getAllTrackerSyncs(args.provider, args.entityType);
+      const syncs = await getAllTrackerSyncs(args.provider, args.entityType);
 
       return toolOk(
         `Found ${syncs.length} tracker sync mapping(s)${args.provider ? ` for ${args.provider}` : ""}${args.entityType ? ` (${args.entityType})` : ""}.`,

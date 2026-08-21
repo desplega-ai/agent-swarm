@@ -27,6 +27,9 @@ jobs:
   lint-and-render:
     name: Lint + render
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -35,7 +38,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version-file: package.json
 
       - name: Check chart version sync
         run: bun run check-chart-version

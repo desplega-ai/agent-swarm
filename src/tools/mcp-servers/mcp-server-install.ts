@@ -33,7 +33,7 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
 
       // Cross-agent install requires lead
       if (targetAgentId !== requestInfo.agentId) {
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",
@@ -51,7 +51,7 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
         }
       }
 
-      const mcpServer = getMcpServerById(args.mcpServerId);
+      const mcpServer = await getMcpServerById(args.mcpServerId);
       if (!mcpServer) {
         return toolErr("MCP server not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
@@ -61,7 +61,7 @@ export const registerMcpServerInstallTool = (server: McpServer) => {
       }
 
       try {
-        const installation = installMcpServer(targetAgentId, args.mcpServerId);
+        const installation = await installMcpServer(targetAgentId, args.mcpServerId);
         return toolOk(`Installed MCP server "${mcpServer.name}" for agent ${targetAgentId}.`, {
           data: { yourAgentId: requestInfo.agentId, installation },
         });

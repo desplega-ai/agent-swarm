@@ -119,7 +119,7 @@ export const registerManageUserTool = (server: McpServer) => {
       }),
     },
     async (input, requestInfo) => {
-      const callerAgent = requestInfo.agentId ? getAgentById(requestInfo.agentId) : null;
+      const callerAgent = requestInfo.agentId ? await getAgentById(requestInfo.agentId) : null;
       const decision = can({
         principal: {
           kind: "agent",
@@ -142,7 +142,7 @@ export const registerManageUserTool = (server: McpServer) => {
 
       switch (input.action) {
         case "list": {
-          const users = getAllUsers();
+          const users = await getAllUsers();
           return toolOk(`Found ${users.length} user(s).`, {
             details: JSON.stringify(users, null, 2),
             data: { users },
@@ -153,7 +153,7 @@ export const registerManageUserTool = (server: McpServer) => {
           if (!input.userId) {
             return toolErr("userId is required for get action.");
           }
-          const user = getUserById(input.userId);
+          const user = await getUserById(input.userId);
           if (!user) {
             return toolErr(`User ${input.userId} not found.`);
           }
@@ -172,7 +172,7 @@ export const registerManageUserTool = (server: McpServer) => {
               input.comms != null
                 ? { ...(input.metadata ?? {}), comms: input.comms }
                 : (input.metadata ?? undefined);
-            const user = createUser({
+            const user = await createUser({
               name: input.name,
               email: input.email,
               role: input.role,
@@ -185,7 +185,7 @@ export const registerManageUserTool = (server: McpServer) => {
               metadata,
             });
             for (const ident of input.identities ?? []) {
-              linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
+              await linkIdentity(user.id, ident.kind, ident.externalId, operatorActor);
             }
             return toolOk(`User created: "${user.name}" (${user.id}).`, {
               details: JSON.stringify(user, null, 2),
@@ -202,7 +202,7 @@ export const registerManageUserTool = (server: McpServer) => {
             return toolErr("userId is required for update action.");
           }
           try {
-            const before = getUserById(input.userId);
+            const before = await getUserById(input.userId);
             if (!before) {
               return toolErr(`User ${input.userId} not found.`);
             }
@@ -225,7 +225,7 @@ export const registerManageUserTool = (server: McpServer) => {
               metadata = Object.keys(base).length > 0 ? base : null;
             }
 
-            const user = updateUser(input.userId, {
+            const user = await updateUser(input.userId, {
               name: input.name,
               email: input.email,
               role: input.role,
@@ -243,18 +243,18 @@ export const registerManageUserTool = (server: McpServer) => {
 
             // Identity diff — pass the desired set, helper emits the deltas.
             if (input.identities !== undefined) {
-              const current = getUserIdentities(input.userId);
+              const current = await getUserIdentities(input.userId);
               const currentSet = new Set(current.map((i) => `${i.kind}:${i.externalId}`));
               const desiredSet = new Set(input.identities.map((i) => `${i.kind}:${i.externalId}`));
 
               for (const ident of input.identities) {
                 if (!currentSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await linkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
               for (const ident of current) {
                 if (!desiredSet.has(`${ident.kind}:${ident.externalId}`)) {
-                  unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
+                  await unlinkIdentity(input.userId, ident.kind, ident.externalId, operatorActor);
                 }
               }
             }
@@ -263,10 +263,18 @@ export const registerManageUserTool = (server: McpServer) => {
             if (input.emailAliases !== undefined) {
               const { added, removed } = diffAliases(before.emailAliases, input.emailAliases);
               for (const alias of added) {
-                recordIdentityEvent(input.userId, "email_added", operatorActor, null, { alias });
+                await recordIdentityEvent(input.userId, "email_added", operatorActor, null, {
+                  alias,
+                });
               }
               for (const alias of removed) {
-                recordIdentityEvent(input.userId, "email_removed", operatorActor, { alias }, null);
+                await recordIdentityEvent(
+                  input.userId,
+                  "email_removed",
+                  operatorActor,
+                  { alias },
+                  null,
+                );
               }
             }
 
@@ -284,7 +292,7 @@ export const registerManageUserTool = (server: McpServer) => {
           if (!input.userId) {
             return toolErr("userId is required for delete action.");
           }
-          const deleted = deleteUser(input.userId);
+          const deleted = await deleteUser(input.userId);
           return deleted
             ? toolOk(`User ${input.userId} deleted.`)
             : toolErr(`User ${input.userId} not found.`);

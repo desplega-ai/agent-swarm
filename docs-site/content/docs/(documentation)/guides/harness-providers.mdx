@@ -794,7 +794,7 @@ The adapter is responsible for polling swarm-side signals during a run. Pattern 
 - Pi: [`src/providers/pi-mono-extension.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-extension.ts) — `createSwarmHooksExtension` passed into `DefaultResourceLoader({ extensionFactories: [swarmExtension] })`.
 - Claude: external hook process reads a task file (`/tmp/agent-swarm-task-<pid>.json`) written by `claude-adapter.ts` L31–43; hook logic lives under `src/hooks/` (e.g. [`tool-loop-detection.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/hooks/tool-loop-detection.ts)).
 
-Tool-loop detection (`src/hooks/tool-loop-detection.ts::checkToolLoop`) is reusable — call it from your event translator when you see `tool_start`.
+Tool-loop detection (`src/hooks/tool-loop-detection.ts::checkToolLoop`) is reusable — call it from your event translator when you see `tool_start`. You do not need to await it: calls for the same session key run one after another in call order inside `checkToolLoop`, so a fire-and-forget caller still gets an exact repeat count.
 
 ### Step 9 — Skills and slash-commands
 

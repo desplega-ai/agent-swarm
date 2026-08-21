@@ -31,10 +31,10 @@ const testApp = {
 
 const originalFetch = globalThis.fetch;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  upsertOAuthApp("linear", testApp);
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("linear", testApp);
+  await upsertOAuthApp("jira", {
     ...testApp,
     tokenUrl: "https://example.com/jira/oauth/token",
   });
@@ -42,8 +42,8 @@ beforeAll(() => {
 
 beforeEach(async () => {
   await stopOAuthKeepalive();
-  deleteOAuthTokens("linear");
-  deleteOAuthTokens("jira");
+  await deleteOAuthTokens("linear");
+  await deleteOAuthTokens("jira");
   globalThis.fetch = originalFetch;
   restoreSlackAlertsChannel();
   mock.restore();
@@ -77,12 +77,12 @@ describe("OAuth keepalive", () => {
   });
 
   test("stopOAuthKeepalive waits for in-flight Jira refresh persistence", async () => {
-    storeOAuthTokens("linear", {
+    await storeOAuthTokens("linear", {
       accessToken: "linear-access",
       refreshToken: "linear-refresh",
       expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
     });
-    storeOAuthTokens("jira", {
+    await storeOAuthTokens("jira", {
       accessToken: "old-jira-access",
       refreshToken: "old-jira-refresh",
       expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
@@ -121,14 +121,14 @@ describe("OAuth keepalive", () => {
 
     await Promise.resolve();
     expect(stopResolved).toBe(false);
-    expect(getOAuthTokens("jira")?.refreshToken).toBe("old-jira-refresh");
+    expect((await getOAuthTokens("jira"))?.refreshToken).toBe("old-jira-refresh");
 
     releaseTokenResponse();
     await stopPromise;
     await keepaliveRun;
 
     expect(stopResolved).toBe(true);
-    const tokens = getOAuthTokens("jira");
+    const tokens = await getOAuthTokens("jira");
     expect(tokens?.accessToken).toBe("new-jira-access");
     expect(tokens?.refreshToken).toBe("new-jira-refresh");
   });

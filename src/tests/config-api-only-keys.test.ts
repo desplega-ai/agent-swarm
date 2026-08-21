@@ -9,6 +9,7 @@ import {
 import { closeDb, createAgent, initDb, upsertSwarmConfig } from "../be/db";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 // Regression guard for the agent-fs bootstrap-key leak (PR #850 review): the
 // API-owned API_AGENT_FS_API_KEY must never be handed out over /api/config
@@ -31,13 +32,6 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 let server: Server;
 let port: number;
 let agentId: string;
@@ -46,17 +40,22 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
 
-  const agent = createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "worker-under-test", isLead: false, status: "idle" });
   agentId = agent.id;
 
   // The API-owned bootstrap key + a normal global secret a worker legitimately reads.
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "global",
     key: BOOTSTRAP_KEY,
     value: BOOTSTRAP_VALUE,
     isSecret: true,
   });
-  upsertSwarmConfig({ scope: "global", key: "SOME_WORKER_SECRET", value: "ok", isSecret: true });
+  await upsertSwarmConfig({
+    scope: "global",
+    key: "SOME_WORKER_SECRET",
+    value: "ok",
+    isSecret: true,
+  });
 
   server = createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const pathSegments = getPathSegments(req.url || "");
@@ -67,7 +66,7 @@ beforeAll(async () => {
       res.end("Not Found");
     }
   });
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

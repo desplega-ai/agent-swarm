@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { __resetEncryptionKeyForTests } from "../be/crypto";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { insertScript } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleCore } from "../http/core";
@@ -150,8 +150,9 @@ beforeAll(async () => {
   initDb(TEST_DB_PATH);
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
-  workerId = createAgent({ name: "script-apis-mcp-worker", isLead: false, status: "idle" }).id;
-  leadId = createAgent({ name: "script-apis-mcp-lead", isLead: true, status: "idle" }).id;
+  workerId = (await createAgent({ name: "script-apis-mcp-worker", isLead: false, status: "idle" }))
+    .id;
+  leadId = (await createAgent({ name: "script-apis-mcp-lead", isLead: true, status: "idle" })).id;
   process.env.MCP_BASE_URL = "http://script-apis-mcp.test";
   globalThis.fetch = (async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -178,22 +179,25 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_apis");
-  getDb().run("DELETE FROM script_runs");
-  getDb().run("DELETE FROM scripts");
-  scriptId = insertScript({
-    name: `doubler-${crypto.randomUUID().slice(0, 8)}`,
-    scope: "agent",
-    scopeId: workerId,
-    source: DOUBLER_SOURCE,
-    description: "Doubles a value",
-    intent: "test fixture",
-    signatureJson: "{}",
-    argsJsonSchema: null,
-    agentId: workerId,
-    typeChecked: true,
-  }).id;
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM script_apis");
+  await client.run("DELETE FROM script_runs");
+  await client.run("DELETE FROM scripts");
+  scriptId = (
+    await insertScript({
+      name: `doubler-${crypto.randomUUID().slice(0, 8)}`,
+      scope: "agent",
+      scopeId: workerId,
+      source: DOUBLER_SOURCE,
+      description: "Doubles a value",
+      intent: "test fixture",
+      signatureJson: "{}",
+      argsJsonSchema: null,
+      agentId: workerId,
+      typeChecked: true,
+    })
+  ).id;
 });
 
 describe("script-apis MCP tool", () => {

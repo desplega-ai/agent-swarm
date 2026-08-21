@@ -28,6 +28,7 @@ import {
 import { handleContext } from "../../http/context";
 import { handleCore } from "../../http/core";
 import { getPathSegments, parseQueryParams } from "../../http/utils";
+import { listenOnFreePort } from "../test-net";
 
 const TEST_DB_PATH = "./test-context-routes.sqlite";
 const API_KEY = "test-context-routes";
@@ -40,13 +41,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -72,10 +66,13 @@ let testTask: { id: string };
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  testAgent = createAgent({ name: "context-route-test", isLead: false, status: "idle" });
-  testTask = createTaskExtended("phase-10 ingestion", { agentId: testAgent.id, source: "mcp" });
+  testAgent = await createAgent({ name: "context-route-test", isLead: false, status: "idle" });
+  testTask = await createTaskExtended("phase-10 ingestion", {
+    agentId: testAgent.id,
+    source: "mcp",
+  });
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {
@@ -128,14 +125,14 @@ describe("Phase 10 — POST /api/tasks/:id/context", () => {
     });
     expect(r3.status).toBe(200);
 
-    const summary = getContextSummaryByTaskId(testTask.id);
+    const summary = await getContextSummaryByTaskId(testTask.id);
     expect(summary.peakContextTokens).toBe(120_000);
   });
 
-  test("contextWindowSize is set on the first snapshot, not on completion", () => {
+  test("contextWindowSize is set on the first snapshot, not on completion", async () => {
     // The first POST in the previous test already set this; assert it stuck
     // and a later POST with a different total doesn't overwrite it.
-    const summary = getContextSummaryByTaskId(testTask.id);
+    const summary = await getContextSummaryByTaskId(testTask.id);
     expect(summary.contextWindowSize).toBe(200_000);
   });
 
@@ -152,7 +149,7 @@ describe("Phase 10 — POST /api/tasks/:id/context", () => {
     });
     expect(res.status).toBe(200);
 
-    const snapshots = getContextSnapshotsByTaskId(testTask.id);
+    const snapshots = await getContextSnapshotsByTaskId(testTask.id);
     const last = snapshots[snapshots.length - 1];
     expect(last.cumulativeInputTokens).toBe(1234);
     expect(last.cumulativeOutputTokens).toBe(567);

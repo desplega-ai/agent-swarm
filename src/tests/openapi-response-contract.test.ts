@@ -4,6 +4,9 @@ import { z } from "zod";
 import { auditRouteResponses } from "../../scripts/check-openapi-response-coverage";
 import { route } from "../http/route-def";
 
+/** Hard ceiling for the spawned `bun -e` probe below. */
+const PROBE_TIMEOUT_MS = 30_000;
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 interface Captured {
@@ -56,10 +59,9 @@ describe("route handle respond()", () => {
 
   test("invalid payload throws a schema-violation error under bun test (NODE_ENV=test)", () => {
     const captured: Captured = {};
-    expect(() =>
-      // biome-ignore lint/suspicious/noExplicitAny: deliberately violating the compile-time contract
-      testRoute.respond(fakeRes(captured), 200, { name: 42 } as any),
-    ).toThrow(/Response schema violation: GET \/api\/__respond-contract-test 200/);
+    expect(() => testRoute.respond(fakeRes(captured), 200, { name: 42 } as any)).toThrow(
+      /Response schema violation: GET \/api\/__respond-contract-test 200/,
+    );
     // Nothing was written — the throw happens before writeHead.
     expect(captured.status).toBeUndefined();
   });
@@ -88,11 +90,17 @@ describe("route handle respond()", () => {
     expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
   });
 
-  test("fail-open: gate armed outside tests logs the violation and still sends", () => {
-    // Step-6 regression: with the gate armed (VALIDATE_HTTP_RESPONSES=true)
-    // but NODE_ENV != test, a schema violation must not throw — it logs to
-    // stderr and the response still goes out (2026-08-18 incident shape).
-    const probe = `
+  // Spawns a second `bun` (boot + transpile of the route-def import graph).
+  // Under --parallel=4 on a 4-vCPU runner that alone can take several seconds,
+  // so the test gets its own budget, and the child gets a hard timeout so a
+  // hung spawn fails with a clear signal instead of the suite's 10 s default.
+  test(
+    "fail-open: gate armed outside tests logs the violation and still sends",
+    async () => {
+      // Step-6 regression: with the gate armed (VALIDATE_HTTP_RESPONSES=true)
+      // but NODE_ENV != test, a schema violation must not throw — it logs to
+      // stderr and the response still goes out (2026-08-18 incident shape).
+      const probe = `
       import { z } from "zod";
       import { route } from "${import.meta.dir}/../http/route-def";
       const r = route({
@@ -103,14 +111,32 @@ describe("route handle respond()", () => {
       r.respond({ writeHead(s) { status = s; return this; }, end(b) { body = b; return this; } }, 200, { n: "not-a-number" });
       console.log(JSON.stringify({ status, body }));
     `;
-    const env = { ...process.env, NODE_ENV: "production", VALIDATE_HTTP_RESPONSES: "true" };
-    const proc = Bun.spawnSync(["bun", "-e", probe], { env });
-    expect(proc.exitCode).toBe(0);
-    const out = JSON.parse(proc.stdout.toString().trim());
-    expect(out.status).toBe(200);
-    expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
-    expect(proc.stderr.toString()).toContain("Response schema violation");
-  });
+      const env = { ...process.env, NODE_ENV: "production", VALIDATE_HTTP_RESPONSES: "true" };
+      const proc = Bun.spawn(["bun", "-e", probe], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+        timeout: PROBE_TIMEOUT_MS,
+        killSignal: "SIGKILL",
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      if (exitCode !== 0) {
+        const why = proc.signalCode
+          ? `signal ${proc.signalCode} (timeout ${PROBE_TIMEOUT_MS} ms?)`
+          : "";
+        throw new Error(`probe failed (exit ${exitCode}) ${why}: ${stderr}`);
+      }
+      const out = JSON.parse(stdout.trim());
+      expect(out.status).toBe(200);
+      expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
+      expect(stderr).toContain("Response schema violation");
+    },
+    PROBE_TIMEOUT_MS + 5_000,
+  );
 });
 
 // ─── coverage-gate audit (per-status regression) ─────────────────────────────

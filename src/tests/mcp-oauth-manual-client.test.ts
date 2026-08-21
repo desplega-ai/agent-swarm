@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createMcpServer, getDb, initDb } from "../be/db";
+import { closeDb, createMcpServer, getDbClient, initDb } from "../be/db";
 import { getMcpOAuthToken } from "../be/db-queries/mcp-oauth";
 import { handleCore } from "../http/core";
 import { handleMcpOAuth } from "../http/mcp-oauth";
@@ -163,7 +163,7 @@ describe("MCP OAuth manual client flow", () => {
   });
 
   async function registerDiscoveredManualClient(name: string, body: Record<string, unknown> = {}) {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name,
       transport: "http",
       url: "https://disc.example.test/mcp",
@@ -185,20 +185,26 @@ describe("MCP OAuth manual client flow", () => {
     // must not be flipped just because the AS also supports Basic.
     asAuthMethodsSupported = ["client_secret_basic", "client_secret_post"];
     const mcpServer = await registerDiscoveredManualClient("manual-disc-both");
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_post",
+    );
   });
 
   test("an AS advertising no methods still leaves an omitted manual method on body-post", async () => {
     asAuthMethodsSupported = null;
     const mcpServer = await registerDiscoveredManualClient("manual-disc-absent");
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_post",
+    );
   });
 
   test("an AS that excludes body-post does switch the omitted manual method", async () => {
     // Here the legacy default is knowably broken, so defer to the server.
     asAuthMethodsSupported = ["client_secret_basic"];
     const mcpServer = await registerDiscoveredManualClient("manual-disc-basic-only");
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_basic");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_basic",
+    );
   });
 
   test("an explicit method still wins over discovery", async () => {
@@ -206,7 +212,9 @@ describe("MCP OAuth manual client flow", () => {
     const mcpServer = await registerDiscoveredManualClient("manual-disc-explicit", {
       tokenEndpointAuthMethod: "client_secret_post",
     });
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_post",
+    );
   });
 
   test("a manual client created without an explicit method records body-post, not Basic", async () => {
@@ -214,7 +222,7 @@ describe("MCP OAuth manual client flow", () => {
     // method. The dashboard posts no tokenEndpointAuthMethod either, so
     // defaulting to Basic here would break every UI-created manual client that
     // works today on body-post.
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "manual-no-method",
       transport: "http",
       url: "https://api.example.com/mcp",
@@ -234,11 +242,13 @@ describe("MCP OAuth manual client flow", () => {
     });
     expect(res.status).toBe(200);
 
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_post",
+    );
   });
 
   test("an explicit method on the manual-client route still wins", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "manual-explicit-method",
       transport: "http",
       url: "https://api.example.com/mcp2",
@@ -259,11 +269,13 @@ describe("MCP OAuth manual client flow", () => {
     });
     expect(res.status).toBe(200);
 
-    expect(getMcpOAuthToken(mcpServer.id)?.tokenEndpointAuthMethod).toBe("client_secret_basic");
+    expect((await getMcpOAuthToken(mcpServer.id))?.tokenEndpointAuthMethod).toBe(
+      "client_secret_basic",
+    );
   });
 
   test("a legacy manual client re-authorizes with body-post authentication", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: "salesforce-sobjects",
       transport: "http",
       url: "https://api.salesforce.com/platform/mcp/v1/platform/sobject-all",
@@ -286,17 +298,16 @@ describe("MCP OAuth manual client flow", () => {
     });
     expect(manualRes.status).toBe(200);
 
-    const provisionalToken = getMcpOAuthToken(mcpServer.id);
+    const provisionalToken = await getMcpOAuthToken(mcpServer.id);
     expect(provisionalToken?.clientSource).toBe("manual");
     expect(provisionalToken?.status).toBe("error");
 
     // Simulate a manual client that was stored before tokenEndpointAuthMethod
     // existed. Reauthorization must preserve its historical body-post method.
-    getDb()
-      .query(
-        "UPDATE oauth_apps SET metadata = json_remove(metadata, '$.tokenEndpointAuthMethod') WHERE provider = ?",
-      )
-      .run(`mcp-${mcpServer.id}`);
+    await getDbClient().run(
+      "UPDATE oauth_apps SET metadata = json_remove(metadata, '$.tokenEndpointAuthMethod') WHERE provider = ?",
+      [`mcp-${mcpServer.id}`],
+    );
 
     const authorizeRes = await dispatch(`/api/mcp-oauth/${mcpServer.id}/authorize-url`, {
       headers: { Authorization: `Bearer ${API_KEY}` },
@@ -337,7 +348,7 @@ describe("MCP OAuth manual client flow", () => {
     );
     expect(capturedTokenHeaders?.Authorization).toBeUndefined();
 
-    const connectedToken = getMcpOAuthToken(mcpServer.id);
+    const connectedToken = await getMcpOAuthToken(mcpServer.id);
     expect(connectedToken?.clientSource).toBe("manual");
     expect(connectedToken?.status).toBe("connected");
     expect(connectedToken?.accessToken).toBe("sf-access-token");
@@ -360,6 +371,6 @@ describe("MCP OAuth manual client flow", () => {
       `/api/mcp-oauth/callback?state=${encodeURIComponent(reconnectState!)}&code=sf-reconnect-code`,
     );
     expect(reconnectCallbackRes.status).toBe(302);
-    expect(getMcpOAuthToken(mcpServer.id)?.refreshToken).toBe("sf-refresh-token");
+    expect((await getMcpOAuthToken(mcpServer.id))?.refreshToken).toBe("sf-refresh-token");
   });
 });

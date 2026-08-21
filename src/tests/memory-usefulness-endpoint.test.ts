@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { recordRetrievals } from "../be/memory/raters/retrieval";
 import { handleMemory } from "../http/memory";
@@ -44,7 +44,7 @@ async function callUsefulness(path: string) {
   return captured;
 }
 
-function insertRating(row: {
+async function insertRating(row: {
   memoryId: string;
   taskId: string | null;
   source: string;
@@ -52,12 +52,10 @@ function insertRating(row: {
   weight?: number;
   createdAt: string;
 }) {
-  getDb()
-    .prepare(
-      `INSERT INTO memory_rating (id, memoryId, taskId, source, signal, weight, reasoning, createdAt)
+  await getDbClient().run(
+    `INSERT INTO memory_rating (id, memoryId, taskId, source, signal, weight, reasoning, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, NULL, ?)`,
-    )
-    .run(
+    [
       crypto.randomUUID(),
       row.memoryId,
       row.taskId,
@@ -65,7 +63,8 @@ function insertRating(row: {
       row.signal,
       row.weight ?? 0.5,
       row.createdAt,
-    );
+    ],
+  );
 }
 
 describe("GET /api/memory/usefulness", () => {
@@ -78,14 +77,17 @@ describe("GET /api/memory/usefulness", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: AGENT_ID, name: "Usefulness Test Agent", isLead: false, status: "idle" });
-    const insertTask = getDb().prepare(
-      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
-       VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
-    );
+    await createAgent({
+      id: AGENT_ID,
+      name: "Usefulness Test Agent",
+      isLead: false,
+      status: "idle",
+    });
+    const insertTaskSql = `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+       VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`;
     const nowIso = new Date().toISOString();
-    insertTask.run(TASK_A, AGENT_ID, "usefulness task A", nowIso, nowIso);
-    insertTask.run(TASK_B, AGENT_ID, "usefulness task B", nowIso, nowIso);
+    await getDbClient().run(insertTaskSql, [TASK_A, AGENT_ID, "usefulness task A", nowIso, nowIso]);
+    await getDbClient().run(insertTaskSql, [TASK_B, AGENT_ID, "usefulness task B", nowIso, nowIso]);
     store = new SqliteMemoryStore();
   });
 
@@ -137,58 +139,63 @@ describe("GET /api/memory/usefulness", () => {
     let m2: string; // task_completion, uncited, posterior 1/2
     let m3: string; // manual, only legacy (out-of-window) activity, prior 1/1
 
-    beforeAll(() => {
-      m1 = store.store({
-        agentId: AGENT_ID,
-        scope: "agent",
-        name: "usefulness-m1",
-        content: "usefulness memory one",
-        source: "manual",
-      }).id;
-      m2 = store.store({
-        agentId: AGENT_ID,
-        scope: "agent",
-        name: "usefulness-m2",
-        content: "usefulness memory two",
-        source: "task_completion",
-      }).id;
-      m3 = store.store({
-        agentId: AGENT_ID,
-        scope: "agent",
-        name: "usefulness-m3",
-        content: "usefulness memory three",
-        source: "manual",
-      }).id;
+    beforeAll(async () => {
+      m1 = (
+        await store.store({
+          agentId: AGENT_ID,
+          scope: "agent",
+          name: "usefulness-m1",
+          content: "usefulness memory one",
+          source: "manual",
+        })
+      ).id;
+      m2 = (
+        await store.store({
+          agentId: AGENT_ID,
+          scope: "agent",
+          name: "usefulness-m2",
+          content: "usefulness memory two",
+          source: "task_completion",
+        })
+      ).id;
+      m3 = (
+        await store.store({
+          agentId: AGENT_ID,
+          scope: "agent",
+          name: "usefulness-m3",
+          content: "usefulness memory three",
+          source: "manual",
+        })
+      ).id;
 
       // In-window retrievals: one grouped call with two arms, one single-arm call.
-      recordRetrievals(TASK_A, AGENT_ID, [
+      await recordRetrievals(TASK_A, AGENT_ID, [
         { memoryId: m1, similarity: 0.9, retrievalSource: "vec" },
         { memoryId: m2, similarity: 0.7, retrievalSource: "hybrid" },
       ]);
-      recordRetrievals(TASK_B, AGENT_ID, [
+      await recordRetrievals(TASK_B, AGENT_ID, [
         { memoryId: m1, similarity: 0.8, retrievalSource: "hybrid" },
       ]);
 
       // Legacy out-of-window row: NULL retrievalSource/retrievalId, 10 days old.
       const tenDaysAgo = new Date(Date.now() - 10 * DAY_MS).toISOString();
-      getDb()
-        .prepare(
-          `INSERT INTO memory_retrieval
+      await getDbClient().run(
+        `INSERT INTO memory_retrieval
              (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, eventType)
            VALUES (?, ?, ?, NULL, ?, 0.5, ?, 'search')`,
-        )
-        .run(crypto.randomUUID(), TASK_A, AGENT_ID, m3, tenDaysAgo);
+        [crypto.randomUUID(), TASK_A, AGENT_ID, m3, tenDaysAgo],
+      );
 
       // In-window implicit citations: m1 cited on both tasks, m2 uncited.
       const nowIso = new Date().toISOString();
-      insertRating({
+      await insertRating({
         memoryId: m1,
         taskId: TASK_A,
         source: "implicit-citation",
         signal: 1,
         createdAt: nowIso,
       });
-      insertRating({
+      await insertRating({
         memoryId: m2,
         taskId: TASK_A,
         source: "implicit-citation",
@@ -196,7 +203,7 @@ describe("GET /api/memory/usefulness", () => {
         weight: 0.25,
         createdAt: nowIso,
       });
-      insertRating({
+      await insertRating({
         memoryId: m1,
         taskId: TASK_B,
         source: "implicit-citation",
@@ -204,7 +211,7 @@ describe("GET /api/memory/usefulness", () => {
         createdAt: nowIso,
       });
       // Out-of-window implicit citation for the legacy row.
-      insertRating({
+      await insertRating({
         memoryId: m3,
         taskId: TASK_A,
         source: "implicit-citation",
@@ -212,7 +219,7 @@ describe("GET /api/memory/usefulness", () => {
         createdAt: tenDaysAgo,
       });
       // Non-citation rating source — must not leak into citation stats.
-      insertRating({
+      await insertRating({
         memoryId: m1,
         taskId: TASK_A,
         source: "explicit-self",
@@ -222,8 +229,8 @@ describe("GET /api/memory/usefulness", () => {
       });
 
       // Posterior movement: m1 → 0.75, m2 → 1/3, m3 stays at the 1/1 prior.
-      getDb().prepare("UPDATE agent_memory SET alpha = 3.0, beta = 1.0 WHERE id = ?").run(m1);
-      getDb().prepare("UPDATE agent_memory SET alpha = 1.0, beta = 2.0 WHERE id = ?").run(m2);
+      await getDbClient().run("UPDATE agent_memory SET alpha = 3.0, beta = 1.0 WHERE id = ?", [m1]);
+      await getDbClient().run("UPDATE agent_memory SET alpha = 1.0, beta = 2.0 WHERE id = ?", [m2]);
     });
 
     test("window filtering: 7-day volume excludes the old row", async () => {
@@ -266,13 +273,12 @@ describe("GET /api/memory/usefulness", () => {
 
     test("get events are excluded from per-arm stats (would pollute the NULL arm)", async () => {
       const getRowId = crypto.randomUUID();
-      getDb()
-        .prepare(
-          `INSERT INTO memory_retrieval
+      await getDbClient().run(
+        `INSERT INTO memory_retrieval
              (id, taskId, agentId, sessionId, memoryId, similarity, retrievedAt, eventType)
            VALUES (?, ?, ?, NULL, ?, 1.0, ?, 'get')`,
-        )
-        .run(getRowId, TASK_A, AGENT_ID, m3, new Date().toISOString());
+        [getRowId, TASK_A, AGENT_ID, m3, new Date().toISOString()],
+      );
 
       const captured = await callUsefulness("/api/memory/usefulness?days=7");
       const body = JSON.parse(captured.body);
@@ -284,7 +290,7 @@ describe("GET /api/memory/usefulness", () => {
         body.byArm.find((a: { retrievalSource: string | null }) => a.retrievalSource === null),
       ).toBeUndefined();
 
-      getDb().prepare("DELETE FROM memory_retrieval WHERE id = ?").run(getRowId);
+      await getDbClient().run("DELETE FROM memory_retrieval WHERE id = ?", [getRowId]);
     });
 
     test("wider window includes the legacy NULL arm", async () => {

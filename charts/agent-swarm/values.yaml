@@ -227,7 +227,7 @@ agentFs:
     registry: ghcr.io
     repository: desplega-ai/agent-fs
     pullPolicy: IfNotPresent
-    tag: 0.13.0
+    tag: 0.13.1
   port: 7433
   # -- Optional API-owned bootstrap key for agent-fs. When blank, the swarm API
   # boot seeder registers a service user and persists its generated key in

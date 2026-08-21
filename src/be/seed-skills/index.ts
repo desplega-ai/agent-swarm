@@ -220,7 +220,7 @@ import {
   computeContentHash,
   createSkill,
   deleteSkillFile,
-  getDb,
+  getDbClient,
   getSkillByName,
   getSkillFiles,
   updateSkill,
@@ -452,14 +452,14 @@ export async function loadSeedSkills(templatesDir?: string): Promise<SeedSkill[]
  * authoritative and prunes anything else out of a `.swarm-managed` skill dir,
  * so a stale DB row would keep resurrecting a file the source no longer ships.
  */
-function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): void {
+async function syncSeededSkillFiles(skillId: string, files: SeedSkillFile[]): Promise<void> {
   const desired = new Set(files.map((file) => file.path));
 
-  for (const existing of getSkillFiles(skillId)) {
-    if (!desired.has(existing.path)) deleteSkillFile(skillId, existing.path);
+  for (const existing of await getSkillFiles(skillId)) {
+    if (!desired.has(existing.path)) await deleteSkillFile(skillId, existing.path);
   }
 
-  if (files.length > 0) upsertSkillFiles(skillId, files);
+  if (files.length > 0) await upsertSkillFiles(skillId, files);
 }
 
 type SkillSeedItem = SeedItem & { skill: SeedSkill };
@@ -481,12 +481,12 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
     }));
   },
 
-  upstreamHash(item): string | null {
-    const existing = getSkillByName(item.key, "swarm");
+  async upstreamHash(item): Promise<string | null> {
+    const existing = await getSkillByName(item.key, "swarm");
     if (!existing) return null;
     // Hash the live bundled files too, so an edit to one is detected as drift
     // on the same footing as an edit to SKILL.md.
-    const liveFiles = getSkillFiles(existing.id).map((file) => ({
+    const liveFiles = (await getSkillFiles(existing.id)).map((file) => ({
       path: file.path,
       content: file.content,
     }));
@@ -510,14 +510,19 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
    * system-default skill would stay broken forever, even after the limit is
    * fixed. The transaction makes the failure clean so the next run retries.
    */
-  apply(item): void {
+  async apply(item): Promise<void> {
     const { skill } = item;
 
-    getDb().transaction(() => {
-      const existing = getSkillByName(skill.name, "swarm");
+    await getDbClient().transaction(async () => {
+      // NOTE: inline lookup (not the fuller `getSkillByName`) — only
+      // `existing.id` is needed here.
+      const existing = await getDbClient().get<{ id: string }>(
+        "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
+        [skill.name, "swarm", ""],
+      );
 
       if (existing) {
-        updateSkill(existing.id, {
+        await updateSkill(existing.id, {
           name: skill.name,
           description: skill.description,
           content: skill.content,
@@ -526,11 +531,11 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
           userInvocable: skill.userInvocable,
           isComplex: skill.files.length > 0,
         });
-        syncSeededSkillFiles(existing.id, skill.files);
+        await syncSeededSkillFiles(existing.id, skill.files);
         return;
       }
 
-      const created = createSkill({
+      const created = await createSkill({
         name: skill.name,
         description: skill.description,
         content: skill.content,
@@ -541,7 +546,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         userInvocable: skill.userInvocable,
         isComplex: skill.files.length > 0,
       });
-      syncSeededSkillFiles(created.id, skill.files);
-    })();
+      await syncSeededSkillFiles(created.id, skill.files);
+    });
   },
 };

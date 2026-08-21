@@ -202,17 +202,17 @@ export async function handleStats(
     const agentId = parsed.query.agentId;
     let logs: AgentLog[] = [];
     if (agentId) {
-      logs = getLogsByAgentId(agentId).slice(0, limit);
+      logs = (await getLogsByAgentId(agentId)).slice(0, limit);
     } else {
-      logs = getAllLogs(limit);
+      logs = await getAllLogs(limit);
     }
     listLogs.respond(res, 200, { logs });
     return true;
   }
 
   if (getStats.match(req.method, pathSegments)) {
-    const agents = getAllAgents();
-    const taskStats = getTaskStats();
+    const agents = await getAllAgents();
+    const taskStats = await getTaskStats();
 
     const stats = {
       agents: {
@@ -242,14 +242,14 @@ export async function handleStats(
   }
 
   if (getMetrics.match(req.method, pathSegments)) {
-    getMetrics.respond(res, 200, getSwarmMetrics());
+    getMetrics.respond(res, 200, await getSwarmMetrics());
     return true;
   }
 
   if (listServices.match(req.method, pathSegments)) {
     const parsed = await listServices.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const services = getAllServices({
+    const services = await getAllServices({
       status: (parsed.query.status as import("../types").ServiceStatus) || undefined,
       agentId: parsed.query.agentId || undefined,
       name: parsed.query.name || undefined,
@@ -261,7 +261,7 @@ export async function handleStats(
   if (listScheduledTasks.match(req.method, pathSegments)) {
     const parsed = await listScheduledTasks.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const scheduledTasks = getScheduledTasks({
+    const scheduledTasks = await getScheduledTasks({
       enabled: parsed.query.enabled !== undefined ? parsed.query.enabled === "true" : undefined,
       name: parsed.query.name || undefined,
       scheduleType: (parsed.query.scheduleType as "recurring" | "one_time") || undefined,
@@ -273,15 +273,18 @@ export async function handleStats(
       workflowId: parsed.query.workflowId,
       scriptName: parsed.query.scriptName,
     });
-    const favoriteScope = resolveHttpFavoriteOwner(req, myAgentId)?.scope;
+    const favoriteScope = (await resolveHttpFavoriteOwner(req, myAgentId))?.scope;
     listScheduledTasks.respond(res, 200, {
-      scheduledTasks: withFavoriteFlags(scheduledTasks, { favoriteScope, itemType: "schedule" }),
+      scheduledTasks: await withFavoriteFlags(scheduledTasks, {
+        favoriteScope,
+        itemType: "schedule",
+      }),
     });
     return true;
   }
 
   if (getConcurrentContextRoute.match(req.method, pathSegments)) {
-    const context = getConcurrentContext();
+    const context = await getConcurrentContext();
     getConcurrentContextRoute.respond(res, 200, context);
     return true;
   }

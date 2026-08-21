@@ -71,7 +71,7 @@ export async function handleOAuthLocks(
   if (acquireLockRoute.match(req.method, pathSegments)) {
     const parsed = await acquireLockRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const owner = acquireOAuthRefreshLock(parsed.params.key, parsed.body.ttlMs);
+    const owner = await acquireOAuthRefreshLock(parsed.params.key, parsed.body.ttlMs);
     if (!owner) {
       jsonError(res, "lock is held by another caller", 409);
       return true;
@@ -83,7 +83,7 @@ export async function handleOAuthLocks(
   if (releaseLockRoute.match(req.method, pathSegments)) {
     const parsed = await releaseLockRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    releaseOAuthRefreshLock(parsed.params.key, parsed.body.owner);
+    await releaseOAuthRefreshLock(parsed.params.key, parsed.body.owner);
     res.writeHead(204);
     res.end();
     return true;

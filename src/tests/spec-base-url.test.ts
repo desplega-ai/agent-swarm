@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync, unlinkSync } from "node:fs";
-import { getDb } from "../be/db";
+import { getDbClient } from "../be/db";
 import { runMigrations } from "../be/migrations/runner";
 import {
   extractSpecBaseUrl,
@@ -39,10 +39,10 @@ function removeDbFiles(path: string) {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   setOpenapiSpecFetchForTesting(null);
   for (const id of createdConnectionIds.splice(0)) {
-    getDb().run("DELETE FROM script_connections WHERE id = ?", id);
+    await getDbClient().run("DELETE FROM script_connections WHERE id = ?", [id]);
   }
   removeDbFiles(MIGRATION_DB_PATH);
 });

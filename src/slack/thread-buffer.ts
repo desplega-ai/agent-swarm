@@ -116,7 +116,7 @@ async function getThreadContextForBuffer(channelId: string, threadTs: string): P
       })
       .join("\n");
 
-    return rewriteSlackMentions(formatted);
+    return await rewriteSlackMentions(formatted);
   } catch (error) {
     console.error("[Slack] Failed to fetch thread context for buffer:", error);
     return "";
@@ -149,18 +149,18 @@ async function slackFlush(
   // Build combined task description. Any in-body `<@U…>` mentions the
   // requester typed are rewritten via the identity primitive so the agent
   // sees a name or the explicit UNKNOWN sentinel — never a raw Slack ID.
-  const combinedText = rewriteSlackMentions(items.map((m) => m.text).join("\n---\n"));
+  const combinedText = await rewriteSlackMentions(items.map((m) => m.text).join("\n---\n"));
   const description = `[Thread follow-up — ${items.length} message(s) buffered]\n\n${combinedText}`;
 
   // Find the latest active task in this thread for dependency chaining
-  const latestActiveTask = getLatestActiveTaskInThread(channelId, threadTs);
+  const latestActiveTask = await getLatestActiveTaskInThread(channelId, threadTs);
   if (latestActiveTask) {
     console.log(
       `[Slack] Dependency chaining: latest active task ${latestActiveTask.id} (status: ${latestActiveTask.status})`,
     );
   }
 
-  const steering = requestSlackThreadSteering({
+  const steering = await requestSlackThreadSteering({
     channelId,
     threadTs,
     message: combinedText,
@@ -172,7 +172,7 @@ async function slackFlush(
     );
 
     const app = getSlackApp();
-    const agent = steering.task.agentId ? getAgentById(steering.task.agentId) : undefined;
+    const agent = steering.task.agentId ? await getAgentById(steering.task.agentId) : undefined;
     if (app) {
       if (!isSlackRenderV2Enabled()) {
         try {
@@ -194,7 +194,7 @@ async function slackFlush(
     return;
   }
 
-  const lead = getLeadAgent();
+  const lead = await getLeadAgent();
 
   // Thread context for the task
   const threadContext = await getThreadContextForBuffer(channelId, threadTs);
@@ -206,8 +206,8 @@ async function slackFlush(
   // Otherwise, depend on the latest active task so it queues naturally.
   const dependsOn = !immediate && latestActiveTask ? [latestActiveTask.id] : undefined;
 
-  const mostRecentTask = getMostRecentTaskInThread(channelId, threadTs);
-  const task = createTaskWithSiblingAwareness(fullDescription, {
+  const mostRecentTask = await getMostRecentTaskInThread(channelId, threadTs);
+  const task = await createTaskWithSiblingAwareness(fullDescription, {
     agentId: lead?.id,
     source: "slack",
     slackChannelId: channelId,
@@ -255,7 +255,7 @@ async function slackFlush(
 
       // Register the batching message as the tree message for this task
       if (result.ts && task) {
-        registerTreeMessage(task.id, channelId, threadTs, result.ts);
+        await registerTreeMessage(task.id, channelId, threadTs, result.ts);
         console.log(
           `[Slack] Registered batched task ${task.id.slice(0, 8)} tree message from buffer flush`,
         );

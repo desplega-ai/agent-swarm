@@ -13,20 +13,27 @@ Quick index:
 
 ## Unit tests
 
-Runner: `bun run test:root` (workspace root).
+Runner: `bun run test:root` (workspace root). Bun version: the one in `package.json` `packageManager` (CI installs exactly that; `bun scripts/check-bun-version.ts` asserts the Dockerfiles match it).
 
 ```bash
-bun run test:root                                      # all unit tests
+bun run test:root -- --parallel=4                      # all unit tests, 4 worker processes (~90s)
+bun run test:root                                      # all unit tests, one process (~4 min)
 bun run test:root -- src/tests/<file>.test.ts          # one file
 bun run test:root -- --watch src/tests/<file>.test.ts
+bun run test:root -- --parallel=4 --changed=$(git merge-base origin/main HEAD)   # only files affected by this branch
+bun run test:root -- --parallel=4 --shard=1/2                                    # CI shard 1 (CI also passes restored --timings files)
 ```
+
+`--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and both shards download the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
 
 Conventions:
 
-- Each test file uses an **isolated SQLite DB**: `./test-<name>.sqlite`. Call `initDb()` in `beforeAll`, `closeDb()` in `afterAll`.
+- Each test file uses an **isolated SQLite DB**: `./test-<name>.sqlite`. Call `initDb()` in `beforeAll`, `closeDb()` in `afterAll`. `src/tests/preload.ts` restores a pre-migrated template (cached under `$TMPDIR/agent-swarm-test-template/`, keyed by migrations + prompt registry + Bun version) so `initDb()` costs a file read, not 130 migrations. `AGENT_SWARM_TEST_TEMPLATE_CACHE=0` bypasses the cache for a run (no read, no write); entries untouched for a day are pruned.
 - Tests that need an HTTP surface use a **minimal `node:http` handler** — not the full `src/http.ts` server. Keeps startup cheap and isolates what's under test.
-- Use **unique test ports** per file (e.g. `13022`, `13023`) so parallel tests don't collide.
+- **Never hard-code a port.** Helpers live in `src/tests/test-net.ts`: in-process `node:http` servers use `const port = await listenOnFreePort(server)`; `Bun.serve({ port: 0 })` servers read `server.port`; spawned `src/http.ts` children take `await getFreePort()` in `beforeAll` and wait with `waitForServer(url)` inside a hook given `SERVER_BOOT_HOOK_TIMEOUT_MS`. Under `--parallel` two files with the same literal collide and one of them hits "Server did not start within 60000ms".
 - In `afterAll`, clean up the `.sqlite`, `-wal`, and `-shm` files — or the next run inherits stale state.
+- **No global retry.** `bunfig.toml` does not set `retry`; a test that is timing-sensitive by design opts in with `test(name, fn, { retry: 2 })` and a comment saying why, so flakes stay visible.
+- The pre-push hook (`prek.toml` -> `scripts/pre-push-tests.sh`) runs the `--changed` form, or the full `--parallel=4` suite when migrations, `templates/`, `bunfig.toml`, `package.json`, or `bun.lock` changed (or `origin/main` is missing). Blocking; CI remains authoritative.
 
 Memory-system tests have their own required suite (see `src/be/memory/` changes in the root `CLAUDE.md`).
 

@@ -6,7 +6,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -62,11 +62,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM agent_tasks").run();
-  db.prepare("DELETE FROM agents").run();
-  db.prepare("DELETE FROM users").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM agents");
+  await client.run("DELETE FROM users");
 });
 
 function expectForbidden(result: CallToolResult): void {
@@ -78,9 +78,9 @@ function expectForbidden(result: CallToolResult): void {
 
 describe("ownership-gated task tools", () => {
   test("getTaskDetailsHandler gates user ctx and leaves owner ctx visible", async () => {
-    const owner = createUser({ name: "Task Owner" });
-    const foreignUser = createUser({ name: "Foreign User" });
-    const task = createTaskExtended("owned details", { requestedByUserId: owner.id });
+    const owner = await createUser({ name: "Task Owner" });
+    const foreignUser = await createUser({ name: "Foreign User" });
+    const task = await createTaskExtended("owned details", { requestedByUserId: owner.id });
 
     expectForbidden(await callGetTaskDetails(userCtx(foreignUser), { taskId: task.id }));
 
@@ -100,9 +100,9 @@ describe("ownership-gated task tools", () => {
   });
 
   test("cancelTaskHandler gates user ctx and preserves owner lead permission", async () => {
-    const owner = createUser({ name: "Cancel Owner" });
-    const foreignUser = createUser({ name: "Cancel Foreign" });
-    const task = createTaskExtended("owned cancellation", { requestedByUserId: owner.id });
+    const owner = await createUser({ name: "Cancel Owner" });
+    const foreignUser = await createUser({ name: "Cancel Foreign" });
+    const task = await createTaskExtended("owned cancellation", { requestedByUserId: owner.id });
 
     expectForbidden(
       await callCancelTask(userCtx(foreignUser), {
@@ -110,7 +110,7 @@ describe("ownership-gated task tools", () => {
         reason: "foreign attempt",
       }),
     );
-    expect(getTaskById(task.id)?.status).toBe("unassigned");
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
 
     const userResult = await callCancelTask(userCtx(owner), {
       taskId: task.id,
@@ -123,8 +123,8 @@ describe("ownership-gated task tools", () => {
       "cancelled",
     );
 
-    const lead = createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
-    const leadTask = createTaskExtended("lead cancellation");
+    const lead = await createAgent({ name: "lead", isLead: true, status: "idle", maxTasks: 1 });
+    const leadTask = await createTaskExtended("lead cancellation");
     const ownerResult = await callCancelTask(ownerCtx({ agentId: lead.id }), {
       taskId: leadTask.id,
       reason: "lead cancel",
@@ -133,9 +133,9 @@ describe("ownership-gated task tools", () => {
   });
 
   test("taskActionHandler gates user backlog moves and rejects agent-only actions", async () => {
-    const owner = createUser({ name: "Backlog Owner" });
-    const foreignUser = createUser({ name: "Backlog Foreign" });
-    const task = createTaskExtended("owned backlog move", { requestedByUserId: owner.id });
+    const owner = await createUser({ name: "Backlog Owner" });
+    const foreignUser = await createUser({ name: "Backlog Foreign" });
+    const task = await createTaskExtended("owned backlog move", { requestedByUserId: owner.id });
 
     expectForbidden(
       await callTaskAction(userCtx(foreignUser), {
@@ -143,7 +143,7 @@ describe("ownership-gated task tools", () => {
         taskId: task.id,
       }),
     );
-    expect(getTaskById(task.id)?.status).toBe("unassigned");
+    expect((await getTaskById(task.id))?.status).toBe("unassigned");
 
     const toBacklog = await callTaskAction(userCtx(owner), {
       action: "to_backlog",
@@ -177,8 +177,13 @@ describe("ownership-gated task tools", () => {
   });
 
   test("taskActionHandler owner ctx preserves worker release behavior", async () => {
-    const worker = createAgent({ name: "worker", isLead: false, status: "idle", maxTasks: 1 });
-    const task = createTaskExtended("assigned task", { agentId: worker.id });
+    const worker = await createAgent({
+      name: "worker",
+      isLead: false,
+      status: "idle",
+      maxTasks: 1,
+    });
+    const task = await createTaskExtended("assigned task", { agentId: worker.id });
 
     const result = await callTaskAction(ownerCtx({ agentId: worker.id }), {
       action: "release",

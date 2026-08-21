@@ -14,7 +14,7 @@ import {
   createSteeringMessage,
   createTaskExtended,
   getAgentById,
-  getDb,
+  getDbClient,
   getPendingSteeringForTask,
   getSteeringMessageById,
   getTaskById,
@@ -48,16 +48,16 @@ export interface RequestSteeringArgs {
   createdByAgentId?: string;
 }
 
-function providerForTask(task: AgentTask): ProviderName {
-  const agent = task.agentId ? getAgentById(task.agentId) : null;
+async function providerForTask(task: AgentTask): Promise<ProviderName> {
+  const agent = task.agentId ? await getAgentById(task.agentId) : null;
   return agent?.harnessProvider ?? agent?.provider ?? task.provider ?? "claude";
 }
 
-export function getTaskSteeringFields(task: AgentTask): {
+export async function getTaskSteeringFields(task: AgentTask): Promise<{
   isLeadTask: boolean;
   supportedSteerModes: SteerMode[];
-} {
-  const agent = task.agentId ? getAgentById(task.agentId) : null;
+}> {
+  const agent = task.agentId ? await getAgentById(task.agentId) : null;
   const provider = agent?.harnessProvider ?? agent?.provider ?? task.provider;
   return {
     isLeadTask: agent?.isLead ?? false,
@@ -69,8 +69,11 @@ export function getTaskSteeringFields(task: AgentTask): {
  * Convert an undeliverable steering message into a normal follow-up task.
  * Step 2 reuses this seam for pending rows discovered during terminal sweeps.
  */
-export function promoteSteeringToTask(task: AgentTask, message: SteeringMessage): AgentTask {
-  return createTaskExtended(message.body, {
+export async function promoteSteeringToTask(
+  task: AgentTask,
+  message: SteeringMessage,
+): Promise<AgentTask> {
+  return await createTaskExtended(message.body, {
     agentId: task.agentId,
     creatorAgentId: message.createdByAgentId,
     source: message.source === "script" ? "api" : message.source,
@@ -92,18 +95,18 @@ export interface MarkSteeringUndeliverableResult {
  * transactional and idempotent, so terminal-status retries cannot create a
  * duplicate follow-up or recursively re-promote the same message.
  */
-export function promotePendingSteeringForTask(
+export async function promotePendingSteeringForTask(
   taskId: string,
   reason: string,
-): MarkSteeringUndeliverableResult[] {
+): Promise<MarkSteeringUndeliverableResult[]> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Promotion reason must not be empty", 400);
   }
 
   const results: MarkSteeringUndeliverableResult[] = [];
-  for (const message of getPendingSteeringForTask(taskId)) {
+  for (const message of await getPendingSteeringForTask(taskId)) {
     try {
-      results.push(markSteeringUndeliverable(message.id, reason));
+      results.push(await markSteeringUndeliverable(message.id, reason));
     } catch (error) {
       // One malformed or concurrently-deleted row must not keep the remaining
       // pending steers from being promoted after the parent reaches terminal.
@@ -122,16 +125,16 @@ export function promotePendingSteeringForTask(
  * Non-pending rows are returned unchanged so retries are safe. A successfully
  * promoted row always includes `promotedTaskId`.
  */
-export function markSteeringUndeliverable(
+export async function markSteeringUndeliverable(
   id: string,
   reason: string,
-): MarkSteeringUndeliverableResult {
+): Promise<MarkSteeringUndeliverableResult> {
   if (!reason.trim()) {
     throw new SteeringRequestError("Undeliverable reason must not be empty", 400);
   }
 
-  return getDb().transaction(() => {
-    const message = getSteeringMessageById(id);
+  return await getDbClient().transaction(async () => {
+    const message = await getSteeringMessageById(id);
     if (!message) {
       throw new SteeringRequestError("Steering message not found", 404);
     }
@@ -142,13 +145,13 @@ export function markSteeringUndeliverable(
       };
     }
 
-    const task = getTaskById(message.taskId);
+    const task = await getTaskById(message.taskId);
     if (!task) {
       throw new SteeringRequestError("Task not found", 404);
     }
 
-    const promotedTask = promoteSteeringToTask(task, message);
-    const promotedMessage = markSteeringPromoted(message.id, promotedTask.id);
+    const promotedTask = await promoteSteeringToTask(task, message);
+    const promotedMessage = await markSteeringPromoted(message.id, promotedTask.id);
     if (!promotedMessage) {
       throw new SteeringRequestError("Failed to promote steering message", 500);
     }
@@ -156,11 +159,11 @@ export function markSteeringUndeliverable(
       message: promotedMessage,
       promotedTaskId: promotedTask.id,
     };
-  })();
+  });
 }
 
 /** Single server-side write path for HTTP, MCP, script, and Slack steering. */
-export function requestSteering(args: RequestSteeringArgs): SteerResult {
+export async function requestSteering(args: RequestSteeringArgs): Promise<SteerResult> {
   if (!isSteeringEnabled()) {
     throw new SteeringRequestError(
       "Steering is disabled on this server (set STEERING_ENABLED=true to enable)",
@@ -168,7 +171,7 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
     );
   }
 
-  const task = getTaskById(args.taskId);
+  const task = await getTaskById(args.taskId);
   if (!task) {
     throw new SteeringRequestError("Task not found", 404);
   }
@@ -179,7 +182,7 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
 
   const requestedMode = args.mode ?? "queue";
   const onUnsupported = args.onUnsupported ?? "degrade";
-  const provider = providerForTask(task);
+  const provider = await providerForTask(task);
   const supportedModes = PROVIDER_STEER_CAPABILITIES[provider];
 
   if (onUnsupported === "fail" && !supportedModes.includes(requestedMode)) {
@@ -190,7 +193,7 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
     );
   }
 
-  const activeTask = task.status === "paused" ? resumeTask(task.id) : task;
+  const activeTask = task.status === "paused" ? await resumeTask(task.id) : task;
   if (!activeTask) {
     throw new SteeringRequestError("Failed to resume paused task", 500);
   }
@@ -218,7 +221,7 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
       : undefined;
   const effectiveMode: SteerMode = degradedFrom ? "queue" : requestedMode;
 
-  const steeringMessage = createSteeringMessage({
+  const steeringMessage = await createSteeringMessage({
     taskId: activeTask.id,
     body,
     mode: requestedMode,
@@ -231,8 +234,8 @@ export function requestSteering(args: RequestSteeringArgs): SteerResult {
   const canReachLiveSession =
     supportedModes.length > 0 && (activeTask.status === "in_progress" || preStart);
   if (!canReachLiveSession) {
-    const promotedTask = promoteSteeringToTask(activeTask, steeringMessage);
-    markSteeringPromoted(steeringMessage.id, promotedTask.id);
+    const promotedTask = await promoteSteeringToTask(activeTask, steeringMessage);
+    await markSteeringPromoted(steeringMessage.id, promotedTask.id);
     return {
       outcome: "promoted",
       steeringMessageId: steeringMessage.id,

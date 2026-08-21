@@ -4,7 +4,7 @@ import * as z from "zod";
 import {
   getActiveTaskCount,
   getAgentById,
-  getDb,
+  getDbClient,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
   getUnassignedTasksCount,
@@ -83,7 +83,7 @@ export const registerPollTaskTool = (server: McpServer) => {
         isMultiRuntimeEnabled() &&
         !(
           requestInfo.runtimeInstanceId &&
-          touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId)
+          (await touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId))
         )
       ) {
         return toolOk("No task available.", {
@@ -97,7 +97,7 @@ export const registerPollTaskTool = (server: McpServer) => {
         });
       }
 
-      const agent = getAgentById(agentId);
+      const agent = await getAgentById(agentId);
       if (!agent) {
         return toolErr(`Agent with ID "${agentId}" not found in the swarm.`, {
           data: {
@@ -110,8 +110,8 @@ export const registerPollTaskTool = (server: McpServer) => {
       }
 
       // Check for offered tasks first - these need immediate attention
-      const offeredTasks = getOfferedTasksForAgent(agentId);
-      const availableCount = getUnassignedTasksCount();
+      const offeredTasks = await getOfferedTasksForAgent(agentId);
+      const availableCount = await getUnassignedTasksCount();
 
       if (offeredTasks.length > 0) {
         return toolOk(
@@ -131,8 +131,8 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Poll for pending tasks
       while (new Date() < maxTime) {
         // Fetch and update in a single transaction to avoid race conditions
-        const outcome = getDb().transaction(
-          (): AgentTask | "at-capacity" | "runtime-unavailable" | null => {
+        const outcome = await getDbClient().transaction(
+          async (): Promise<AgentTask | "at-capacity" | "runtime-unavailable" | null> => {
             // The entry gate only proves liveness when the long poll began;
             // the runtime must be live at the exact moment work is acquired,
             // so revalidate in the same transaction that can start the task.
@@ -141,37 +141,37 @@ export const registerPollTaskTool = (server: McpServer) => {
               isMultiRuntimeEnabled() &&
               !(
                 requestInfo.runtimeInstanceId &&
-                touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId)
+                (await touchRuntimeInstance(requestInfo.runtimeInstanceId, agentId))
               )
             ) {
               return "runtime-unavailable";
             }
 
-            const agentNow = getAgentById(agentId)!;
+            const agentNow = (await getAgentById(agentId))!;
 
             if (agentNow.status !== "busy") {
-              updateAgentStatus(agentId, "idle");
+              await updateAgentStatus(agentId, "idle");
             }
 
-            const pendingTask = getPendingTaskForAgent(agentId);
+            const pendingTask = await getPendingTaskForAgent(agentId);
             if (!pendingTask) return null;
 
             // Logical capacity is decided inside the same transaction as the
             // start transition: several runtimes of one agent race this
             // dispatch, and a check outside it would let each of them start a
             // task past the agent's limit. Same gate as HTTP /api/poll.
-            if (!hasCapacity(agentId)) return "at-capacity";
+            if (!(await hasCapacity(agentId))) return "at-capacity";
 
-            const maybeTask = startTask(pendingTask.id);
+            const maybeTask = await startTask(pendingTask.id);
 
             if (maybeTask) {
               // Update automatically in case the agent forgets xd
-              updateAgentStatus(agentId, "busy");
+              await updateAgentStatus(agentId, "busy");
             }
 
             return maybeTask;
           },
-        )();
+        );
 
         if (outcome === "runtime-unavailable") {
           // The runtime was retired while this call waited: stop immediately
@@ -192,11 +192,11 @@ export const registerPollTaskTool = (server: McpServer) => {
           // A capacity refusal is not an empty poll (refused ≠ empty, D-R3):
           // return without advancing the exit counter.
           return toolOk("No task available.", {
-            details: `You are at capacity (${getActiveTaskCount(agentId)} active task(s)). Complete a task before polling for more.`,
+            details: `You are at capacity (${await getActiveTaskCount(agentId)} active task(s)). Complete a task before polling for more.`,
             data: {
               yourAgentId: requestInfo.agentId,
               offeredTasks: [],
-              availableCount: getUnassignedTasksCount(),
+              availableCount: await getUnassignedTasksCount(),
               waitedForSeconds: Math.round((Date.now() - now.getTime()) / 1000),
             },
           });
@@ -205,7 +205,7 @@ export const registerPollTaskTool = (server: McpServer) => {
         const startedTask = outcome;
         if (startedTask) {
           // Reset empty poll count when task is assigned
-          resetEmptyPollCount(agentId);
+          await resetEmptyPollCount(agentId);
 
           const waitedFor = Math.round((Date.now() - now.getTime()) / 1000);
 
@@ -214,7 +214,7 @@ export const registerPollTaskTool = (server: McpServer) => {
               yourAgentId: requestInfo.agentId,
               task: startedTask,
               offeredTasks: [],
-              availableCount: getUnassignedTasksCount(),
+              availableCount: await getUnassignedTasksCount(),
               waitedForSeconds: waitedFor,
               emptyPollCount: 0,
             },
@@ -239,9 +239,10 @@ export const registerPollTaskTool = (server: McpServer) => {
       // Refused ≠ empty (D-R3) — skip bookkeeping when a budget refusal
       // occurred during this poll window.
       const newCount = wasBudgetRefused
-        ? (getAgentById(agentId)?.emptyPollCount ?? 0)
-        : incrementEmptyPollCount(agentId);
+        ? ((await getAgentById(agentId))?.emptyPollCount ?? 0)
+        : await incrementEmptyPollCount(agentId);
       const shouldExit = newCount >= MAX_EMPTY_POLLS;
+      const unassignedCount = await getUnassignedTasksCount();
 
       // If no task was found within the time limit. An empty poll is a routine
       // outcome, not a tool failure — isError:true here would make every idle
@@ -253,11 +254,11 @@ export const registerPollTaskTool = (server: McpServer) => {
         {
           details: shouldExit
             ? `No task assigned after ${newCount} polling attempts. EXIT NOW - do not poll again.`
-            : `No task assigned within the polling duration (${waitedForSeconds}s). ${getUnassignedTasksCount()} unassigned task(s) available in pool.`,
+            : `No task assigned within the polling duration (${waitedForSeconds}s). ${unassignedCount} unassigned task(s) available in pool.`,
           data: {
             yourAgentId: requestInfo.agentId,
             offeredTasks: [],
-            availableCount: getUnassignedTasksCount(),
+            availableCount: unassignedCount,
             waitedForSeconds,
             shouldExit,
             emptyPollCount: newCount,

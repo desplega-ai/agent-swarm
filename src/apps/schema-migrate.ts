@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { getDb } from "../be/db";
+import { getDbClient } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import {
   type AppDefinition,
@@ -255,13 +255,13 @@ function scanRawElementReferences(
   }
 }
 
-function exportedElementCompatibilityIssues(
+async function exportedElementCompatibilityIssues(
   appId: string,
   previousDefinition: AppDefinition | undefined,
   previousRawDefinition: unknown,
   nextDefinition: AppDefinition,
   forceElementBreak: string[],
-): AppValidationIssue[] {
+): Promise<AppValidationIssue[]> {
   const previousElements = previousElementsForCompatibility(
     previousDefinition,
     previousRawDefinition,
@@ -302,20 +302,21 @@ function exportedElementCompatibilityIssues(
   // Phase 4 has no reverse ElementRef index yet. This scan shares no lock with
   // consumer writes, so a concurrent consumer-add can race a producer removal;
   // Phase 6's unresolved-reference error card is the fallback for that TOCTOU.
-  const rows = getDb()
-    .prepare<StoredAppDefinitionRow, [string]>(
-      "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
-    )
-    .all(appId);
+  const rows = await getDbClient().query<StoredAppDefinitionRow>(
+    "SELECT id, name, definition FROM apps WHERE id != ? ORDER BY name, id",
+    [appId],
+  );
   for (const row of rows) {
     let raw: unknown;
     let parseable = false;
     try {
       raw = JSON.parse(row.definition);
-      parseable = parseAppDefinition(upgradeAppDefinition(raw), {
-        currentAppId: row.id,
-        skipExternalTargetResolution: true,
-      }).success;
+      parseable = (
+        await parseAppDefinition(upgradeAppDefinition(raw), {
+          currentAppId: row.id,
+          skipExternalTargetResolution: true,
+        })
+      ).success;
     } catch {
       raw = row.definition;
     }
@@ -703,7 +704,7 @@ function planSources(
   }
 }
 
-function planModel(
+async function planModel(
   appId: string,
   modelName: string,
   oldModel: ModelDef | undefined,
@@ -713,8 +714,8 @@ function planModel(
   report: AppMigrationReport,
   orphanFields: Set<string>,
   appliedDirectives: Set<string>,
-): ModelMigrationPlan & { issues: AppValidationIssue[] } {
-  const persistedRows = listAllAppRowsForMigrationUnlocked(appId, modelName);
+): Promise<ModelMigrationPlan & { issues: AppValidationIssue[] }> {
+  const persistedRows = await listAllAppRowsForMigrationUnlocked(appId, modelName);
   const rows = persistedRows.map((row) => structuredClone(row));
   const issues: AppValidationIssue[] = [];
   const changedColumns = changedColumnNames(oldModel, nextModel);
@@ -904,23 +905,23 @@ function planModel(
   };
 }
 
-function buildPlan(
+async function buildPlan(
   appId: string,
   previousDefinition: AppDefinition | undefined,
   previousRawDefinition: unknown,
   nextDefinition: AppDefinition,
   migration: AppMigration,
   forceElementBreak: string[],
-): MigrationPlan {
+): Promise<MigrationPlan> {
   const issues = [
     ...validateDirectiveOrder(migration),
-    ...exportedElementCompatibilityIssues(
+    ...(await exportedElementCompatibilityIssues(
       appId,
       previousDefinition,
       previousRawDefinition,
       nextDefinition,
       forceElementBreak,
-    ),
+    )),
   ];
   const report = structuredClone(EMPTY_REPORT);
   const userConfigNames = new Set([
@@ -940,10 +941,11 @@ function buildPlan(
   const affected = affectedModelNames(previousDefinition, nextDefinition, migration);
   const orphanFields = new Set<string>();
   const appliedDirectives = new Set<string>();
-  const models = affected.map((modelName) => {
+  const models: (ModelMigrationPlan & { issues: AppValidationIssue[] })[] = [];
+  for (const modelName of affected) {
     const previousModel = modelAt(previousDefinition, modelName);
     const nextModel = modelAt(nextDefinition, modelName);
-    const plan = planModel(
+    const plan = await planModel(
       appId,
       modelName,
       previousModel,
@@ -956,8 +958,8 @@ function buildPlan(
     );
     issues.push(...plan.issues);
     report.idxRebuilt += plan.rebuildColumns.length;
-    return plan;
-  });
+    models.push(plan);
+  }
   for (const [columnName, directive] of Object.entries(migration)) {
     if (Object.hasOwn(SYSTEM_COLUMN_KINDS, columnName) || appliedDirectives.has(columnName)) {
       continue;
@@ -1020,6 +1022,13 @@ function withModelLocks<T>(
  * The snapshot and writeDefinition callbacks run while both lock levels are
  * held; they must not call withMutationLock or purgeAppRows for the same
  * app/model, which would self-deadlock.
+ *
+ * The callbacks also run inside an open DbClient transaction, which holds the
+ * process-global write lock. They may only do DB work through the seam
+ * (which routes into this transaction). Any foreign await — fetch, spawn, a
+ * timer, another lock — stalls every DB operation in the process for its
+ * duration, and one that itself needs the DB lock hangs the process
+ * permanently. Keep them pure-DB.
  */
 export async function migrateAppSchema<T>(input: {
   appId: string;
@@ -1028,13 +1037,13 @@ export async function migrateAppSchema<T>(input: {
   nextDefinition: AppDefinition;
   migration?: AppMigration;
   forceElementBreak?: string[];
-  snapshot: () => void;
-  writeDefinition: () => T;
+  snapshot: () => void | Promise<void>;
+  writeDefinition: () => T | Promise<T>;
 }): Promise<{ result: T; migration: AppMigrationReport }> {
   const migration = input.migration ?? {};
   const modelNames = affectedModelNames(input.previousDefinition, input.nextDefinition, migration);
-  return withModelLocks(input.appId, modelNames, () => {
-    const plan = buildPlan(
+  return withModelLocks(input.appId, modelNames, async () => {
+    const plan = await buildPlan(
       input.appId,
       input.previousDefinition,
       input.previousRawDefinition,
@@ -1044,17 +1053,17 @@ export async function migrateAppSchema<T>(input: {
     );
     if (plan.issues.length > 0) throw new AppSchemaMigrationError(plan.issues);
 
-    const transaction = getDb().transaction(() => {
-      input.snapshot();
+    const result = await getDbClient().transaction(async () => {
+      await input.snapshot();
       for (const modelPlan of plan.models) {
         for (const row of modelPlan.changedRows) {
-          writeAppRowForMigrationUnlocked(input.appId, modelPlan.modelName, row);
+          await writeAppRowForMigrationUnlocked(input.appId, modelPlan.modelName, row);
         }
         const nextModel = Object.hasOwn(input.nextDefinition.models, modelPlan.modelName)
           ? input.nextDefinition.models[modelPlan.modelName]
           : undefined;
         for (const columnName of modelPlan.rebuildColumns) {
-          rebuildAppColumnIndexUnlocked(
+          await rebuildAppColumnIndexUnlocked(
             input.appId,
             modelPlan.modelName,
             columnName,
@@ -1063,12 +1072,16 @@ export async function migrateAppSchema<T>(input: {
           );
         }
       }
-      const written = input.writeDefinition();
+      const written = await input.writeDefinition();
       // The stored per-pair sync status describes the OLD configuration:
       // presenting it for a changed pair would claim a pass that never ran.
-      invalidateChangedSyncStatus(input.appId, input.previousDefinition, input.nextDefinition);
+      await invalidateChangedSyncStatus(
+        input.appId,
+        input.previousDefinition,
+        input.nextDefinition,
+      );
       return written;
     });
-    return { result: transaction(), migration: plan.report };
+    return { result, migration: plan.report };
   });
 }

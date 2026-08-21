@@ -29,7 +29,7 @@ export const registerListChannelsTool = (server: McpServer) => {
       }),
     },
     async (_input, requestInfo, _meta) => {
-      const channels = getAllChannels();
+      const channels = await getAllChannels();
 
       const details = channels.length
         ? channels.map((c) => `- #${c.name} (${c.type}) — ${c.id}`).join("\n")

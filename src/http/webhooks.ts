@@ -549,7 +549,7 @@ export async function handleWebhooks(
   // at this URL); the generic workflow-webhook path (/api/webhooks/{id}) is
   // untouched and still serves any number not registered in KV.
   if (kapsoWebhook.match(req.method, pathSegments)) {
-    const config = getKapsoConfig();
+    const config = await getKapsoConfig();
     if (!config.webhookHmacSecret) {
       res.writeHead(503, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Kapso integration not configured" }));
@@ -586,7 +586,7 @@ export async function handleWebhooks(
     void acknowledgeKapsoInboundMessage(payload, config);
 
     try {
-      const routing = routeKapsoInbound(payload);
+      const routing = await routeKapsoInbound(payload);
       switch (routing.kind) {
         case "workflow":
           // Advanced override — dispatch through the workflow's webhook trigger.
@@ -602,7 +602,7 @@ export async function handleWebhooks(
             getExecutorRegistry(),
             {
               alreadyAuthenticated: true,
-              requestedByUserId: resolveKapsoRequestedByUserId(payload),
+              requestedByUserId: await resolveKapsoRequestedByUserId(payload),
             },
           );
           break;

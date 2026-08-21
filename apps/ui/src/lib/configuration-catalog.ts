@@ -499,6 +499,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "e.g. swarm-ready",
         docsUrl: `${DOCS}integrations/linear`,
       },
+      {
+        key: "AGENT_FS_REQUEST_TIMEOUT_MS",
+        label: "agent-fs request timeout (ms)",
+        description:
+          "Deadline in milliseconds for each agent-fs data-plane request (upload, delete, list). Uploads get extra time proportional to size. A stalled provider fails the attachment with 504 after this long.",
+        kind: "number",
+        defaultValue: "20000",
+        placeholder: "20000",
+        docsUrl: `${DOCS}ui/configuration`,
+      },
     ],
   },
   {

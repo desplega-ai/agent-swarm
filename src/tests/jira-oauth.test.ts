@@ -10,7 +10,7 @@ import {
   test,
 } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import { getJiraMetadata } from "../jira/metadata";
 import * as wrapperModule from "../oauth/wrapper";
@@ -27,9 +27,9 @@ const exchangeCodeSpy = spyOn(wrapperModule, "exchangeCode");
 
 const originalFetch = globalThis.fetch;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -50,7 +50,7 @@ afterAll(async () => {
 
 const { handleJiraCallback } = await import("../jira/oauth");
 
-beforeEach(() => {
+beforeEach(async () => {
   exchangeCodeSpy.mockClear();
   exchangeCodeSpy.mockImplementation(() =>
     Promise.resolve({
@@ -61,7 +61,7 @@ beforeEach(() => {
     }),
   );
   // Wipe metadata between tests to confirm writes happen.
-  getDb().query("UPDATE oauth_apps SET metadata = '{}' WHERE provider = 'jira'").run();
+  await getDbClient().run("UPDATE oauth_apps SET metadata = '{}' WHERE provider = 'jira'");
 });
 
 afterEach(() => {
@@ -103,7 +103,7 @@ describe("handleJiraCallback", () => {
     expect(fetchedHeaders?.Authorization).toBe("Bearer access-1");
 
     // Metadata persisted via updateJiraMetadata
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.cloudId).toBe("cloud-abc");
     expect(meta.siteUrl).toBe("https://example.atlassian.net");
   });
@@ -120,7 +120,7 @@ describe("handleJiraCallback", () => {
     );
 
     // Metadata not persisted
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.cloudId).toBeUndefined();
   });
 

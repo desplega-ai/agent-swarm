@@ -32,9 +32,10 @@ import { registerTriggerWorkflowTool } from "../tools/workflows/trigger-workflow
 import { registerUpdateWorkflowTool } from "../tools/workflows/update-workflow";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-mcp-trigger-schema.sqlite";
-const TEST_PORT = 13031;
+let TEST_PORT = 0;
 
 // ─── Test Harness ────────────────────────────────────────────
 //
@@ -171,12 +172,10 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
       // File doesn't exist
     }
     initDb(TEST_DB_PATH);
-    initWorkflows();
+    await initWorkflows();
     tools = buildServerWithTools();
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    TEST_PORT = await listenOnFreePort(server);
   });
 
   afterAll(async () => {
@@ -184,7 +183,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     await new Promise<void>((resolve) => server.close(() => resolve()));
     for (const id of createdWorkflowIds) {
       try {
-        deleteWorkflow(id);
+        await deleteWorkflow(id);
       } catch {
         // Already deleted
       }
@@ -225,7 +224,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     });
     expect(rejectedUpdate.structuredContent?.success).toBe(false);
     expect(rejectedUpdate.structuredContent?.message).toContain("config.timeoutMs");
-    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+    expect((await getWorkflow(workflowId))?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
 
     const rejectedPatch = await tools.callPatch({
       id: workflowId,
@@ -238,7 +237,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     });
     expect(rejectedPatch.structuredContent?.success).toBe(false);
     expect(rejectedPatch.structuredContent?.message).toContain("config.timeoutMs");
-    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+    expect((await getWorkflow(workflowId))?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
 
     const rejectedNodePatch = await tools.callPatchNode({
       id: workflowId,
@@ -247,7 +246,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     });
     expect(rejectedNodePatch.structuredContent?.success).toBe(false);
     expect(rejectedNodePatch.structuredContent?.message).toContain("config.timeoutMs");
-    expect(getWorkflow(workflowId)?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
+    expect((await getWorkflow(workflowId))?.definition.nodes[0]?.config.timeoutMs).toBe(300_000);
   });
 
   test("workflow authoring tools nudge strictly above the long-timeout hint", async () => {
@@ -378,7 +377,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(workflow!.triggerSchema).toEqual(triggerSchema);
 
     // Persisted in DB and returned identically by getWorkflow
-    const loaded = getWorkflow(workflow!.id);
+    const loaded = await getWorkflow(workflow!.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toEqual(triggerSchema);
   });
@@ -398,7 +397,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
 
     expect(workflow!.triggerSchema).toBeUndefined();
 
-    const loaded = getWorkflow(workflow!.id);
+    const loaded = await getWorkflow(workflow!.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toBeUndefined();
   });
@@ -428,7 +427,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(updated.structuredContent?.success).toBe(true);
     expect(updated.structuredContent?.workflow?.triggerSchema).toEqual(newSchema);
 
-    const loaded = getWorkflow(workflowId);
+    const loaded = await getWorkflow(workflowId);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toEqual(newSchema);
   });
@@ -462,7 +461,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(cleared.structuredContent?.success).toBe(true);
     expect(cleared.structuredContent?.workflow?.triggerSchema).toBeUndefined();
 
-    const loaded = getWorkflow(workflowId);
+    const loaded = await getWorkflow(workflowId);
     expect(loaded).not.toBeNull();
     expect(loaded!.triggerSchema).toBeUndefined();
   });
@@ -477,7 +476,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     const workflowId = created.structuredContent?.workflow?.id as string;
     expect(workflowId).toBeTruthy();
     createdWorkflowIds.push(workflowId);
-    const originalDefinition = getWorkflow(workflowId)?.definition;
+    const originalDefinition = (await getWorkflow(workflowId))?.definition;
     expect(originalDefinition).toBeDefined();
 
     const newSchema: Record<string, unknown> = {
@@ -491,7 +490,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(patched.structuredContent?.workflow?.triggerSchema).toEqual(newSchema);
 
     // Definition unchanged by a metadata-only patch
-    const loaded = getWorkflow(workflowId);
+    const loaded = await getWorkflow(workflowId);
     expect(loaded?.definition).toEqual(originalDefinition!);
     expect(loaded?.triggerSchema).toEqual(newSchema);
   });
@@ -523,7 +522,7 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     });
     expect(patched.structuredContent?.success).toBe(true);
 
-    const loaded = getWorkflow(workflowId);
+    const loaded = await getWorkflow(workflowId);
     expect(loaded?.triggerSchema).toEqual(newSchema);
     expect(loaded?.definition.nodes).toHaveLength(2);
     const nodeIds = loaded?.definition.nodes.map((n) => n.id).sort();
@@ -547,13 +546,13 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     const workflowId = created.structuredContent?.workflow?.id as string;
     expect(workflowId).toBeTruthy();
     createdWorkflowIds.push(workflowId);
-    expect(getWorkflow(workflowId)?.triggerSchema).toEqual(initialSchema);
+    expect((await getWorkflow(workflowId))?.triggerSchema).toEqual(initialSchema);
 
     const cleared = await tools.callPatch({ id: workflowId, triggerSchema: null });
     expect(cleared.structuredContent?.success).toBe(true);
     expect(cleared.structuredContent?.workflow?.triggerSchema).toBeUndefined();
 
-    const loaded = getWorkflow(workflowId);
+    const loaded = await getWorkflow(workflowId);
     expect(loaded?.triggerSchema).toBeUndefined();
   });
 
@@ -590,24 +589,24 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
     expect(patchBody.triggerSchema).toEqual(newSchema);
 
     // Verify persistence at the DB layer
-    const loaded = getWorkflow(createBody.id);
+    const loaded = await getWorkflow(createBody.id);
     expect(loaded?.triggerSchema).toEqual(newSchema);
   });
 
   // ─── Phase 3: trigger-workflow surfaces TriggerSchemaError ──
 
   test("trigger-workflow attributes the run and its root task to the calling task's requester", async () => {
-    const requester = createUser({ name: "MCP Workflow Requester" });
-    const agent = createAgent({
+    const requester = await createUser({ name: "MCP Workflow Requester" });
+    const agent = await createAgent({
       name: uniqueName("mcp-trigger-agent"),
       isLead: false,
       status: "idle",
     });
-    const sourceTask = createTaskExtended("Trigger a workflow", {
+    const sourceTask = await createTaskExtended("Trigger a workflow", {
       agentId: agent.id,
       requestedByUserId: requester.id,
     });
-    const workflow = createWorkflow({
+    const workflow = await createWorkflow({
       name: uniqueName("mcp-trigger-attribution"),
       definition: minimalDefinition,
     });
@@ -621,11 +620,11 @@ describe("MCP create-workflow / update-workflow / patch-workflow accept triggerS
 
     expect(triggered.structuredContent?.success).toBe(true);
     const runId = triggered.structuredContent?.runId as string;
-    expect(getWorkflowRun(runId)?.createdBy).toBe(requester.id);
+    expect((await getWorkflowRun(runId))?.createdBy).toBe(requester.id);
 
-    const [step] = getWorkflowRunStepsByRunId(runId);
+    const [step] = await getWorkflowRunStepsByRunId(runId);
     expect(step).toBeDefined();
-    expect(getTaskByWorkflowRunStepId(step!.id)?.requestedByUserId).toBe(requester.id);
+    expect((await getTaskByWorkflowRunStepId(step!.id))?.requestedByUserId).toBe(requester.id);
   });
 
   test("trigger-workflow with missing required field → structured TriggerSchemaError", async () => {

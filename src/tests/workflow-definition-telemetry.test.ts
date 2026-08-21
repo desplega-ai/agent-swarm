@@ -39,8 +39,8 @@ describe("workflow definition telemetry", () => {
     await removeTestDb();
   });
 
-  test("emits workflow.created with definition size and known source", () => {
-    const workflow = createWorkflow(
+  test("emits workflow.created with definition size and known source", async () => {
+    const workflow = await createWorkflow(
       {
         name: "created telemetry",
         definition: {
@@ -65,8 +65,8 @@ describe("workflow definition telemetry", () => {
     ]);
   });
 
-  test("emits workflow.deleted only after a workflow is deleted", () => {
-    const workflow = createWorkflow(
+  test("emits workflow.deleted only after a workflow is deleted", async () => {
+    const workflow = await createWorkflow(
       {
         name: "deleted telemetry",
         definition: { nodes: [] },
@@ -75,8 +75,8 @@ describe("workflow definition telemetry", () => {
     );
     calls = [];
 
-    expect(deleteWorkflow(workflow.id, "mcp")).toBe(true);
-    expect(deleteWorkflow(workflow.id, "mcp")).toBe(false);
+    expect(await deleteWorkflow(workflow.id, "mcp")).toBe(true);
+    expect(await deleteWorkflow(workflow.id, "mcp")).toBe(false);
 
     expect(calls).toEqual([
       {
@@ -89,8 +89,8 @@ describe("workflow definition telemetry", () => {
     ]);
   });
 
-  test("omits source for direct internal workflow mutations", () => {
-    const workflow = createWorkflow({
+  test("omits source for direct internal workflow mutations", async () => {
+    const workflow = await createWorkflow({
       name: "internal telemetry",
       definition: { nodes: [] },
     });

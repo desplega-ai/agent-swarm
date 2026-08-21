@@ -16,7 +16,10 @@ export interface SlackThreadSteeringResult {
   result: SteerResult;
 }
 
-function configuredSteeringTarget(channelId: string, threadTs: string): AgentTask | null {
+async function configuredSteeringTarget(
+  channelId: string,
+  threadTs: string,
+): Promise<AgentTask | null> {
   switch (process.env.SLACK_THREAD_STEERING) {
     case "lead":
       return getLatestLeadTaskInThread(channelId, threadTs);
@@ -32,16 +35,16 @@ function configuredSteeringTarget(channelId: string, threadTs: string): AgentTas
  * in progress. The default and invalid configuration values deliberately
  * return null so Slack preserves its existing task-creation behavior.
  */
-export function requestSlackThreadSteering(
+export async function requestSlackThreadSteering(
   args: SlackThreadSteeringRequest,
-): SlackThreadSteeringResult | null {
+): Promise<SlackThreadSteeringResult | null> {
   if (!isSteeringEnabled()) return null;
 
-  const task = configuredSteeringTarget(args.channelId, args.threadTs);
+  const task = await configuredSteeringTarget(args.channelId, args.threadTs);
   if (!task || task.status !== "in_progress") return null;
 
   const mode = process.env.SLACK_THREAD_STEERING_MODE === "steer" ? "steer" : "queue";
-  const result = requestSteering({
+  const result = await requestSteering({
     taskId: task.id,
     message: args.message,
     mode,
@@ -51,7 +54,7 @@ export function requestSlackThreadSteering(
     createdByUserId: args.requestedByUserId,
   });
   for (const messageTs of args.messageTimestamps ?? []) {
-    createLogEntry({
+    await createLogEntry({
       eventType: "task_steering",
       taskId: task.id,
       newValue: "slack_reaction",
