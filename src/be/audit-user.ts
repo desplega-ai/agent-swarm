@@ -25,20 +25,20 @@ import { findUserByExternalId } from "./users";
  * Returns `null` when no trusted actor can be established — which leaves the
  * audit column untouched on updates and NULL on inserts.
  */
-export function resolveTaskAuditUserId(
+export async function resolveTaskAuditUserId(
   sourceTaskId: string | undefined,
   callerAgentId: string | undefined,
-): string | null {
+): Promise<string | null> {
   if (!callerAgentId) return null;
 
   let resolvedSourceTaskId = sourceTaskId;
   if (!resolvedSourceTaskId) {
-    const currentTask = getAgentCurrentTask(callerAgentId);
+    const currentTask = await getAgentCurrentTask(callerAgentId);
     if (currentTask) resolvedSourceTaskId = currentTask.id;
   }
   if (!resolvedSourceTaskId) return null;
 
-  const task = getTaskById(resolvedSourceTaskId);
+  const task = await getTaskById(resolvedSourceTaskId);
   if (!task) return null;
   // Bind the header to the caller's own task — otherwise it is just a
   // client-chosen value and its requester cannot be trusted.
@@ -47,7 +47,7 @@ export function resolveTaskAuditUserId(
   if (task.requestedByUserId) return task.requestedByUserId;
 
   if (task.slackUserId) {
-    const user = findUserByExternalId("slack", task.slackUserId);
+    const user = await findUserByExternalId("slack", task.slackUserId);
     if (user) return user.id;
   }
 
@@ -61,10 +61,10 @@ export function resolveTaskAuditUserId(
  * authenticated request user is never client-controlled), then falls back to
  * the ownership-validated `X-Source-Task-Id` resolution.
  */
-export function resolveHttpAuditUserId(
+export async function resolveHttpAuditUserId(
   req: IncomingMessage,
   callerAgentId: string | undefined,
-): string | null {
+): Promise<string | null> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") return auth.userId;
   const header = req.headers["x-source-task-id"];

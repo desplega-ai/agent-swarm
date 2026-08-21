@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import ts from "typescript";
 import { getScriptAppTypes, MAX_APP_TYPES_BYTES, renderAppTypes } from "../apps/script-types";
 import { type AppRecord, createApp } from "../apps/store";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 
 const TEST_DB_PATH = "./test-apps-script-types.sqlite";
 
@@ -286,8 +286,8 @@ describe("getScriptAppTypes", () => {
     initDb(TEST_DB_PATH);
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM apps");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM apps");
   });
 
   afterAll(async () => {
@@ -295,11 +295,15 @@ describe("getScriptAppTypes", () => {
     await removeDbFiles(TEST_DB_PATH);
   });
 
-  test("reads app records in created order", () => {
-    createApp({ id: "first-id", name: "First App", definition: issueDefinition() as never });
-    createApp({ id: "second-id", name: "Second App", definition: issueDefinition() as never });
+  test("reads app records in created order", async () => {
+    await createApp({ id: "first-id", name: "First App", definition: issueDefinition() as never });
+    await createApp({
+      id: "second-id",
+      name: "Second App",
+      definition: issueDefinition() as never,
+    });
 
-    const rendered = getScriptAppTypes();
+    const rendered = await getScriptAppTypes();
     expect(rendered.indexOf("namespace App_FirstApp")).toBeLessThan(
       rendered.indexOf("namespace App_SecondApp"),
     );

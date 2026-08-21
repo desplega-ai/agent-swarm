@@ -10,7 +10,7 @@ import {
   failTask,
   getAgentById,
   getAllTasks,
-  getDb,
+  getDbClient,
   getLeadAgent,
   getLogsByTaskId,
   getPausedTasksForAgent,
@@ -588,11 +588,11 @@ const updateTaskTitleRoute = route({
   },
 });
 
-function canSteerTask(
+async function canSteerTask(
   req: IncomingMessage,
   myAgentId: string | undefined,
   task: AgentTask,
-): boolean {
+): Promise<boolean> {
   const resource: RbacResource = {
     kind: "task",
     taskId: task.id,
@@ -612,7 +612,7 @@ function canSteerTask(
     verb = "task.steer.own";
   } else {
     if (!myAgentId) return false;
-    const agent = getAgentById(myAgentId);
+    const agent = await getAgentById(myAgentId);
     if (!agent) return false;
     principal = { kind: "agent", agentId: myAgentId, isLead: agent.isLead };
     verb = "task.steer.any";
@@ -695,8 +695,10 @@ export async function handleTasks(
     // List responses default to slim (full `task` text → bounded `taskPreview`,
     // heavy blobs dropped); `?fields=full` restores the full `AgentTask`.
     const tasks =
-      parsed.query.fields === "full" ? getAllTasks(filters) : getAllTasks(filters, { slim: true });
-    const total = getTasksCount(filters);
+      parsed.query.fields === "full"
+        ? await getAllTasks(filters)
+        : await getAllTasks(filters, { slim: true });
+    const total = await getTasksCount(filters);
     listTasks.respond(res, 200, { tasks, total });
     return true;
   }
@@ -718,11 +720,11 @@ export async function handleTasks(
     // Set TRUST_BODY_REQUESTED_BY_USER_ID=false anywhere holders of the
     // shared/global key are NOT all equally trusted — with it on, any such
     // caller can attribute a task to any user.
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     const trustBodyRequestedByUserId = process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false";
     if (trustBodyRequestedByUserId && !requestedByUserId && parsed.body.requestedByUserId) {
-      const candidate = findUserById(parsed.body.requestedByUserId);
+      const candidate = await findUserById(parsed.body.requestedByUserId);
       if (candidate) requestedByUserId = candidate.id;
     }
 
@@ -734,17 +736,19 @@ export async function handleTasks(
     // there's no working agent).
     let defaultAgentId = parsed.body.agentId || undefined;
     if (!defaultAgentId) {
-      const lead = getLeadAgent();
+      const lead = await getLeadAgent();
       if (lead) defaultAgentId = lead.id;
     }
 
     let assetKey: string | undefined;
     try {
       const inheritedKey = parsed.body.parentTaskId
-        ? getTaskById(parsed.body.parentTaskId)?.key
+        ? (await getTaskById(parsed.body.parentTaskId))?.key
         : undefined;
       const requestedKey = parsed.body.key ?? inheritedKey;
-      assetKey = requestedKey ? authorizeAssetKeyWrite(requestedKey, trustedUserId) : undefined;
+      assetKey = requestedKey
+        ? await authorizeAssetKeyWrite(requestedKey, trustedUserId)
+        : undefined;
     } catch (error) {
       if (error instanceof AssetKeyAuthorizationError) {
         jsonError(res, error.message, error.statusCode);
@@ -754,7 +758,7 @@ export async function handleTasks(
     }
 
     try {
-      const task = createTaskWithSiblingAwareness(parsed.body.task, {
+      const task = await createTaskWithSiblingAwareness(parsed.body.task, {
         key: assetKey,
         agentId: defaultAgentId,
         creatorAgentId: myAgentId || undefined,
@@ -803,7 +807,7 @@ export async function handleTasks(
   if (updateSession.match(req.method, pathSegments)) {
     const parsed = await updateSession.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskClaudeSessionId(
+    const task = await updateTaskClaudeSessionId(
       parsed.params.id,
       parsed.body.claudeSessionId,
       parsed.body.provider,
@@ -823,7 +827,7 @@ export async function handleTasks(
   if (cancelTaskRoute.match(req.method, pathSegments)) {
     const parsed = await cancelTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -852,7 +856,7 @@ export async function handleTasks(
       }
     }
 
-    const cancelledTask = cancelTask(parsed.params.id, reason);
+    const cancelledTask = await cancelTask(parsed.params.id, reason);
     if (!cancelledTask) {
       jsonError(res, "Failed to cancel task", 500);
       return true;
@@ -901,7 +905,7 @@ export async function handleTasks(
     }
 
     if (task.agentId) {
-      updateAgentStatusFromCapacity(task.agentId);
+      await updateAgentStatusFromCapacity(task.agentId);
     }
 
     cancelTaskRoute.respond(res, 200, { success: true, task: cancelledTask });
@@ -911,32 +915,32 @@ export async function handleTasks(
   if (steerTaskRoute.match(req.method, pathSegments)) {
     const parsed = await steerTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
-    if (!canSteerTask(req, myAgentId, task)) {
+    if (!(await canSteerTask(req, myAgentId, task))) {
       jsonError(res, "Forbidden: caller cannot steer this task", 403);
       return true;
     }
 
-    const trustedUserId = resolveHttpAuditUserId(req, myAgentId);
+    const trustedUserId = await await resolveHttpAuditUserId(req, myAgentId);
     let requestedByUserId = trustedUserId ?? undefined;
     if (
       process.env.TRUST_BODY_REQUESTED_BY_USER_ID !== "false" &&
       !requestedByUserId &&
       parsed.body.requestedByUserId
     ) {
-      requestedByUserId = findUserById(parsed.body.requestedByUserId)?.id;
+      requestedByUserId = (await findUserById(parsed.body.requestedByUserId))?.id;
     }
 
     try {
       const auth = getRequestAuth(req);
       const createdByAgentId =
-        !auth && myAgentId && getAgentById(myAgentId) ? myAgentId : undefined;
-      const result = requestSteering({
+        !auth && myAgentId && (await getAgentById(myAgentId)) ? myAgentId : undefined;
+      const result = await requestSteering({
         taskId: task.id,
         message: parsed.body.message,
         mode: parsed.body.mode,
@@ -966,12 +970,12 @@ export async function handleTasks(
     // Keep history readable after a kill-switch flip so past steering remains auditable.
     const parsed = await getTaskSteeringMessagesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getTaskById(parsed.params.id)) {
+    if (!(await getTaskById(parsed.params.id))) {
       jsonError(res, "Task not found", 404);
       return true;
     }
     getTaskSteeringMessagesRoute.respond(res, 200, {
-      messages: getSteeringMessagesForTask(parsed.params.id),
+      messages: await getSteeringMessagesForTask(parsed.params.id),
     });
     return true;
   }
@@ -984,21 +988,21 @@ export async function handleTasks(
     }
     const parsed = await getPendingSteeringMessagesRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getAgentById(myAgentId)) {
+    if (!(await getAgentById(myAgentId))) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
     if (parsed.query.taskId) {
-      const task = getTaskById(parsed.query.taskId);
+      const task = await getTaskById(parsed.query.taskId);
       const messages =
-        task?.agentId === myAgentId ? getPendingSteeringForTask(parsed.query.taskId) : [];
+        task?.agentId === myAgentId ? await getPendingSteeringForTask(parsed.query.taskId) : [];
       getPendingSteeringMessagesRoute.respond(res, 200, { messages });
       return true;
     }
 
     getPendingSteeringMessagesRoute.respond(res, 200, {
-      messages: getPendingSteeringForAgent(myAgentId),
+      messages: await getPendingSteeringForAgent(myAgentId),
     });
     return true;
   }
@@ -1011,17 +1015,17 @@ export async function handleTasks(
     }
     const parsed = await markSteeringDeliveredRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getAgentById(myAgentId)) {
+    if (!(await getAgentById(myAgentId))) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    const message = getSteeringMessageById(parsed.params.id);
+    const message = await getSteeringMessageById(parsed.params.id);
     if (!message) {
       jsonError(res, "Steering message not found", 404);
       return true;
     }
-    const task = getTaskById(message.taskId);
+    const task = await getTaskById(message.taskId);
     if (task?.agentId !== myAgentId) {
       jsonError(res, "Steering message task is assigned to another agent", 403);
       return true;
@@ -1032,7 +1036,8 @@ export async function handleTasks(
     }
 
     const delivered =
-      markSteeringDelivered(message.id, parsed.body.mode) ?? getSteeringMessageById(message.id);
+      (await markSteeringDelivered(message.id, parsed.body.mode)) ??
+      (await getSteeringMessageById(message.id));
     if (!delivered) {
       jsonError(res, "Failed to mark steering message delivered", 500);
       return true;
@@ -1049,17 +1054,17 @@ export async function handleTasks(
     }
     const parsed = await markSteeringHandledRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getAgentById(myAgentId)) {
+    if (!(await getAgentById(myAgentId))) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    const message = getSteeringMessageById(parsed.params.id);
+    const message = await getSteeringMessageById(parsed.params.id);
     if (!message) {
       jsonError(res, "Steering message not found", 404);
       return true;
     }
-    const task = getTaskById(message.taskId);
+    const task = await getTaskById(message.taskId);
     if (task?.agentId !== myAgentId) {
       jsonError(res, "Steering message task is assigned to another agent", 403);
       return true;
@@ -1081,7 +1086,8 @@ export async function handleTasks(
       // No/invalid JSON body — the note is optional.
     }
 
-    const handled = markSteeringHandled(message.id, note) ?? getSteeringMessageById(message.id);
+    const handled =
+      (await markSteeringHandled(message.id, note)) ?? (await getSteeringMessageById(message.id));
     if (!handled) {
       jsonError(res, "Failed to mark steering message handled", 500);
       return true;
@@ -1098,17 +1104,17 @@ export async function handleTasks(
     }
     const parsed = await markSteeringUndeliverableRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    if (!getAgentById(myAgentId)) {
+    if (!(await getAgentById(myAgentId))) {
       jsonError(res, "Agent not found", 404);
       return true;
     }
 
-    const message = getSteeringMessageById(parsed.params.id);
+    const message = await getSteeringMessageById(parsed.params.id);
     if (!message) {
       jsonError(res, "Steering message not found", 404);
       return true;
     }
-    const task = getTaskById(message.taskId);
+    const task = await getTaskById(message.taskId);
     if (task?.agentId !== myAgentId) {
       jsonError(res, "Steering message task is assigned to another agent", 403);
       return true;
@@ -1125,7 +1131,7 @@ export async function handleTasks(
       markSteeringUndeliverableRoute.respond(
         res,
         200,
-        markSteeringUndeliverable(message.id, parsed.body.reason),
+        await markSteeringUndeliverable(message.id, parsed.body.reason),
       );
     } catch (error) {
       if (error instanceof SteeringRequestError) {
@@ -1140,30 +1146,35 @@ export async function handleTasks(
   if (getTask.match(req.method, pathSegments)) {
     const parsed = await getTask.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    const logs = getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
-    const attachments = getTaskAttachments(parsed.params.id);
-    getTask.respond(res, 200, { ...task, ...getTaskSteeringFields(task), logs, attachments });
+    const logs = await getLogsByTaskId(parsed.params.id, parsed.query.logsLimit ?? 200);
+    const attachments = await getTaskAttachments(parsed.params.id);
+    getTask.respond(res, 200, {
+      ...task,
+      ...(await getTaskSteeringFields(task)),
+      logs,
+      attachments,
+    });
     return true;
   }
 
   if (updateTaskProgressRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskProgressRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
     }
 
-    updateTaskProgress(parsed.params.id, parsed.body.progress);
+    await updateTaskProgress(parsed.params.id, parsed.body.progress);
     updateTaskProgressRoute.respond(res, 200, { success: true });
     return true;
   }
@@ -1221,56 +1232,58 @@ export async function handleTasks(
     ): r is Extract<FinishTaskTransactionResult, { task: AgentTask; wasPaused: boolean }> =>
       !("alreadyFinished" in r && r.alreadyFinished);
 
-    const result = getDb().transaction((): FinishTaskTransactionResult => {
-      const task = getTaskById(parsed.params.id);
+    const result = await getDbClient().transaction(
+      async (): Promise<FinishTaskTransactionResult> => {
+        const task = await getTaskById(parsed.params.id);
 
-      if (!task) {
-        return { error: "Task not found", status: 404 };
-      }
-
-      if (task.agentId && task.agentId !== myAgentId) {
-        return { error: "Task is assigned to another agent", status: 403 };
-      }
-
-      const terminalResultGuard = guardTerminalTaskResultWrite(task, parsed.body);
-      if (terminalResultGuard.handled) {
-        const { handled: _handled, ...guardResult } = terminalResultGuard;
-        return { ...guardResult, alreadyFinished: true };
-      }
-
-      if (task.status !== "in_progress") {
-        return { success: true, task, alreadyFinished: true };
-      }
-
-      const wasPaused = task.wasPaused;
-
-      let updatedTask: typeof task;
-      if (parsed.body.status === "completed") {
-        const result = completeTask(
-          parsed.params.id,
-          parsed.body.output || "Completed by runner wrapper (no explicit output)",
-        );
-        if (!result) {
-          return { error: "Failed to complete task", status: 500 };
+        if (!task) {
+          return { error: "Task not found", status: 404 };
         }
-        updatedTask = result;
-      } else {
-        const result = failTask(
-          parsed.params.id,
-          parsed.body.failureReason || "Process exited without explicit completion",
-        );
-        if (!result) {
-          return { error: "Failed to mark task as failed", status: 500 };
+
+        if (task.agentId && task.agentId !== myAgentId) {
+          return { error: "Task is assigned to another agent", status: 403 };
         }
-        updatedTask = result;
-      }
 
-      if (task.agentId) {
-        updateAgentStatusFromCapacity(task.agentId);
-      }
+        const terminalResultGuard = await guardTerminalTaskResultWrite(task, parsed.body);
+        if (terminalResultGuard.handled) {
+          const { handled: _handled, ...guardResult } = terminalResultGuard;
+          return { ...guardResult, alreadyFinished: true };
+        }
 
-      return { task: updatedTask, wasPaused };
-    })();
+        if (task.status !== "in_progress") {
+          return { success: true, task, alreadyFinished: true };
+        }
+
+        const wasPaused = task.wasPaused;
+
+        let updatedTask: typeof task;
+        if (parsed.body.status === "completed") {
+          const result = await completeTask(
+            parsed.params.id,
+            parsed.body.output || "Completed by runner wrapper (no explicit output)",
+          );
+          if (!result) {
+            return { error: "Failed to complete task", status: 500 };
+          }
+          updatedTask = result;
+        } else {
+          const result = await failTask(
+            parsed.params.id,
+            parsed.body.failureReason || "Process exited without explicit completion",
+          );
+          if (!result) {
+            return { error: "Failed to mark task as failed", status: 500 };
+          }
+          updatedTask = result;
+        }
+
+        if (task.agentId) {
+          await updateAgentStatusFromCapacity(task.agentId);
+        }
+
+        return { task: updatedTask, wasPaused };
+      },
+    );
 
     if (hasFinishError(result)) {
       jsonError(res, result.error, result.status ?? 500);
@@ -1308,7 +1321,7 @@ export async function handleTasks(
       });
 
       try {
-        const followUp = createWorkerTaskFollowUp({
+        const followUp = await createWorkerTaskFollowUp({
           task: result.task,
           status: parsed.body.status,
           output: parsed.body.output,
@@ -1342,7 +1355,7 @@ export async function handleTasks(
       jsonError(res, "Missing X-Agent-ID header", 400);
       return true;
     }
-    const pausedTasks = getPausedTasksForAgent(myAgentId);
+    const pausedTasks = await getPausedTasksForAgent(myAgentId);
     listPausedTasks.respond(res, 200, { tasks: pausedTasks });
     return true;
   }
@@ -1350,7 +1363,7 @@ export async function handleTasks(
   if (pauseTaskRoute.match(req.method, pathSegments)) {
     const parsed = await pauseTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1367,7 +1380,7 @@ export async function handleTasks(
       return true;
     }
 
-    const pausedTask = pauseTask(parsed.params.id);
+    const pausedTask = await pauseTask(parsed.params.id);
     if (!pausedTask) {
       jsonError(res, "Failed to pause task", 500);
       return true;
@@ -1396,7 +1409,7 @@ export async function handleTasks(
   if (updateTaskVcsRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskVcsRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskVcs(parsed.params.id, parsed.body);
+    const task = await updateTaskVcs(parsed.params.id, parsed.body);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1408,7 +1421,7 @@ export async function handleTasks(
   if (updateTaskTitleRoute.match(req.method, pathSegments)) {
     const parsed = await updateTaskTitleRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = updateTaskTitle(parsed.params.id, parsed.body.title);
+    const task = await updateTaskTitle(parsed.params.id, parsed.body.title);
     if (!task) {
       jsonError(res, "Task not found", 404);
       return true;
@@ -1420,7 +1433,7 @@ export async function handleTasks(
   if (resumeTaskRoute.match(req.method, pathSegments)) {
     const parsed = await resumeTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1437,7 +1450,7 @@ export async function handleTasks(
       return true;
     }
 
-    const resumedTask = resumeTask(parsed.params.id);
+    const resumedTask = await resumeTask(parsed.params.id);
     if (!resumedTask) {
       jsonError(res, "Failed to resume task", 500);
       return true;
@@ -1466,7 +1479,7 @@ export async function handleTasks(
   if (supersedeTaskRoute.match(req.method, pathSegments)) {
     const parsed = await supersedeTaskRoute.parse(req, res, pathSegments, queryParams);
     if (!parsed) return true;
-    const task = getTaskById(parsed.params.id);
+    const task = await getTaskById(parsed.params.id);
 
     if (!task) {
       jsonError(res, "Task not found", 404);
@@ -1500,7 +1513,7 @@ export async function handleTasks(
     // Check this BEFORE the supersede UPDATE so we don't leave a workflow
     // step in `superseded` if the engine expects `failed`.
     if (task.workflowRunStepId != null) {
-      const failed = failTask(parsed.params.id, "superseded_workflow_task");
+      const failed = await failTask(parsed.params.id, "superseded_workflow_task");
       ensure({
         id: "task.workflow_step_failed_on_supersede",
         flow: "task",
@@ -1524,7 +1537,7 @@ export async function handleTasks(
     // Supersede FIRST (atomic + idempotent in db.ts) so we don't orphan a
     // resume child if a worker races to complete/fail/cancel between the
     // pre-read status check and the supersede UPDATE.
-    const superseded = supersedeTask(parsed.params.id, {
+    const superseded = await supersedeTask(parsed.params.id, {
       reason: parsed.body.reason,
       // resumeTaskId is attached AFTER the child is created. Lost race here
       // means no child is created at all, so the log entry's null is accurate.
@@ -1533,7 +1546,7 @@ export async function handleTasks(
     if (!superseded) {
       // Worker won the race (terminal transition between status check and
       // this UPDATE). Treat as `alreadyFinished` — no resume child is created.
-      const fresh = getTaskById(parsed.params.id);
+      const fresh = await getTaskById(parsed.params.id);
       supersedeTaskRoute.respond(res, 200, {
         success: true,
         kind: "alreadyFinished",
@@ -1544,7 +1557,7 @@ export async function handleTasks(
     }
 
     // Parent is now superseded. Create the resume child.
-    const followUp = createResumeFollowUp({
+    const followUp = await createResumeFollowUp({
       parentId: parsed.params.id,
       reason: parsed.body.reason,
     });
@@ -1568,7 +1581,7 @@ export async function handleTasks(
     }
 
     const resumeTaskId = followUp.task.id;
-    backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
+    await backfillSupersedeTaskResumeTaskId(parsed.params.id, resumeTaskId);
 
     ensure({
       id: "task.superseded",

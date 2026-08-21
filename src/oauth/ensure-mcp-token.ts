@@ -45,12 +45,12 @@ export async function ensureMcpToken(
   if (existing) return existing;
 
   const work = (async () => {
-    const token = getMcpOAuthToken(mcpServerId, userId);
+    const token = await getMcpOAuthToken(mcpServerId, userId);
     if (!token) return null;
     if (token.status === "revoked") return token;
     if (!isMcpTokenExpiringSoon(token, opts.bufferMs)) return token;
     if (!token.refreshToken) {
-      markMcpOAuthTokenStatus(
+      await markMcpOAuthTokenStatus(
         token.id,
         "expired",
         "No refresh token available; reconnect required.",
@@ -69,7 +69,7 @@ export async function ensureMcpToken(
         scopes: token.scope ? token.scope.split(" ").filter(Boolean) : undefined,
       });
 
-      applyMcpOAuthRefresh(token.id, {
+      await applyMcpOAuthRefresh(token.id, {
         accessToken: refreshed.access_token,
         refreshToken: refreshed.refresh_token ?? undefined,
         expiresAt: computeExpiresAt(refreshed.expires_in),
@@ -77,7 +77,7 @@ export async function ensureMcpToken(
         expectedTokenVersion: token.tokenVersion,
       });
 
-      return getMcpOAuthToken(mcpServerId, userId);
+      return await getMcpOAuthToken(mcpServerId, userId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (isInvalidClientError(message)) {
@@ -86,9 +86,9 @@ export async function ensureMcpToken(
         // through this path (the proxy / server resolution) must do the same,
         // otherwise a revoked client stays "reusable" forever and every
         // subsequent /authorize call keeps selecting it.
-        invalidateMcpOAuthClient(mcpServerId, userId);
+        await invalidateMcpOAuthClient(mcpServerId, userId);
       }
-      markMcpOAuthTokenStatus(token.id, "error", message);
+      await markMcpOAuthTokenStatus(token.id, "error", message);
       console.error(`[mcp-oauth] refresh failed for ${mcpServerId}: ${message}`);
       return { ...token, status: "error" as const, lastErrorMessage: message };
     }

@@ -24,7 +24,7 @@ function digest(version: ReturnType<typeof decodeAppVersion>): string {
     .join(", ");
 }
 
-function renderHistory(versions: ReturnType<typeof getAppVersions>): string {
+function renderHistory(versions: Awaited<ReturnType<typeof getAppVersions>>): string {
   if (versions.length === 0) return "No snapshots yet; the current app has no prior version.";
   const header = "| Version | Created | Changed by | Digest |";
   const separator = "| --- | --- | --- | --- |";
@@ -62,7 +62,7 @@ export const registerAppHistoryTool = (server: McpServer) => {
     },
     async ({ appId, limit }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.manage",
@@ -70,9 +70,9 @@ export const registerAppHistoryTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      if (!getApp(appId)) return toolErr(`App ${appId} not found.`);
+      if (!(await getApp(appId))) return toolErr(`App ${appId} not found.`);
 
-      const allVersions = getAppVersions(appId);
+      const allVersions = await getAppVersions(appId);
       const versions = limit === undefined ? allVersions : allVersions.slice(0, limit);
       const currentHead = allVersions[0]?.version;
       return toolOk(`Found ${allVersions.length} snapshot(s) for app ${appId}.`, {

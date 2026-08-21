@@ -599,7 +599,7 @@ export function collectScriptReferences(definition: unknown): Map<string, string
  */
 function foreignScriptForWriter(
   context: AppDefinitionParseContext,
-  script: NonNullable<ReturnType<typeof getScriptById>>,
+  script: NonNullable<Awaited<ReturnType<typeof getScriptById>>>,
 ): boolean {
   if (script.scope !== "agent") return false;
   if (context.writerIsUser === true) return true;
@@ -650,12 +650,12 @@ function collectScriptReferencePathMap(definition: unknown): Map<string, string>
 }
 
 /** Semantic checks for a model's sources and its columns' source bindings. */
-function modelSourceIssues(
+async function modelSourceIssues(
   modelName: string,
   model: ModelDef,
   context: AppDefinitionParseContext,
   grandfatheredScriptRefs: Map<string, string>,
-): AppValidationIssue[] {
+): Promise<AppValidationIssue[]> {
   const issues: AppValidationIssue[] = [];
   const sources = model.sources ?? {};
   const sourceNames = new Set(Object.keys(sources));
@@ -697,12 +697,12 @@ function modelSourceIssues(
     }
 
     if (source.connector !== "script") continue;
-    const script = getScriptById(source.scriptId);
+    const script = await getScriptById(source.scriptId);
     if (!script) {
       issues.push({ path: `${path}.scriptId`, message: `script "${source.scriptId}" not found` });
       continue;
     }
-    const runAs = resolveSyncRunAs(script);
+    const runAs = await resolveSyncRunAs(script);
     const grandfatheredRef =
       grandfatheredScriptRefs.get(path) ===
       scriptRefKey(source.scriptId, source.args, source.connection);
@@ -820,10 +820,12 @@ function syncActionIssues(
   return [{ path: `actions.${name}`, message: "no model declares a source to sync" }];
 }
 
-export function parseAppDefinition(
+export async function parseAppDefinition(
   input: unknown,
   elementContext: AppDefinitionParseContext = {},
-): { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] } {
+): Promise<
+  { success: true; definition: AppDefinition } | { success: false; issues: AppValidationIssue[] }
+> {
   if (isMergePatchObject(input) && Object.hasOwn(input, "page")) {
     return {
       success: false,
@@ -857,11 +859,13 @@ export function parseAppDefinition(
       validatePage(parsed.data, catalog, pageName),
     ),
     ...crossPageDefinitionIssues(parsed.data, catalog),
-    ...elementDefinitionIssues(parsed.data, catalog, elementContext),
+    ...(await elementDefinitionIssues(parsed.data, catalog, elementContext)),
   ];
   const grandfatheredScriptRefs = collectScriptReferencePathMap(elementContext.existingDefinition);
   for (const [modelName, model] of Object.entries(parsed.data.models)) {
-    issues.push(...modelSourceIssues(modelName, model, elementContext, grandfatheredScriptRefs));
+    issues.push(
+      ...(await modelSourceIssues(modelName, model, elementContext, grandfatheredScriptRefs)),
+    );
   }
   for (const [name, action] of Object.entries(parsed.data.actions ?? {})) {
     if (action.kind === "sync") {
@@ -869,7 +873,7 @@ export function parseAppDefinition(
       continue;
     }
     if (action.kind !== "script") continue;
-    const script = getScriptById(action.scriptId);
+    const script = await getScriptById(action.scriptId);
     if (!script) {
       issues.push({
         path: `actions.${name}.scriptId`,

@@ -13,7 +13,7 @@
  * Server-side only. Route handlers should call these functions instead of
  * preparing SQL directly so the query is reusable and typed in one place.
  */
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 
 /** Max chars of `agent_memory.content` returned in retrieval listings. */
 const RETRIEVAL_CONTENT_SNIPPET_CHARS = 500;
@@ -61,10 +61,10 @@ export type RetrievalListFilter = {
  * `retrievedAt`. Caller MUST pass at least one of `taskId` / `sessionId`;
  * the route's Zod schema enforces this — this function does not re-validate.
  */
-export function getRetrievalsForAgent(
+export async function getRetrievalsForAgent(
   agentId: string,
   filter: RetrievalListFilter,
-): RetrievalListRow[] {
+): Promise<RetrievalListRow[]> {
   const conditions: string[] = ["mr.agentId = ?"];
   const params: (string | number)[] = [agentId];
   if (filter.taskId) {
@@ -98,9 +98,11 @@ export function getRetrievalsForAgent(
      LIMIT ?
   `;
 
-  return getDb()
-    .prepare<RetrievalListRow, (string | number)[]>(sql)
-    .all(RETRIEVAL_CONTENT_SNIPPET_CHARS, ...params, RETRIEVAL_LIST_LIMIT);
+  return getDbClient().query<RetrievalListRow>(sql, [
+    RETRIEVAL_CONTENT_SNIPPET_CHARS,
+    ...params,
+    RETRIEVAL_LIST_LIMIT,
+  ]);
 }
 
 /**
@@ -108,11 +110,10 @@ export function getRetrievalsForAgent(
  * to the agent during the task? Used by the rate endpoint to reject
  * `explicit-self` ratings for memories the agent never saw.
  */
-export function hasRetrievalForTask(taskId: string, memoryId: string): boolean {
-  const row = getDb()
-    .prepare<{ id: string }, [string, string]>(
-      "SELECT id FROM memory_retrieval WHERE taskId = ? AND memoryId = ? LIMIT 1",
-    )
-    .get(taskId, memoryId);
+export async function hasRetrievalForTask(taskId: string, memoryId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ id: string }>(
+    "SELECT id FROM memory_retrieval WHERE taskId = ? AND memoryId = ? LIMIT 1",
+    [taskId, memoryId],
+  );
   return row != null;
 }

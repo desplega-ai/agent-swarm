@@ -431,8 +431,10 @@ class ClaudeManagedSession implements ProviderSession {
    * AbortError catch path emits the cancelled `result` and settles.
    *
    * Made non-blocking so the SSE for-await loop stays synchronous in the hot
-   * path. Errors from `checkToolLoop` (file I/O on `/tmp`) are swallowed —
-   * loop detection failure must never kill a real session.
+   * path. `checkToolLoop` serializes calls per session key, so back-to-back
+   * events are counted in order even though nothing here awaits them. Errors
+   * from `checkToolLoop` (file I/O on `/tmp`) are swallowed — loop detection
+   * failure must never kill a real session.
    */
   private runToolLoopCheck(toolName: string, args: unknown): void {
     if (!this.taskId) return;

@@ -4,7 +4,7 @@ import {
   checkoutPromptTemplate,
   closeDb,
   deletePromptTemplate,
-  getDb,
+  getDbClient,
   getPromptTemplateById,
   getPromptTemplateHistory,
   getPromptTemplates,
@@ -45,7 +45,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("CRUD operations", () => {
-    test("create via upsert (insert path) and read by ID", () => {
+    test("create via upsert (insert path) and read by ID", async () => {
       const template = upsertPromptTemplate({
         eventType: "github.push",
         scope: "global",
@@ -65,7 +65,7 @@ describe("Prompt Templates DB", () => {
       expect(template.createdAt).toBeTruthy();
       expect(template.updatedAt).toBeTruthy();
 
-      const fetched = getPromptTemplateById(template.id);
+      const fetched = await getPromptTemplateById(template.id);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(template.id);
       expect(fetched!.body).toBe("Handle push event: {{payload}}");
@@ -115,22 +115,22 @@ describe("Prompt Templates DB", () => {
       expect(updated.body).toBe("Slack message v2");
     });
 
-    test("delete removes template", () => {
+    test("delete removes template", async () => {
       const template = upsertPromptTemplate({
         eventType: "test.delete_me",
         scope: "global",
         body: "Will be deleted",
       });
 
-      const deleted = deletePromptTemplate(template.id);
+      const deleted = await deletePromptTemplate(template.id);
       expect(deleted).toBe(true);
 
-      const fetched = getPromptTemplateById(template.id);
+      const fetched = await getPromptTemplateById(template.id);
       expect(fetched).toBeNull();
     });
 
-    test("delete returns false for non-existent ID", () => {
-      const deleted = deletePromptTemplate("non-existent-id");
+    test("delete returns false for non-existent ID", async () => {
+      const deleted = await deletePromptTemplate("non-existent-id");
       expect(deleted).toBe(false);
     });
   });
@@ -301,12 +301,12 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("wildcard matching", () => {
-    test("wildcard matches when exact not found", () => {
+    test("wildcard matches when exact not found", async () => {
       // Remove any seeded exact match so the wildcard can be tested
       const seeded = getPromptTemplates({ eventType: "github.pull_request.review_submitted" });
       for (const t of seeded) {
-        getDb().run("DELETE FROM prompt_template_history WHERE templateId = ?", [t.id]);
-        getDb().run("DELETE FROM prompt_templates WHERE id = ?", [t.id]);
+        await getDbClient().run("DELETE FROM prompt_template_history WHERE templateId = ?", [t.id]);
+        await getDbClient().run("DELETE FROM prompt_templates WHERE id = ?", [t.id]);
       }
 
       upsertPromptTemplate({
@@ -370,7 +370,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("history", () => {
-    test("history entry created on insert", () => {
+    test("history entry created on insert", async () => {
       const template = upsertPromptTemplate({
         eventType: "history.test.insert",
         scope: "global",
@@ -378,7 +378,7 @@ describe("Prompt Templates DB", () => {
         changedBy: "creator",
       });
 
-      const history = getPromptTemplateHistory(template.id);
+      const history = await getPromptTemplateHistory(template.id);
       expect(history.length).toBe(1);
       expect(history[0].version).toBe(1);
       expect(history[0].body).toBe("History v1");
@@ -386,7 +386,7 @@ describe("Prompt Templates DB", () => {
       expect(history[0].changeReason).toBe("Initial creation");
     });
 
-    test("history entry created on update", () => {
+    test("history entry created on update", async () => {
       const template = upsertPromptTemplate({
         eventType: "history.test.update",
         scope: "global",
@@ -401,7 +401,7 @@ describe("Prompt Templates DB", () => {
         changeReason: "Fixed typo",
       });
 
-      const history = getPromptTemplateHistory(template.id);
+      const history = await getPromptTemplateHistory(template.id);
       expect(history.length).toBe(2);
       // Ordered by version DESC
       expect(history[0].version).toBe(2);
@@ -418,7 +418,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("checkout", () => {
-    test("checkout restores body and state from target version (backward)", () => {
+    test("checkout restores body and state from target version (backward)", async () => {
       const template = upsertPromptTemplate({
         eventType: "checkout.test.backward",
         scope: "global",
@@ -434,23 +434,23 @@ describe("Prompt Templates DB", () => {
       });
 
       // Check we're at v2
-      const v2 = getPromptTemplateById(template.id)!;
+      const v2 = (await getPromptTemplateById(template.id))!;
       expect(v2.version).toBe(2);
       expect(v2.body).toBe("Version 2 body");
       expect(v2.state).toBe("skip_event");
 
       // Checkout back to v1
-      const restored = checkoutPromptTemplate(template.id, 1);
+      const restored = await checkoutPromptTemplate(template.id, 1);
       expect(restored.version).toBe(3); // Version bumped
       expect(restored.body).toBe("Version 1 body");
       expect(restored.state).toBe("enabled");
 
       // History should have a checkout entry
-      const history = getPromptTemplateHistory(template.id);
+      const history = await getPromptTemplateHistory(template.id);
       expect(history[0].changeReason).toBe("Checked out from version 1");
     });
 
-    test("checkout restores forward version", () => {
+    test("checkout restores forward version", async () => {
       const template = upsertPromptTemplate({
         eventType: "checkout.test.forward",
         scope: "global",
@@ -470,28 +470,28 @@ describe("Prompt Templates DB", () => {
       });
 
       // Now at v3, checkout to v2
-      const restored = checkoutPromptTemplate(template.id, 2);
+      const restored = await checkoutPromptTemplate(template.id, 2);
       expect(restored.version).toBe(4);
       expect(restored.body).toBe("V2");
 
       // Checkout back to v3
-      const restored2 = checkoutPromptTemplate(template.id, 3);
+      const restored2 = await checkoutPromptTemplate(template.id, 3);
       expect(restored2.version).toBe(5);
       expect(restored2.body).toBe("V3");
     });
 
-    test("checkout throws for non-existent template", () => {
-      expect(() => checkoutPromptTemplate("non-existent", 1)).toThrow("not found");
+    test("checkout throws for non-existent template", async () => {
+      await expect(checkoutPromptTemplate("non-existent", 1)).rejects.toThrow("not found");
     });
 
-    test("checkout throws for non-existent version", () => {
+    test("checkout throws for non-existent version", async () => {
       const template = upsertPromptTemplate({
         eventType: "checkout.test.bad_version",
         scope: "global",
         body: "Only v1",
       });
 
-      expect(() => checkoutPromptTemplate(template.id, 99)).toThrow("No history entry");
+      await expect(checkoutPromptTemplate(template.id, 99)).rejects.toThrow("No history entry");
     });
   });
 
@@ -500,7 +500,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("isDefault guard", () => {
-    test("cannot delete a template with isDefault=true", () => {
+    test("cannot delete a template with isDefault=true", async () => {
       // Create a template and then reset it to default
       const template = upsertPromptTemplate({
         eventType: "default.test.guard",
@@ -510,10 +510,10 @@ describe("Prompt Templates DB", () => {
 
       resetPromptTemplateToDefault(template.id, "Default body");
 
-      const refreshed = getPromptTemplateById(template.id)!;
+      const refreshed = (await getPromptTemplateById(template.id))!;
       expect(refreshed.isDefault).toBe(true);
 
-      expect(() => deletePromptTemplate(template.id)).toThrow("Cannot delete a default");
+      await expect(deletePromptTemplate(template.id)).rejects.toThrow("Cannot delete a default");
     });
   });
 
@@ -522,7 +522,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("global override of isDefault", () => {
-    test("upsert at global scope with existing isDefault=true flips it to false", () => {
+    test("upsert at global scope with existing isDefault=true flips it to false", async () => {
       const template = upsertPromptTemplate({
         eventType: "default.test.flip",
         scope: "global",
@@ -531,7 +531,7 @@ describe("Prompt Templates DB", () => {
 
       // Set it as default
       resetPromptTemplateToDefault(template.id, "Default body");
-      const defaulted = getPromptTemplateById(template.id)!;
+      const defaulted = (await getPromptTemplateById(template.id))!;
       expect(defaulted.isDefault).toBe(true);
 
       // Upsert at global scope should flip isDefault to false
@@ -550,7 +550,7 @@ describe("Prompt Templates DB", () => {
   // ============================================================================
 
   describe("resetPromptTemplateToDefault", () => {
-    test("restores body and sets isDefault=true", () => {
+    test("restores body and sets isDefault=true", async () => {
       const template = upsertPromptTemplate({
         eventType: "reset.test.basic",
         scope: "global",
@@ -567,7 +567,7 @@ describe("Prompt Templates DB", () => {
       expect(reset.version).toBe(2);
 
       // Check history
-      const history = getPromptTemplateHistory(template.id);
+      const history = await getPromptTemplateHistory(template.id);
       const latestEntry = history[0];
       expect(latestEntry.changeReason).toBe("Reset to default");
     });

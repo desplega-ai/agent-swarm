@@ -17,9 +17,9 @@ import {
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { ScheduledTask, ScheduledTaskSummary } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-schedule-http-triage-tools.sqlite";
-const TEST_PORT = 13031;
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -36,7 +36,7 @@ function createTestServer(): Server {
   });
 }
 
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const headers = {
   "Content-Type": "application/json",
   "X-Agent-ID": crypto.randomUUID(),
@@ -51,9 +51,8 @@ describe("Schedule HTTP triage tooling", () => {
     }
     initDb(TEST_DB_PATH);
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {
@@ -65,7 +64,7 @@ describe("Schedule HTTP triage tooling", () => {
   });
 
   test("PATCH /api/schedules/:id clears one field without restating the schedule", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `http-patch-schedule-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "keep me",
@@ -83,25 +82,25 @@ describe("Schedule HTTP triage tooling", () => {
     expect(body.model).toBeUndefined();
     expect(body.intervalMs).toBe(60000);
     expect(body.taskTemplate).toBe("keep me");
-    expect(getScheduledTaskById(schedule.id)?.model).toBeUndefined();
+    expect((await getScheduledTaskById(schedule.id))?.model).toBeUndefined();
   });
 
   test("GET /api/schedules filters by consecutive errors and last run status", async () => {
-    const ok = createScheduledTask({
+    const ok = await createScheduledTask({
       name: `http-schedule-ok-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "healthy",
     });
-    const failing = createScheduledTask({
+    const failing = await createScheduledTask({
       name: `http-schedule-failing-${crypto.randomUUID()}`,
       intervalMs: 60000,
       taskTemplate: "failing",
     });
-    updateScheduledTask(ok.id, {
+    await updateScheduledTask(ok.id, {
       lastRunAt: new Date(Date.now() - 120000).toISOString(),
       consecutiveErrors: 0,
     });
-    updateScheduledTask(failing.id, {
+    await updateScheduledTask(failing.id, {
       lastRunAt: new Date(Date.now() - 60000).toISOString(),
       consecutiveErrors: 2,
       lastErrorAt: new Date().toISOString(),

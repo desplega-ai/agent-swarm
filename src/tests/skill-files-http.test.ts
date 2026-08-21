@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createSkill, getDb, initDb } from "../be/db";
+import { closeDb, createSkill, getDbClient, initDb } from "../be/db";
 import { handleSkills } from "../http/skills";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
@@ -66,10 +66,11 @@ describe("/api/skills/:id/files", () => {
     initDb(TEST_DB_PATH);
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM skill_files");
-    getDb().run("DELETE FROM skills");
-    const skill = createSkill({
+  beforeEach(async () => {
+    const client = getDbClient();
+    await client.run("DELETE FROM skill_files");
+    await client.run("DELETE FROM skills");
+    const skill = await createSkill({
       name: `http-file-skill-${crypto.randomUUID()}`,
       description: "HTTP file skill",
       content: "---\nname: http-file-skill\ndescription: HTTP file skill\n---\n\nBody.",
@@ -139,7 +140,7 @@ describe("/api/skills/:id/files", () => {
   });
 
   test("rejects file mutations for system-managed skills", async () => {
-    const systemSkill = createSkill({
+    const systemSkill = await createSkill({
       name: `system-file-skill-${crypto.randomUUID()}`,
       description: "System file skill",
       content: "---\nname: system-file-skill\ndescription: System file skill\n---\n\nBody.",

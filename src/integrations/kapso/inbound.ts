@@ -41,12 +41,12 @@ function extractText(message: NonNullable<KapsoWebhookPayload["message"]>): stri
   return `(non-text message — type: ${message.type ?? "unknown"})`;
 }
 
-function buildTaskDescription(payload: KapsoWebhookPayload): string {
+async function buildTaskDescription(payload: KapsoWebhookPayload): Promise<string> {
   const message = payload.message ?? {};
   const conversation = payload.conversation ?? {};
   const externalId = normalizeKapsoSender(payload);
   const contactDisplay = externalId
-    ? renderIdentity(resolveKapsoIdentity(externalId))
+    ? renderIdentity(await resolveKapsoIdentity(externalId))
     : "(unknown user)";
   return resolveTemplate("kapso.message.received", {
     conversation_id: conversation.id ?? "unknown",
@@ -70,24 +70,26 @@ function normalizeKapsoSender(payload: KapsoWebhookPayload): string | null {
  * integration writes (`kapso`, `whatsapp` — see the dual-kind note on
  * `resolveKapsoRequestedByUserId`). Never a provider profile label.
  */
-function resolveKapsoIdentity(externalId: string): IdentityResolution {
-  const kapsoResolution = resolveIdentity(KAPSO_IDENTITY_KIND, externalId);
+async function resolveKapsoIdentity(externalId: string): Promise<IdentityResolution> {
+  const kapsoResolution = await resolveIdentity(KAPSO_IDENTITY_KIND, externalId);
   if (kapsoResolution.status === "resolved") return kapsoResolution;
-  const whatsappResolution = resolveIdentity(WHATSAPP_IDENTITY_KIND, externalId);
+  const whatsappResolution = await resolveIdentity(WHATSAPP_IDENTITY_KIND, externalId);
   if (whatsappResolution.status === "resolved") return whatsappResolution;
   // Both unknown — report under the `kapso` kind for consistency with
   // resolveKapsoRequestedByUserId's unmapped-tracker recording.
   return kapsoResolution;
 }
 
-export function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): string | undefined {
+export async function resolveKapsoRequestedByUserId(
+  payload: KapsoWebhookPayload,
+): Promise<string | undefined> {
   const externalId = normalizeKapsoSender(payload);
   if (!externalId) return undefined;
 
-  const resolution = resolveKapsoIdentity(externalId);
+  const resolution = await resolveKapsoIdentity(externalId);
   if (resolution.status === "resolved") return resolution.userId;
 
-  recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
+  await recordUnmappedIdentity(KAPSO_IDENTITY_KIND, externalId, {
     sampleEventType: "kapso.message.received",
     sampleContext: [
       payload.conversation?.contact_name ? `contact=${payload.conversation.contact_name}` : null,
@@ -113,7 +115,7 @@ export function resolveKapsoRequestedByUserId(payload: KapsoWebhookPayload): str
  *      or creates a native `kapso-inbound` task,
  *   5. returns `no_mapping` when the number isn't registered (caller logs a warning).
  */
-export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
+export async function routeKapsoInbound(payload: KapsoWebhookPayload): Promise<KapsoRouting> {
   const message = payload.message;
   const direction = message?.kapso?.direction;
   if (direction !== "inbound") {
@@ -125,7 +127,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     return { kind: "skip", reason: "missing_message_id" };
   }
 
-  if (!markKapsoMessageSeen(messageId)) {
+  if (!(await markKapsoMessageSeen(messageId))) {
     return { kind: "duplicate", messageId };
   }
 
@@ -141,7 +143,7 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     text: extractText(message ?? {}),
   });
 
-  const mapping = phoneNumberId ? getKapsoNumberMapping(phoneNumberId) : null;
+  const mapping = phoneNumberId ? await getKapsoNumberMapping(phoneNumberId) : null;
   if (!mapping) {
     return { kind: "no_mapping", phoneNumberId };
   }
@@ -150,13 +152,13 @@ export function routeKapsoInbound(payload: KapsoWebhookPayload): KapsoRouting {
     return { kind: "workflow", workflowId: mapping.workflowId };
   }
 
-  const task = createTaskWithSiblingAwareness(buildTaskDescription(payload), {
+  const task = await createTaskWithSiblingAwareness(await buildTaskDescription(payload), {
     agentId: mapping.agentId ?? null,
     source: "system",
     taskType: "kapso-inbound",
     tags: ["kapso-whatsapp", "inbound"],
     priority: 70,
-    requestedByUserId: resolveKapsoRequestedByUserId(payload),
+    requestedByUserId: await resolveKapsoRequestedByUserId(payload),
     contextKey: `kapso:conversation:${payload.conversation?.id ?? messageId}`,
   });
 

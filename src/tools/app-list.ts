@@ -10,7 +10,7 @@ function escapeTableCell(value: unknown): string {
     .replace(/\r\n|\r|\n/g, "<br>");
 }
 
-function renderApps(apps: ReturnType<typeof listApps>): string {
+function renderApps(apps: Awaited<ReturnType<typeof listApps>>): string {
   if (apps.length === 0) return "No apps found.";
   const header = "| ID | Name | Description | Updated |";
   const separator = "| --- | --- | --- | --- |";
@@ -37,7 +37,7 @@ export const registerAppListTool = (server: McpServer) => {
       }),
     },
     async () => {
-      const apps = listApps();
+      const apps = await listApps();
       return toolOk(`Found ${apps.length} app(s).`, {
         details: renderApps(apps),
         data: { apps },

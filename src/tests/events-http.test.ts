@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { Subprocess } from "bun";
+import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
-const TEST_PORT = 13033;
+let TEST_PORT = 0;
 const TEST_DB_PATH = `/tmp/test-events-http-${Date.now()}.sqlite`;
-const BASE = `http://localhost:${TEST_PORT}`;
+let BASE = "";
 const TEST_API_KEY = "test-events-http-key";
 
 let serverProc: Subprocess;
@@ -35,19 +36,10 @@ async function api(
 const get = (p: string) => api("GET", p);
 const post = (p: string, body?: unknown) => api("POST", p, { body });
 
-async function waitForServer(url: string, timeoutMs = 15000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    try {
-      const r = await fetch(url);
-      if (r.ok) return;
-    } catch {}
-    await Bun.sleep(50);
-  }
-  throw new Error(`Server did not start within ${timeoutMs}ms`);
-}
-
 beforeAll(async () => {
+  TEST_PORT = await getFreePort();
+  BASE = `http://localhost:${TEST_PORT}`;
+
   try {
     await unlink(TEST_DB_PATH);
   } catch {}
@@ -69,7 +61,7 @@ beforeAll(async () => {
   });
 
   await waitForServer(`${BASE}/health`);
-}, 20000);
+}, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
   if (serverProc) {

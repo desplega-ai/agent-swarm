@@ -55,16 +55,16 @@ export async function indexMemoryContent(
   const provider = getEmbeddingProvider();
 
   if (sourcePath && agentId && contentChunks.length === 1) {
-    const existing = store
-      .list(agentId, {
+    const existing = (
+      await store.list(agentId, {
         scope,
         limit: 2,
         ownerAgentId: agentId,
         sourcePath,
       })
-      .filter((memory) => memory.sourcePath === sourcePath);
+    ).filter((memory) => memory.sourcePath === sourcePath);
     if (existing.length === 1 && existing[0]?.totalChunks === 1) {
-      const result = store.edit({
+      const result = await store.edit({
         id: existing[0].id,
         mode: "replace",
         content: contentChunks[0]!.content,
@@ -72,10 +72,10 @@ export async function indexMemoryContent(
         changedByAgentId: agentId,
       });
       const embedding = await provider.embed(contentChunks[0]!.content);
-      if (embedding) store.updateEmbedding(result.memory.id, embedding, provider.name);
+      if (embedding) await store.updateEmbedding(result.memory.id, embedding, provider.name);
       try {
         // Re-index of an existing memory: prune stale content-derived links.
-        refreshLinks(result.memory.id, agentId, result.memory.content);
+        await refreshLinks(result.memory.id, agentId, result.memory.content);
       } catch (err) {
         console.error(
           `[memory] Link resolution failed for ${result.memory.id}:`,
@@ -88,11 +88,11 @@ export async function indexMemoryContent(
 
   // Dedup multi-chunk or ambiguous source paths via the existing lossy path.
   if (sourcePath && agentId) {
-    store.deleteBySourcePath(sourcePath, agentId);
+    await store.deleteBySourcePath(sourcePath, agentId);
   }
 
   // Atomic batch insert: all chunks or none
-  const memories = store.storeBatch(
+  const memories = await store.storeBatch(
     contentChunks.map((chunk) => ({
       agentId: agentId || null,
       content: chunk.content,
@@ -114,7 +114,7 @@ export async function indexMemoryContent(
   if (agentId) {
     for (const memory of memories) {
       try {
-        storeLinks(memory.id, agentId, memory.content);
+        await storeLinks(memory.id, agentId, memory.content);
       } catch (err) {
         console.error(`[memory] Link resolution failed for ${memory.id}:`, (err as Error).message);
       }
@@ -127,7 +127,7 @@ export async function indexMemoryContent(
       const embeddings = await provider.embedBatch(contentChunks.map((c) => c.content));
       for (let i = 0; i < embeddings.length; i++) {
         if (embeddings[i]) {
-          store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
+          await store.updateEmbedding(memories[i]!.id, embeddings[i]!, provider.name);
         }
       }
     } catch (err) {

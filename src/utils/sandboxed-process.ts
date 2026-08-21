@@ -64,6 +64,21 @@ function shellQuote(value: string): string {
 }
 
 /**
+ * Bun runtime flag: the child exits when its parent dies and SIGKILLs every
+ * descendant when it exits. Closes the process-tree gap the ulimits alone
+ * leave open (a harness that forks and is then killed on timeout used to
+ * leave its grandchildren running). Bun ignores flags it does not know, so
+ * older runtimes degrade to the previous behavior.
+ */
+export const BUN_NO_ORPHANS_FLAG = "--no-orphans";
+
+function withBunNoOrphans(innerCommand: readonly string[]): string[] {
+  if (commandBasename(innerCommand[0] ?? "") !== "bun") return [...innerCommand];
+  if (innerCommand.includes(BUN_NO_ORPHANS_FLAG)) return [...innerCommand];
+  return [innerCommand[0] as string, BUN_NO_ORPHANS_FLAG, ...innerCommand.slice(1)];
+}
+
+/**
  * Wrap `innerCommand` in a shell prelude that applies the resource
  * ulimits above, then `exec`s into a completely clean environment (`env -i`)
  * containing ONLY the entries in `env`. This is the enforcement point for
@@ -112,7 +127,7 @@ export function buildSandboxedCommand(
   const envAssignments = Object.entries(env)
     .map(([key, value]) => `${key}=${shellQuote(value)}`)
     .join(" ");
-  const quotedInner = innerCommand.map(shellQuote).join(" ");
+  const quotedInner = withBunNoOrphans(innerCommand).map(shellQuote).join(" ");
 
   return [
     usesInterpreterProfile ? "bash" : "sh",

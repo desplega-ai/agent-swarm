@@ -29,8 +29,10 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
-function makeToken(overrides: Partial<UpsertMcpOAuthTokenInput> = {}): UpsertMcpOAuthTokenInput {
-  const server = createMcpServer({
+async function makeToken(
+  overrides: Partial<UpsertMcpOAuthTokenInput> = {},
+): Promise<UpsertMcpOAuthTokenInput> {
+  const server = await createMcpServer({
     name: `ens-${Math.random().toString(36).slice(2, 10)}`,
     transport: "http",
     url: "https://mcp.example.com",
@@ -57,7 +59,7 @@ function makeToken(overrides: Partial<UpsertMcpOAuthTokenInput> = {}): UpsertMcp
 
 describe("ensureMcpToken", () => {
   test("returns null when no token row exists", async () => {
-    const server = createMcpServer({
+    const server = await createMcpServer({
       name: "ens-nothing",
       transport: "http",
       url: "https://mcp.example.com",
@@ -68,8 +70,8 @@ describe("ensureMcpToken", () => {
   });
 
   test("returns fresh token without calling fetch", async () => {
-    const input = makeToken();
-    upsertMcpOAuthToken(input);
+    const input = await makeToken();
+    await upsertMcpOAuthToken(input);
 
     let fetchCalled = false;
     globalThis.fetch = async () => {
@@ -84,11 +86,11 @@ describe("ensureMcpToken", () => {
   });
 
   test("returns 'revoked' token untouched (never refresh a revoked token)", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       status: "revoked",
       expiresAt: new Date(Date.now() - 1000).toISOString(), // expired
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async () => {
       throw new Error("should not fetch for revoked tokens");
@@ -100,26 +102,26 @@ describe("ensureMcpToken", () => {
   });
 
   test("flips status to 'expired' when no refresh token and access is expiring", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       refreshToken: null,
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     const token = await ensureMcpToken(input.mcpServerId);
     expect(token!.status).toBe("expired");
 
     // Persisted
-    const reread = getMcpOAuthToken(input.mcpServerId);
+    const reread = await getMcpOAuthToken(input.mcpServerId);
     expect(reread!.status).toBe("expired");
     expect(reread!.lastErrorMessage).toMatch(/reconnect required/i);
   });
 
   test("refreshes when expiring and refresh succeeds", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     let calls = 0;
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
@@ -146,11 +148,11 @@ describe("ensureMcpToken", () => {
   });
 
   test("uses body-post authentication for a legacy row with no recorded method", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
       tokenEndpointAuthMethod: null,
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = init?.headers as Record<string, string>;
@@ -169,10 +171,10 @@ describe("ensureMcpToken", () => {
   });
 
   test("flips status to 'error' on refresh failure", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     globalThis.fetch = async () => new Response('{"error":"invalid_grant"}', { status: 400 });
 
@@ -180,21 +182,21 @@ describe("ensureMcpToken", () => {
     expect(token!.status).toBe("error");
     expect(token!.lastErrorMessage).toMatch(/Token refresh failed/);
 
-    const reread = getMcpOAuthToken(input.mcpServerId);
+    const reread = await getMcpOAuthToken(input.mcpServerId);
     expect(reread!.status).toBe("error");
   });
 
   test("invalidates the stored DCR client on an invalid_client refresh failure (automatic path)", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(), // within 5-min buffer
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     // The automatic refresh path (ensureMcpToken, used by the proxy/server
     // resolution) must invalidate the stored client on invalid_client just
     // like the explicit POST /refresh route does — otherwise a client the
     // provider has disowned stays "reusable" forever.
-    expect(findReusableMcpOAuthClient(input.mcpServerId)).not.toBeNull();
+    expect(await findReusableMcpOAuthClient(input.mcpServerId)).not.toBeNull();
 
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ error: "invalid_client" }), { status: 401 });
@@ -202,14 +204,14 @@ describe("ensureMcpToken", () => {
     const token = await ensureMcpToken(input.mcpServerId);
     expect(token!.status).toBe("error");
 
-    expect(findReusableMcpOAuthClient(input.mcpServerId)).toBeNull();
+    expect(await findReusableMcpOAuthClient(input.mcpServerId)).toBeNull();
   });
 
   test("concurrent calls dedupe via per-key inflight mutex", async () => {
-    const input = makeToken({
+    const input = await makeToken({
       expiresAt: new Date(Date.now() + 30_000).toISOString(),
     });
-    upsertMcpOAuthToken(input);
+    await upsertMcpOAuthToken(input);
 
     let calls = 0;
     globalThis.fetch = async () => {

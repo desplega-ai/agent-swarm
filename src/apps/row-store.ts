@@ -1,4 +1,4 @@
-import { deleteKv, getDb, getKv, listKv, upsertKv } from "../be/db";
+import { deleteKv, getDbClient, getKv, listKv, upsertKv } from "../be/db";
 import {
   AppDefinitionSchema,
   type AppValidationIssue,
@@ -184,6 +184,12 @@ function prepareValues(
   return prepared;
 }
 
+/**
+ * Lock ordering: this per-app/model lock is always acquired BEFORE the DbClient
+ * transaction lock, never the other way round. Awaiting `withMutationLock` (or
+ * anything that calls it, such as `purgeAppRows`) from inside an open client
+ * transaction inverts that order and deadlocks.
+ */
 export function withMutationLock<T>(
   appId: string,
   model: string,
@@ -198,27 +204,33 @@ export function withMutationLock<T>(
   });
 }
 
-function writeRow(appId: string, model: string, definition: ModelDef, row: AppRow): AppRow {
+async function writeRow(
+  appId: string,
+  model: string,
+  definition: ModelDef,
+  row: AppRow,
+): Promise<AppRow> {
   const namespace = appsNamespace(appId);
-  upsertKv({ namespace, key: rowKey(model, row.id), value: row, valueType: "json" });
+  await upsertKv({ namespace, key: rowKey(model, row.id), value: row, valueType: "json" });
   for (const key of indexKeys(model, definition, row)) {
-    upsertKv({ namespace, key, value: "1", valueType: "json" });
+    await upsertKv({ namespace, key, value: "1", valueType: "json" });
   }
   return row;
 }
 
-function appExists(appId: string): boolean {
-  return (
-    getDb()
-      .prepare<{ present: number }, [string]>("SELECT 1 AS present FROM apps WHERE id = ?")
-      .get(appId) !== null
+async function appExists(appId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ present: number }>(
+    "SELECT 1 AS present FROM apps WHERE id = ?",
+    [appId],
   );
+  return row !== null;
 }
 
-function currentModelDefinition(appId: string, model: string): ModelDef | null {
-  const row = getDb()
-    .prepare<{ definition: string }, [string]>("SELECT definition FROM apps WHERE id = ?")
-    .get(appId);
+async function currentModelDefinition(appId: string, model: string): Promise<ModelDef | null> {
+  const row = await getDbClient().get<{ definition: string }>(
+    "SELECT definition FROM apps WHERE id = ?",
+    [appId],
+  );
   if (!row) return null;
   try {
     const definition = AppDefinitionSchema.safeParse(
@@ -232,13 +244,13 @@ function currentModelDefinition(appId: string, model: string): ModelDef | null {
   }
 }
 
-function createRowUnlocked(
+async function createRowUnlocked(
   appId: string,
   model: string,
   definition: ModelDef,
   prepared: Record<string, unknown>,
   options: AppRowWriteOptions,
-): AppRow {
+): Promise<AppRow> {
   const issuedMs = Math.max(Date.now(), lastCreatedAtMs + 1);
   lastCreatedAtMs = issuedMs;
   const now = new Date(issuedMs).toISOString();
@@ -254,15 +266,15 @@ function createRowUnlocked(
 }
 
 /** Caller must already hold the app/model mutation lock. */
-export function createAppRowUnlocked(
+export async function createAppRowUnlocked(
   appId: string,
   model: string,
   definition: ModelDef,
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
-): AppRow {
+): Promise<AppRow> {
   const prepared = prepareValues(definition, values, "create", options);
-  if (!appExists(appId)) throw new AppRowAppNotFoundError(appId);
+  if (!(await appExists(appId))) throw new AppRowAppNotFoundError(appId);
   return createRowUnlocked(appId, model, definition, prepared, options);
 }
 
@@ -273,8 +285,8 @@ export function createAppRow(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow> {
-  return withMutationLock(appId, model, () => {
-    const currentDefinition = currentModelDefinition(appId, model);
+  return withMutationLock(appId, model, async () => {
+    const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "create", options);
     return createRowUnlocked(appId, model, currentDefinition, prepared, options);
@@ -288,20 +300,26 @@ export function createAppRows(
   rows: Array<Record<string, unknown>>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow[]> {
-  return withMutationLock(appId, model, () => {
-    const currentDefinition = currentModelDefinition(appId, model);
+  return withMutationLock(appId, model, async () => {
+    const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = rows.map((values) =>
       prepareValues(currentDefinition, values, "create", options),
     );
-    return prepared.map((values) =>
-      createRowUnlocked(appId, model, currentDefinition, values, options),
-    );
+    const created: AppRow[] = [];
+    for (const values of prepared) {
+      created.push(await createRowUnlocked(appId, model, currentDefinition, values, options));
+    }
+    return created;
   });
 }
 
-export function getAppRow(appId: string, model: string, rowId: string): AppRow | null {
-  const entry = getKv(appsNamespace(appId), rowKey(model, rowId));
+export async function getAppRow(
+  appId: string,
+  model: string,
+  rowId: string,
+): Promise<AppRow | null> {
+  const entry = await getKv(appsNamespace(appId), rowKey(model, rowId));
   if (
     !entry ||
     typeof entry.value !== "object" ||
@@ -313,8 +331,13 @@ export function getAppRow(appId: string, model: string, rowId: string): AppRow |
   return entry.value as AppRow;
 }
 
-export function listAppRows(appId: string, model: string): AppRow[] {
-  return listKv(appsNamespace(appId), { prefix: `${model}/row/`, limit: 100000, offset: 0 })
+export async function listAppRows(appId: string, model: string): Promise<AppRow[]> {
+  const entries = await listKv(appsNamespace(appId), {
+    prefix: `${model}/row/`,
+    limit: 100000,
+    offset: 0,
+  });
+  return entries
     .map((entry) => entry.value)
     .filter(
       (value): value is AppRow =>
@@ -325,13 +348,16 @@ export function listAppRows(appId: string, model: string): AppRow[] {
 const MIGRATION_KV_BATCH_SIZE = 1000;
 
 /** Caller must already hold the app/model mutation lock. */
-export function listAllAppRowsForMigrationUnlocked(appId: string, model: string): AppRow[] {
+export async function listAllAppRowsForMigrationUnlocked(
+  appId: string,
+  model: string,
+): Promise<AppRow[]> {
   const rows: AppRow[] = [];
   const namespace = appsNamespace(appId);
   const prefix = `${model}/row/`;
   let offset = 0;
   while (true) {
-    const entries = listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset });
+    const entries = await listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset });
     for (const entry of entries) {
       const value = entry.value;
       if (typeof value === "object" && value !== null && !Array.isArray(value)) {
@@ -351,24 +377,24 @@ export function patchAppRow(
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
 ): Promise<AppRow | null> {
-  return withMutationLock(appId, model, () => {
-    const currentDefinition = currentModelDefinition(appId, model);
+  return withMutationLock(appId, model, async () => {
+    const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) throw new AppRowAppNotFoundError(appId);
     const prepared = prepareValues(currentDefinition, values, "patch", options);
     return patchPreparedRowUnlocked(appId, model, currentDefinition, rowId, prepared, options);
   });
 }
 
-function patchPreparedRowUnlocked(
+async function patchPreparedRowUnlocked(
   appId: string,
   model: string,
   definition: ModelDef,
   rowId: string,
   prepared: Record<string, unknown>,
   options: AppRowWriteOptions,
-): AppRow | null {
-  if (!appExists(appId)) return null;
-  const existing = getAppRow(appId, model, rowId);
+): Promise<AppRow | null> {
+  if (!(await appExists(appId))) return null;
+  const existing = await getAppRow(appId, model, rowId);
   if (!existing) return null;
   const oldKeys = new Set(indexKeys(model, definition, existing));
   const previousMs = Date.parse(existing.updatedAt);
@@ -390,30 +416,36 @@ function patchPreparedRowUnlocked(
   Object.assign(updated, sourceEnvelope(options));
   const newKeys = new Set(indexKeys(model, definition, updated));
   const namespace = appsNamespace(appId);
-  for (const key of oldKeys) if (!newKeys.has(key)) deleteKv(namespace, key);
-  upsertKv({ namespace, key: rowKey(model, rowId), value: updated, valueType: "json" });
+  for (const key of oldKeys) if (!newKeys.has(key)) await deleteKv(namespace, key);
+  await upsertKv({ namespace, key: rowKey(model, rowId), value: updated, valueType: "json" });
   for (const key of newKeys) {
-    if (!oldKeys.has(key)) upsertKv({ namespace, key, value: "1", valueType: "json" });
+    if (!oldKeys.has(key)) await upsertKv({ namespace, key, value: "1", valueType: "json" });
   }
   return updated;
 }
 
 /** Caller must already hold the app/model mutation lock. */
-export function patchAppRowUnlocked(
+export async function patchAppRowUnlocked(
   appId: string,
   model: string,
   definition: ModelDef,
   rowId: string,
   values: Record<string, unknown>,
   options: AppRowWriteOptions = {},
-): AppRow | null {
+): Promise<AppRow | null> {
   const prepared = prepareValues(definition, values, "patch", options);
   return patchPreparedRowUnlocked(appId, model, definition, rowId, prepared, options);
 }
 
-/** Caller must already hold the app/model mutation lock. */
-export function writeAppRowForMigrationUnlocked(appId: string, model: string, row: AppRow): void {
-  upsertKv({
+/**
+ * Caller must already hold the app/model mutation lock.
+ */
+export async function writeAppRowForMigrationUnlocked(
+  appId: string,
+  model: string,
+  row: AppRow,
+): Promise<void> {
+  await upsertKv({
     namespace: appsNamespace(appId),
     key: rowKey(model, row.id),
     value: row,
@@ -422,30 +454,28 @@ export function writeAppRowForMigrationUnlocked(appId: string, model: string, ro
 }
 
 /** Caller must already hold the app/model mutation lock. */
-export function rebuildAppColumnIndexUnlocked(
+export async function rebuildAppColumnIndexUnlocked(
   appId: string,
   model: string,
   columnName: string,
   column: ColumnDef | undefined,
   rows: AppRow[],
-): void {
+): Promise<void> {
   const namespace = appsNamespace(appId);
   const prefix = `${model}/idx/${columnName}/`;
   while (true) {
-    const entries = listKv(namespace, {
-      prefix,
-      limit: MIGRATION_KV_BATCH_SIZE,
-      offset: 0,
-    });
-    if (entries.length === 0) break;
-    for (const entry of entries) deleteKv(namespace, entry.key);
+    const keys = (
+      await listKv(namespace, { prefix, limit: MIGRATION_KV_BATCH_SIZE, offset: 0 })
+    ).map((entry) => entry.key);
+    if (keys.length === 0) break;
+    for (const key of keys) await deleteKv(namespace, key);
   }
   if (!column || !isIndexed(column)) return;
   for (const row of rows) {
     if (!Object.hasOwn(row, columnName)) continue;
     const value = row[columnName];
     if (value === undefined || value === null) continue;
-    upsertKv({
+    await upsertKv({
       namespace,
       key: appIndexKey(model, columnName, value, row.id),
       value: "1",
@@ -460,31 +490,31 @@ export function deleteAppRow(
   _definition: ModelDef,
   rowId: string,
 ): Promise<boolean> {
-  return withMutationLock(appId, model, () => {
-    const currentDefinition = currentModelDefinition(appId, model);
+  return withMutationLock(appId, model, async () => {
+    const currentDefinition = await currentModelDefinition(appId, model);
     if (!currentDefinition) return false;
     const namespace = appsNamespace(appId);
-    const row = getAppRow(appId, model, rowId);
+    const row = await getAppRow(appId, model, rowId);
     if (!row) return false;
-    for (const key of indexKeys(model, currentDefinition, row)) deleteKv(namespace, key);
-    deleteKv(namespace, rowKey(model, rowId));
+    for (const key of indexKeys(model, currentDefinition, row)) await deleteKv(namespace, key);
+    await deleteKv(namespace, rowKey(model, rowId));
     return true;
   });
 }
 
-function purgeNamespace(appId: string): void {
+async function purgeNamespace(appId: string): Promise<void> {
   const namespace = appsNamespace(appId);
   while (true) {
-    const entries = listKv(namespace, { prefix: "", limit: 100000, offset: 0 });
+    const entries = await listKv(namespace, { prefix: "", limit: 100000, offset: 0 });
     if (entries.length === 0) return;
-    for (const entry of entries) deleteKv(namespace, entry.key);
+    for (const entry of entries) await deleteKv(namespace, entry.key);
   }
 }
 
 export function purgeAppRows(
   appId: string,
   models: string[],
-  afterPurge?: () => void,
+  afterPurge?: () => void | Promise<void>,
 ): Promise<void> {
   const lockNames = models.length > 0 ? [...new Set(models)].sort() : ["*"];
   const acquire = (index: number): Promise<void> => {
@@ -492,9 +522,10 @@ export function purgeAppRows(
       // Purge KV first while every model lock is held. If the purge is
       // interrupted, the relational app remains reachable and deletion can be
       // retried instead of leaving orphaned KV entries.
-      purgeNamespace(appId);
-      afterPurge?.();
-      return Promise.resolve();
+      return (async () => {
+        await purgeNamespace(appId);
+        await afterPurge?.();
+      })();
     }
     return withMutationLock(appId, lockNames[index]!, () => acquire(index + 1));
   };

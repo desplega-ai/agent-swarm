@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import { loadModelsDevCache } from "../be/modelsdev-cache";
 import { seedPricingFromModelsDev } from "../be/seed-pricing";
 import { CODEX_MODEL_PRICING } from "../providers/codex-models";
@@ -55,9 +55,8 @@ interface PricingRow {
 }
 
 describe("migration 046 — budgets and pricing", () => {
-  test("budgets table exists with expected columns and PK", () => {
-    const db = getDb();
-    const cols = db.prepare<TableInfoRow, []>("PRAGMA table_info(budgets)").all();
+  test("budgets table exists with expected columns and PK", async () => {
+    const cols = await getDbClient().query<TableInfoRow>("PRAGMA table_info(budgets)");
     expect(cols.length).toBeGreaterThan(0);
 
     const colMap = new Map(cols.map((c) => [c.name, c]));
@@ -72,54 +71,49 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("scope_id")!.pk).toBeGreaterThan(0);
   });
 
-  test("budgets CHECK constraints reject invalid scope and negative budget", () => {
-    const db = getDb();
+  test("budgets CHECK constraints reject invalid scope and negative budget", async () => {
+    const client = getDbClient();
     // Valid global row.
-    db.prepare(
+    await client.run(
       "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-    ).run("global", "", 10.0, 0, 0);
+      ["global", "", 10.0, 0, 0],
+    );
 
     // Round-trip
-    const row = db
-      .prepare<{ scope: string; scope_id: string; daily_budget_usd: number }, []>(
-        "SELECT scope, scope_id, daily_budget_usd FROM budgets WHERE scope = 'global'",
-      )
-      .get();
+    const row = await client.get<{ scope: string; scope_id: string; daily_budget_usd: number }>(
+      "SELECT scope, scope_id, daily_budget_usd FROM budgets WHERE scope = 'global'",
+    );
     expect(row?.scope).toBe("global");
     expect(row?.scope_id).toBe("");
     expect(row?.daily_budget_usd).toBe(10.0);
 
     // Inserting another row with same PK fails.
-    expect(() =>
-      db
-        .prepare(
-          "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run("global", "", 5.0, 0, 0),
-    ).toThrow();
+    await expect(
+      client.run(
+        "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+        ["global", "", 5.0, 0, 0],
+      ),
+    ).rejects.toThrow();
 
     // Invalid scope rejected by CHECK.
-    expect(() =>
-      db
-        .prepare(
-          "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run("not-a-scope", "x", 1.0, 0, 0),
-    ).toThrow();
+    await expect(
+      client.run(
+        "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+        ["not-a-scope", "x", 1.0, 0, 0],
+      ),
+    ).rejects.toThrow();
 
     // Negative budget rejected by CHECK.
-    expect(() =>
-      db
-        .prepare(
-          "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
-        )
-        .run("agent", "agent-x", -1, 0, 0),
-    ).toThrow();
+    await expect(
+      client.run(
+        "INSERT INTO budgets (scope, scope_id, daily_budget_usd, createdAt, lastUpdatedAt) VALUES (?, ?, ?, ?, ?)",
+        ["agent", "agent-x", -1, 0, 0],
+      ),
+    ).rejects.toThrow();
   });
 
-  test("pricing table exists with expected columns and composite PK", () => {
-    const db = getDb();
-    const cols = db.prepare<TableInfoRow, []>("PRAGMA table_info(pricing)").all();
+  test("pricing table exists with expected columns and composite PK", async () => {
+    const cols = await getDbClient().query<TableInfoRow>("PRAGMA table_info(pricing)");
     expect(cols.length).toBeGreaterThan(0);
 
     const colMap = new Map(cols.map((c) => [c.name, c]));
@@ -136,20 +130,17 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("effective_from")!.pk).toBeGreaterThan(0);
   });
 
-  test("pricing seed includes every known Codex model/token class at effective_from=0", () => {
-    const db = getDb();
+  test("pricing seed includes every known Codex model/token class at effective_from=0", async () => {
     const minimumCodexRows = Object.keys(CODEX_MODEL_PRICING).length * 3;
 
-    const seedRows = db
-      .prepare<CountRow, []>(
-        "SELECT COUNT(*) as cnt FROM pricing WHERE provider = 'codex' AND effective_from = 0",
-      )
-      .get();
+    const seedRows = await getDbClient().get<CountRow>(
+      "SELECT COUNT(*) as cnt FROM pricing WHERE provider = 'codex' AND effective_from = 0",
+    );
     expect(seedRows?.cnt ?? 0).toBeGreaterThanOrEqual(minimumCodexRows);
   });
 
-  test("every CODEX_MODEL_PRICING entry has priced rows for input / cached_input / output", () => {
-    const db = getDb();
+  test("every CODEX_MODEL_PRICING entry has priced rows for input / cached_input / output", async () => {
+    const client = getDbClient();
 
     // No exact-rate equality here: effective_from=0 rows are frozen history
     // (migrations 046/114 captured launch rates), while CODEX_MODEL_PRICING
@@ -160,19 +151,18 @@ describe("migration 046 — budgets and pricing", () => {
     // watchdog. This test pins seed COVERAGE, not rate sync.
     for (const model of Object.keys(CODEX_MODEL_PRICING)) {
       for (const tokenClass of ["input", "cached_input", "output"] as const) {
-        const row = db
-          .prepare<PricingRow, [string, string, number]>(
-            "SELECT * FROM pricing WHERE provider = 'codex' AND model = ? AND token_class = ? AND effective_from = ?",
-          )
-          .get(model, tokenClass, 0);
+        const row = await client.get<PricingRow>(
+          "SELECT * FROM pricing WHERE provider = 'codex' AND model = ? AND token_class = ? AND effective_from = ?",
+          [model, tokenClass, 0],
+        );
         expect(row).toBeDefined();
         expect(row?.price_per_million_usd).toBeGreaterThan(0);
       }
     }
   });
 
-  test("models.dev seed includes Claude Mythos 5 pricing rows", () => {
-    const db = getDb();
+  test("models.dev seed includes Claude Mythos 5 pricing rows", async () => {
+    const client = getDbClient();
     const result = seedPricingFromModelsDev({ quiet: true });
     expect(result.modelsdevFound).toBe(true);
 
@@ -192,19 +182,18 @@ describe("migration 046 — budgets and pricing", () => {
 
     for (const [provider, model] of seededKeys) {
       for (const [tokenClass, price] of Object.entries(expectedPrices)) {
-        const row = db
-          .prepare<PricingRow, [string, string, string]>(
-            `SELECT * FROM pricing
+        const row = await client.get<PricingRow>(
+          `SELECT * FROM pricing
              WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,
-          )
-          .get(provider, model, tokenClass);
+          [provider, model, tokenClass],
+        );
         expect(row?.price_per_million_usd).toBe(price);
       }
     }
   });
 
-  test("models.dev seed includes Claude Sonnet 5 pricing rows", () => {
-    const db = getDb();
+  test("models.dev seed includes Claude Sonnet 5 pricing rows", async () => {
+    const client = getDbClient();
     const result = seedPricingFromModelsDev({ quiet: true });
     expect(result.modelsdevFound).toBe(true);
 
@@ -231,24 +220,20 @@ describe("migration 046 — budgets and pricing", () => {
 
     for (const [provider, model] of seededKeys) {
       for (const [tokenClass, price] of Object.entries(expectedPrices)) {
-        const row = db
-          .prepare<PricingRow, [string, string, string]>(
-            `SELECT * FROM pricing
+        const row = await client.get<PricingRow>(
+          `SELECT * FROM pricing
              WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,
-          )
-          .get(provider, model, tokenClass);
+          [provider, model, tokenClass],
+        );
         expect(row?.price_per_million_usd).toBe(price as number);
       }
     }
   });
 
-  test("idx_pricing_lookup index exists", () => {
-    const db = getDb();
-    const idx = db
-      .prepare<MasterRow, []>(
-        "SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_pricing_lookup'",
-      )
-      .get();
+  test("idx_pricing_lookup index exists", async () => {
+    const idx = await getDbClient().get<MasterRow>(
+      "SELECT name, sql FROM sqlite_master WHERE type='index' AND name='idx_pricing_lookup'",
+    );
     expect(idx?.name).toBe("idx_pricing_lookup");
     expect(idx?.sql).toContain("provider");
     expect(idx?.sql).toContain("model");
@@ -256,72 +241,68 @@ describe("migration 046 — budgets and pricing", () => {
     expect(idx?.sql).toContain("effective_from");
   });
 
-  test("re-applying seed INSERT OR IGNORE does not duplicate rows", () => {
-    const db = getDb();
-    const before = db.prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing").get();
+  test("re-applying seed INSERT OR IGNORE does not duplicate rows", async () => {
+    const client = getDbClient();
+    const before = await client.get<CountRow>("SELECT COUNT(*) as cnt FROM pricing");
 
     // Replay the same seed statements.
-    db.prepare(
+    await client.run(
       `INSERT OR IGNORE INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
        VALUES ('codex', 'gpt-5.4', 'input', 0, 2.5, 0, 0)`,
-    ).run();
-    db.prepare(
+    );
+    await client.run(
       `INSERT OR IGNORE INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
        VALUES ('codex', 'gpt-5.3-codex', 'output', 0, 14.0, 0, 0)`,
-    ).run();
+    );
 
-    const after = db.prepare<CountRow, []>("SELECT COUNT(*) as cnt FROM pricing").get();
+    const after = await client.get<CountRow>("SELECT COUNT(*) as cnt FROM pricing");
     expect(after?.cnt).toBe(before?.cnt);
   });
 
-  test("append-only price history: new effective_from row coexists with seed; latest-active lookup picks correct row", () => {
-    const db = getDb();
+  test("append-only price history: new effective_from row coexists with seed; latest-active lookup picks correct row", async () => {
+    const client = getDbClient();
     const NOW = 1_700_000_000_000; // arbitrary epoch ms in the future relative to 0
 
     // Add a NEW pricing row for codex/gpt-5.3-codex/input at a later effective_from with a different price.
-    db.prepare(
+    await client.run(
       `INSERT INTO pricing (provider, model, token_class, effective_from, price_per_million_usd, createdAt, lastUpdatedAt)
        VALUES ('codex', 'gpt-5.3-codex', 'input', ?, ?, ?, ?)`,
-    ).run(NOW, 99.99, NOW, NOW);
+      [NOW, 99.99, NOW, NOW],
+    );
 
     // Seed row should still exist at effective_from = 0.
-    const seedRow = db
-      .prepare<PricingRow, []>(
-        "SELECT * FROM pricing WHERE provider='codex' AND model='gpt-5.3-codex' AND token_class='input' AND effective_from=0",
-      )
-      .get();
+    const seedRow = await client.get<PricingRow>(
+      "SELECT * FROM pricing WHERE provider='codex' AND model='gpt-5.3-codex' AND token_class='input' AND effective_from=0",
+    );
     expect(seedRow?.price_per_million_usd).toBe(1.75);
 
     // "Largest effective_from <= now" — should return the new row.
-    const latestRow = db
-      .prepare<PricingRow, [number]>(
-        `SELECT * FROM pricing
+    const latestRow = await client.get<PricingRow>(
+      `SELECT * FROM pricing
          WHERE provider='codex' AND model='gpt-5.3-codex' AND token_class='input'
          AND effective_from <= ?
          ORDER BY effective_from DESC LIMIT 1`,
-      )
-      .get(NOW + 1);
+      [NOW + 1],
+    );
     expect(latestRow?.effective_from).toBe(NOW);
     expect(latestRow?.price_per_million_usd).toBe(99.99);
 
     // Same query against effective_from <= 0 should return the seed row.
-    const seedLookup = db
-      .prepare<PricingRow, [number]>(
-        `SELECT * FROM pricing
+    const seedLookup = await client.get<PricingRow>(
+      `SELECT * FROM pricing
          WHERE provider='codex' AND model='gpt-5.3-codex' AND token_class='input'
          AND effective_from <= ?
          ORDER BY effective_from DESC LIMIT 1`,
-      )
-      .get(0);
+      [0],
+    );
     expect(seedLookup?.effective_from).toBe(0);
     expect(seedLookup?.price_per_million_usd).toBe(1.75);
   });
 
-  test("budget_refusal_notifications table exists with expected columns and composite PK", () => {
-    const db = getDb();
-    const cols = db
-      .prepare<TableInfoRow, []>("PRAGMA table_info(budget_refusal_notifications)")
-      .all();
+  test("budget_refusal_notifications table exists with expected columns and composite PK", async () => {
+    const cols = await getDbClient().query<TableInfoRow>(
+      "PRAGMA table_info(budget_refusal_notifications)",
+    );
     expect(cols.length).toBeGreaterThan(0);
 
     const colMap = new Map(cols.map((c) => [c.name, c]));
@@ -346,52 +327,47 @@ describe("migration 046 — budgets and pricing", () => {
     expect(colMap.get("follow_up_task_id")!.notnull).toBe(0);
   });
 
-  test("budget_refusal_notifications dedup via INSERT OR IGNORE on (task_id, date)", () => {
-    const db = getDb();
+  test("budget_refusal_notifications dedup via INSERT OR IGNORE on (task_id, date)", async () => {
+    const client = getDbClient();
 
     const taskId = "task-dedup-1";
     const date = "2026-04-28";
 
-    const first = db
-      .prepare(
-        `INSERT OR IGNORE INTO budget_refusal_notifications
+    const first = await client.run(
+      `INSERT OR IGNORE INTO budget_refusal_notifications
          (task_id, date, agent_id, cause, createdAt)
          VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(taskId, date, "agent-1", "agent", 0);
+      [taskId, date, "agent-1", "agent", 0],
+    );
     expect(first.changes).toBe(1);
 
     // Second insert with same PK is silently ignored.
-    const second = db
-      .prepare(
-        `INSERT OR IGNORE INTO budget_refusal_notifications
+    const second = await client.run(
+      `INSERT OR IGNORE INTO budget_refusal_notifications
          (task_id, date, agent_id, cause, createdAt)
          VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(taskId, date, "agent-1", "agent", 1);
+      [taskId, date, "agent-1", "agent", 1],
+    );
     expect(second.changes).toBe(0);
 
     // Different date succeeds (PK rolls over).
-    const nextDay = db
-      .prepare(
-        `INSERT OR IGNORE INTO budget_refusal_notifications
+    const nextDay = await client.run(
+      `INSERT OR IGNORE INTO budget_refusal_notifications
          (task_id, date, agent_id, cause, createdAt)
          VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(taskId, "2026-04-29", "agent-1", "agent", 2);
+      [taskId, "2026-04-29", "agent-1", "agent", 2],
+    );
     expect(nextDay.changes).toBe(1);
   });
 
-  test("budget_refusal_notifications CHECK rejects unknown cause", () => {
-    const db = getDb();
-    expect(() =>
-      db
-        .prepare(
-          `INSERT INTO budget_refusal_notifications
+  test("budget_refusal_notifications CHECK rejects unknown cause", async () => {
+    await expect(
+      getDbClient().run(
+        `INSERT INTO budget_refusal_notifications
            (task_id, date, agent_id, cause, createdAt)
            VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run("task-cause-1", "2026-04-28", "agent-1", "not-a-cause", 0),
-    ).toThrow();
+        ["task-cause-1", "2026-04-28", "agent-1", "not-a-cause", 0],
+      ),
+    ).rejects.toThrow();
   });
 });

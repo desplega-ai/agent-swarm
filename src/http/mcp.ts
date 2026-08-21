@@ -44,7 +44,7 @@ export function closeIdleMcpTransports(
     if (now - lastActivity < idleTimeoutMs) continue;
 
     try {
-      transport.close();
+      void transport.close();
     } catch (err) {
       console.warn(`[HTTP] Failed to close idle ${options.label ?? "MCP"} transport ${id}: ${err}`);
     } finally {
@@ -68,10 +68,13 @@ function headerValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function requireKnownAgent(req: IncomingMessage, res: ServerResponse): string | true {
+async function requireKnownAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<string | true> {
   const agentId = headerValue(req.headers["x-agent-id"]);
   if (!agentId) return unauthorized(res, "Missing X-Agent-ID header");
-  if (!getAgentById(agentId)) return unauthorized(res, "Agent not found");
+  if (!(await getAgentById(agentId))) return unauthorized(res, "Agent not found");
   return agentId;
 }
 
@@ -136,7 +139,7 @@ export async function handleMcp(
       transport = transports[sessionId];
       markMcpTransportActivity(sessionActivity, sessionId);
     } else if (!sessionId && isInitializeRequest(body)) {
-      const agentId = requireKnownAgent(req, res);
+      const agentId = await requireKnownAgent(req, res);
       if (agentId === true) return true;
 
       transport = new StreamableHTTPServerTransport({
@@ -161,10 +164,10 @@ export async function handleMcp(
         }
       };
 
-      const configValue = getResolvedConfig(agentId).find(
+      const configValue = (await getResolvedConfig(agentId)).find(
         (config) => config.key === "SCRIPTS_ONLY_MCP",
       )?.value;
-      const server = createServer({
+      const server = await createServer({
         scriptsOnly: resolveScriptsOnlyMode({
           env: process.env.SCRIPTS_ONLY_MCP,
           configValue,

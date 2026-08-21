@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, createTask, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createTask, getDbClient, initDb } from "../be/db";
 import { getMemoryStore } from "../be/memory";
 import { registerMemoryStoreTool } from "../tools/memory-store";
 
@@ -57,7 +57,7 @@ describe("memory-store MCP tool", () => {
     }
 
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Memory Store Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Memory Store Agent A", isLead: false, status: "idle" });
   });
 
   afterAll(async () => {
@@ -74,9 +74,9 @@ describe("memory-store MCP tool", () => {
     }
   });
 
-  beforeEach(() => {
-    getDb().run("DELETE FROM memory_link");
-    getDb().run("DELETE FROM agent_memory");
+  beforeEach(async () => {
+    await getDbClient().run("DELETE FROM memory_link");
+    await getDbClient().run("DELETE FROM agent_memory");
   });
 
   test("rejects a call without an agent ID", async () => {
@@ -107,7 +107,7 @@ describe("memory-store MCP tool", () => {
     expect(result.structuredContent.chunks).toBe(1);
     expect(result.structuredContent.memoryIds).toHaveLength(1);
 
-    const memory = getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
+    const memory = await getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
     expect(memory?.agentId).toBe(agentA);
     expect(memory?.scope).toBe("agent");
     expect(memory?.source).toBe("manual");
@@ -128,13 +128,13 @@ describe("memory-store MCP tool", () => {
 
     expect(result.structuredContent.success).toBe(true);
 
-    const memory = getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
+    const memory = await getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
     expect(memory?.agentId).toBe(agentA);
     expect(memory?.scope).toBe("swarm");
   });
 
   test("records the source task when taskId is given", async () => {
-    const task = createTask(agentA, "investigate the flaky heartbeat sweep");
+    const task = await createTask(agentA, "investigate the flaky heartbeat sweep");
 
     const result = (await buildTool().handler(
       {
@@ -148,7 +148,7 @@ describe("memory-store MCP tool", () => {
 
     expect(result.structuredContent.success).toBe(true);
 
-    const memory = getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
+    const memory = await getMemoryStore().peek(result.structuredContent.memoryIds![0]!);
     expect(memory?.sourceTaskId).toBe(task.id);
   });
 
@@ -170,7 +170,7 @@ describe("memory-store MCP tool", () => {
     expect(result.structuredContent.memoryIds).toHaveLength(chunks);
 
     for (const id of result.structuredContent.memoryIds!) {
-      expect(getMemoryStore().peek(id)?.totalChunks).toBe(chunks);
+      expect((await getMemoryStore().peek(id))?.totalChunks).toBe(chunks);
     }
   });
 });

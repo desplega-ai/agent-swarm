@@ -98,7 +98,7 @@ const scriptConnectionsOutputSchema = swarmToolOutputSchema({
 });
 
 type ScriptConnectionsArgs = z.infer<typeof scriptConnectionsInputSchema>;
-type ExistingConnection = NonNullable<ReturnType<typeof getScriptConnectionById>>;
+type ExistingConnection = NonNullable<Awaited<ReturnType<typeof getScriptConnectionById>>>;
 
 function baseUrlProvenanceText(connection: {
   slug: string;
@@ -149,7 +149,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: {
           kind: "agent",
@@ -186,7 +186,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
             },
           });
         }
-        setScriptConnectionEnabled(args.id, false);
+        await setScriptConnectionEnabled(args.id, false);
         const connections = listScriptConnections({ includeDisabled: true, allScopes: true });
         return toolOk("Script connection disabled.", {
           data: { yourAgentId: requestInfo.agentId, connections },
@@ -228,7 +228,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           });
         }
 
-        const existing = args.id ? getScriptConnectionById(args.id) : null;
+        const existing = args.id ? await getScriptConnectionById(args.id) : null;
         const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
           id: args.id,
@@ -259,7 +259,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
           });
         }
 
-        const existing = args.id ? getScriptConnectionById(args.id) : null;
+        const existing = args.id ? await getScriptConnectionById(args.id) : null;
         const { scope, scopeId } = resolveConnectionScope(args, existing);
         const connection = await upsertScriptConnection({
           id: args.id,
@@ -308,7 +308,7 @@ export const registerScriptConnectionsTool = (server: McpServer) => {
         });
       }
 
-      const existing = args.id ? getScriptConnectionById(args.id) : null;
+      const existing = args.id ? await getScriptConnectionById(args.id) : null;
       const { scope, scopeId } = resolveConnectionScope(args, existing);
       const connection = await upsertScriptConnection({
         id: args.id,

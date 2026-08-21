@@ -8,7 +8,7 @@ import {
   createAgent,
   createTaskExtended,
   failTask,
-  getDb,
+  getDbClient,
   getLatestScriptRunStepTaskByContextKey,
   getLatestTaskByContextKey,
   initDb,
@@ -45,7 +45,7 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   refreshSecretScrubberCache();
 
-  const agent = createAgent({ name: "script-runs-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "script-runs-worker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -62,9 +62,10 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_run_journal");
-  getDb().run("DELETE FROM script_runs");
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM script_run_journal");
+  await client.run("DELETE FROM script_runs");
   delete process.env.SCRIPT_RUN_CONCURRENCY_CAP;
   delete process.env.SCRIPT_RUN_MAX_STEPS;
   delete process.env.SCRIPT_RUN_MAX_AGENT_TASKS;
@@ -362,9 +363,9 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:implement`;
-    const dispatched = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const dispatched = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(dispatched).not.toBeNull();
-    completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
+    await completeTask((dispatched as { id: string }).id, JSON.stringify({ done: true }));
 
     const first = await firstCallPromise;
     expect(first.status).toBe(200);
@@ -372,13 +373,13 @@ describe("/api/script-runs HTTP", () => {
     expect(firstBody.taskId).toBe((dispatched as { id: string }).id);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the completed step", {
+    const followUp = await createTaskExtended("review the completed step", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: dispatched?.id,
     });
-    completeTask(followUp.id, "reviewed");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    await completeTask(followUp.id, "reviewed");
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     // Replay: same stepKey again (what ctx.step.agentTask's poll loop does,
     // and what a resumed harness process does after a crash mid-wait). Must
@@ -393,11 +394,10 @@ describe("/api/script-runs HTTP", () => {
     expect(secondBody.taskId).toBe((dispatched as { id: string }).id);
     expect(secondBody.taskOutput).toBe(JSON.stringify({ done: true }));
 
-    const stepCount = getDb()
-      .query(
-        "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
-      )
-      .get(contextKey) as { c: number };
+    const stepCount = (await getDbClient().get<{ c: number }>(
+      "SELECT COUNT(*) as c FROM agent_tasks WHERE contextKey = ? AND taskType = 'script-run-step'",
+      [contextKey],
+    )) as { c: number };
     expect(stepCount.c).toBe(1);
   });
 
@@ -417,19 +417,19 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:plan`;
-    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const step = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ plan: ["inspect", "implement", "verify"] });
-    completeTask((step as { id: string }).id, stepOutput);
+    await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the plan", {
+    const followUp = await createTaskExtended("review the plan", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: step?.id,
     });
-    completeTask(followUp.id, "Reviewed the plan; proceed.");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    await completeTask(followUp.id, "Reviewed the plan; proceed.");
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     const response = await callPromise;
     expect(response.status).toBe(200);
@@ -452,19 +452,19 @@ describe("/api/script-runs HTTP", () => {
 
     await Bun.sleep(50);
     const contextKey = `script-run:${runId}:review`;
-    const step = getLatestScriptRunStepTaskByContextKey(contextKey);
+    const step = await getLatestScriptRunStepTaskByContextKey(contextKey);
     expect(step).not.toBeNull();
     const stepOutput = JSON.stringify({ approved: true });
-    completeTask((step as { id: string }).id, stepOutput);
+    await completeTask((step as { id: string }).id, stepOutput);
 
     await Bun.sleep(2);
-    const followUp = createTaskExtended("review the review", {
+    const followUp = await createTaskExtended("review the review", {
       taskType: "follow-up",
       source: "system",
       parentTaskId: step?.id,
     });
-    failTask(followUp.id, "Lead follow-up failed");
-    expect(getLatestTaskByContextKey(contextKey)?.id).toBe(followUp.id);
+    await failTask(followUp.id, "Lead follow-up failed");
+    expect((await getLatestTaskByContextKey(contextKey))?.id).toBe(followUp.id);
 
     const response = await callPromise;
     expect(response.status).toBe(200);
@@ -478,7 +478,7 @@ describe("/api/script-runs HTTP", () => {
       body: createBody(),
     });
     const { id } = (await created.json()) as { id: string };
-    updateScriptRun(id, {
+    await updateScriptRun(id, {
       status: "failed",
       pid: null,
       finishedAt: new Date().toISOString(),

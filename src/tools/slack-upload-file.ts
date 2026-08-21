@@ -12,7 +12,9 @@ import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/t
  */
 const WORKSPACE_DIR = "/workspace";
 
-function resolveTaskUploadThreadTs(task: ReturnType<typeof getTaskById>): string | undefined {
+function resolveTaskUploadThreadTs(
+  task: Awaited<ReturnType<typeof getTaskById>>,
+): string | undefined {
   if (!task) return undefined;
 
   if (task.slackChannelId?.startsWith("D")) {
@@ -165,7 +167,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.");
       }
@@ -175,7 +177,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
 
       // Determine Slack context from inbox message, task, or direct params
       if (inboxMessageId) {
-        const inboxMsg = getInboxMessageById(inboxMessageId);
+        const inboxMsg = await getInboxMessageById(inboxMessageId);
         if (!inboxMsg) {
           return toolErr("Inbox message not found.");
         }
@@ -185,7 +187,7 @@ export const registerSlackUploadFileTool = (server: McpServer) => {
         slackChannelId = inboxMsg.slackChannelId;
         slackThreadTs = inboxMsg.slackThreadTs;
       } else if (taskId) {
-        const task = getTaskById(taskId);
+        const task = await getTaskById(taskId);
         if (!task) {
           return toolErr("Task not found.");
         }

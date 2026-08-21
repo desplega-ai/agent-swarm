@@ -1,6 +1,6 @@
 import type { ScriptRecord, ScriptScope } from "../../types";
 import { scrubSecrets } from "../../utils/secret-scrubber";
-import { getDb } from "../db";
+import { getDbClient } from "../db";
 import { cosineSimilarity, deserializeEmbedding, serializeEmbedding } from "../embedding";
 import { getEmbeddingProvider } from "../memory";
 import type { EmbeddingProvider } from "../memory/types";
@@ -89,25 +89,24 @@ export async function embedScript(script: ScriptRecord): Promise<void> {
     return;
   }
 
-  getDb()
-    .prepare(
-      `INSERT INTO script_embeddings (
-        scriptId, embedding, embeddingModel, embeddedText, embeddedAt
-      )
-      VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(scriptId) DO UPDATE SET
-        embedding = excluded.embedding,
-        embeddingModel = excluded.embeddingModel,
-        embeddedText = excluded.embeddedText,
-        embeddedAt = excluded.embeddedAt`,
+  await getDbClient().run(
+    `INSERT INTO script_embeddings (
+      scriptId, embedding, embeddingModel, embeddedText, embeddedAt
     )
-    .run(script.id, serializeEmbedding(embedding), provider.name, text, new Date().toISOString());
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(scriptId) DO UPDATE SET
+      embedding = excluded.embedding,
+      embeddingModel = excluded.embeddingModel,
+      embeddedText = excluded.embeddedText,
+      embeddedAt = excluded.embeddedAt`,
+    [script.id, serializeEmbedding(embedding), provider.name, text, new Date().toISOString()],
+  );
 }
 
-function candidateRows(
+async function candidateRows(
   scope?: ScriptScope,
   scopeId?: string | null,
-): ScriptEmbeddingCandidateRow[] {
+): Promise<ScriptEmbeddingCandidateRow[]> {
   const params: string[] = [];
   let where = "s.isScratch = 0";
 
@@ -124,23 +123,25 @@ function candidateRows(
     where += " AND s.scope = 'global' AND s.scopeId IS NULL";
   }
 
-  return getDb()
-    .prepare<ScriptEmbeddingCandidateRow, string[]>(
-      `SELECT
-        s.*,
-        e.scriptId,
-        e.embedding,
-        e.embeddingModel,
-        e.embeddedText,
-        e.embeddedAt
-      FROM script_embeddings e
-      JOIN scripts s ON s.id = e.scriptId
-      WHERE ${where}`,
-    )
-    .all(...params);
+  return getDbClient().query<ScriptEmbeddingCandidateRow>(
+    `SELECT
+      s.*,
+      e.scriptId,
+      e.embedding,
+      e.embeddingModel,
+      e.embeddedText,
+      e.embeddedAt
+    FROM script_embeddings e
+    JOIN scripts s ON s.id = e.scriptId
+    WHERE ${where}`,
+    params,
+  );
 }
 
-function scriptRows(scope?: ScriptScope, scopeId?: string | null): ScriptEmbeddingCandidateRow[] {
+async function scriptRows(
+  scope?: ScriptScope,
+  scopeId?: string | null,
+): Promise<ScriptEmbeddingCandidateRow[]> {
   const params: string[] = [];
   let where = "isScratch = 0";
 
@@ -156,11 +157,10 @@ function scriptRows(scope?: ScriptScope, scopeId?: string | null): ScriptEmbeddi
     where += " AND scope = 'global' AND scopeId IS NULL";
   }
 
-  return getDb()
-    .prepare<ScriptEmbeddingCandidateRow, string[]>(
-      `SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE ${where}`,
-    )
-    .all(...params);
+  return getDbClient().query<ScriptEmbeddingCandidateRow>(
+    `SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE ${where}`,
+    params,
+  );
 }
 
 function nameMatchBonus(script: ScriptRecord, query: string): number {
@@ -169,14 +169,14 @@ function nameMatchBonus(script: ScriptRecord, query: string): number {
   return script.name.toLowerCase().includes(trimmed) ? 1 : 0;
 }
 
-function lexicalFallback(args: {
+async function lexicalFallback(args: {
   query: string;
   scope?: ScriptScope;
   scopeId?: string | null;
   limit?: number;
-}): ScriptSearchResult[] {
+}): Promise<ScriptSearchResult[]> {
   const query = args.query.trim().toLowerCase();
-  return scriptRows(args.scope, args.scopeId)
+  return (await scriptRows(args.scope, args.scopeId))
     .map(rowToScript)
     .filter((script) => {
       if (!query) return true;
@@ -208,7 +208,7 @@ export async function searchScripts(args: {
   const queryEmbedding = await provider.embed(args.query);
   if (!queryEmbedding) return lexicalFallback(args);
 
-  const candidates = candidateRows(args.scope, args.scopeId);
+  const candidates = await candidateRows(args.scope, args.scopeId);
   if (candidates.length === 0) return lexicalFallback(args);
 
   const results: ScriptSearchResult[] = [];
@@ -232,11 +232,9 @@ export async function searchScripts(args: {
 }
 
 export async function reembedAllScripts(): Promise<void> {
-  const rows = getDb()
-    .prepare<ScriptEmbeddingCandidateRow, []>(
-      "SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE isScratch = 0 ORDER BY updatedAt ASC",
-    )
-    .all();
+  const rows = await getDbClient().query<ScriptEmbeddingCandidateRow>(
+    "SELECT *, NULL as scriptId, NULL as embedding, NULL as embeddingModel, NULL as embeddedText, NULL as embeddedAt FROM scripts WHERE isScratch = 0 ORDER BY updatedAt ASC",
+  );
 
   for (const row of rows) {
     await embedScript(rowToScript(row));

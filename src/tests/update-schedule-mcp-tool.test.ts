@@ -15,7 +15,7 @@ import {
   closeDb,
   createAgent,
   createScheduledTask,
-  getDb,
+  getDbClient,
   getScheduledTaskById,
   initDb,
 } from "../be/db";
@@ -94,12 +94,12 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const creator = createAgent({
+  const creator = await createAgent({
     name: "update-schedule-mcp-creator",
     isLead: false,
     status: "idle",
   });
-  const otherAgent = createAgent({
+  const otherAgent = await createAgent({
     name: "update-schedule-mcp-other",
     isLead: false,
     status: "idle",
@@ -120,7 +120,7 @@ afterAll(async () => {
 describe("update-schedule MCP tool", () => {
   test("patch-schedule can clear one field without restating the whole schedule", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-patch-single-field-${Date.now()}`,
       intervalMs: 60000,
       taskTemplate: "has model override",
@@ -137,7 +137,7 @@ describe("update-schedule MCP tool", () => {
     const sc = structured(result);
 
     expect(sc.success).toBe(true);
-    const updated = getScheduledTaskById(schedule.id);
+    const updated = await getScheduledTaskById(schedule.id);
     expect(updated?.model).toBeUndefined();
     expect(updated?.intervalMs).toBe(60000);
     expect(updated?.taskTemplate).toBe("has model override");
@@ -145,7 +145,7 @@ describe("update-schedule MCP tool", () => {
 
   test("disabling through update-schedule clears nextRunAt", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-disable-next-run-${Date.now()}`,
       intervalMs: 60000,
       nextRunAt: new Date(Date.now() + 60000).toISOString(),
@@ -162,12 +162,12 @@ describe("update-schedule MCP tool", () => {
     const sc = structured(result);
 
     expect(sc.success).toBe(true);
-    expect(getScheduledTaskById(schedule.id)?.nextRunAt).toBeUndefined();
+    expect((await getScheduledTaskById(schedule.id))?.nextRunAt).toBeUndefined();
   });
 
   test("non-lead, non-creator agent can update a schedule", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-noncreator-update-${Date.now()}`,
       intervalMs: 60000,
       taskTemplate: "owned by creator",
@@ -184,12 +184,12 @@ describe("update-schedule MCP tool", () => {
 
     expect(sc.success).toBe(true);
     expect(sc.schedule?.intervalMs).toBe(120000);
-    expect(getScheduledTaskById(schedule.id)?.intervalMs).toBe(120000);
+    expect((await getScheduledTaskById(schedule.id))?.intervalMs).toBe(120000);
   });
 
   test("non-lead, non-creator agent can delete a schedule and writes an audit event", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-noncreator-delete-${Date.now()}`,
       intervalMs: 60000,
       taskTemplate: "owned by creator",
@@ -206,12 +206,10 @@ describe("update-schedule MCP tool", () => {
     const sc = result.structuredContent as { success: boolean };
 
     expect(sc.success).toBe(true);
-    expect(getScheduledTaskById(schedule.id)).toBeNull();
-    const event = getDb()
-      .prepare<{ data: string }, []>(
-        "SELECT data FROM events WHERE event = 'schedule.deleted' ORDER BY createdAt DESC LIMIT 1",
-      )
-      .get();
+    expect(await getScheduledTaskById(schedule.id)).toBeNull();
+    const event = await getDbClient().get<{ data: string }>(
+      "SELECT data FROM events WHERE event = 'schedule.deleted' ORDER BY createdAt DESC LIMIT 1",
+    );
     expect(JSON.parse(event!.data)).toMatchObject({
       scheduleId: schedule.id,
       deletedByAgentId: otherAgentId,
@@ -221,7 +219,7 @@ describe("update-schedule MCP tool", () => {
 
   test("regression: { cronExpression: null, intervalMs: null, enabled: false } returns success:false and leaves DB row unchanged", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-regression-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "hourly task",
@@ -229,7 +227,7 @@ describe("update-schedule MCP tool", () => {
       timezone: "UTC",
     });
 
-    const before = getScheduledTaskById(schedule.id)!;
+    const before = (await getScheduledTaskById(schedule.id))!;
 
     const result = await callUpdateSchedule(
       server,
@@ -242,7 +240,7 @@ describe("update-schedule MCP tool", () => {
     expect(sc.message).toContain("At least one of intervalMs or cronExpression must be set");
 
     // DB row must be unchanged — no partial write on validation failure
-    const after = getScheduledTaskById(schedule.id)!;
+    const after = (await getScheduledTaskById(schedule.id))!;
     expect(after.cronExpression).toBe(before.cronExpression);
     expect(after.intervalMs).toBe(before.intervalMs);
     expect(after.enabled).toBe(before.enabled);
@@ -250,7 +248,7 @@ describe("update-schedule MCP tool", () => {
 
   test("cron-to-interval switch: { cronExpression: null, intervalMs: 60000 } succeeds and nextRunAt is recomputed", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-cron-switch-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "hourly task",
@@ -275,7 +273,7 @@ describe("update-schedule MCP tool", () => {
 
   test("interval happy path: { intervalMs: 120000 } on interval schedule succeeds and nextRunAt updates", async () => {
     const server = buildServer();
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `mcp-interval-update-${Date.now()}`,
       intervalMs: 60000,
       taskTemplate: "heartbeat task",

@@ -2,7 +2,7 @@
 # Multi-stage build: compiles to standalone binary for minimal image size
 
 # Stage 1: Build the binary (pinned — keep in sync with Dockerfile.worker's builder)
-FROM oven/bun:1.3.11 AS builder
+FROM oven/bun:1.4.0 AS builder
 
 WORKDIR /build
 

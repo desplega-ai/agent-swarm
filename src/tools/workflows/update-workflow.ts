@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { getWorkflow, updateWorkflow } from "@/be/db";
+import { getWorkflow } from "@/be/db";
 import {
   createToolRegistrar,
   findLongScriptTimeoutHint,
@@ -19,7 +19,7 @@ import {
 } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
 import { definitionNodeIds, validateDefinition } from "@/workflows/definition";
-import { snapshotWorkflow } from "@/workflows/version";
+import { snapshotAndUpdateWorkflow } from "@/workflows/version";
 
 export const registerUpdateWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -105,7 +105,7 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
     ) => {
       try {
         // Check workflow exists
-        const existing = getWorkflow(id);
+        const existing = await getWorkflow(id);
         if (!existing) {
           return toolErr(`Workflow not found: ${id}`);
         }
@@ -120,26 +120,32 @@ export const registerUpdateWorkflowTool = (server: McpServer) => {
           }
         }
 
-        // Create version snapshot before applying update
-        const version = snapshotWorkflow(id, requestInfo.agentId);
-
         const updatedBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
-        const assetKey = key === undefined ? undefined : authorizeAssetKeyWrite(key, updatedBy);
-        const workflow = updateWorkflow(id, {
-          key: assetKey,
-          name,
-          description,
-          definition,
-          triggers,
-          cooldown: cooldown === null ? null : cooldown,
-          input: input === null ? null : input,
-          dir: dir === null ? null : dir,
-          vcsRepo: vcsRepo === null ? null : vcsRepo,
-          enabled,
-          triggerSchema: triggerSchema === null ? null : triggerSchema,
-          updatedBy,
-        });
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
+        const assetKey =
+          key === undefined ? undefined : await authorizeAssetKeyWrite(key, updatedBy);
+        // Snapshot + update in one transaction: concurrent full updates would
+        // otherwise allocate the same version number, and the loser would
+        // fail (or worse, commit with no history row).
+        const { workflow, version } = await snapshotAndUpdateWorkflow(
+          id,
+          {
+            key: assetKey,
+            name,
+            description,
+            definition,
+            triggers,
+            cooldown: cooldown === null ? null : cooldown,
+            input: input === null ? null : input,
+            dir: dir === null ? null : dir,
+            vcsRepo: vcsRepo === null ? null : vcsRepo,
+            enabled,
+            triggerSchema: triggerSchema === null ? null : triggerSchema,
+            updatedBy,
+          },
+          { changedByAgentId: requestInfo.agentId },
+        );
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
         }

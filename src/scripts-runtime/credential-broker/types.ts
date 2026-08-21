@@ -61,7 +61,7 @@ export type CredentialBindingStoreContext = {
 };
 
 export interface CredentialBindingStore {
-  listActiveBindings(context: CredentialBindingStoreContext): CredentialBinding[];
+  listActiveBindings(context: CredentialBindingStoreContext): Promise<CredentialBinding[]>;
 }
 
 export type CredentialResolver = (configKey: string) => string | undefined;

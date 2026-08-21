@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { authorizeAssetKeyWrite } from "@/be/asset-key-auth";
 import { resolveTaskAuditUserId } from "@/be/audit-user";
-import { getWorkflow, updateWorkflow } from "@/be/db";
+import type { updateWorkflow } from "@/be/db";
 import {
   createToolRegistrar,
   findLongScriptTimeoutHint,
@@ -13,12 +13,7 @@ import {
 import type { WorkflowPatch } from "@/types";
 import { AssetKeySchema, WorkflowNodePatchSchema } from "@/types";
 import { getExecutorRegistry } from "@/workflows";
-import {
-  applyDefinitionPatch,
-  definitionNodeIds,
-  validateDefinition,
-} from "@/workflows/definition";
-import { snapshotWorkflow } from "@/workflows/version";
+import { patchWorkflowDefinition } from "@/workflows/patch-definition";
 
 export const registerPatchWorkflowTool = (server: McpServer) => {
   createToolRegistrar(server)(
@@ -87,49 +82,40 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
     },
     async ({ id, key, update, delete: del, create, onNodeFailure, triggerSchema }, requestInfo) => {
       try {
-        const existing = getWorkflow(id);
-        if (!existing) {
-          return toolErr(`Workflow not found: ${id}`);
-        }
-
-        const patchResult = applyDefinitionPatch(existing.definition, {
-          update,
-          delete: del,
-          create: create as WorkflowPatch["create"],
-          onNodeFailure,
-        });
-        if (patchResult.errors.length > 0) {
-          const msg = patchResult.errors.join("; ");
-          return toolErr(`Patch errors: ${msg}`);
-        }
-
-        const validation = validateDefinition(patchResult.definition, getExecutorRegistry(), {
-          legacyNodeIds: definitionNodeIds(existing.definition),
-        });
-        if (!validation.valid) {
-          return toolErr(`Invalid definition: ${validation.errors.join("; ")}`);
-        }
-
-        const version = snapshotWorkflow(id, requestInfo.agentId);
-
         const updatedBy =
-          resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined;
-        const updateArgs: Parameters<typeof updateWorkflow>[1] = {
-          definition: patchResult.definition,
-        };
+          (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+          undefined;
+        const updates: Omit<Parameters<typeof updateWorkflow>[1], "definition"> = {};
         if (key !== undefined) {
-          updateArgs.key = authorizeAssetKeyWrite(key, updatedBy);
+          updates.key = await authorizeAssetKeyWrite(key, updatedBy);
         }
         if (triggerSchema !== undefined) {
-          updateArgs.triggerSchema = triggerSchema;
+          updates.triggerSchema = triggerSchema;
         }
         if (updatedBy !== undefined) {
-          updateArgs.updatedBy = updatedBy;
+          updates.updatedBy = updatedBy;
         }
-        const workflow = updateWorkflow(id, updateArgs);
-        if (!workflow) {
-          return toolErr(`Workflow not found: ${id}`);
+
+        const result = await patchWorkflowDefinition({
+          id,
+          patch: {
+            update,
+            delete: del,
+            create: create as WorkflowPatch["create"],
+            onNodeFailure,
+          },
+          registry: getExecutorRegistry(),
+          snapshotAgentId: requestInfo.agentId,
+          updates,
+        });
+        if (!result.ok) {
+          if (result.reason === "not_found") return toolErr(`Workflow not found: ${id}`);
+          if (result.reason === "patch") {
+            return toolErr(`Patch errors: ${result.errors.join("; ")}`);
+          }
+          return toolErr(`Invalid definition: ${result.errors.join("; ")}`);
         }
+        const { workflow, version } = result;
 
         const timeoutAuthoredNodeIds = new Set((create ?? []).map((node) => node.id));
         for (const { nodeId, node } of update ?? []) {
@@ -142,16 +128,16 @@ export const registerPatchWorkflowTool = (server: McpServer) => {
             timeoutAuthoredNodeIds.add(nodeId);
           }
         }
-        const authoredFinalNodes = patchResult.definition.nodes.filter((node) =>
+        const authoredFinalNodes = result.definition.nodes.filter((node) =>
           timeoutAuthoredNodeIds.has(node.id),
         );
         const longScriptTimeoutHint = findLongScriptTimeoutHint(authoredFinalNodes);
 
         return toolOk(`Patched workflow "${workflow.name}".`, {
-          details: `Patched workflow "${workflow.name}" (${id}). Version ${version.version} snapshot created.`,
+          details: `Patched workflow "${workflow.name}" (${id}). Version ${version} snapshot created.`,
           data: {
             workflow,
-            versionCreated: version.version,
+            versionCreated: version ?? undefined,
             nodesCreated: create?.length ?? 0,
             nodesUpdated: update?.length ?? 0,
             nodesDeleted: del?.length ?? 0,

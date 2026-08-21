@@ -57,7 +57,7 @@ describe("skill-get-file tool", () => {
     server = new McpServer({ name: "skill-get-file-test", version: "1.0.0" });
     registerSkillGetFileTool(server);
 
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "tool-file-skill",
       description: "Tool file skill",
       content: "---\nname: tool-file-skill\ndescription: Tool file skill\n---\n\nBody.",
@@ -66,7 +66,7 @@ describe("skill-get-file tool", () => {
       isComplex: true,
     });
     skillId = skill.id;
-    upsertSkillFile(skill.id, {
+    await upsertSkillFile(skill.id, {
       path: "references/guide.md",
       content: "# Guide",
       mimeType: "text/markdown",

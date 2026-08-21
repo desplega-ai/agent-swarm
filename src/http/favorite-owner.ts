@@ -17,10 +17,10 @@ export type FavoriteOwner = {
  * resolved through its owned task before the transport-level operator auth is
  * allowed to select the dashboard's shared scope.
  */
-export function resolveHttpFavoriteOwner(
+export async function resolveHttpFavoriteOwner(
   req: IncomingMessage,
   callerAgentId: string | undefined,
-): FavoriteOwner | null {
+): Promise<FavoriteOwner | null> {
   const auth = getRequestAuth(req);
   if (auth?.kind === "user") {
     return { scope: `user:${auth.userId}`, userId: auth.userId, actorId: auth.userId };
@@ -36,6 +36,6 @@ export function resolveHttpFavoriteOwner(
     };
   }
 
-  const userId = resolveHttpAuditUserId(req, callerAgentId);
+  const userId = await resolveHttpAuditUserId(req, callerAgentId);
   return userId ? { scope: `user:${userId}`, userId, actorId: userId } : null;
 }

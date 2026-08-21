@@ -22,10 +22,10 @@ function parseHeadersJson(value: string | null): Record<string, string> {
   }
 }
 
-function resolveHeaderConfigKeys(
+async function resolveHeaderConfigKeys(
   headerConfigKeys: string | null,
   context: { agentId?: string; repoId?: string },
-): Record<string, string> {
+): Promise<Record<string, string>> {
   if (!headerConfigKeys) return {};
 
   let parsed: unknown;
@@ -35,7 +35,7 @@ function resolveHeaderConfigKeys(
     return {};
   }
 
-  const configs = getResolvedConfig(context.agentId, context.repoId);
+  const configs = await getResolvedConfig(context.agentId, context.repoId);
   const configMap = new Map(configs.map((config) => [config.key, config.value]));
   const resolved: Record<string, string> = {};
 
@@ -67,7 +67,7 @@ async function resolveMcpHeaders(
 ): Promise<Record<string, string>> {
   const headers = {
     ...parseHeadersJson(server.headers),
-    ...resolveHeaderConfigKeys(server.headerConfigKeys, context),
+    ...(await resolveHeaderConfigKeys(server.headerConfigKeys, context)),
   };
 
   if (server.authMethod !== "oauth") return headers;
@@ -91,7 +91,7 @@ async function createMcpServerClient(
   serverId: string,
   context: { agentId?: string; repoId?: string; timeoutMs?: number } = {},
 ): Promise<McpHttpClient> {
-  const server = getMcpServerById(serverId);
+  const server = await getMcpServerById(serverId);
   if (!server) throw new Error("MCP server not found");
   if (!server.isEnabled) throw new Error("MCP server is disabled");
   if (server.transport === "sse") {

@@ -45,7 +45,7 @@ export const registerSlackListChannelsTool = (server: McpServer) => {
         return toolErr("Agent ID not found.", { data: { channels: [] } });
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.", { data: { channels: [] } });
       }

@@ -7,7 +7,7 @@
  * call OpenAI, so the backfill runs at startup instead.
  */
 
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 import { EMBEDDING_DIMENSIONS } from "./constants";
 import { getEmbeddingProvider, getMemoryStore } from "./index";
 
@@ -15,15 +15,13 @@ const VECTOR_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 const BATCH_SIZE = 20;
 
 export async function runBootReembed(): Promise<void> {
-  const db = getDb();
-
   const invalidCount =
-    db
-      .prepare<{ count: number }, []>(
+    (
+      await getDbClient().get<{ count: number }>(
         `SELECT COUNT(*) as count FROM agent_memory
        WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
       )
-      .get()?.count ?? 0;
+    )?.count ?? 0;
 
   if (invalidCount === 0) {
     return;
@@ -41,12 +39,10 @@ export async function runBootReembed(): Promise<void> {
   console.log(`[boot-reembed] starting: ${invalidCount} rows with wrong embedding dimensions`);
 
   const store = getMemoryStore();
-  const rows = db
-    .prepare<{ id: string; content: string }, []>(
-      `SELECT id, content FROM agent_memory
+  const rows = await getDbClient().query<{ id: string; content: string }>(
+    `SELECT id, content FROM agent_memory
        WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
-    )
-    .all();
+  );
 
   let reembedded = 0;
   let failed = 0;
@@ -57,7 +53,7 @@ export async function runBootReembed(): Promise<void> {
       const embeddings = await provider.embedBatch(batch.map((m) => m.content));
       for (let j = 0; j < embeddings.length; j++) {
         if (embeddings[j]) {
-          store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
+          await store.updateEmbedding(batch[j]!.id, embeddings[j]!, provider.name);
           reembedded++;
         }
       }
@@ -71,12 +67,12 @@ export async function runBootReembed(): Promise<void> {
   }
 
   const afterInvalid =
-    db
-      .prepare<{ count: number }, []>(
+    (
+      await getDbClient().get<{ count: number }>(
         `SELECT COUNT(*) as count FROM agent_memory
        WHERE embedding IS NOT NULL AND length(embedding) != ${VECTOR_BYTES}`,
       )
-      .get()?.count ?? 0;
+    )?.count ?? 0;
 
   console.log(
     `[boot-reembed] complete: reembedded=${reembedded} failed=${failed} remaining_invalid=${afterInvalid}`,

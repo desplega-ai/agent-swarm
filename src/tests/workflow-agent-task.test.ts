@@ -54,16 +54,16 @@ beforeAll(async () => {
   (mockDeps as { db: typeof import("../be/db") }).db = db;
 
   // Create prerequisite workflow records for FK constraints
-  const wf = createWorkflow({
+  const wf = await createWorkflow({
     name: "test-workspace-scoping",
     definition: { nodes: [], edges: [] },
   });
   workflowId = wf.id;
 
-  const run = createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
+  const run = await createWorkflowRun({ id: crypto.randomUUID(), workflowId: wf.id });
   runId = run.id;
 
-  const step1 = createWorkflowRunStep({
+  const step1 = await createWorkflowRunStep({
     id: crypto.randomUUID(),
     runId: run.id,
     nodeId: "test-node-1",
@@ -71,7 +71,7 @@ beforeAll(async () => {
   });
   stepId1 = step1.id;
 
-  const step2 = createWorkflowRunStep({
+  const step2 = await createWorkflowRunStep({
     id: crypto.randomUUID(),
     runId: run.id,
     nodeId: "test-node-2",
@@ -166,7 +166,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     const taskId = (result as { correlationId?: string }).correlationId;
     expect(taskId).toBeDefined();
 
-    const task = getTaskById(taskId!);
+    const task = await getTaskById(taskId!);
     expect(task).toBeDefined();
     expect(task!.dir).toBe("/workspace/repos/agent-swarm");
     expect(task!.vcsRepo).toBe("desplega-ai/agent-swarm");
@@ -192,7 +192,7 @@ describe("AgentTaskExecutor — workspace scoping", () => {
     const taskId = (result as { correlationId?: string }).correlationId;
     expect(taskId).toBeDefined();
 
-    const task = getTaskById(taskId!);
+    const task = await getTaskById(taskId!);
     expect(task).toBeDefined();
     expect(task!.dir).toBeUndefined();
     expect(task!.vcsRepo).toBeUndefined();

@@ -1,5 +1,5 @@
 import { extractGitHubPullRequestUrls } from "../../utils/github-pull-request";
-import { getDb } from "../db";
+import { getDbClient } from "../db";
 
 export type TaskShippingEvidenceSource = "attachment" | "output-fallback" | "none";
 
@@ -140,17 +140,19 @@ export function taskShippingEvidenceSql(alias = "t"): {
 }
 
 /** Look up one task's attachment-first shipping evidence. */
-export function getTaskShippingEvidence(taskId: string): TaskShippingEvidence | null {
-  const task = getDb()
-    .prepare<{ output: string | null }, [string]>("SELECT output FROM agent_tasks WHERE id = ?")
-    .get(taskId);
+export async function getTaskShippingEvidence(
+  taskId: string,
+): Promise<TaskShippingEvidence | null> {
+  const task = await getDbClient().get<{ output: string | null }>(
+    "SELECT output FROM agent_tasks WHERE id = ?",
+    [taskId],
+  );
   if (!task) return null;
 
-  const attachments = getDb()
-    .prepare<{ kind: string; url: string | null }, [string]>(
-      "SELECT kind, url FROM task_attachments WHERE task_id = ? ORDER BY created_at, rowid",
-    )
-    .all(taskId);
+  const attachments = await getDbClient().query<{ kind: string; url: string | null }>(
+    "SELECT kind, url FROM task_attachments WHERE task_id = ? ORDER BY created_at, rowid",
+    [taskId],
+  );
   const attachmentPullRequests = Array.from(
     new Set(
       attachments.flatMap((attachment) =>

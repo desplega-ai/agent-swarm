@@ -84,7 +84,7 @@ beforeAll(async () => {
   await removeDbFiles();
   closeDb();
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "Slack Lifecycle Lead", isLead: true, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Slack Lifecycle Lead", isLead: true, status: "idle" });
 
   const server = new McpServer({ name: "slack-channel-lifecycle-test", version: "1.0.0" });
   registerSlackCreateChannelTool(server);

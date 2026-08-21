@@ -114,10 +114,14 @@ function syncStatusKey(model: string, source: string): string {
   return `sync-status:${model}:${source}`;
 }
 
-function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: string): void {
+async function writeSyncStatus(
+  appId: string,
+  pass: SyncPassResult,
+  lastStartedAt: string,
+): Promise<void> {
   // A pass can outlive its app: deletion purges the apps:<id> namespace while
   // a pull is in flight, and writing here would resurrect it as an orphan.
-  if (!getApp(appId)) return;
+  if (!(await getApp(appId))) return;
   const status: AppSyncStatus = {
     lastStartedAt,
     lastFinishedAt: new Date().toISOString(),
@@ -128,7 +132,7 @@ function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: str
     markedStale: pass.markedStale,
     ...(pass.error === undefined ? {} : { error: pass.error }),
   };
-  upsertKv({
+  await upsertKv({
     namespace: appsNamespace(appId),
     key: syncStatusKey(pass.model, pass.source),
     value: status,
@@ -137,12 +141,12 @@ function writeSyncStatus(appId: string, pass: SyncPassResult, lastStartedAt: str
 }
 
 /** Last completed pass for a pair, or null when none has run. */
-export function getAppSyncStatus(
+export async function getAppSyncStatus(
   appId: string,
   model: string,
   source: string,
-): AppSyncStatus | null {
-  const entry = getKv(appsNamespace(appId), syncStatusKey(model, source));
+): Promise<AppSyncStatus | null> {
+  const entry = await getKv(appsNamespace(appId), syncStatusKey(model, source));
   const value = entry?.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   return value as AppSyncStatus;
@@ -153,13 +157,13 @@ export function getAppSyncStatus(
  * `<model>:<source>` — the per-source freshness surface the app payload and
  * `app-get` expose so UI/agents can render "last synced / last error".
  */
-export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatus> {
+export async function collectAppSyncStatus(appId: string): Promise<Record<string, AppSyncStatus>> {
   const statuses: Record<string, AppSyncStatus> = {};
-  const app = getApp(appId);
+  const app = await getApp(appId);
   if (!app || appDefinitionNeedsRepair(app)) return statuses;
   for (const [modelName, model] of Object.entries(app.definition.models)) {
     for (const sourceName of Object.keys(model.sources ?? {})) {
-      const status = getAppSyncStatus(appId, modelName, sourceName);
+      const status = await getAppSyncStatus(appId, modelName, sourceName);
       if (status) statuses[`${modelName}:${sourceName}`] = status;
     }
   }
@@ -172,11 +176,11 @@ export function collectAppSyncStatus(appId: string): Record<string, AppSyncStatu
  * gone: the stored freshness described the OLD configuration, and presenting
  * it for the new one would claim a pass that never ran.
  */
-export function invalidateChangedSyncStatus(
+export async function invalidateChangedSyncStatus(
   appId: string,
   previous: AppDefinition | undefined,
   next: AppDefinition,
-): void {
+): Promise<void> {
   if (!previous) return;
   for (const [modelName, oldModel] of Object.entries(previous.models)) {
     for (const [sourceName, oldSource] of Object.entries(oldModel.sources ?? {})) {
@@ -187,7 +191,7 @@ export function invalidateChangedSyncStatus(
         nextSource !== undefined &&
         pairFingerprint(nextModel, sourceName, nextSource) ===
           pairFingerprint(oldModel, sourceName, oldSource);
-      if (!unchanged) deleteKv(appsNamespace(appId), syncStatusKey(modelName, sourceName));
+      if (!unchanged) await deleteKv(appsNamespace(appId), syncStatusKey(modelName, sourceName));
     }
   }
 }
@@ -259,9 +263,9 @@ async function pullFromScript(args: {
 }): Promise<PullResult> {
   const warnings: string[] = [];
   const { source } = args;
-  const script = getScriptById(source.scriptId);
+  const script = await getScriptById(source.scriptId);
   if (!script) throw new SyncPassError(`script "${source.scriptId}" not found`);
-  const agentId = resolveSyncRunAs(script);
+  const agentId = await resolveSyncRunAs(script);
 
   // Re-run the definition-time connection check at runtime: a connection
   // disabled after the write must fail the pass before the script is invoked.
@@ -356,10 +360,10 @@ function taskRecord(task: AgentTask): SourceRecord {
   };
 }
 
-function pullFromSwarmTasks(
+async function pullFromSwarmTasks(
   source: Extract<SourceDef, { connector: "swarm-tasks" }>,
   invokedBy?: string,
-): PullResult {
+): Promise<PullResult> {
   const warnings: string[] = [];
   const config = source.config ?? {};
   for (const key of Object.keys(config)) {
@@ -429,7 +433,7 @@ function pullFromSwarmTasks(
     warn(warnings, "pull scoped to tasks requested by the invoking user");
   }
 
-  const records = getAllTasks(filters).map(taskRecord);
+  const records = (await getAllTasks(filters)).map(taskRecord);
   // A full page means the window may have cut records off.
   return { records, complete: scopedUserId === undefined && records.length < limit, warnings };
 }
@@ -536,8 +540,12 @@ function sameValue(existing: unknown, projected: unknown): boolean {
 
 type PairDefinition = { model: ModelDef; source: SourceDef };
 
-function resolvePair(appId: string, model: string, source: string): PairDefinition | null {
-  const app = getApp(appId);
+async function resolvePair(
+  appId: string,
+  model: string,
+  source: string,
+): Promise<PairDefinition | null> {
+  const app = await getApp(appId);
   if (!app || appDefinitionNeedsRepair(app)) return null;
   const modelDef = app.definition.models[model];
   const sourceDef = modelDef?.sources?.[source];
@@ -593,11 +601,11 @@ function reconcile(args: {
   counts: ReconcileCounts;
 }): Promise<void> {
   const { appId, model, sourceName, joinKey, pull, warnings, counts } = args;
-  return withMutationLock(appId, model, () => {
+  return withMutationLock(appId, model, async () => {
     // Re-read under the lock: the pull ran unlocked, so the definition it was
     // planned against may be gone. Anything that moves the identity or the
     // projection rules of this pair aborts before the first write.
-    const fresh = resolvePair(appId, model, sourceName);
+    const fresh = await resolvePair(appId, model, sourceName);
     if (!fresh) {
       throw new SyncPassError(
         `model "${model}" no longer declares source "${sourceName}"; pass aborted with no writes`,
@@ -620,7 +628,7 @@ function reconcile(args: {
     // Reconcile holds the mutation lock, so the unbounded pager is safe. The
     // plain listAppRows cap (100k) would hide rows past it: pulled keys would
     // duplicate and the hidden rows would never be swept stale.
-    for (const row of listAllAppRowsForMigrationUnlocked(appId, model)) {
+    for (const row of await listAllAppRowsForMigrationUnlocked(appId, model)) {
       if (row.source !== sourceName) continue;
       const key = row[joinKey];
       if (typeof key === "string") mine.set(key, row);
@@ -641,7 +649,7 @@ function reconcile(args: {
       const existing = mine.get(record.key);
       if (!existing) {
         // No adoption: a row with no source of its own is not ours to take.
-        const created = createAppRowUnlocked(appId, model, modelDef, values, {
+        const created = await createAppRowUnlocked(appId, model, modelDef, values, {
           allowSourceManaged: true,
           envelope,
           actor,
@@ -653,7 +661,7 @@ function reconcile(args: {
       const differs = Object.entries(values).some(
         ([name, value]) => !sameValue(existing[name], value),
       );
-      const updated = patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
+      const updated = await patchAppRowUnlocked(appId, model, modelDef, existing.id, values, {
         allowSourceManaged: true,
         envelope,
         actor,
@@ -685,7 +693,7 @@ function reconcile(args: {
         counts.unchanged += 1;
         continue;
       }
-      patchAppRowUnlocked(
+      await patchAppRowUnlocked(
         appId,
         model,
         modelDef,
@@ -759,14 +767,14 @@ async function executePass(args: {
   // for a pair that changed or vanished while it was in flight.
   let plannedFingerprint: string | null = null;
 
-  const finish = (result: SyncPassResult): SyncPassResult => {
+  const finish = async (result: SyncPassResult): Promise<SyncPassResult> => {
     const scrubbed = scrubObject({ ...result, warnings, durationMs: Date.now() - startedMs });
-    const current = resolvePair(args.appId, args.model, args.sourceName);
+    const current = await resolvePair(args.appId, args.model, args.sourceName);
     const stillCurrent =
       plannedFingerprint !== null &&
       current !== null &&
       pairFingerprint(current.model, args.sourceName, current.source) === plannedFingerprint;
-    if (stillCurrent) writeSyncStatus(args.appId, scrubbed, lastStartedAt);
+    if (stillCurrent) await writeSyncStatus(args.appId, scrubbed, lastStartedAt);
     return scrubbed;
   };
 
@@ -784,7 +792,7 @@ async function executePass(args: {
   try {
     // Snapshot the pair's projection rules before the unlocked pull; reconcile
     // compares under the lock and aborts on any drift.
-    const planned = resolvePair(args.appId, args.model, args.sourceName);
+    const planned = await resolvePair(args.appId, args.model, args.sourceName);
     if (!planned) {
       throw new SyncPassError(
         `model "${args.model}" no longer declares source "${args.sourceName}"; pass aborted with no writes`,
@@ -810,7 +818,7 @@ async function executePass(args: {
             sourceName: args.sourceName,
             source,
           })
-        : pullFromSwarmTasks(source, args.invokedBy),
+        : await pullFromSwarmTasks(source, args.invokedBy),
     );
     pulled = pull.records.length;
     for (const warning of pull.warnings) warn(warnings, warning);
@@ -893,7 +901,7 @@ export async function runAppSync(input: {
   source?: string;
   invokedBy?: string;
 }): Promise<AppSyncResult> {
-  const app = getApp(input.appId);
+  const app = await getApp(input.appId);
   if (!app) {
     return {
       ok: false,

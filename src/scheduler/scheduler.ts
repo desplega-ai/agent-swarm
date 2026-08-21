@@ -1,7 +1,7 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
 import {
-  getDb,
+  getDbClient,
   getDueScheduledTasks,
   getScheduledTaskById,
   getUserById,
@@ -44,14 +44,14 @@ function resolveExecutorRegistry(): ExecutorRegistry | null {
   }
 }
 
-export function createStandaloneScheduleTask(
+export async function createStandaloneScheduleTask(
   schedule: ScheduledTask,
   extraTags: string[] = [],
-): AgentTask {
+): Promise<AgentTask> {
   if (!schedule.taskTemplate) {
     throw new Error(`Schedule "${schedule.name}" has no taskTemplate (targetType=agent-task)`);
   }
-  return createTaskWithSiblingAwareness(schedule.taskTemplate, {
+  return await createTaskWithSiblingAwareness(schedule.taskTemplate, {
     key: schedule.key,
     creatorAgentId: schedule.createdByAgentId,
     taskType: schedule.taskType,
@@ -77,7 +77,7 @@ async function executeScheduleScript(schedule: ScheduledTask): Promise<void> {
     throw new Error(`Schedule "${schedule.name}" has no scriptName (targetType=script)`);
   }
 
-  const script = getScript({ name: schedule.scriptName, scope: "global" });
+  const script = await getScript({ name: schedule.scriptName, scope: "global" });
   if (!script) {
     throw new Error(`Script '${schedule.scriptName}' not found`);
   }
@@ -118,8 +118,8 @@ export interface DispatchScheduleResult {
   task?: AgentTask;
 }
 
-function withoutDeletedRequester(schedule: ScheduledTask): ScheduledTask {
-  if (!schedule.createdBy || getUserById(schedule.createdBy)) return schedule;
+async function withoutDeletedRequester(schedule: ScheduledTask): Promise<ScheduledTask> {
+  if (!schedule.createdBy || (await getUserById(schedule.createdBy))) return schedule;
   return { ...schedule, createdBy: undefined };
 }
 
@@ -127,13 +127,13 @@ export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): Promise<DispatchScheduleResult> {
-  schedule = withoutDeletedRequester(schedule);
+  schedule = await withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
       if (!schedule.workflowId) {
         throw new Error(`Schedule "${schedule.name}" has no workflowId (targetType=workflow)`);
       }
-      const workflow = getWorkflow(schedule.workflowId);
+      const workflow = await getWorkflow(schedule.workflowId);
       if (!workflow) {
         throw new Error(`Workflow ${schedule.workflowId} not found`);
       }
@@ -178,7 +178,9 @@ export async function dispatchScheduleTarget(
         }
       }
       if (!triggeredWorkflows) {
-        const task = getDb().transaction(() => createStandaloneScheduleTask(schedule, extraTags))();
+        const task = await getDbClient().transaction(async () =>
+          createStandaloneScheduleTask(schedule, extraTags),
+        );
         return { triggeredWorkflows, task };
       }
       return { triggeredWorkflows, workflowRunIds };
@@ -193,7 +195,7 @@ export async function dispatchScheduleTarget(
  */
 async function recoverMissedSchedules(): Promise<void> {
   const now = new Date();
-  const dueSchedules = getDueScheduledTasks();
+  const dueSchedules = await getDueScheduledTasks();
 
   for (const schedule of dueSchedules) {
     if (!schedule.nextRunAt) continue;
@@ -211,7 +213,7 @@ async function recoverMissedSchedules(): Promise<void> {
 
       // Update schedule state regardless of workflow/task path
       if (schedule.scheduleType === "one_time") {
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: null,
           enabled: false,
@@ -219,7 +221,7 @@ async function recoverMissedSchedules(): Promise<void> {
         });
       } else {
         const nextRun = calculateNextRun(schedule, now);
-        updateScheduledTask(schedule.id, {
+        await updateScheduledTask(schedule.id, {
           lastRunAt: now.toISOString(),
           nextRunAt: nextRun,
           lastUpdatedAt: now.toISOString(),
@@ -301,7 +303,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
     // Update schedule state regardless of workflow/task path
     const now = new Date().toISOString();
     if (schedule.scheduleType === "one_time") {
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: null,
         enabled: false,
@@ -313,7 +315,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Executed one-time schedule "${schedule.name}", auto-disabled`);
     } else {
       const nextRun = calculateNextRun(schedule, new Date());
-      updateScheduledTask(schedule.id, {
+      await updateScheduledTask(schedule.id, {
         lastRunAt: now,
         nextRunAt: nextRun,
         lastUpdatedAt: now,
@@ -368,7 +370,7 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       console.log(`[Scheduler] Backing off "${schedule.name}" for ${backoff / 1000}s`);
     }
 
-    updateScheduledTask(schedule.id, updates);
+    await updateScheduledTask(schedule.id, updates);
     telemetry.schedule("error", {
       scheduleType: schedule.scheduleType,
       triggeredWorkflows,
@@ -431,7 +433,7 @@ async function processSchedules(): Promise<void> {
   isProcessing = true;
 
   try {
-    const dueSchedules = getDueScheduledTasks();
+    const dueSchedules = await getDueScheduledTasks();
 
     for (const schedule of dueSchedules) {
       try {
@@ -463,7 +465,7 @@ export function stopScheduler(): void {
  * @param scheduleId The ID of the schedule to run
  */
 export async function runScheduleNow(scheduleId: string): Promise<void> {
-  const schedule = getScheduledTaskById(scheduleId);
+  const schedule = await getScheduledTaskById(scheduleId);
   if (!schedule) {
     throw new Error(`Schedule not found: ${scheduleId}`);
   }
@@ -476,7 +478,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
   // Update schedule state
   const now = new Date().toISOString();
   if (schedule.scheduleType === "one_time") {
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       nextRunAt: null,
       enabled: false,
@@ -487,7 +489,7 @@ export async function runScheduleNow(scheduleId: string): Promise<void> {
     );
   } else {
     // Only update lastRunAt, not nextRunAt (to not affect regular schedule)
-    updateScheduledTask(schedule.id, {
+    await updateScheduledTask(schedule.id, {
       lastRunAt: now,
       lastUpdatedAt: now,
     });

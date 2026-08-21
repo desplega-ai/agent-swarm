@@ -24,7 +24,7 @@ import {
   createAgent,
   createContextVersion,
   createTaskExtended,
-  getDb,
+  getDbClient,
   getKv,
   getTaskById,
   initDb,
@@ -112,7 +112,7 @@ beforeAll(async () => {
   // fresh DB without re-checking the schema → "no such table: memory_fts".
   // Create the FTS table (same DDL as SqliteMemoryStore.ensureFtsTable) so the
   // memory-delete characterization below is order-independent under `bun test`.
-  getDb().run(`
+  await getDbClient().run(`
     CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
       memory_id UNINDEXED,
       name,
@@ -121,9 +121,14 @@ beforeAll(async () => {
     )
   `);
 
-  createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
-  createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
-  createAgent({ id: OTHER_WORKER_ID, name: "Charact Other Worker", isLead: false, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "Charact Lead", isLead: true, status: "idle" });
+  await createAgent({ id: WORKER_ID, name: "Charact Worker", isLead: false, status: "idle" });
+  await createAgent({
+    id: OTHER_WORKER_ID,
+    name: "Charact Other Worker",
+    isLead: false,
+    status: "idle",
+  });
 
   server = new McpServer({ name: "test-rbac-charact-misc-tools", version: "1.0.0" });
   registerCancelTaskTool(server);
@@ -150,7 +155,7 @@ afterAll(async () => {
 describe("cancel-task lead-or-creator gate (characterization)", () => {
   // cancel-task.ts:74 — lead OR task creator (previously zero denial coverage)
   test("worker who is neither lead nor creator cannot cancel a task", async () => {
-    const task = createTaskExtended("charact cancel deny", {
+    const task = await createTaskExtended("charact cancel deny", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: LEAD_ID,
     });
@@ -162,11 +167,11 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
       "Only the lead or task creator can cancel tasks.",
     );
     // DB not mutated
-    expect(getTaskById(task.id)?.status).toBe("pending");
+    expect((await getTaskById(task.id))?.status).toBe("pending");
   });
 
   test("lead can cancel any task", async () => {
-    const task = createTaskExtended("charact cancel lead allow", {
+    const task = await createTaskExtended("charact cancel lead allow", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: OTHER_WORKER_ID,
     });
@@ -174,11 +179,11 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
     const result = await callTool("cancel-task", LEAD_ID, { taskId: task.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getTaskById(task.id)?.status).toBe("cancelled");
+    expect((await getTaskById(task.id))?.status).toBe("cancelled");
   });
 
   test("task creator (non-lead) can cancel their own task", async () => {
-    const task = createTaskExtended("charact cancel creator allow", {
+    const task = await createTaskExtended("charact cancel creator allow", {
       agentId: OTHER_WORKER_ID,
       creatorAgentId: WORKER_ID,
     });
@@ -186,7 +191,7 @@ describe("cancel-task lead-or-creator gate (characterization)", () => {
     const result = await callTool("cancel-task", WORKER_ID, { taskId: task.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getTaskById(task.id)?.status).toBe("cancelled");
+    expect((await getTaskById(task.id))?.status).toBe("cancelled");
   });
 });
 
@@ -242,7 +247,7 @@ describe("context-history / context-diff gates (characterization)", () => {
 
   // context-diff.ts:95 — diffing another agent's context requires lead
   test("worker cannot diff another agent's context version", async () => {
-    const version = createContextVersion({
+    const version = await createContextVersion({
       agentId: LEAD_ID,
       field: "soulMd",
       content: "# Lead soul v1",
@@ -260,7 +265,7 @@ describe("context-history / context-diff gates (characterization)", () => {
   });
 
   test("lead can diff another agent's context version", async () => {
-    const version = createContextVersion({
+    const version = await createContextVersion({
       agentId: WORKER_ID,
       field: "soulMd",
       content: "# Worker soul v1",
@@ -278,7 +283,7 @@ describe("context-history / context-diff gates (characterization)", () => {
 describe("memory-delete gate (characterization)", () => {
   // memory-delete.ts:54,56 — owner OR (lead AND scope=swarm)
   test("worker cannot delete another agent's memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: LEAD_ID,
       scope: "agent",
       name: "charact lead memory",
@@ -293,11 +298,11 @@ describe("memory-delete gate (characterization)", () => {
       "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
     );
     // DB not mutated
-    expect(getMemoryStore().peek(memory.id)).not.toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });
 
   test("owner can delete their own memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "agent",
       name: "charact worker memory",
@@ -308,11 +313,11 @@ describe("memory-delete gate (characterization)", () => {
     const result = await callTool("memory-delete", WORKER_ID, { memoryId: memory.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getMemoryStore().peek(memory.id)).toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).toBeNull();
   });
 
   test("lead can delete another agent's swarm-scoped memory", async () => {
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "swarm",
       name: "charact swarm memory",
@@ -323,12 +328,12 @@ describe("memory-delete gate (characterization)", () => {
     const result = await callTool("memory-delete", LEAD_ID, { memoryId: memory.id });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getMemoryStore().peek(memory.id)).toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).toBeNull();
   });
 
   test("lead cannot delete another agent's agent-scoped memory", async () => {
     // Characterizes the composite rule's other edge: lead + non-swarm scope = deny.
-    const memory = getMemoryStore().store({
+    const memory = await getMemoryStore().store({
       agentId: WORKER_ID,
       scope: "agent",
       name: "charact private worker memory",
@@ -342,7 +347,7 @@ describe("memory-delete gate (characterization)", () => {
     expect(result.structuredContent.message).toBe(
       "Permission denied. You can only delete your own memories, or swarm memories if you are the lead.",
     );
-    expect(getMemoryStore().peek(memory.id)).not.toBeNull();
+    expect(await getMemoryStore().peek(memory.id)).not.toBeNull();
   });
 });
 
@@ -440,7 +445,7 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
   // (kv-set's identical guard is covered by kv-tool.test.ts:178)
   test("worker cannot kv-delete in another agent's namespace", async () => {
     const namespace = `task:agent:${OTHER_WORKER_ID}`;
-    upsertKv({ namespace, key: "charact-del", value: "keep-me", valueType: "string" });
+    await upsertKv({ namespace, key: "charact-del", value: "keep-me", valueType: "string" });
 
     const result = await callTool("kv-delete", WORKER_ID, { key: "charact-del", namespace });
 
@@ -449,18 +454,18 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
       "writes to another agent's namespace require lead",
     );
     // DB not mutated
-    expect(getKv(namespace, "charact-del")).not.toBeNull();
+    expect(await getKv(namespace, "charact-del")).not.toBeNull();
   });
 
   test("lead can kv-delete in another agent's namespace", async () => {
     const namespace = `task:agent:${OTHER_WORKER_ID}`;
-    upsertKv({ namespace, key: "charact-del-lead", value: "x", valueType: "string" });
+    await upsertKv({ namespace, key: "charact-del-lead", value: "x", valueType: "string" });
 
     const result = await callTool("kv-delete", LEAD_ID, { key: "charact-del-lead", namespace });
 
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.deleted).toBe(true);
-    expect(getKv(namespace, "charact-del-lead")).toBeNull();
+    expect(await getKv(namespace, "charact-del-lead")).toBeNull();
   });
 
   // kv-incr.ts:17 — cross-agent task:agent:* writes require lead
@@ -474,7 +479,7 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
       "writes to another agent's namespace require lead",
     );
     // DB not mutated (entry was never created)
-    expect(getKv(namespace, "charact-incr")).toBeNull();
+    expect(await getKv(namespace, "charact-incr")).toBeNull();
   });
 
   test("lead can kv-incr in another agent's namespace", async () => {
@@ -483,6 +488,6 @@ describe("kv-delete / kv-incr namespace gates (characterization)", () => {
     const result = await callTool("kv-incr", LEAD_ID, { key: "charact-incr-lead", namespace });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getKv(namespace, "charact-incr-lead")).not.toBeNull();
+    expect(await getKv(namespace, "charact-incr-lead")).not.toBeNull();
   });
 });

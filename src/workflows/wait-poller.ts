@@ -27,7 +27,7 @@ export function startWaitPoller(registry: ExecutorRegistry, intervalMs = 5000): 
 
   async function poll(): Promise<void> {
     try {
-      const dueWaits = getDueWaitStates();
+      const dueWaits = await getDueWaitStates();
 
       for (const wait of dueWaits) {
         try {

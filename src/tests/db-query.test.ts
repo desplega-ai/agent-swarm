@@ -24,6 +24,7 @@ import {
   resetDbQuerySpawnUnavailableWarningForTests,
 } from "../http/db-query-shared";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 describe("db-query input compatibility", () => {
   test("canonical sql input resolves to sql", () => {
@@ -61,7 +62,7 @@ describe("db-query input compatibility", () => {
 // ---------------------------------------------------------------------------
 
 const BOUNDED_TEST_DB_PATH = "./test-db-query-bounded.sqlite";
-const HTTP_TEST_PORT = 13097;
+let HTTP_TEST_PORT = 0;
 
 // A CPU-bound query with near-zero fixture setup cost (no table/data needed)
 // and deterministic timing that doesn't depend on disk cache state, unlike
@@ -96,7 +97,7 @@ async function withDbQueryHttpServer<T>(
         res.end();
       }
     });
-    await new Promise<void>((resolve) => server?.listen(HTTP_TEST_PORT, () => resolve()));
+    HTTP_TEST_PORT = await listenOnFreePort(server);
 
     const post = async (body: unknown) => {
       const res = await fetch(`http://localhost:${HTTP_TEST_PORT}/api/db-query`, {
@@ -347,7 +348,7 @@ describe("db-query bounded execution (Fix 1)", () => {
           res.end();
         }
       });
-      await new Promise<void>((resolve) => server?.listen(HTTP_TEST_PORT, () => resolve()));
+      HTTP_TEST_PORT = await listenOnFreePort(server);
 
       const res = await fetch(`http://localhost:${HTTP_TEST_PORT}/api/db-query`, {
         method: "POST",

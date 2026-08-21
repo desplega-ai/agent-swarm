@@ -69,7 +69,7 @@ async function maybeDenyUserToolAdmission(
 ): Promise<SwarmToolResult | undefined> {
   if (!isRbacEnabled()) return undefined;
 
-  const grant = getUserGrant(user.id);
+  const grant = await getUserGrant(user.id);
   if (grant.grantsAll) return undefined;
 
   const decision = decideToolAdmission({

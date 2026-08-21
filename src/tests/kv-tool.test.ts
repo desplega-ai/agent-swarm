@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   registerKvDeleteTool,
   registerKvGetTool,
@@ -68,9 +68,9 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const a = createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
-  const b = createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
-  const l = createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
+  const a = await createAgent({ name: "kv-tool-a", isLead: false, status: "idle" });
+  const b = await createAgent({ name: "kv-tool-b", isLead: false, status: "idle" });
+  const l = await createAgent({ name: "kv-tool-lead", isLead: true, status: "idle" });
   agentA = a.id;
   agentB = b.id;
   lead = l.id;
@@ -85,8 +85,8 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM kv_entries");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM kv_entries");
 });
 
 describe("kv MCP tools", () => {
@@ -125,7 +125,7 @@ describe("kv MCP tools", () => {
   test("overflow retrieval hint round-trips for its owner and rejects another agent", async () => {
     const tools = buildServer();
     const blob = "private-result:".concat("x".repeat(30_000));
-    const spill = finalizeSwarmToolResult(
+    const spill = await finalizeSwarmToolResult(
       "private-tool",
       { ok: true, message: "Large result.", data: { blob } },
       { agentId: agentA },

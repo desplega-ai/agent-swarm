@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { migrateLegacyCredentialBindingBlob } from "../be/connection-bindings-blob-migration";
-import { deleteSwarmConfig, getDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
+import {
+  deleteSwarmConfig,
+  getDb,
+  getDbClient,
+  getSwarmConfigs,
+  upsertSwarmConfig,
+} from "../be/db";
 import { getOAuthApp, upsertAuthorization, upsertOAuthApp } from "../be/db-queries/oauth";
 import {
   getScriptApiConnectionDescriptors,
@@ -51,16 +57,16 @@ beforeEach(() => {
   process.env.MCP_BASE_URL = "http://localhost:3013";
 });
 
-afterEach(() => {
-  const db = getDb();
+afterEach(async () => {
+  const db = getDbClient();
   for (const id of createdConnectionIds.splice(0)) {
-    db.run("DELETE FROM script_connections WHERE id = ?", id);
+    await db.run("DELETE FROM script_connections WHERE id = ?", [id]);
   }
-  db.run("DELETE FROM script_credential_bindings WHERE source = 'connection'");
+  await db.run("DELETE FROM script_credential_bindings WHERE source = 'connection'");
   for (const key of createdConfigKeys.splice(0)) {
-    for (const row of getSwarmConfigs({ key })) deleteSwarmConfig(row.id);
+    for (const row of await getSwarmConfigs({ key })) await deleteSwarmConfig(row.id);
   }
-  db.run("DELETE FROM swarm_config WHERE key = 'SCRIPT_CREDENTIAL_BINDINGS'");
+  await db.run("DELETE FROM swarm_config WHERE key = 'SCRIPT_CREDENTIAL_BINDINGS'");
   clearVolatileSecretsForTesting();
   for (const key of Object.keys(process.env)) {
     if (!(key in savedEnv)) delete process.env[key];
@@ -72,21 +78,16 @@ afterEach(() => {
 });
 
 function managedBindingFor(connectionId: string) {
-  return getDb()
-    .prepare<
-      {
-        config_key: string;
-        header_template: string | null;
-        query_template: string | null;
-        allowed_hosts_json: string;
-        auth_kind: string;
-        oauth_authorization_id: string | null;
-        source: string;
-        managed_by_connection_id: string | null;
-      },
-      [string]
-    >("SELECT * FROM script_credential_bindings WHERE managed_by_connection_id = ?")
-    .get(connectionId);
+  return getDbClient().get<{
+    config_key: string;
+    header_template: string | null;
+    query_template: string | null;
+    allowed_hosts_json: string;
+    auth_kind: string;
+    oauth_authorization_id: string | null;
+    source: string;
+    managed_by_connection_id: string | null;
+  }>("SELECT * FROM script_credential_bindings WHERE managed_by_connection_id = ?", [connectionId]);
 }
 
 describe("embedded connection auth", () => {
@@ -104,7 +105,7 @@ describe("embedded connection auth", () => {
     expect(connection.authType).toBe("bearer");
     expect(connection.authConfigKey).toBe("connection.bearerVendor.secret");
 
-    const binding = managedBindingFor(connection.id);
+    const binding = await managedBindingFor(connection.id);
     expect(binding?.config_key).toBe("connection.bearerVendor.secret");
     expect(binding?.header_template).toBe(
       "Authorization: Bearer [REDACTED:connection.bearerVendor.secret]",
@@ -114,16 +115,15 @@ describe("embedded connection auth", () => {
     expect(JSON.parse(binding?.allowed_hosts_json ?? "[]")).toEqual(["api.vendor.test"]);
 
     // Stored encrypted, not plaintext.
-    const raw = getDb()
-      .prepare<{ value: string; isSecret: number; encrypted: number }, [string]>(
-        "SELECT value, isSecret, encrypted FROM swarm_config WHERE key = ?",
-      )
-      .get("connection.bearerVendor.secret");
+    const raw = await getDbClient().get<{ value: string; isSecret: number; encrypted: number }>(
+      "SELECT value, isSecret, encrypted FROM swarm_config WHERE key = ?",
+      ["connection.bearerVendor.secret"],
+    );
     expect(raw?.isSecret).toBe(1);
     expect(raw?.encrypted).toBe(1);
     expect(raw?.value).not.toBe("test-tok-123");
     // Decrypts back to plaintext on read.
-    expect(getSwarmConfigs({ key: "connection.bearerVendor.secret" })[0]?.value).toBe(
+    expect((await getSwarmConfigs({ key: "connection.bearerVendor.secret" }))[0]?.value).toBe(
       "test-tok-123",
     );
 
@@ -146,9 +146,9 @@ describe("embedded connection auth", () => {
     createdConnectionIds.push(connection.id);
 
     expect(connection.authConfigKey).toBe("SHARED_VENDOR_KEY");
-    expect(managedBindingFor(connection.id)?.config_key).toBe("SHARED_VENDOR_KEY");
+    expect((await managedBindingFor(connection.id))?.config_key).toBe("SHARED_VENDOR_KEY");
     // No derived secret key was written.
-    expect(getSwarmConfigs({ key: "connection.sharedVendor.secret" })).toHaveLength(0);
+    expect(await getSwarmConfigs({ key: "connection.sharedVendor.secret" })).toHaveLength(0);
   });
 
   test("query auth derives a query template and NO Authorization header", async () => {
@@ -162,7 +162,7 @@ describe("embedded connection auth", () => {
     });
     createdConnectionIds.push(connection.id);
 
-    const binding = managedBindingFor(connection.id);
+    const binding = await managedBindingFor(connection.id);
     expect(binding?.header_template).toBeNull();
     expect(binding?.query_template).toBe("api_key=[REDACTED:connection.queryVendor.secret]");
     expect(connection.authType).toBe("query");
@@ -180,14 +180,14 @@ describe("embedded connection auth", () => {
     });
     createdConnectionIds.push(connection.id);
 
-    const binding = managedBindingFor(connection.id);
+    const binding = await managedBindingFor(connection.id);
     expect(binding?.header_template).toBe("X-Api-Key: [REDACTED:connection.headerVendor.secret]");
     expect(binding?.query_template).toBeNull();
     expect(connection.authParamName).toBe("X-Api-Key");
   });
 
   test("oauth auth validates the authorization and derives a bearer binding", async () => {
-    upsertOAuthApp("embeddedvendor", {
+    await upsertOAuthApp("embeddedvendor", {
       clientId: "cid",
       clientSecret: "csecret",
       authorizeUrl: "https://vendor.test/authorize",
@@ -195,9 +195,9 @@ describe("embedded connection auth", () => {
       redirectUri: "https://swarm.test/api/oauth/callback",
       scopes: "read",
     });
-    const app = getOAuthApp("embeddedvendor");
+    const app = await getOAuthApp("embeddedvendor");
     if (!app) throw new Error("app not created");
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId: app.id,
       accessToken: "oauth-access-token",
       status: "active",
@@ -214,13 +214,13 @@ describe("embedded connection auth", () => {
 
     expect(connection.authType).toBe("oauth");
     expect(connection.authAuthorizationId).toBe(authorization.id);
-    const binding = managedBindingFor(connection.id);
+    const binding = await managedBindingFor(connection.id);
     expect(binding?.auth_kind).toBe("oauth");
     expect(binding?.oauth_authorization_id).toBe(authorization.id);
     expect(binding?.header_template).toContain("Authorization: Bearer [REDACTED:");
 
     // Cleanup: removing the app cascades the authorization (and SET-NULLs the ref).
-    getDb().run("DELETE FROM oauth_apps WHERE id = ?", app.id);
+    await getDbClient().run("DELETE FROM oauth_apps WHERE id = ?", [app.id]);
   });
 
   test("oauth auth with an unknown authorization is rejected", async () => {
@@ -256,9 +256,10 @@ describe("embedded connection auth", () => {
     ).rejects.toThrow(/was not found/);
 
     // The rejection happens before any DB write — no connection row is saved.
-    const row = getDb()
-      .prepare<{ id: string }, [string]>("SELECT id FROM script_connections WHERE slug = ?")
-      .get("openapiBadAuth");
+    const row = await getDbClient().get<{ id: string }>(
+      "SELECT id FROM script_connections WHERE slug = ?",
+      ["openapiBadAuth"],
+    );
     expect(row).toBeNull();
   });
 
@@ -298,7 +299,7 @@ describe("embedded connection auth", () => {
       allowedHosts: ["api2.vendor.test"],
     });
     expect(updated.authConfigKey).toBe("REDERIVE_KEY");
-    const binding = managedBindingFor(connection.id);
+    const binding = await managedBindingFor(connection.id);
     expect(JSON.parse(binding?.allowed_hosts_json ?? "[]")).toEqual(["api2.vendor.test"]);
   });
 
@@ -312,7 +313,7 @@ describe("embedded connection auth", () => {
       auth: { type: "bearer", secret: "slug-secret-1" },
     });
     createdConnectionIds.push(connection.id);
-    expect(getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(1);
+    expect(await getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(1);
 
     const renamed = await upsertScriptConnection({
       id: connection.id,
@@ -324,8 +325,10 @@ describe("embedded connection auth", () => {
     });
     expect(renamed.authConfigKey).toBe("connection.slugTwo.secret");
     // Old derived secret is gone; the new one holds the new value.
-    expect(getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(0);
-    expect(getSwarmConfigs({ key: "connection.slugTwo.secret" })[0]?.value).toBe("slug-secret-2");
+    expect(await getSwarmConfigs({ key: "connection.slugOne.secret" })).toHaveLength(0);
+    expect((await getSwarmConfigs({ key: "connection.slugTwo.secret" }))[0]?.value).toBe(
+      "slug-secret-2",
+    );
     // Stale key no longer scrubbed; new key is.
     await buildScriptCredentialBindings({});
     expect(scrubSecrets("v=slug-secret-2")).toContain("[REDACTED:connection.slugTwo.secret]");
@@ -333,7 +336,7 @@ describe("embedded connection auth", () => {
 
   test("switching an inline-secret connection to oauth deletes the derived inline secret", async () => {
     createdConfigKeys.push("connection.switchVendor.secret");
-    upsertOAuthApp("switchvendor", {
+    await upsertOAuthApp("switchvendor", {
       clientId: "cid",
       clientSecret: "csecret",
       authorizeUrl: "https://vendor.test/authorize",
@@ -341,9 +344,9 @@ describe("embedded connection auth", () => {
       redirectUri: "https://swarm.test/api/oauth/callback",
       scopes: "read",
     });
-    const app = getOAuthApp("switchvendor");
+    const app = await getOAuthApp("switchvendor");
     if (!app) throw new Error("app not created");
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId: app.id,
       accessToken: "oauth-access-token",
       status: "active",
@@ -357,7 +360,7 @@ describe("embedded connection auth", () => {
       auth: { type: "bearer", secret: "switch-secret" },
     });
     createdConnectionIds.push(connection.id);
-    expect(getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(1);
+    expect(await getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(1);
 
     const switched = await upsertScriptConnection({
       id: connection.id,
@@ -369,9 +372,9 @@ describe("embedded connection auth", () => {
     });
     expect(switched.authType).toBe("oauth");
     // The derived inline secret is orphaned by the switch and is deleted.
-    expect(getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(0);
+    expect(await getSwarmConfigs({ key: "connection.switchVendor.secret" })).toHaveLength(0);
 
-    getDb().run("DELETE FROM oauth_apps WHERE id = ?", app.id);
+    await getDbClient().run("DELETE FROM oauth_apps WHERE id = ?", [app.id]);
   });
 
   test("metadata-only rename preserves the derived inline secret (not deleted)", async () => {
@@ -395,7 +398,9 @@ describe("embedded connection auth", () => {
       allowedHosts: ["api2.vendor.test"],
     });
     expect(updated.authConfigKey).toBe("connection.keepVendor.secret");
-    expect(getSwarmConfigs({ key: "connection.keepVendor.secret" })[0]?.value).toBe("keep-secret");
+    expect((await getSwarmConfigs({ key: "connection.keepVendor.secret" }))[0]?.value).toBe(
+      "keep-secret",
+    );
   });
 
   test("clearing auth AFTER a rename deletes the renamed derived inline secret", async () => {
@@ -408,7 +413,7 @@ describe("embedded connection auth", () => {
       auth: { type: "bearer", secret: "rename-secret" },
     });
     createdConnectionIds.push(connection.id);
-    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
+    expect(await getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
 
     // Metadata-only rename with a blank secret field (no `auth`): reconstruct
     // keeps referencing `connection.renameOne.secret` even though the slug is now
@@ -421,7 +426,7 @@ describe("embedded connection auth", () => {
       allowedHosts: ["api.vendor.test"],
     });
     expect(renamed.authConfigKey).toBe("connection.renameOne.secret");
-    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
+    expect(await getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(1);
 
     // Later switch to `none`: the owned key is `connection.renameOne.secret`,
     // NOT the slug-derived `connection.renameTwo.secret`. It must be deleted so
@@ -435,7 +440,7 @@ describe("embedded connection auth", () => {
       auth: { type: "none" },
     });
     expect(cleared.authType).toBe("none");
-    expect(getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(0);
+    expect(await getSwarmConfigs({ key: "connection.renameOne.secret" })).toHaveLength(0);
   });
 
   test("a user configKey may not use the reserved connection.*.secret namespace", async () => {
@@ -459,7 +464,7 @@ describe("embedded connection auth", () => {
       auth: { type: "bearer", configKey: "CLEAR_KEY" },
     });
     createdConnectionIds.push(connection.id);
-    expect(managedBindingFor(connection.id)).toBeTruthy();
+    expect(await managedBindingFor(connection.id)).toBeTruthy();
 
     const cleared = await upsertScriptConnection({
       id: connection.id,
@@ -471,7 +476,7 @@ describe("embedded connection auth", () => {
     });
     expect(cleared.authType).toBe("none");
     expect(cleared.credentialBindingId).toBeNull();
-    expect(managedBindingFor(connection.id)).toBeNull();
+    expect(await managedBindingFor(connection.id)).toBeNull();
   });
 
   test("deleting a connection cascades its managed binding", async () => {
@@ -482,9 +487,9 @@ describe("embedded connection auth", () => {
       allowedHosts: ["api.vendor.test"],
       auth: { type: "bearer", configKey: "CASCADE_KEY" },
     });
-    expect(managedBindingFor(connection.id)).toBeTruthy();
-    getDb().run("DELETE FROM script_connections WHERE id = ?", connection.id);
-    expect(managedBindingFor(connection.id)).toBeNull();
+    expect(await managedBindingFor(connection.id)).toBeTruthy();
+    await getDbClient().run("DELETE FROM script_connections WHERE id = ?", [connection.id]);
+    expect(await managedBindingFor(connection.id)).toBeNull();
   });
 
   test("managed bindings are hidden from the standalone list but visible to the broker", async () => {
@@ -497,20 +502,20 @@ describe("embedded connection auth", () => {
     });
     createdConnectionIds.push(connection.id);
 
-    const standalone = listRelationalCredentialBindings({
+    const standalone = await listRelationalCredentialBindings({
       includeInactive: true,
       excludeManaged: true,
     });
     expect(standalone.some((b) => b.managedByConnectionId === connection.id)).toBe(false);
 
-    const all = listRelationalCredentialBindings({ includeInactive: true });
+    const all = await listRelationalCredentialBindings({ includeInactive: true });
     expect(all.some((b) => b.managedByConnectionId === connection.id)).toBe(true);
   });
 
   test("connection auth upsert does NOT adopt a user's standalone raw-fetch binding", async () => {
     // A binding the user created directly (raw fetch egress) — same configKey /
     // scope / header template a connection would derive, but NOT connection-owned.
-    const standalone = upsertCredentialBinding({
+    const standalone = await upsertCredentialBinding({
       configKey: "SHARED_ADOPT_KEY",
       allowedHosts: ["user.example.test"],
       headerTemplate: "Authorization: Bearer [REDACTED:SHARED_ADOPT_KEY]",
@@ -530,24 +535,24 @@ describe("embedded connection auth", () => {
     });
     createdConnectionIds.push(connection.id);
 
-    const managed = managedBindingFor(connection.id);
+    const managed = await managedBindingFor(connection.id);
     expect(managed).toBeTruthy();
     expect(managed?.id).not.toBe(standalone.id);
 
     // The user's standalone row is untouched: still user-owned, still its hosts.
-    const row = getDb()
-      .prepare<
-        { source: string; managed_by_connection_id: string | null; allowed_hosts_json: string },
-        [string]
-      >(
-        "SELECT source, managed_by_connection_id, allowed_hosts_json FROM script_credential_bindings WHERE id = ?",
-      )
-      .get(standalone.id);
+    const row = await getDbClient().get<{
+      source: string;
+      managed_by_connection_id: string | null;
+      allowed_hosts_json: string;
+    }>(
+      "SELECT source, managed_by_connection_id, allowed_hosts_json FROM script_credential_bindings WHERE id = ?",
+      [standalone.id],
+    );
     expect(row?.source).toBe("user");
     expect(row?.managed_by_connection_id).toBeNull();
     expect(JSON.parse(row?.allowed_hosts_json ?? "[]")).toEqual(["user.example.test"]);
 
-    getDb().run("DELETE FROM script_credential_bindings WHERE id = ?", standalone.id);
+    await getDbClient().run("DELETE FROM script_credential_bindings WHERE id = ?", [standalone.id]);
   });
 
   test("openapi metadata/auth-only edit preserves the stored spec (no wipe to {})", async () => {
@@ -568,7 +573,7 @@ describe("embedded connection auth", () => {
       kind: "openapi",
       displayName: "Renamed Vendor",
     });
-    const stored = getScriptConnectionById(created.id);
+    const stored = await getScriptConnectionById(created.id);
     expect(edited.displayName).toBe("Renamed Vendor");
     expect(Object.keys(JSON.parse(stored?.openapiSpecJson ?? "{}").paths ?? {})).toContain("/me");
   });
@@ -584,8 +589,8 @@ describe("embedded connection auth", () => {
     ).rejects.toThrow(/MCP connections resolve auth/);
   });
 
-  test("legacy SCRIPT_CREDENTIAL_BINDINGS blob migrates once and is idempotent", () => {
-    upsertSwarmConfig({
+  test("legacy SCRIPT_CREDENTIAL_BINDINGS blob migrates once and is idempotent", async () => {
+    await upsertSwarmConfig({
       scope: "global",
       key: "SCRIPT_CREDENTIAL_BINDINGS",
       value: JSON.stringify({
@@ -601,8 +606,8 @@ describe("embedded connection auth", () => {
 
     const first = migrateLegacyCredentialBindingBlob(getDb());
     expect(first).toBe(1);
-    expect(getSwarmConfigs({ key: "SCRIPT_CREDENTIAL_BINDINGS" })).toHaveLength(0);
-    const migrated = listRelationalCredentialBindings({ includeInactive: true }).find(
+    expect(await getSwarmConfigs({ key: "SCRIPT_CREDENTIAL_BINDINGS" })).toHaveLength(0);
+    const migrated = (await listRelationalCredentialBindings({ includeInactive: true })).find(
       (b) => b.configKey === "BLOB_VENDOR_KEY",
     );
     expect(migrated?.source).toBe("migration");
@@ -611,14 +616,16 @@ describe("embedded connection auth", () => {
     // Idempotent second pass.
     expect(migrateLegacyCredentialBindingBlob(getDb())).toBe(0);
 
-    getDb().run("DELETE FROM script_credential_bindings WHERE config_key = 'BLOB_VENDOR_KEY'");
+    await getDbClient().run(
+      "DELETE FROM script_credential_bindings WHERE config_key = 'BLOB_VENDOR_KEY'",
+    );
   });
 
-  test("agent-scoped blob entries that omit scope inherit the config row scope (no leak)", () => {
+  test("agent-scoped blob entries that omit scope inherit the config row scope (no leak)", async () => {
     // Legacy blob stored under an agent-scoped swarm_config row. The first entry
     // omits its own scope (must inherit "agent"); the second pins "global"
     // explicitly (must stay global).
-    upsertSwarmConfig({
+    await upsertSwarmConfig({
       scope: "agent",
       scopeId: "agent-scope-owner",
       key: "SCRIPT_CREDENTIAL_BINDINGS",
@@ -645,21 +652,20 @@ describe("embedded connection auth", () => {
     // applies scope filtering (an agent-scoped row needs an agentId context),
     // and here we want to assert the persisted scope/scope_id verbatim.
     const rowFor = (configKey: string) =>
-      getDb()
-        .prepare<{ scope: string; scope_id: string | null }, [string]>(
-          "SELECT scope, scope_id FROM script_credential_bindings WHERE config_key = ?",
-        )
-        .get(configKey);
+      getDbClient().get<{ scope: string; scope_id: string | null }>(
+        "SELECT scope, scope_id FROM script_credential_bindings WHERE config_key = ?",
+        [configKey],
+      );
 
-    const scoped = rowFor("SCOPED_VENDOR_KEY");
+    const scoped = await rowFor("SCOPED_VENDOR_KEY");
     expect(scoped?.scope).toBe("agent");
     expect(scoped?.scope_id).toBe("agent-scope-owner");
 
-    const global = rowFor("GLOBAL_VENDOR_KEY");
+    const global = await rowFor("GLOBAL_VENDOR_KEY");
     expect(global?.scope).toBe("global");
     expect(global?.scope_id).toBeNull();
 
-    getDb().run(
+    await getDbClient().run(
       "DELETE FROM script_credential_bindings WHERE config_key IN ('SCOPED_VENDOR_KEY', 'GLOBAL_VENDOR_KEY')",
     );
   });

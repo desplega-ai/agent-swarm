@@ -90,7 +90,7 @@ export async function handleCodexOAuthKeepWarm(
   for (const { slot, creds } of slots) {
     const keySuffix = deriveCodexKeySuffix(creds.access, creds.accountId);
 
-    if (getKv(AUTH_WATCH_NAMESPACE, `bench:${keySuffix}`)) {
+    if (await getKv(AUTH_WATCH_NAMESPACE, `bench:${keySuffix}`)) {
       results.push({ slot, keySuffix, outcome: "skipped-benched" });
       continue;
     }

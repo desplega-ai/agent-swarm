@@ -16,7 +16,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, createUser, deleteKv, getDb, getKv, initDb } from "../be/db";
+import { closeDb, createAgent, createUser, deleteKv, getDbClient, getKv, initDb } from "../be/db";
 import { linkIdentity } from "../be/users";
 import {
   handleComment,
@@ -56,7 +56,7 @@ beforeAll(async () => {
   await unlink(`${TEST_DB_PATH}-wal`).catch(() => {});
   await unlink(`${TEST_DB_PATH}-shm`).catch(() => {});
   initDb(TEST_DB_PATH);
-  createAgent({
+  await createAgent({
     id: "lead-gh-handlers",
     name: "GitHubHandlersTestLead",
     status: "idle",
@@ -72,10 +72,10 @@ afterAll(async () => {
 });
 
 // Clear unmapped kv rows + tasks between tests to keep assertions independent.
-beforeEach(() => {
-  const db = getDb();
-  db.prepare("DELETE FROM kv_entries WHERE namespace = ?").run(UNMAPPED_NAMESPACE);
-  db.prepare("DELETE FROM agent_tasks").run();
+beforeEach(async () => {
+  const client = getDbClient();
+  await client.run("DELETE FROM kv_entries WHERE namespace = ?", [UNMAPPED_NAMESPACE]);
+  await client.run("DELETE FROM agent_tasks");
 });
 
 // ── Helpers ──
@@ -168,19 +168,18 @@ function makeReviewEvent(
   };
 }
 
-function getMappedUserTaskCount(userId: string): number {
-  const row = getDb()
-    .prepare<{ n: number }, string>(
-      "SELECT COUNT(*) AS n FROM agent_tasks WHERE requestedByUserId = ?",
-    )
-    .get(userId);
+async function getMappedUserTaskCount(userId: string): Promise<number> {
+  const row = await getDbClient().get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM agent_tasks WHERE requestedByUserId = ?",
+    [userId],
+  );
   return row?.n ?? 0;
 }
 
-function getLatestTaskText(): string | null {
-  const row = getDb()
-    .prepare<{ task: string }, []>("SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1")
-    .get();
+async function getLatestTaskText(): Promise<string | null> {
+  const row = await getDbClient().get<{ task: string }>(
+    "SELECT task FROM agent_tasks ORDER BY rowid DESC LIMIT 1",
+  );
   return row?.task ?? null;
 }
 
@@ -188,20 +187,20 @@ function getLatestTaskText(): string | null {
 
 describe("known github sender", () => {
   test("PR event from a mapped user populates requestedByUserId and writes no kv rows", async () => {
-    const user = createUser({ name: "Mapped User", email: "mapped@example.com" });
-    linkIdentity(user.id, "github", "mapped-login", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Mapped User", email: "mapped@example.com" });
+    await linkIdentity(user.id, "github", "mapped-login", SYSTEM_ACTOR);
 
     const result = await handlePullRequest(makePREvent("mapped-login", 100));
     // Even if the PR doesn't create a task (no mention), the sender resolution
     // side effects are what we're testing — assert no kv writes happened.
     expect(result.created).toBeDefined();
-    expect(getKv(UNMAPPED_NAMESPACE, "mapped-login:meta")).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, "mapped-login:count")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "mapped-login:meta")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "mapped-login:count")).toBeNull();
   });
 
   test("PR with bot assignment from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Assigner", email: "assigner@example.com" });
-    linkIdentity(user.id, "github", "assigner", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Mapped Assigner", email: "assigner@example.com" });
+    await linkIdentity(user.id, "github", "assigner", SYSTEM_ACTOR);
 
     const event: PullRequestEvent = {
       action: "assigned",
@@ -212,50 +211,50 @@ describe("known github sender", () => {
     };
     const result = await handlePullRequest(event);
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
-    expect(getKv(UNMAPPED_NAMESPACE, "assigner:meta")).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, "assigner:count")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "assigner:meta")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "assigner:count")).toBeNull();
   });
 
   test("comment event with bot mention from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
-    linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Mapped Commenter", email: "commenter@example.com" });
+    await linkIdentity(user.id, "github", "commenter", SYSTEM_ACTOR);
 
     const result = await handleComment(
       makeCommentEvent("commenter", `Hey @${GITHUB_BOT_NAME} please take a look`),
       "issue_comment",
     );
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
-    expect(getKv(UNMAPPED_NAMESPACE, "commenter:meta")).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, "commenter:count")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "commenter:meta")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "commenter:count")).toBeNull();
   });
 
   test("review event from mapped user puts user id on the task", async () => {
-    const user = createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
-    linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Mapped Reviewer", email: "reviewer@example.com" });
+    await linkIdentity(user.id, "github", "reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("reviewer"));
     expect(result.created).toBe(true);
-    expect(getMappedUserTaskCount(user.id)).toBe(1);
+    expect(await getMappedUserTaskCount(user.id)).toBe(1);
 
     // Mapped sender → no unmapped kv writes.
-    expect(getKv(UNMAPPED_NAMESPACE, "reviewer:meta")).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, "reviewer:count")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "reviewer:meta")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "reviewer:count")).toBeNull();
   });
 
   test("review event from mapped user renders the resolved identity pair, never the raw login", async () => {
-    const user = createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
-    linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
+    const user = await createUser({ name: "Pair Reviewer", email: "pair-reviewer@example.com" });
+    await linkIdentity(user.id, "github", "pair-reviewer", SYSTEM_ACTOR);
 
     const result = await handlePullRequestReview(makeReviewEvent("pair-reviewer", 1001));
     expect(result.created).toBe(true);
 
-    const text = getLatestTaskText();
+    const text = await getLatestTaskText();
     expect(text).toContain("Pair Reviewer (github:pair-reviewer)");
   });
 });
@@ -268,9 +267,9 @@ describe("self-authored review suppression", () => {
 
     expect(result.created).toBe(false);
     expect(
-      getDb().prepare<{ n: number }, never>("SELECT COUNT(*) AS n FROM agent_tasks").get()?.n,
+      (await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM agent_tasks"))?.n,
     ).toBe(0);
-    expect(getKv(UNMAPPED_NAMESPACE, `${GITHUB_BOT_NAME}:meta`)).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, `${GITHUB_BOT_NAME}:meta`)).toBeNull();
   });
 
   test("commented review from the bot is ignored before inline comments are fetched", async () => {
@@ -321,7 +320,7 @@ describe("unknown github sender", () => {
   test("PR event from unknown user writes :meta + :count = 1", async () => {
     await handlePullRequest(makePREvent("ghost-login", 300));
 
-    const meta = getKv(UNMAPPED_NAMESPACE, "ghost-login:meta");
+    const meta = await getKv(UNMAPPED_NAMESPACE, "ghost-login:meta");
     expect(meta).not.toBeNull();
     expect(meta?.valueType).toBe("json");
     const metaValue = meta?.value as {
@@ -332,7 +331,7 @@ describe("unknown github sender", () => {
     expect(metaValue.sampleEventType).toBe("pull_request");
     expect(metaValue.sampleContext).toContain("PR #300");
 
-    const count = getKv(UNMAPPED_NAMESPACE, "ghost-login:count");
+    const count = await getKv(UNMAPPED_NAMESPACE, "ghost-login:count");
     expect(count?.valueType).toBe("integer");
     expect(count?.value).toBe(1);
   });
@@ -341,14 +340,14 @@ describe("unknown github sender", () => {
     await handlePullRequest(makePREvent("repeater", 400));
     await handlePullRequest(makePREvent("repeater", 401));
 
-    const count = getKv(UNMAPPED_NAMESPACE, "repeater:count");
+    const count = await getKv(UNMAPPED_NAMESPACE, "repeater:count");
     expect(count?.value).toBe(2);
   });
 
   test("issue event from unknown user writes sampleEventType = 'issues'", async () => {
     await handleIssue(makeIssueEvent("issue-ghost", 50));
 
-    const meta = getKv(UNMAPPED_NAMESPACE, "issue-ghost:meta");
+    const meta = await getKv(UNMAPPED_NAMESPACE, "issue-ghost:meta");
     const metaValue = meta?.value as { sampleEventType: string; sampleContext: string };
     expect(metaValue.sampleEventType).toBe("issues");
     expect(metaValue.sampleContext).toContain("Issue #50");
@@ -363,7 +362,7 @@ describe("unknown github sender", () => {
       "issue_comment",
     );
 
-    const meta = getKv(UNMAPPED_NAMESPACE, "comment-ghost:meta");
+    const meta = await getKv(UNMAPPED_NAMESPACE, "comment-ghost:meta");
     const metaValue = meta?.value as { sampleEventType: string; sampleContext: string };
     expect(metaValue.sampleEventType).toBe("issue_comment");
     expect(metaValue.sampleContext).toContain("just a comment");
@@ -372,7 +371,7 @@ describe("unknown github sender", () => {
   test("review event from unknown user writes sampleEventType = 'pull_request_review'", async () => {
     await handlePullRequestReview(makeReviewEvent("review-ghost"));
 
-    const meta = getKv(UNMAPPED_NAMESPACE, "review-ghost:meta");
+    const meta = await getKv(UNMAPPED_NAMESPACE, "review-ghost:meta");
     const metaValue = meta?.value as { sampleEventType: string; sampleContext: string };
     expect(metaValue.sampleEventType).toBe("pull_request_review");
     expect(metaValue.sampleContext).toContain("Review on PR #99");
@@ -383,7 +382,7 @@ describe("unknown github sender", () => {
     const longBody = "x".repeat(200);
     await handleComment(makeCommentEvent("trunc-ghost", longBody), "issue_comment");
 
-    const meta = getKv(UNMAPPED_NAMESPACE, "trunc-ghost:meta");
+    const meta = await getKv(UNMAPPED_NAMESPACE, "trunc-ghost:meta");
     const metaValue = meta?.value as { sampleContext: string };
     expect(metaValue.sampleContext.length).toBeLessThanOrEqual(100);
   });
@@ -392,7 +391,7 @@ describe("unknown github sender", () => {
     const result = await handlePullRequestReview(makeReviewEvent("sentinel-ghost", 1002));
     expect(result.created).toBe(true);
 
-    const text = getLatestTaskText();
+    const text = await getLatestTaskText();
     expect(text).toContain("github:sentinel-ghost (unknown user)");
   });
 });
@@ -411,14 +410,14 @@ describe("no github email enrichment", () => {
 
   test("kv entries are cleaned up by deleteKv (operator triage flow)", async () => {
     await handlePullRequest(makePREvent("triage-target", 500));
-    expect(getKv(UNMAPPED_NAMESPACE, "triage-target:meta")).not.toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "triage-target:meta")).not.toBeNull();
 
     // Simulate the operator triage action that removes the kv entry after
     // mapping the identity manually (step-9 UI will do this).
-    deleteKv(UNMAPPED_NAMESPACE, "triage-target:meta");
-    deleteKv(UNMAPPED_NAMESPACE, "triage-target:count");
+    await deleteKv(UNMAPPED_NAMESPACE, "triage-target:meta");
+    await deleteKv(UNMAPPED_NAMESPACE, "triage-target:count");
 
-    expect(getKv(UNMAPPED_NAMESPACE, "triage-target:meta")).toBeNull();
-    expect(getKv(UNMAPPED_NAMESPACE, "triage-target:count")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "triage-target:meta")).toBeNull();
+    expect(await getKv(UNMAPPED_NAMESPACE, "triage-target:count")).toBeNull();
   });
 });

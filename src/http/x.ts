@@ -159,7 +159,7 @@ export async function handleX(
   if (!scriptApiRoute.match(req.method, pathSegments)) return false;
 
   const endpointId = pathSegments[3] ?? "";
-  const endpoint = getScriptApiById(endpointId);
+  const endpoint = await getScriptApiById(endpointId);
   // Treat disabled endpoints as not-found so we don't leak their existence.
   if (!endpoint || !endpoint.enabled) {
     json(res, { error: { type: "not_found", message: "Endpoint not found" } }, 404);
@@ -168,7 +168,7 @@ export async function handleX(
 
   if (endpoint.authMode === "bearer") {
     const provided = extractBearer(req);
-    const expected = getScriptApiSecret(endpointId);
+    const expected = await getScriptApiSecret(endpointId);
     if (!provided || !expected || !timingSafeEqualStr(provided, expected)) {
       json(
         res,
@@ -195,7 +195,7 @@ export async function handleX(
     return true;
   }
 
-  const script = getScriptById(endpoint.scriptId);
+  const script = await getScriptById(endpoint.scriptId);
   if (!script) {
     json(res, { error: { type: "not_found", message: "Script not found" } }, 404);
     return true;
@@ -232,7 +232,7 @@ export async function handleX(
 
   // Touch before executing so an already-stale scratch script isn't reaped by
   // the retention sweep while this run is still in flight.
-  const runStartTouch = script.isScratch ? touchScratchScriptLastUsed(script.id) : null;
+  const runStartTouch = script.isScratch ? await touchScratchScriptLastUsed(script.id) : null;
 
   const credentials = await buildScriptCredentialBindingsWithFailures({
     agentId: endpoint.agentId,
@@ -257,22 +257,22 @@ export async function handleX(
   const ok = output.exitCode === 0 && !output.error && !output.runtimeError;
   const error = ok ? null : buildExecutionError(output);
   if (ok) {
-    touchScratchScriptLastUsed(script.id);
+    await touchScratchScriptLastUsed(script.id);
   } else if (script.isScratch && runStartTouch) {
     // Failed run — restore the pre-run timestamp so it doesn't buy the
     // script another retention window, unless a concurrent run already
     // touched it since.
-    restoreScratchScriptLastUsedIfUnchanged(script.id, script.updatedAt, runStartTouch);
+    await restoreScratchScriptLastUsedIfUnchanged(script.id, script.updatedAt, runStartTouch);
   }
 
   // Usage + observability — best-effort, must never fail the response.
   try {
-    recordScriptApiUsage(endpointId);
+    await recordScriptApiUsage(endpointId);
   } catch {
     // ignore
   }
   try {
-    recordInlineScriptRun({
+    await recordInlineScriptRun({
       id: crypto.randomUUID(),
       agentId: endpoint.agentId,
       source: script.source,

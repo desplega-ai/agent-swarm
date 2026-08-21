@@ -45,7 +45,7 @@ export const registerAppGetTool = (server: McpServer) => {
     },
     async ({ appId }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.use",
@@ -53,10 +53,10 @@ export const registerAppGetTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
-      const syncStatus = collectAppSyncStatus(app.id);
+      const syncStatus = await collectAppSyncStatus(app.id);
       const hasSyncStatus = Object.keys(syncStatus).length > 0;
       // Supplying `details` suppresses the registrar's JSON-data fallback, so
       // text-only harnesses must get the sync freshness surface here too.
@@ -100,7 +100,7 @@ export const registerAppQueryTool = (server: McpServer) => {
     },
     async ({ appId, query: queryName, params }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.use",
@@ -108,14 +108,14 @@ export const registerAppQueryTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       const query = app?.definition.queries?.[queryName];
       if (!app || !query) return toolErr(`App ${appId} or query "${queryName}" not found.`);
       const model = app.definition.models[query.model];
       if (!model) return toolErr(`Model "${query.model}" not found.`);
       let rows: AppRow[];
       try {
-        rows = applyQuery(listAppRows(app.id, query.model), query, model, params, queryName);
+        rows = applyQuery(await listAppRows(app.id, query.model), query, model, params, queryName);
       } catch (error) {
         if (!(error instanceof AppQueryParamsError)) throw error;
         return toolErr(error.message, {

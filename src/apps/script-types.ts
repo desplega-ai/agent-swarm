@@ -279,9 +279,9 @@ export function renderAppTypes(apps: AppRecord[]): string {
  * Generates types for every app. `context` is accepted for the future
  * `app.use` RBAC filter hook; apps are intentionally unfiltered today.
  */
-export function getScriptAppTypes(_context: ScriptTypeContext = {}): string {
+export async function getScriptAppTypes(_context: ScriptTypeContext = {}): Promise<string> {
   try {
-    return renderAppTypes(listAppRecords());
+    return renderAppTypes(await listAppRecords());
   } catch {
     return "";
   }

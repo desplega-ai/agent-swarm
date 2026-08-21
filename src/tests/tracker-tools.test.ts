@@ -25,14 +25,14 @@ afterAll(async () => {
 });
 
 describe("tracker-status (DB layer)", () => {
-  test("returns null when no OAuth app configured", () => {
-    const app = getOAuthApp("linear");
+  test("returns null when no OAuth app configured", async () => {
+    const app = await getOAuthApp("linear");
     // May or may not exist depending on test order, but the query itself should not throw
     expect(app === null || typeof app === "object").toBe(true);
   });
 
-  test("returns token info after storing tokens", () => {
-    upsertOAuthApp("linear", {
+  test("returns token info after storing tokens", async () => {
+    await upsertOAuthApp("linear", {
       clientId: "test-client",
       clientSecret: "test-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
@@ -41,22 +41,22 @@ describe("tracker-status (DB layer)", () => {
       scopes: "read,write",
     });
 
-    storeOAuthTokens("linear", {
+    await storeOAuthTokens("linear", {
       accessToken: "test-token",
       refreshToken: "test-refresh",
       expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
       scope: "read,write",
     });
 
-    const app = getOAuthApp("linear");
+    const app = await getOAuthApp("linear");
     expect(app).not.toBeNull();
     expect(app!.clientId).toBe("test-client");
   });
 });
 
 describe("tracker-link-task (DB layer)", () => {
-  test("creates a task sync mapping", () => {
-    const sync = createTrackerSync({
+  test("creates a task sync mapping", async () => {
+    const sync = await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "tool-task-001",
@@ -73,53 +73,53 @@ describe("tracker-link-task (DB layer)", () => {
     expect(sync.externalId).toBe("LIN-TOOL-001");
   });
 
-  test("duplicate link throws", () => {
-    expect(() =>
+  test("duplicate link throws", async () => {
+    await expect(
       createTrackerSync({
         provider: "linear",
         entityType: "task",
         swarmId: "tool-task-001",
         externalId: "LIN-TOOL-DIFFERENT",
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });
 
 describe("tracker-unlink (DB layer)", () => {
-  test("removes a sync mapping", () => {
-    const sync = createTrackerSync({
+  test("removes a sync mapping", async () => {
+    const sync = await createTrackerSync({
       provider: "linear",
       entityType: "task",
       swarmId: "tool-task-unlink",
       externalId: "LIN-UNLINK-001",
     });
 
-    expect(getTrackerSync("linear", "task", "tool-task-unlink")).not.toBeNull();
+    expect(await getTrackerSync("linear", "task", "tool-task-unlink")).not.toBeNull();
 
-    deleteTrackerSync(sync.id);
+    await deleteTrackerSync(sync.id);
 
-    expect(getTrackerSync("linear", "task", "tool-task-unlink")).toBeNull();
+    expect(await getTrackerSync("linear", "task", "tool-task-unlink")).toBeNull();
   });
 });
 
 describe("tracker-sync-status (DB layer)", () => {
-  test("returns all syncs", () => {
-    const all = getAllTrackerSyncs();
+  test("returns all syncs", async () => {
+    const all = await getAllTrackerSyncs();
     expect(all.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("filters by provider", () => {
-    const linear = getAllTrackerSyncs("linear");
+  test("filters by provider", async () => {
+    const linear = await getAllTrackerSyncs("linear");
     expect(linear.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("filters by entityType", () => {
-    const tasks = getAllTrackerSyncs(undefined, "task");
+  test("filters by entityType", async () => {
+    const tasks = await getAllTrackerSyncs(undefined, "task");
     expect(tasks.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("filters by both provider and entityType", () => {
-    const linearTasks = getAllTrackerSyncs("linear", "task");
+  test("filters by both provider and entityType", async () => {
+    const linearTasks = await getAllTrackerSyncs("linear", "task");
     expect(linearTasks.length).toBeGreaterThanOrEqual(1);
     for (const sync of linearTasks) {
       expect(sync.provider).toBe("linear");
@@ -129,8 +129,8 @@ describe("tracker-sync-status (DB layer)", () => {
 });
 
 describe("tracker-map-agent (DB layer)", () => {
-  test("creates an agent mapping", () => {
-    const mapping = createTrackerAgentMapping({
+  test("creates an agent mapping", async () => {
+    const mapping = await createTrackerAgentMapping({
       provider: "linear",
       agentId: "tool-agent-001",
       externalUserId: "lin-user-tool-001",
@@ -144,19 +144,19 @@ describe("tracker-map-agent (DB layer)", () => {
     expect(mapping.agentName).toBe("Test Coder");
   });
 
-  test("duplicate agent mapping throws", () => {
-    expect(() =>
+  test("duplicate agent mapping throws", async () => {
+    await expect(
       createTrackerAgentMapping({
         provider: "linear",
         agentId: "tool-agent-001",
         externalUserId: "lin-user-different",
         agentName: "Duplicate",
       }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  test("getAllTrackerAgentMappings returns mappings", () => {
-    const all = getAllTrackerAgentMappings("linear");
+  test("getAllTrackerAgentMappings returns mappings", async () => {
+    const all = await getAllTrackerAgentMappings("linear");
     expect(all.length).toBeGreaterThanOrEqual(1);
     expect(all.some((m) => m.agentId === "tool-agent-001")).toBe(true);
   });

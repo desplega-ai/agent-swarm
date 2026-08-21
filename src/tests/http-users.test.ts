@@ -27,7 +27,7 @@ import {
   createWorkflow,
   createWorkflowRun,
   getBudget,
-  getDb,
+  getDbClient,
   getScheduledTaskById,
   getWorkflowRun,
   initDb,
@@ -98,19 +98,19 @@ afterAll(async () => {
   }
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Clean slate between tests for deterministic event counts.
-  const db = getDb();
-  db.run("DELETE FROM user_identity_events");
-  db.run("DELETE FROM user_external_ids");
-  db.run("DELETE FROM user_tokens");
-  db.run("DELETE FROM workflow_run_steps");
-  db.run("DELETE FROM workflow_runs");
-  db.run("DELETE FROM workflows");
-  db.run("DELETE FROM scheduled_tasks");
-  db.run("DELETE FROM users");
-  db.run("DELETE FROM budgets");
-  db.run("DELETE FROM kv_entries");
+  const client = getDbClient();
+  await client.run("DELETE FROM user_identity_events");
+  await client.run("DELETE FROM user_external_ids");
+  await client.run("DELETE FROM user_tokens");
+  await client.run("DELETE FROM workflow_run_steps");
+  await client.run("DELETE FROM workflow_runs");
+  await client.run("DELETE FROM workflows");
+  await client.run("DELETE FROM scheduled_tasks");
+  await client.run("DELETE FROM users");
+  await client.run("DELETE FROM budgets");
+  await client.run("DELETE FROM kv_entries");
 });
 
 function url(path: string): string {
@@ -149,8 +149,8 @@ describe("auth", () => {
 
 describe("GET /api/users", () => {
   test("returns users composed with identities, tokens, recentEvents", async () => {
-    const u = createUser({ name: "Composed", email: "c@x.com" });
-    linkIdentity(u.id, "slack", "U_COMP", { kind: "operator", id: OPERATOR_FP });
+    const u = await createUser({ name: "Composed", email: "c@x.com" });
+    await linkIdentity(u.id, "slack", "U_COMP", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch("/api/users");
     expect(r.status).toBe(200);
@@ -213,25 +213,25 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(create.status).toBe(200);
     const { user } = (await create.json()) as { user: { id: string } };
-    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(1.25);
+    expect((await getBudget("user", user.id))?.dailyBudgetUsd).toBe(1.25);
 
     const update = await authedFetch(`/api/users/${user.id}`, {
       method: "PATCH",
       body: JSON.stringify({ dailyBudgetUsd: 2.5 }),
     });
     expect(update.status).toBe(200);
-    expect(getBudget("user", user.id)?.dailyBudgetUsd).toBe(2.5);
+    expect((await getBudget("user", user.id))?.dailyBudgetUsd).toBe(2.5);
 
     const remove = await authedFetch(`/api/users/${user.id}`, {
       method: "PATCH",
       body: JSON.stringify({ dailyBudgetUsd: null }),
     });
     expect(remove.status).toBe(200);
-    expect(getBudget("user", user.id)).toBeNull();
+    expect(await getBudget("user", user.id)).toBeNull();
   });
 
   test("budget / status / emailAliases diffs each emit the right event types", async () => {
-    const u = createUser({
+    const u = await createUser({
       name: "Patcher",
       email: "p@x.com",
       emailAliases: ["a1@x.com"],
@@ -249,11 +249,10 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(r.status).toBe(200);
 
-    const events = getDb()
-      .prepare<{ eventType: string }, string>(
-        "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY rowid",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ eventType: string }>(
+      "SELECT eventType FROM user_identity_events WHERE userId = ? ORDER BY rowid",
+      [u.id],
+    );
     const types = events.map((e) => e.eventType);
     expect(types).toContain("budget_changed");
     expect(types).toContain("status_changed");
@@ -262,8 +261,8 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("identities complete-list diff adds + removes", async () => {
-    const u = createUser({ name: "IdDiff" });
-    linkIdentity(u.id, "slack", "U_OLD", { kind: "operator", id: OPERATOR_FP });
+    const u = await createUser({ name: "IdDiff" });
+    await linkIdentity(u.id, "slack", "U_OLD", { kind: "operator", id: OPERATOR_FP });
 
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
@@ -287,7 +286,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("profile_changed events fire for name / role / notes / timezone / preferredChannel edits", async () => {
-    const u = createUser({
+    const u = await createUser({
       name: "Old",
       email: "old@x.com",
       role: "viewer",
@@ -308,11 +307,10 @@ describe("PATCH /api/users/:id", () => {
     });
     expect(r.status).toBe(200);
 
-    const events = getDb()
-      .prepare<{ eventType: string; afterJson: string | null }, string>(
-        "SELECT eventType, afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed' ORDER BY rowid",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ eventType: string; afterJson: string | null }>(
+      "SELECT eventType, afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed' ORDER BY rowid",
+      [u.id],
+    );
     const fields = events
       .map((e) => (e.afterJson ? Object.keys(JSON.parse(e.afterJson))[0] : null))
       .filter((f): f is string => !!f);
@@ -324,18 +322,17 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("profile_changed does NOT fire when value is unchanged", async () => {
-    const u = createUser({ name: "Same", role: "admin" });
+    const u = await createUser({ name: "Same", role: "admin" });
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
       // role unchanged, only emit no events for it; status doesn't change here either
       body: JSON.stringify({ role: "admin", name: "Renamed" }),
     });
     expect(r.status).toBe(200);
-    const events = getDb()
-      .prepare<{ afterJson: string | null }, string>(
-        "SELECT afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed'",
-      )
-      .all(u.id);
+    const events = await getDbClient().query<{ afterJson: string | null }>(
+      "SELECT afterJson FROM user_identity_events WHERE userId = ? AND eventType = 'profile_changed'",
+      [u.id],
+    );
     const fields = events
       .map((e) => (e.afterJson ? Object.keys(JSON.parse(e.afterJson))[0] : null))
       .filter((f): f is string => !!f);
@@ -344,7 +341,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("comms merges into metadata.comms and preserves sibling metadata keys", async () => {
-    const u = createUser({ name: "CommsMerge", metadata: { customerId: "abc123" } });
+    const u = await createUser({ name: "CommsMerge", metadata: { customerId: "abc123" } });
 
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
@@ -361,7 +358,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("comms: null removes only the comms key", async () => {
-    const u = createUser({
+    const u = await createUser({
       name: "CommsRemove",
       metadata: { customerId: "abc123", comms: { tone: "formal" } },
     });
@@ -376,7 +373,7 @@ describe("PATCH /api/users/:id", () => {
   });
 
   test("comms combined with metadata applies metadata first then comms", async () => {
-    const u = createUser({ name: "CommsWithMetadata", metadata: { customerId: "abc123" } });
+    const u = await createUser({ name: "CommsWithMetadata", metadata: { customerId: "abc123" } });
 
     const r = await authedFetch(`/api/users/${u.id}`, {
       method: "PATCH",
@@ -396,7 +393,7 @@ describe("PATCH /api/users/:id", () => {
 
 describe("identity link/unlink", () => {
   test("POST then DELETE round-trips", async () => {
-    const u = createUser({ name: "RoundTrip" });
+    const u = await createUser({ name: "RoundTrip" });
 
     const add = await authedFetch(`/api/users/${u.id}/identities`, {
       method: "POST",
@@ -422,7 +419,7 @@ describe("identity link/unlink", () => {
     // Webhook auto-link can store an externalId containing `@` (AgentMail
     // email-as-id, Linear `@handle`). The UI sends the path URL-encoded; the
     // handler must decode before SELECT/DELETE or the row sticks around.
-    const u = createUser({ name: "DecodeDelete" });
+    const u = await createUser({ name: "DecodeDelete" });
     const literal = "@deletable";
 
     const add = await authedFetch(`/api/users/${u.id}/identities`, {
@@ -453,12 +450,12 @@ describe("identity link/unlink", () => {
 
 describe("GET /api/users/:id/events", () => {
   test("returns events DESC and respects limit + before cursor", async () => {
-    const u = createUser({ name: "EventList" });
+    const u = await createUser({ name: "EventList" });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
     // Emit a sequence of events with monotonically-increasing createdAt.
-    linkIdentity(u.id, "slack", "E1", actor);
-    linkIdentity(u.id, "slack", "E2", actor);
-    linkIdentity(u.id, "slack", "E3", actor);
+    await linkIdentity(u.id, "slack", "E1", actor);
+    await linkIdentity(u.id, "slack", "E2", actor);
+    await linkIdentity(u.id, "slack", "E3", actor);
 
     const r = await authedFetch(`/api/users/${u.id}/events?limit=2`);
     expect(r.status).toBe(200);
@@ -476,20 +473,20 @@ describe("GET /api/users/unmapped", () => {
   test("groups :meta + :count entries and sorts by count DESC", async () => {
     // Seed two unmapped identities with different counts.
     const ns = "integration:unmapped:slack";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "U_LOW:meta",
       value: { lastSeenAt: "2026-05-01T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "U_LOW:count", value: 1, valueType: "integer" });
-    upsertKv({
+    await upsertKv({ namespace: ns, key: "U_LOW:count", value: 1, valueType: "integer" });
+    await upsertKv({
       namespace: ns,
       key: "U_HIGH:meta",
       value: { lastSeenAt: "2026-05-15T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "U_HIGH:count", value: 5, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "U_HIGH:count", value: 5, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped?kind=slack");
     expect(r.status).toBe(200);
@@ -509,13 +506,13 @@ describe("GET /api/users/unmapped", () => {
 
   test("default unmapped list includes Kapso sender identities", async () => {
     const ns = "integration:unmapped:kapso";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "34679077777:meta",
       value: { lastSeenAt: "2026-05-20T00:00:00Z", sampleEventType: "kapso.message.received" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped");
     expect(r.status).toBe(200);
@@ -530,10 +527,15 @@ describe("GET /api/users/unmapped", () => {
 
 describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
   test("link-to-existing branch links + clears kv rows", async () => {
-    const existing = createUser({ name: "ExistingTarget" });
+    const existing = await createUser({ name: "ExistingTarget" });
     const ns = "integration:unmapped:slack";
-    upsertKv({ namespace: ns, key: "U_QA9:meta", value: { lastSeenAt: "x" }, valueType: "json" });
-    upsertKv({ namespace: ns, key: "U_QA9:count", value: 3, valueType: "integer" });
+    await upsertKv({
+      namespace: ns,
+      key: "U_QA9:meta",
+      value: { lastSeenAt: "x" },
+      valueType: "json",
+    });
+    await upsertKv({ namespace: ns, key: "U_QA9:count", value: 3, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/slack/U_QA9/resolve", {
       method: "POST",
@@ -554,8 +556,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
   test("create-new branch creates the user + links + clears kv rows", async () => {
     const ns = "integration:unmapped:github";
-    upsertKv({ namespace: ns, key: "ghuser:meta", value: { lastSeenAt: "x" }, valueType: "json" });
-    upsertKv({ namespace: ns, key: "ghuser:count", value: 1, valueType: "integer" });
+    await upsertKv({
+      namespace: ns,
+      key: "ghuser:meta",
+      value: { lastSeenAt: "x" },
+      valueType: "json",
+    });
+    await upsertKv({ namespace: ns, key: "ghuser:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/github/ghuser/resolve", {
       method: "POST",
@@ -571,13 +578,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
   test("create-new branch supports phone-only Kapso contacts without email", async () => {
     const ns = "integration:unmapped:kapso";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: "34679077777:meta",
       value: { lastSeenAt: "x", sampleEventType: "kapso.message.received" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: "34679077777:count", value: 1, valueType: "integer" });
 
     const r = await authedFetch("/api/users/unmapped/kapso/34679077777/resolve", {
       method: "POST",
@@ -609,13 +616,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     // before linking AND before deleting the two kv rows.
     const ns = "integration:unmapped:slack";
     const literal = "@alexdev";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: `${literal}:meta`,
       value: { lastSeenAt: "2026-05-19T00:00:00Z", sampleEventType: "message" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: `${literal}:count`, value: 2, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: `${literal}:count`, value: 2, valueType: "integer" });
 
     const r = await authedFetch(
       `/api/users/unmapped/slack/${encodeURIComponent(literal)}/resolve`,
@@ -648,13 +655,13 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
     const literalKind = "custom;crm";
     const ns = `integration:unmapped:${literalKind}`;
     const externalId = "CRM_42";
-    upsertKv({
+    await upsertKv({
       namespace: ns,
       key: `${externalId}:meta`,
       value: { lastSeenAt: "2026-05-19T00:00:00Z", sampleEventType: "lead" },
       valueType: "json",
     });
-    upsertKv({ namespace: ns, key: `${externalId}:count`, value: 4, valueType: "integer" });
+    await upsertKv({ namespace: ns, key: `${externalId}:count`, value: 4, valueType: "integer" });
 
     const r = await authedFetch(
       `/api/users/unmapped/${encodeURIComponent(literalKind)}/${externalId}/resolve`,
@@ -682,24 +689,28 @@ describe("POST /api/users/unmapped/:kind/:externalId/resolve", () => {
 
 describe("POST /api/users/:id/merge", () => {
   test("moves identities, removes source, leaves manual_merge event", async () => {
-    const target = createUser({ name: "Target", email: "t@x.com" });
-    const source = createUser({ name: "Source", email: "s@x.com", emailAliases: ["alt@x.com"] });
+    const target = await createUser({ name: "Target", email: "t@x.com" });
+    const source = await createUser({
+      name: "Source",
+      email: "s@x.com",
+      emailAliases: ["alt@x.com"],
+    });
     const actor = { kind: "operator" as const, id: OPERATOR_FP };
-    linkIdentity(source.id, "slack", "U_SRC", actor);
-    linkIdentity(source.id, "github", "src-gh", actor);
-    const workflow = createWorkflow({
+    await linkIdentity(source.id, "slack", "U_SRC", actor);
+    await linkIdentity(source.id, "github", "src-gh", actor);
+    const workflow = await createWorkflow({
       name: `merge-user-workflow-${crypto.randomUUID()}`,
       definition: { nodes: [] },
     });
-    const run = createWorkflowRun({
+    const run = await createWorkflowRun({
       id: crypto.randomUUID(),
       workflowId: workflow.id,
       createdBy: source.id,
     });
-    updateWorkflowRun(run.id, {
+    await updateWorkflowRun(run.id, {
       context: { swarm: { requestedByUserId: source.id }, retained: "value" },
     });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `merge-user-schedule-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       taskTemplate: "Run merged schedule",
@@ -732,18 +743,18 @@ describe("POST /api/users/:id/merge", () => {
     // Source user is gone.
     const sourceR = await authedFetch(`/api/users/${source.id}`);
     expect(sourceR.status).toBe(404);
-    expect(getWorkflowRun(run.id)?.createdBy).toBe(target.id);
-    expect(getWorkflowRun(run.id)?.context).toEqual({
+    expect((await getWorkflowRun(run.id))?.createdBy).toBe(target.id);
+    expect((await getWorkflowRun(run.id))?.context).toEqual({
       swarm: { requestedByUserId: target.id },
       retained: "value",
     });
-    expect(getScheduledTaskById(schedule.id)?.createdBy).toBe(target.id);
-    expect(getScheduledTaskById(schedule.id)?.updatedBy).toBe(target.id);
+    expect((await getScheduledTaskById(schedule.id))?.createdBy).toBe(target.id);
+    expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBe(target.id);
   });
 
   test("manual_merge event payload carries the source user's id/name", async () => {
-    const target = createUser({ name: "MergeTarget", email: "mt@x.com" });
-    const source = createUser({ name: "MergeSource", email: "ms@x.com" });
+    const target = await createUser({ name: "MergeTarget", email: "mt@x.com" });
+    const source = await createUser({ name: "MergeSource", email: "ms@x.com" });
 
     const r = await authedFetch(`/api/users/${target.id}/merge`, {
       method: "POST",
@@ -768,31 +779,31 @@ describe("POST /api/users/:id/merge", () => {
   });
 
   test("rolls back identity moves when deletion fails", async () => {
-    const target = createUser({ name: "RollbackTarget", email: "rollback-target@x.com" });
-    const source = createUser({ name: "RollbackSource", email: "rollback-source@x.com" });
-    const workflow = createWorkflow({
+    const target = await createUser({ name: "RollbackTarget", email: "rollback-target@x.com" });
+    const source = await createUser({ name: "RollbackSource", email: "rollback-source@x.com" });
+    const workflow = await createWorkflow({
       name: `rollback-attribution-${crypto.randomUUID()}`,
       definition: { nodes: [] },
     });
-    const run = createWorkflowRun({
+    const run = await createWorkflowRun({
       id: crypto.randomUUID(),
       workflowId: workflow.id,
       createdBy: source.id,
     });
-    updateWorkflowRun(run.id, {
+    await updateWorkflowRun(run.id, {
       context: { swarm: { requestedByUserId: source.id }, retained: "rollback" },
     });
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `rollback-user-schedule-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       taskTemplate: "Retain rollback schedule",
       createdBy: source.id,
     });
-    linkIdentity(source.id, "slack", "U_MERGE_ROLLBACK", {
+    await linkIdentity(source.id, "slack", "U_MERGE_ROLLBACK", {
       kind: "operator",
       id: OPERATOR_FP,
     });
-    getDb().run(`CREATE TEMP TRIGGER fail_merge_source_delete
+    await getDbClient().run(`CREATE TEMP TRIGGER fail_merge_source_delete
       BEFORE DELETE ON users WHEN OLD.id = '${source.id}'
       BEGIN SELECT RAISE(ABORT, 'forced merge failure'); END`);
 
@@ -803,45 +814,49 @@ describe("POST /api/users/:id/merge", () => {
       });
       expect(response.status).toBe(500);
 
-      const identity = getDb()
-        .prepare<{ userId: string }, [string, string]>(
-          "SELECT userId FROM user_external_ids WHERE kind = ? AND externalId = ?",
-        )
-        .get("slack", "U_MERGE_ROLLBACK");
+      const identity = await getDbClient().get<{ userId: string }>(
+        "SELECT userId FROM user_external_ids WHERE kind = ? AND externalId = ?",
+        ["slack", "U_MERGE_ROLLBACK"],
+      );
       expect(identity?.userId).toBe(source.id);
       expect(
-        getDb()
-          .prepare<{ count: number }, [string]>("SELECT COUNT(*) AS count FROM users WHERE id = ?")
-          .get(source.id)?.count,
+        (
+          await getDbClient().get<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM users WHERE id = ?",
+            [source.id],
+          )
+        )?.count,
       ).toBe(1);
       expect(
-        getDb()
-          .prepare<{ emailAliases: string }, [string]>(
+        (
+          await getDbClient().get<{ emailAliases: string }>(
             "SELECT emailAliases FROM users WHERE id = ?",
+            [target.id],
           )
-          .get(target.id)?.emailAliases,
+        )?.emailAliases,
       ).toBe("[]");
       expect(
-        getDb()
-          .prepare<{ count: number }, [string]>(
+        (
+          await getDbClient().get<{ count: number }>(
             "SELECT COUNT(*) AS count FROM user_identity_events WHERE userId = ?",
+            [target.id],
           )
-          .get(target.id)?.count,
+        )?.count,
       ).toBe(0);
-      expect(getWorkflowRun(run.id)?.createdBy).toBe(source.id);
-      expect(getWorkflowRun(run.id)?.context).toEqual({
+      expect((await getWorkflowRun(run.id))?.createdBy).toBe(source.id);
+      expect((await getWorkflowRun(run.id))?.context).toEqual({
         swarm: { requestedByUserId: source.id },
         retained: "rollback",
       });
-      expect(getScheduledTaskById(schedule.id)?.createdBy).toBe(source.id);
-      expect(getScheduledTaskById(schedule.id)?.updatedBy).toBe(source.id);
+      expect((await getScheduledTaskById(schedule.id))?.createdBy).toBe(source.id);
+      expect((await getScheduledTaskById(schedule.id))?.updatedBy).toBe(source.id);
     } finally {
-      getDb().run("DROP TRIGGER fail_merge_source_delete");
+      await getDbClient().run("DROP TRIGGER fail_merge_source_delete");
     }
   });
 
   test("400 when target == source", async () => {
-    const u = createUser({ name: "Self" });
+    const u = await createUser({ name: "Self" });
     const r = await authedFetch(`/api/users/${u.id}/merge`, {
       method: "POST",
       body: JSON.stringify({ sourceUserId: u.id }),

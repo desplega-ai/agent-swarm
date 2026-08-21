@@ -27,7 +27,7 @@ afterAll(async () => {
 
 describe("task tool ctx", () => {
   test("sendTaskHandler with user ctx writes requestedByUserId", async () => {
-    const user = createUser({ name: "MCP User" });
+    const user = await createUser({ name: "MCP User" });
 
     const result = await sendTaskHandler(userCtx(user), {
       task: "user requested task",
@@ -43,19 +43,19 @@ describe("task tool ctx", () => {
     const data = result.data as { task: { id: string; requestedByUserId?: string } };
     expect(data.task.requestedByUserId).toBe(user.id);
 
-    const stored = getTaskById(data.task.id);
+    const stored = await getTaskById(data.task.id);
     expect(stored?.creatorAgentId).toBeUndefined();
     expect(stored?.requestedByUserId).toBe(user.id);
   });
 
   test("getTasksHandler with user ctx only returns that user's tasks", async () => {
-    const userA = createUser({ name: "List User A" });
-    const userB = createUser({ name: "List User B" });
+    const userA = await createUser({ name: "List User A" });
+    const userB = await createUser({ name: "List User B" });
 
-    const a1 = createTaskExtended("owned task one", { requestedByUserId: userA.id });
-    const a2 = createTaskExtended("owned task two", { requestedByUserId: userA.id });
-    const b1 = createTaskExtended("foreign task", { requestedByUserId: userB.id });
-    createTaskExtended("owner-only task");
+    const a1 = await createTaskExtended("owned task one", { requestedByUserId: userA.id });
+    const a2 = await createTaskExtended("owned task two", { requestedByUserId: userA.id });
+    const b1 = await createTaskExtended("foreign task", { requestedByUserId: userB.id });
+    await createTaskExtended("owner-only task");
 
     const result = await getTasksHandler(userCtx(userA), {
       includeFull: true,
@@ -75,9 +75,9 @@ describe("task tool ctx", () => {
   });
 
   test("getTasksHandler renders compact escaped markdown without changing structured tasks", async () => {
-    const user = createUser({ name: "Markdown List User" });
+    const user = await createUser({ name: "Markdown List User" });
     const taskText = "triage | path\\one\nsecond line";
-    const task = createTaskExtended(taskText, { requestedByUserId: user.id });
+    const task = await createTaskExtended(taskText, { requestedByUserId: user.id });
 
     const result = await getTasksHandler(userCtx(user), {
       includeFull: true,
@@ -93,7 +93,7 @@ describe("task tool ctx", () => {
   });
 
   test("getTasksHandler uses a human empty-state instead of a raw data fallback", async () => {
-    const user = createUser({ name: "Empty List User" });
+    const user = await createUser({ name: "Empty List User" });
     const result = await getTasksHandler(userCtx(user), {
       includeHeartbeat: true,
       limit: 50,
@@ -103,10 +103,10 @@ describe("task tool ctx", () => {
     expect((result.data as { tasks: unknown[] }).tasks).toEqual([]);
   });
 
-  test("assertOwnsTask gates user tasks and allows owned or owner ctx", () => {
-    const owner = createUser({ name: "Task Owner" });
-    const foreignUser = createUser({ name: "Foreign User" });
-    const ownedTask = createTaskExtended("owned", { requestedByUserId: owner.id });
+  test("assertOwnsTask gates user tasks and allows owned or owner ctx", async () => {
+    const owner = await createUser({ name: "Task Owner" });
+    const foreignUser = await createUser({ name: "Foreign User" });
+    const ownedTask = await createTaskExtended("owned", { requestedByUserId: owner.id });
 
     expect(assertOwnsTask(userCtx(owner), ownedTask)).toBeNull();
     expect(

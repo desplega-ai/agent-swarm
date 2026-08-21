@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import { storeLinks, storeSequelLink } from "../be/memory/link-resolver";
 import { applyEditMode, SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 import { registerMemoryEditTool } from "../tools/memory-edit";
@@ -67,7 +67,7 @@ describe("memory editing", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentId, name: "Edit Test Agent", isLead: false, status: "idle" });
+    await createAgent({ id: agentId, name: "Edit Test Agent", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 
@@ -80,8 +80,8 @@ describe("memory editing", () => {
     }
   });
 
-  test("preserves id and posterior while writing a version row", () => {
-    const memory = store.store({
+  test("preserves id and posterior while writing a version row", async () => {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name: "editable",
@@ -90,9 +90,11 @@ describe("memory editing", () => {
       key: "notes/editable.md",
       intent: "seed test memory",
     });
-    getDb().prepare("UPDATE agent_memory SET alpha = 3, beta = 2 WHERE id = ?").run(memory.id);
+    await getDbClient().run("UPDATE agent_memory SET alpha = 3, beta = 2 WHERE id = ?", [
+      memory.id,
+    ]);
 
-    const result = store.edit({
+    const result = await store.edit({
       id: memory.id,
       mode: "replace",
       content: "new body",
@@ -103,18 +105,22 @@ describe("memory editing", () => {
     expect(result.changed).toBe(true);
     expect(result.memory.id).toBe(memory.id);
     expect(result.version).toBe(2);
-    const row = getDb()
-      .prepare<{ alpha: number; beta: number; content: string; version: number }, [string]>(
-        "SELECT alpha, beta, content, version FROM agent_memory WHERE id = ?",
-      )
-      .get(memory.id);
+    const row = await getDbClient().get<{
+      alpha: number;
+      beta: number;
+      content: string;
+      version: number;
+    }>("SELECT alpha, beta, content, version FROM agent_memory WHERE id = ?", [memory.id]);
     expect(row).toEqual({ alpha: 3, beta: 2, content: "new body", version: 2 });
 
-    const versions = getDb()
-      .prepare<{ version: number; operation: string; intent: string }, [string]>(
-        "SELECT version, operation, intent FROM agent_memory_version WHERE memory_id = ? ORDER BY version",
-      )
-      .all(memory.id);
+    const versions = await getDbClient().query<{
+      version: number;
+      operation: string;
+      intent: string;
+    }>(
+      "SELECT version, operation, intent FROM agent_memory_version WHERE memory_id = ? ORDER BY version",
+      [memory.id],
+    );
     expect(versions.map((version) => [version.version, version.operation])).toEqual([
       [1, "create"],
       [2, "edit"],
@@ -122,8 +128,8 @@ describe("memory editing", () => {
     expect(versions[1]?.intent).toBe("correct stale body");
   });
 
-  test("short-circuits unchanged content", () => {
-    const memory = store.store({
+  test("short-circuits unchanged content", async () => {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name: "same",
@@ -131,7 +137,7 @@ describe("memory editing", () => {
       source: "manual",
     });
 
-    const result = store.edit({
+    const result = await store.edit({
       id: memory.id,
       mode: "replace",
       content: "same body",
@@ -140,16 +146,17 @@ describe("memory editing", () => {
 
     expect(result.changed).toBe(false);
     expect(result.version).toBe(1);
-    const versionCount = getDb()
-      .prepare<{ count: number }, [string]>(
+    const versionCount = (
+      await getDbClient().get<{ count: number }>(
         "SELECT COUNT(*) AS count FROM agent_memory_version WHERE memory_id = ?",
+        [memory.id],
       )
-      .get(memory.id)?.count;
+    )?.count;
     expect(versionCount).toBe(1);
   });
 
-  test("exact mode rejects missing and ambiguous old strings", () => {
-    const memory = store.store({
+  test("exact mode rejects missing and ambiguous old strings", async () => {
+    const memory = await store.store({
       agentId,
       scope: "agent",
       name: "exact",
@@ -157,7 +164,7 @@ describe("memory editing", () => {
       source: "manual",
     });
 
-    expect(() =>
+    await expect(
       store.edit({
         id: memory.id,
         mode: "exact",
@@ -165,9 +172,9 @@ describe("memory editing", () => {
         newString: "x",
         intent: "test missing",
       }),
-    ).toThrow("oldString not found");
+    ).rejects.toThrow("oldString not found");
 
-    expect(() =>
+    await expect(
       store.edit({
         id: memory.id,
         mode: "exact",
@@ -175,7 +182,7 @@ describe("memory editing", () => {
         newString: "x",
         intent: "test ambiguous",
       }),
-    ).toThrow("oldString is ambiguous");
+    ).rejects.toThrow("oldString is ambiguous");
   });
 
   // ─── Edit-path callers prune stale links (DES-639b regression) ────────────
@@ -209,11 +216,10 @@ describe("memory editing", () => {
     }
 
     function linkRowsFor(memoryId: string) {
-      return getDb()
-        .prepare<{ linkType: string; targetId: string }, [string]>(
-          "SELECT linkType, targetId FROM memory_link WHERE from_memory_id = ? ORDER BY targetId",
-        )
-        .all(memoryId);
+      return getDbClient().query<{ linkType: string; targetId: string }>(
+        "SELECT linkType, targetId FROM memory_link WHERE from_memory_id = ? ORDER BY targetId",
+        [memoryId],
+      );
     }
 
     test("editing away a wikilink deletes its link row, keeps survivors + sequel", async () => {
@@ -221,30 +227,30 @@ describe("memory editing", () => {
       process.env.EMBEDDING_API_KEY = "";
       process.env.OPENAI_API_KEY = "";
 
-      const b = store.store({
+      const b = await store.store({
         agentId,
         scope: "agent",
         name: "edit-b-target",
         content: "target B",
         source: "manual",
       });
-      const c = store.store({
+      const c = await store.store({
         agentId,
         scope: "agent",
         name: "edit-c-target",
         content: "target C",
         source: "manual",
       });
-      const a = store.store({
+      const a = await store.store({
         agentId,
         scope: "agent",
         name: "edit-a-source",
         content: "See [[edit-b-target]] and [[edit-c-target]].",
         source: "manual",
       });
-      storeLinks(a.id, agentId, a.content);
-      storeSequelLink(a.id, b.id);
-      expect(linkRowsFor(a.id)).toHaveLength(3);
+      await storeLinks(a.id, agentId, a.content);
+      await storeSequelLink(a.id, b.id);
+      expect(await linkRowsFor(a.id)).toHaveLength(3);
 
       const result = (await buildTool().handler(
         {
@@ -279,7 +285,7 @@ describe("memory editing", () => {
       expect(result.structuredContent.version).toBe(2);
       expect(result.structuredContent.memory?.id).toBe(a.id);
 
-      const rows = linkRowsFor(a.id);
+      const rows = await linkRowsFor(a.id);
       expect(rows).toHaveLength(2);
       expect(rows.filter((r) => r.linkType === "wikilink").map((r) => r.targetId)).toEqual([b.id]);
       expect(rows.find((r) => r.linkType === "sequel")?.targetId).toBe(b.id);

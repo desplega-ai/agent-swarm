@@ -81,12 +81,12 @@ export const registerReadMessagesTool = (server: McpServer) => {
       try {
         // If no channel specified, get unread messages from all channels
         if (!channel) {
-          const allChannels = getAllChannels();
-          let allMessages: ReturnType<typeof getUnreadMessages> = [];
+          const allChannels = await getAllChannels();
+          let allMessages: Awaited<ReturnType<typeof getUnreadMessages>> = [];
           let totalUnreadCount = 0;
 
           for (const ch of allChannels) {
-            const unreadMessages = getUnreadMessages(requestInfo.agentId, ch.id);
+            const unreadMessages = await getUnreadMessages(requestInfo.agentId, ch.id);
             totalUnreadCount += unreadMessages.length;
 
             // Add channel name to messages for context
@@ -98,8 +98,8 @@ export const registerReadMessagesTool = (server: McpServer) => {
 
             // Update read state if requested
             if (markAsRead && unreadMessages.length > 0) {
-              updateReadState(requestInfo.agentId, ch.id);
-              releaseMentionProcessing(requestInfo.agentId, [ch.id]); // Release processing claim
+              await updateReadState(requestInfo.agentId, ch.id);
+              await releaseMentionProcessing(requestInfo.agentId, [ch.id]); // Release processing claim
             }
           }
 
@@ -119,9 +119,9 @@ export const registerReadMessagesTool = (server: McpServer) => {
         }
 
         // Find channel by name or ID
-        let targetChannel = getChannelByName(channel);
+        let targetChannel = await getChannelByName(channel);
         if (!targetChannel) {
-          targetChannel = getChannelById(channel);
+          targetChannel = await getChannelById(channel);
         }
 
         if (!targetChannel) {
@@ -134,16 +134,16 @@ export const registerReadMessagesTool = (server: McpServer) => {
 
         if (mentionsOnly) {
           // Get messages that mention this agent
-          messages = getMentionsForAgent(requestInfo.agentId, {
+          messages = await getMentionsForAgent(requestInfo.agentId, {
             unreadOnly,
             channelId: targetChannel.id,
           });
         } else if (unreadOnly) {
           // Get unread messages only
-          messages = getUnreadMessages(requestInfo.agentId, targetChannel.id);
+          messages = await getUnreadMessages(requestInfo.agentId, targetChannel.id);
         } else {
           // Get regular messages with filters
-          messages = getChannelMessages(targetChannel.id, {
+          messages = await getChannelMessages(targetChannel.id, {
             limit,
             since,
           });
@@ -156,12 +156,12 @@ export const registerReadMessagesTool = (server: McpServer) => {
 
         // Update read state if requested
         if (markAsRead && messages.length > 0) {
-          updateReadState(requestInfo.agentId, targetChannel.id);
-          releaseMentionProcessing(requestInfo.agentId, [targetChannel.id]); // Release processing claim
+          await updateReadState(requestInfo.agentId, targetChannel.id);
+          await releaseMentionProcessing(requestInfo.agentId, [targetChannel.id]); // Release processing claim
         }
 
         // Get unread count for context
-        const allUnread = getUnreadMessages(requestInfo.agentId, targetChannel.id);
+        const allUnread = await getUnreadMessages(requestInfo.agentId, targetChannel.id);
 
         return toolOk(
           `Found ${messages.length} message(s) in #${targetChannel.name}${unreadOnly ? " (unread)" : ""}${mentionsOnly ? " (mentions)" : ""}.`,

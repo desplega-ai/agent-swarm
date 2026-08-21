@@ -300,8 +300,8 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
     }));
   },
 
-  upstreamHash(item): string | null {
-    const existing = getScript({ name: item.key, scope: "global" });
+  async upstreamHash(item): Promise<string | null> {
+    const existing = await getScript({ name: item.key, scope: "global" });
     return existing ? existing.contentHash : null;
   },
 
@@ -311,7 +311,7 @@ export const scriptsSeeder: Seeder<ScriptSeedItem> = {
     const imports = validateScriptImports(script.source);
     if (!imports.ok) throw new Error(`import check: ${imports.diagnostic}`);
 
-    const typecheck = typecheckScript(script.source);
+    const typecheck = await typecheckScript(script.source);
     if (!typecheck.ok) throw new Error(`typecheck: ${typecheck.diagnostics.join(" | ")}`);
 
     // upsertScriptByName handles both create and update (and bumps the

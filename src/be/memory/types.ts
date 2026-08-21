@@ -16,24 +16,28 @@ export interface EmbeddingProvider {
 // ============================================================================
 
 export interface MemoryStore {
-  store(input: MemoryInput): AgentMemory;
-  storeBatch(inputs: MemoryInput[]): AgentMemory[];
-  get(id: string): AgentMemory | null;
-  peek(id: string): AgentMemory | null;
-  search(embedding: Float32Array, agentId: string, options: MemorySearchOptions): MemoryCandidate[];
-  edit(input: MemoryEditInput): MemoryEditResult;
-  list(agentId: string, options: MemoryListOptions): AgentMemory[];
-  count(agentId: string, options: MemoryListOptions): number;
+  store(input: MemoryInput): Promise<AgentMemory>;
+  storeBatch(inputs: MemoryInput[]): Promise<AgentMemory[]>;
+  get(id: string): Promise<AgentMemory | null>;
+  peek(id: string): Promise<AgentMemory | null>;
+  search(
+    embedding: Float32Array,
+    agentId: string,
+    options: MemorySearchOptions,
+  ): Promise<MemoryCandidate[]>;
+  edit(input: MemoryEditInput): Promise<MemoryEditResult>;
+  list(agentId: string, options: MemoryListOptions): Promise<AgentMemory[]>;
+  count(agentId: string, options: MemoryListOptions): Promise<number>;
   isSourceProtected(source: AgentMemorySource): boolean;
   listForCuration(
     agentId?: string,
-  ): { id: string; source: string; name: string; createdAt: string }[];
-  listForReembedding(options?: { agentId?: string }): { id: string; content: string }[];
-  delete(id: string): boolean;
-  deleteBySourcePath(sourcePath: string, agentId: string): number;
-  purgeExpired(): number;
-  updateEmbedding(id: string, embedding: Float32Array, model: string): void;
-  getStats(agentId: string): MemoryStats;
+  ): Promise<{ id: string; source: string; name: string; createdAt: string }[]>;
+  listForReembedding(options?: { agentId?: string }): Promise<{ id: string; content: string }[]>;
+  delete(id: string): Promise<boolean>;
+  deleteBySourcePath(sourcePath: string, agentId: string): Promise<number>;
+  purgeExpired(): Promise<number>;
+  updateEmbedding(id: string, embedding: Float32Array, model: string): Promise<void>;
+  getStats(agentId: string): Promise<MemoryStats>;
   getHealth(): MemoryHealth;
 }
 

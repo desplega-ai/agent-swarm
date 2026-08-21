@@ -89,7 +89,7 @@ export const registerSetConfigTool = (server: McpServer) => {
         // ANY agent could write arbitrary config (incl. secret values). The
         // legacy SCRIPT_CREDENTIAL_BINDINGS blob is retired, so there is no
         // special-cased key here anymore.
-        const agent = getAgentById(requestInfo.agentId);
+        const agent = await getAgentById(requestInfo.agentId);
         const decision = can({
           principal: {
             kind: "agent",
@@ -111,7 +111,7 @@ export const registerSetConfigTool = (server: McpServer) => {
           return toolErr(validationError, { data: { yourAgentId: requestInfo.agentId } });
         }
 
-        const config = upsertSwarmConfigWithPolicyMirror({
+        const config = await upsertSwarmConfigWithPolicyMirror({
           scope,
           scopeId: scope === "global" ? null : scopeId,
           key,

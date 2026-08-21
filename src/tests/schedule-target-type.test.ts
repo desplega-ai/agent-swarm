@@ -23,7 +23,7 @@ import {
   createUser,
   createWorkflow,
   deleteUser,
-  getDb,
+  getDbClient,
   getScheduledTaskById,
   getWorkflowRun,
   initDb,
@@ -84,14 +84,17 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function makeWorkflow(def: WorkflowDefinition, overrides: { enabled?: boolean } = {}): Workflow {
-  const wf = createWorkflow({
+async function makeWorkflow(
+  def: WorkflowDefinition,
+  overrides: { enabled?: boolean } = {},
+): Promise<Workflow> {
+  const wf = await createWorkflow({
     name: `target-type-test-wf-${crypto.randomUUID()}`,
     definition: def,
     createdByAgentId: agentId,
   });
   if (overrides.enabled === false) {
-    return updateWorkflow(wf.id, { enabled: false }) ?? wf;
+    return (await updateWorkflow(wf.id, { enabled: false })) ?? wf;
   }
   return wf;
 }
@@ -117,7 +120,11 @@ beforeAll(async () => {
   delete process.env.API_KEY;
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const agent = createAgent({ name: "schedule-target-type-agent", isLead: true, status: "idle" });
+  const agent = await createAgent({
+    name: "schedule-target-type-agent",
+    isLead: true,
+    status: "idle",
+  });
   agentId = agent.id;
 
   // Wire the module-private executorRegistry used by dispatchScheduleTarget's
@@ -152,8 +159,8 @@ afterAll(async () => {
 });
 
 describe("scheduled_tasks DB layer — targetType", () => {
-  test("defaults to targetType='agent-task' and preserves back-compat rows", () => {
-    const schedule = createScheduledTask({
+  test("defaults to targetType='agent-task' and preserves back-compat rows", async () => {
+    const schedule = await createScheduledTask({
       name: `db-default-${crypto.randomUUID()}`,
       taskTemplate: "Do the thing",
       intervalMs: 60_000,
@@ -163,9 +170,9 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.scriptName).toBeUndefined();
   });
 
-  test("persists targetType='workflow' with workflowId, no taskTemplate required", () => {
-    const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+  test("persists targetType='workflow' with workflowId, no taskTemplate required", async () => {
+    const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const schedule = await createScheduledTask({
       name: `db-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -175,13 +182,13 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.workflowId).toBe(wf.id);
     expect(schedule.taskTemplate).toBeUndefined();
 
-    const reloaded = getScheduledTaskById(schedule.id);
+    const reloaded = await getScheduledTaskById(schedule.id);
     expect(reloaded?.targetType).toBe("workflow");
     expect(reloaded?.workflowId).toBe(wf.id);
   });
 
-  test("persists targetType='script' with scriptName + scriptArgs", () => {
-    const schedule = createScheduledTask({
+  test("persists targetType='script' with scriptName + scriptArgs", async () => {
+    const schedule = await createScheduledTask({
       name: `db-script-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -193,9 +200,9 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.scriptArgs).toEqual({ foo: "bar" });
   });
 
-  test("the recreated table's CHECK constraint rejects targetType='workflow' with no workflowId", () => {
-    expect(() =>
-      getDb().run(
+  test("the recreated table's CHECK constraint rejects targetType='workflow' with no workflowId", async () => {
+    await expect(
+      getDbClient().run(
         `INSERT INTO scheduled_tasks (id, name, targetType, scheduleType, intervalMs, createdAt, lastUpdatedAt)
          VALUES (?, ?, 'workflow', 'recurring', 60000, ?, ?)`,
         [
@@ -205,18 +212,18 @@ describe("scheduled_tasks DB layer — targetType", () => {
           new Date().toISOString(),
         ],
       ),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  test("updateScheduledTask can switch targetType and clear the previous target field", () => {
-    const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+  test("updateScheduledTask can switch targetType and clear the previous target field", async () => {
+    const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const schedule = await createScheduledTask({
       name: `db-switch-${crypto.randomUUID()}`,
       taskTemplate: "Original template",
       intervalMs: 60_000,
     });
-    updateScheduledTask(schedule.id, { targetType: "workflow", workflowId: wf.id });
-    const updated = getScheduledTaskById(schedule.id);
+    await updateScheduledTask(schedule.id, { targetType: "workflow", workflowId: wf.id });
+    const updated = await getScheduledTaskById(schedule.id);
     expect(updated?.targetType).toBe("workflow");
     expect(updated?.workflowId).toBe(wf.id);
     // taskTemplate isn't auto-cleared by the DB layer (callers control that);
@@ -227,9 +234,9 @@ describe("scheduled_tasks DB layer — targetType", () => {
 
 describe("dispatchScheduleTarget — workflow target", () => {
   test("triggers the workflow directly and returns its run ID (no implicit-binding lookup)", async () => {
-    const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const requester = createUser({ name: "Workflow Schedule Requester" });
-    const schedule = createScheduledTask({
+    const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const requester = await createUser({ name: "Workflow Schedule Requester" });
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -241,50 +248,51 @@ describe("dispatchScheduleTarget — workflow target", () => {
     expect(result.triggeredWorkflows).toBe(true);
     expect(result.workflowRunIds?.length).toBe(1);
 
-    const run = getWorkflowRun(result.workflowRunIds![0]!);
+    const run = await getWorkflowRun(result.workflowRunIds![0]!);
     expect(run?.workflowId).toBe(wf.id);
     expect(run?.createdBy).toBe(requester.id);
   });
 
   test("runs an implicitly bound workflow without dangling attribution after owner deletion", async () => {
-    const requester = createUser({ name: "Deleted Schedule Requester" });
-    const schedule = createScheduledTask({
+    const requester = await createUser({ name: "Deleted Schedule Requester" });
+    const schedule = await createScheduledTask({
       name: `dispatch-deleted-owner-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       taskTemplate: "Fallback task that should not run",
       createdBy: requester.id,
     });
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `implicit-schedule-workflow-${crypto.randomUUID()}`,
       definition: { nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] },
       triggers: [{ type: "schedule", scheduleId: schedule.id }],
       createdByAgentId: agentId,
     });
 
-    expect(deleteUser(requester.id)).toBe(true);
+    expect(await deleteUser(requester.id)).toBe(true);
     // Simulate an orphan created before deleteUser learned to clean audit
     // columns whose FK was dropped by migration 103.
-    getDb()
-      .prepare("UPDATE scheduled_tasks SET created_by = ? WHERE id = ?")
-      .run(requester.id, schedule.id);
-    const reloaded = getScheduledTaskById(schedule.id)!;
+    await getDbClient().run("UPDATE scheduled_tasks SET created_by = ? WHERE id = ?", [
+      requester.id,
+      schedule.id,
+    ]);
+    const reloaded = (await getScheduledTaskById(schedule.id))!;
     expect(reloaded.createdBy).toBe(requester.id);
 
     const result = await dispatchScheduleTarget(reloaded);
     expect(result.triggeredWorkflows).toBe(true);
     expect(result.task).toBeUndefined();
     expect(result.workflowRunIds).toHaveLength(1);
-    const run = getWorkflowRun(result.workflowRunIds![0]!);
+    const run = await getWorkflowRun(result.workflowRunIds![0]!);
     expect(run?.workflowId).toBe(wf.id);
     expect(run?.createdBy).toBeUndefined();
   });
 
   test("throws when the target workflow is disabled", async () => {
-    const wf = makeWorkflow(
+    const wf = await makeWorkflow(
       { nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] },
       { enabled: false },
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-disabled-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -295,7 +303,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
   });
 
   test("throws when workflowId does not resolve to a real workflow", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-workflow-missing-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "workflow",
@@ -312,7 +320,7 @@ describe("dispatchScheduleTarget — script target", () => {
       "schedule-target-type-echo",
       `export default async (args) => ({ received: args });`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -342,19 +350,17 @@ describe("dispatchScheduleTarget — script target", () => {
       runtime: { slug: "schedmcp", kind: "mcp", connectionId: "", tools: [{ name: "ping" }] },
     };
     mcpRow.runtime.connectionId = mcpRow.id;
-    getDb()
-      .prepare(
-        `INSERT INTO mcp_servers (id, name, transport, scope, url, createdAt, lastUpdatedAt)
-         VALUES (?, ?, 'http', 'global', 'http://mcp.invalid.test/mcp', datetime('now'), datetime('now'))`,
-      )
-      .run(mcpRow.serverId, `sched-mcp-${mcpRow.serverId.slice(0, 8)}`);
-    getDb()
-      .prepare(
-        `INSERT INTO script_connections
-           (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
-         VALUES (?, 'schedmcp', 'mcp', 'global', '[]', ?, ?)`,
-      )
-      .run(mcpRow.id, mcpRow.serverId, JSON.stringify(mcpRow.runtime));
+    await getDbClient().run(
+      `INSERT INTO mcp_servers (id, name, transport, scope, url, createdAt, lastUpdatedAt)
+       VALUES (?, ?, 'http', 'global', 'http://mcp.invalid.test/mcp', datetime('now'), datetime('now'))`,
+      [mcpRow.serverId, `sched-mcp-${mcpRow.serverId.slice(0, 8)}`],
+    );
+    await getDbClient().run(
+      `INSERT INTO script_connections
+         (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
+       VALUES (?, 'schedmcp', 'mcp', 'global', '[]', ?, ?)`,
+      [mcpRow.id, mcpRow.serverId, JSON.stringify(mcpRow.runtime)],
+    );
 
     await saveGlobalScript(
       "schedule-target-type-ctx-connections",
@@ -364,7 +370,7 @@ describe("dispatchScheduleTarget — script target", () => {
         return { ok: true };
       };`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-ctx-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -377,7 +383,7 @@ describe("dispatchScheduleTarget — script target", () => {
   }, 15_000);
 
   test("throws a clear error when the script does not exist", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-missing-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -393,7 +399,7 @@ describe("dispatchScheduleTarget — script target", () => {
       "schedule-target-type-throws",
       `export default async () => { throw new Error("boom"); };`,
     );
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `dispatch-script-throws-${crypto.randomUUID()}`,
       intervalMs: 60_000,
       targetType: "script",
@@ -487,7 +493,7 @@ describe("POST /api/schedules — targetType validation", () => {
   });
 
   test("accepts targetType='workflow' with a real workflowId and no taskTemplate", async () => {
-    const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
     const { status, json } = await postSchedule({
       name: `http-wf-ok-${crypto.randomUUID()}`,
       intervalMs: 60_000,
@@ -532,7 +538,7 @@ describe("POST /api/schedules — targetType validation", () => {
 
 describe("PUT /api/schedules/{id} — targetType validation", () => {
   test("rejects switching to targetType='workflow' without a workflowId", async () => {
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `http-put-wf-missing-${crypto.randomUUID()}`,
       taskTemplate: "Original",
       intervalMs: 60_000,
@@ -543,8 +549,8 @@ describe("PUT /api/schedules/{id} — targetType validation", () => {
   });
 
   test("accepts switching to targetType='workflow' with a valid workflowId", async () => {
-    const wf = makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
-    const schedule = createScheduledTask({
+    const wf = await makeWorkflow({ nodes: [{ id: "n1", type: "echo", config: { value: "hi" } }] });
+    const schedule = await createScheduledTask({
       name: `http-put-wf-ok-${crypto.randomUUID()}`,
       taskTemplate: "Original",
       intervalMs: 60_000,

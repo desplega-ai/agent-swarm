@@ -429,7 +429,7 @@ async function shutdown() {
   stopQueueStallAlarm();
 
   // Stop durable script workflow subprocesses
-  stopScriptRunSupervisor();
+  await stopScriptRunSupervisor();
 
   // Stop Slack bot
   await stopSlackApp();
@@ -452,7 +452,7 @@ async function shutdown() {
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
   stopAuditWriter();
-  flushAuditBuffer();
+  await flushAuditBuffer();
   clearAuditSink();
 
   if (globalState.__apiGcInterval) {
@@ -463,7 +463,7 @@ async function shutdown() {
   // Close all active transports (SSE connections, etc.)
   for (const [id, transport] of Object.entries(transports)) {
     console.log(`[HTTP] Closing transport ${id}`);
-    transport.close();
+    void transport.close();
     delete transports[id];
     delete mcpSessionAgents[id];
     delete transportActivity[id];
@@ -471,7 +471,7 @@ async function shutdown() {
 
   for (const [id, transport] of Object.entries(transportsUser)) {
     console.log(`[HTTP] Closing user transport ${id}`);
-    transport.close();
+    void transport.close();
     delete transportsUser[id];
     delete sessionUsers[id];
     delete transportActivityUser[id];
@@ -522,7 +522,7 @@ startApiGcInterval();
 // failures fail closed instead of leaving the runtime half-initialized.
 let startupConfigsInjected: string[] = [];
 try {
-  startupConfigsInjected = loadGlobalConfigsIntoEnv(false);
+  startupConfigsInjected = await loadGlobalConfigsIntoEnv(false);
 } catch (err) {
   console.error("[startup] Failed to load global swarm configs before listen:", err);
   process.exitCode = 1;
@@ -534,7 +534,7 @@ try {
 // global swarm_config row (operator-editable; skipped when a row exists).
 // Non-fatal — a seed failure must not brick boot.
 try {
-  seedLegacyCapabilitiesConfig();
+  await seedLegacyCapabilitiesConfig();
 } catch (err) {
   console.warn("[startup] CAPABILITIES upgrade seed failed (non-fatal):", err);
 }
@@ -582,7 +582,7 @@ try {
 // RBAC_AUDIT_DISABLED=true makes the sink a no-op inside enqueueAuditRow.
 setAuditSink(enqueueAuditRow);
 startAuditWriter();
-startAuditGc();
+await startAuditGc();
 startScratchScriptGc();
 
 // business-use initialization (no-op if envs not set)
@@ -615,9 +615,9 @@ httpServer
     // must NOT mint (see src/commands/runner.ts).
     await initTelemetry(
       "api-server",
-      (key) => getSwarmConfigs({ scope: "global", key })?.[0]?.value,
-      (key, value) => {
-        upsertSwarmConfig({ scope: "global", key, value });
+      async (key) => (await getSwarmConfigs({ scope: "global", key }))?.[0]?.value,
+      async (key, value) => {
+        await upsertSwarmConfig({ scope: "global", key, value });
       },
       { generateIfMissing: true },
     );
@@ -639,16 +639,16 @@ httpServer
     initAgentMail();
 
     // Initialize Linear tracker integration (if configured)
-    initLinear();
+    await initLinear();
 
     // Initialize Jira tracker integration (if configured)
-    initJira();
+    await initJira();
 
     // Initialize workflow engine (trigger subscriptions + resume listener)
-    initWorkflows();
+    await initWorkflows();
 
     // Reconcile durable script workflow subprocesses
-    startScriptRunSupervisor(getMcpBaseUrl());
+    await startScriptRunSupervisor(getMcpBaseUrl());
 
     // Start scheduler (if enabled)
     if (hasCapability("scheduling")) {
@@ -688,7 +688,7 @@ httpServer
     startOAuthPendingGc();
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
-    startMemoryGc();
+    await startMemoryGc();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

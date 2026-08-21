@@ -21,14 +21,14 @@ export const registerSkillGetFileTool = (server: McpServer) => {
       }),
     },
     async (args, requestInfo, _meta) => {
-      const skill = getSkillById(args.skillId);
+      const skill = await getSkillById(args.skillId);
       if (!skill) {
         return toolErr("Skill not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       let file = null;
       try {
-        file = getSkillFile(args.skillId, args.path);
+        file = await getSkillFile(args.skillId, args.path);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Invalid file path.";
         return toolErr(message, { data: { yourAgentId: requestInfo.agentId } });

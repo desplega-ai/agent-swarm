@@ -51,8 +51,8 @@ function getAppBaseUrl(): string {
  * edited N times" signal. Mirrors the value returned by
  * `PUT /api/pages/:id` (see src/http/pages.ts:pageEditCounter).
  */
-function pageEditCounter(pageId: string): number {
-  const versions = getPageVersions(pageId);
+async function pageEditCounter(pageId: string): Promise<number> {
+  const versions = await getPageVersions(pageId);
   return versions.length > 0 ? versions[0]!.version + 1 : 1;
 }
 
@@ -141,12 +141,15 @@ export const registerCreatePageTool = (server: McpServer) => {
       const needsCredentialsNames = input.needsCredentials?.map((c) => c.name);
 
       // Upsert. Look up existing row by (agentId, slug).
-      const existing = getPageBySlug(requestInfo.agentId, finalSlug);
-      const trustedUserId = resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId);
+      const existing = await getPageBySlug(requestInfo.agentId, finalSlug);
+      const trustedUserId = await resolveTaskAuditUserId(
+        requestInfo.sourceTaskId,
+        requestInfo.agentId,
+      );
       let assetKey: string | undefined;
       try {
         if (input.key !== undefined || !existing) {
-          assetKey = input.key ? authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
+          assetKey = input.key ? await authorizeAssetKeyWrite(input.key, trustedUserId) : undefined;
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -159,11 +162,11 @@ export const registerCreatePageTool = (server: McpServer) => {
       if (existing) {
         // Snapshot first — failure must NOT block the update.
         try {
-          snapshotPage(existing.id, requestInfo.agentId);
+          await snapshotPage(existing.id, requestInfo.agentId);
         } catch {
           // intentional empty
         }
-        const updated = updatePage(existing.id, {
+        const updated = await updatePage(existing.id, {
           key: assetKey,
           title: input.title,
           description: input.description,
@@ -182,7 +185,7 @@ export const registerCreatePageTool = (server: McpServer) => {
         id = updated.id;
       } else {
         try {
-          const created = createPage({
+          const created = await createPage({
             key: assetKey,
             agentId: requestInfo.agentId,
             slug: finalSlug,
@@ -204,7 +207,7 @@ export const registerCreatePageTool = (server: McpServer) => {
 
       // Re-read after write so the page exists (defensive). 1 round-trip;
       // page row is small. If it's missing here something's badly wrong.
-      const fresh = getPage(id);
+      const fresh = await getPage(id);
       if (!fresh) {
         const msg = `Page ${id} disappeared between write and read.`;
         return toolErr(msg, { data: { yourAgentId: requestInfo.agentId, id } });
@@ -212,7 +215,7 @@ export const registerCreatePageTool = (server: McpServer) => {
 
       const apiUrl = `${getApiBaseUrl()}/p/${id}`;
       const appUrl = `${getAppBaseUrl()}/pages/${id}`;
-      const version = pageEditCounter(id);
+      const version = await pageEditCounter(id);
 
       return toolOk(`Page "${input.title}" saved (slug=${finalSlug}, version=${version}).`, {
         details: `API: ${apiUrl}\n  App: ${appUrl}`,

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { closeDb, createTaskExtended, createUser, getDb, initDb } from "../be/db";
+import { closeDb, createTaskExtended, createUser, getDb, getDbClient, initDb } from "../be/db";
 
 const FRESH_DB = "./test-asset-key-migration-fresh.sqlite";
 const HISTORICAL_DB = "./test-asset-key-migration-historical.sqlite";
@@ -225,13 +225,13 @@ describe("asset namespace key migrations", () => {
     }
   });
 
-  test("migration 129 preserves existing history rows while widening entity types", () => {
+  test("migration 129 preserves existing history rows while widening entity types", async () => {
     closeDb();
     initDb(HISTORY_REBUILD_DB);
 
     const historyId = crypto.randomUUID();
     const entityId = crypto.randomUUID();
-    const user = createUser({ name: "History User", email: "history@example.com" });
+    const user = await createUser({ name: "History User", email: "history@example.com" });
     const changedAt = "2026-08-08T12:34:56.789Z";
     getDb().run(
       `INSERT INTO asset_key_history (
@@ -282,7 +282,7 @@ describe("asset namespace key migrations", () => {
     }
   });
 
-  test("triggers reject malformed and unknown-personal keys but allow an existing personal user", () => {
+  test("triggers reject malformed and unknown-personal keys but allow an existing personal user", async () => {
     const taskId = getDb()
       .prepare<{ id: string }, []>("SELECT id FROM agent_tasks LIMIT 1")
       .get()!.id;
@@ -298,7 +298,7 @@ describe("asset namespace key migrations", () => {
       ]),
     ).toThrow();
 
-    const user = createUser({ name: "Migration User", email: "migration@example.com" });
+    const user = await createUser({ name: "Migration User", email: "migration@example.com" });
     expect(() =>
       getDb().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', [
         `personal/${user.id}/drafts/`,
@@ -379,7 +379,7 @@ describe("asset namespace key migrations", () => {
     ).toBe(2);
   });
 
-  test("preserves asset keys when upgrading a legacy restrictive task status schema", () => {
+  test("preserves asset keys when upgrading a legacy restrictive task status schema", async () => {
     closeDb();
     initDb(LEGACY_STATUS_DB);
     dropMigration115ForHistoricalFixture();
@@ -414,20 +414,20 @@ describe("asset namespace key migrations", () => {
       .all()
       .map((row) => row.sql);
     getDb().run("PRAGMA foreign_keys = OFF");
-    getDb().transaction(() => {
-      getDb().run(restrictiveSchema);
-      getDb().run(
+    await getDbClient().transaction(async (tx) => {
+      await tx.run(restrictiveSchema);
+      await tx.run(
         `INSERT INTO agent_tasks_restrictive (${columns}) SELECT ${columns} FROM agent_tasks`,
       );
-      getDb().run("DROP TABLE agent_tasks");
-      getDb().run("ALTER TABLE agent_tasks_restrictive RENAME TO agent_tasks");
-      for (const sql of schemaObjects) getDb().run(sql);
-    })();
+      await tx.run("DROP TABLE agent_tasks");
+      await tx.run("ALTER TABLE agent_tasks_restrictive RENAME TO agent_tasks");
+      for (const sql of schemaObjects) await tx.run(sql);
+    });
     getDb().run("PRAGMA foreign_keys = ON");
 
     const taskId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const user = createUser({ name: "Legacy Task Owner", email: "legacy-task@example.com" });
+    const user = await createUser({ name: "Legacy Task Owner", email: "legacy-task@example.com" });
     getDb().run(
       `INSERT INTO agent_tasks (
          id, task, status, source, createdAt, lastUpdatedAt,
@@ -483,7 +483,7 @@ describe("asset namespace key migrations", () => {
     expect(() =>
       getDb().run('UPDATE agent_tasks SET "key" = ? WHERE id = ?', ["INVALID", taskId]),
     ).toThrow("invalid asset namespace key");
-    const createdAfterUpgrade = createTaskExtended("post-upgrade task");
+    const createdAfterUpgrade = await createTaskExtended("post-upgrade task");
     expect(createdAfterUpgrade.key).toBe(`shared/task:${createdAfterUpgrade.id}/`);
   });
 

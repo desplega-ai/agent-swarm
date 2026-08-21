@@ -16,9 +16,9 @@ async function removeDbFiles(): Promise<void> {
   }
 }
 
-function clearCapabilitiesRows(): void {
-  for (const row of getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })) {
-    deleteSwarmConfig(row.id);
+async function clearCapabilitiesRows(): Promise<void> {
+  for (const row of await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })) {
+    await deleteSwarmConfig(row.id);
   }
 }
 
@@ -33,22 +33,22 @@ describe("seedLegacyCapabilitiesConfig", () => {
     await removeDbFiles();
   });
 
-  afterEach(() => {
-    clearCapabilitiesRows();
+  afterEach(async () => {
+    await clearCapabilitiesRows();
     if (originalCapabilities === undefined) delete process.env.CAPABILITIES;
     else process.env.CAPABILITIES = originalCapabilities;
   });
 
-  test("no env value → no seed (defaults in play)", () => {
+  test("no env value → no seed (defaults in play)", async () => {
     delete process.env.CAPABILITIES;
-    const result = seedLegacyCapabilitiesConfig();
+    const result = await seedLegacyCapabilitiesConfig();
     expect(result.seeded).toBe(false);
-    expect(getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })).toHaveLength(0);
+    expect(await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })).toHaveLength(0);
   });
 
-  test("legacy explicit list → seeds a global row backfilled with always-on groups", () => {
+  test("legacy explicit list → seeds a global row backfilled with always-on groups", async () => {
     process.env.CAPABILITIES = "core,task-pool,messaging,profiles,services,scheduling,memory";
-    const result = seedLegacyCapabilitiesConfig();
+    const result = await seedLegacyCapabilitiesConfig();
     expect(result.seeded).toBe(true);
     expect(result.added).toEqual([
       "config",
@@ -60,7 +60,7 @@ describe("seedLegacyCapabilitiesConfig", () => {
       "repo",
     ]);
 
-    const rows = getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
+    const rows = await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
     expect(rows).toHaveLength(1);
     // Operator's original entries preserved (including previously-gated opt-ins
     // like messaging/services and free-form tags), backfill appended.
@@ -72,21 +72,21 @@ describe("seedLegacyCapabilitiesConfig", () => {
     expect(process.env.CAPABILITIES).toBe(rows[0]!.value);
   });
 
-  test("existing global row → never touched", () => {
+  test("existing global row → never touched", async () => {
     process.env.CAPABILITIES = "core,task-pool";
-    upsertSwarmConfig({ scope: "global", key: "CAPABILITIES", value: "core" });
-    const result = seedLegacyCapabilitiesConfig();
+    await upsertSwarmConfig({ scope: "global", key: "CAPABILITIES", value: "core" });
+    const result = await seedLegacyCapabilitiesConfig();
     expect(result.seeded).toBe(false);
-    const rows = getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
+    const rows = await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.value).toBe("core");
     expect(process.env.CAPABILITIES).toBe("core,task-pool");
   });
 
-  test("explicit list already containing all always-on groups → no seed", () => {
+  test("explicit list already containing all always-on groups → no seed", async () => {
     process.env.CAPABILITIES = "core,config,scripts,mcp,slack,tracker,skills,repo,kv";
-    const result = seedLegacyCapabilitiesConfig();
+    const result = await seedLegacyCapabilitiesConfig();
     expect(result.seeded).toBe(false);
-    expect(getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })).toHaveLength(0);
+    expect(await getSwarmConfigs({ scope: "global", key: "CAPABILITIES" })).toHaveLength(0);
   });
 });

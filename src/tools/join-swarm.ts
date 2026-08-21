@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createAgent, getAllAgents, getDb, updateAgentProfile } from "@/be/db";
+import { createAgent, getAllAgents, getDbClient, updateAgentProfile } from "@/be/db";
 import {
   generateDefaultClaudeMd,
   generateDefaultIdentityMd,
@@ -83,8 +83,8 @@ export const registerJoinSwarmTool = (server: McpServer) => {
       const agentId = requestInfo.agentId ?? requestedId ?? "";
 
       try {
-        const agentTx = getDb().transaction(() => {
-          const agents = getAllAgents();
+        const agent = await getDbClient().transaction(async () => {
+          const agents = await getAllAgents();
 
           const existingIdAgent = agents.find((agent) => agent.id === agentId);
 
@@ -107,7 +107,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
             );
           }
 
-          const agent = createAgent({
+          const agent = await createAgent({
             id: agentId,
             name,
             isLead: lead,
@@ -131,7 +131,7 @@ export const registerJoinSwarmTool = (server: McpServer) => {
           });
 
           // Update profile with any provided fields and the default templates
-          const updatedAgent = updateAgentProfile(agent.id, {
+          const updatedAgent = await updateAgentProfile(agent.id, {
             description,
             role,
             capabilities,
@@ -142,8 +142,6 @@ export const registerJoinSwarmTool = (server: McpServer) => {
 
           return updatedAgent ?? agent;
         });
-
-        const agent = agentTx();
 
         return toolOk(
           `Successfully joined swarm as ${agent.isLead ? "Lead" : "Worker"} agent "${agent.name}" (ID: ${agent.id}).`,

@@ -1,5 +1,5 @@
 import { defaultAssetKey } from "../assets/key";
-import { getDb } from "../be/db";
+import { getDbClient } from "../be/db";
 import type { AppDefinition, AppValidationIssue } from "./definition";
 import { AppDefinitionSchema, appDefinitionIssues } from "./definition";
 import {
@@ -97,21 +97,19 @@ function nextTimestamp(previous?: string): string {
   return new Date(Math.max(now, previousMs + 1)).toISOString();
 }
 
-export function createApp(input: {
+export async function createApp(input: {
   id?: string;
   name: string;
   description?: string;
   definition: AppDefinition;
-}): AppRecord {
+}): Promise<AppRecord> {
   const id = input.id ?? crypto.randomUUID();
   const now = nextTimestamp();
-  const row = getDb()
-    .prepare<AppDbRow, [string, string, string | null, string, string, string, string]>(
-      `INSERT INTO apps (id, name, description, definition, created_at, updated_at, "key")
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       RETURNING id, name, description, definition, created_at, updated_at`,
-    )
-    .get(
+  const row = await getDbClient().get<AppDbRow>(
+    `INSERT INTO apps (id, name, description, definition, created_at, updated_at, "key")
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     RETURNING id, name, description, definition, created_at, updated_at`,
+    [
       id,
       input.name,
       input.description ?? null,
@@ -119,70 +117,65 @@ export function createApp(input: {
       now,
       now,
       defaultAssetKey("app", id),
-    );
+    ],
+  );
   if (!row) throw new Error("Failed to create app");
   return decodeApp(row);
 }
 
-export function getApp(id: string): AppRecord | null {
-  const row = getDb()
-    .prepare<AppDbRow, [string]>(
-      `SELECT id, name, description, definition, created_at, updated_at FROM apps WHERE id = ?`,
-    )
-    .get(id);
+export async function getApp(id: string): Promise<AppRecord | null> {
+  const row = await getDbClient().get<AppDbRow>(
+    `SELECT id, name, description, definition, created_at, updated_at FROM apps WHERE id = ?`,
+    [id],
+  );
   return row ? decodeApp(row) : null;
 }
 
-export function listApps(): Array<Omit<AppRecord, "definition">> {
-  return getDb()
-    .prepare<AppDbRow, []>(
-      `SELECT id, name, description, definition, created_at, updated_at
-       FROM apps ORDER BY created_at DESC, id`,
-    )
-    .all()
-    .map((row) => ({
-      id: row.id,
-      name: row.name,
-      ...(row.description === null ? {} : { description: row.description }),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+export async function listApps(): Promise<Array<Omit<AppRecord, "definition">>> {
+  const rows = await getDbClient().query<AppDbRow>(
+    `SELECT id, name, description, definition, created_at, updated_at
+     FROM apps ORDER BY created_at DESC, id`,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    ...(row.description === null ? {} : { description: row.description }),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
 }
 
-export function listAppRecords(): AppRecord[] {
-  return getDb()
-    .prepare<AppDbRow, []>(
-      `SELECT id, name, description, definition, created_at, updated_at
-       FROM apps ORDER BY created_at ASC, id ASC`,
-    )
-    .all()
-    .map(decodeApp);
+export async function listAppRecords(): Promise<AppRecord[]> {
+  const rows = await getDbClient().query<AppDbRow>(
+    `SELECT id, name, description, definition, created_at, updated_at
+     FROM apps ORDER BY created_at ASC, id ASC`,
+  );
+  return rows.map(decodeApp);
 }
 
-export function updateApp(
+export async function updateApp(
   id: string,
   patch: { name?: string; description?: string | null; definition?: AppDefinition },
-): AppRecord | null {
-  const existing = getApp(id);
+): Promise<AppRecord | null> {
+  const existing = await getApp(id);
   if (!existing) return null;
   const updatedAt = nextTimestamp(existing.updatedAt);
-  const row = getDb()
-    .prepare<AppDbRow, [string, string | null, string, string, string]>(
-      `UPDATE apps
-       SET name = ?, description = ?, definition = ?, updated_at = ?
-       WHERE id = ?
-       RETURNING id, name, description, definition, created_at, updated_at`,
-    )
-    .get(
+  const row = await getDbClient().get<AppDbRow>(
+    `UPDATE apps
+     SET name = ?, description = ?, definition = ?, updated_at = ?
+     WHERE id = ?
+     RETURNING id, name, description, definition, created_at, updated_at`,
+    [
       patch.name ?? existing.name,
       patch.description === undefined ? (existing.description ?? null) : patch.description,
       encodeDefinition(patch.definition ?? existing.definition),
       updatedAt,
       id,
-    );
+    ],
+  );
   return row ? decodeApp(row) : null;
 }
 
-export function deleteApp(id: string): boolean {
-  return getDb().prepare<unknown, [string]>("DELETE FROM apps WHERE id = ?").run(id).changes > 0;
+export async function deleteApp(id: string): Promise<boolean> {
+  return (await getDbClient().run("DELETE FROM apps WHERE id = ?", [id])).changes > 0;
 }

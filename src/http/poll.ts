@@ -12,7 +12,7 @@ import {
   claimTask,
   getAgentById,
   getAllChannelActivityCursors,
-  getDb,
+  getDbClient,
   getInboxSummary,
   getOfferedTasksForAgent,
   getPendingTaskForAgent,
@@ -188,11 +188,11 @@ function getRequesterNotes(notes: string | undefined): string | undefined {
  * omitting the section: never a substituted human (Rule 33 /
  * provenance-or-silence).
  */
-function buildTriggerRequestedBy(task: {
+async function buildTriggerRequestedBy(task: {
   requestedByUserId?: string | null;
   slackUserId?: string | null;
-}): z.infer<typeof PollRequestedBySchema> | undefined {
-  const user = task.requestedByUserId ? getUserById(task.requestedByUserId) : undefined;
+}): Promise<z.infer<typeof PollRequestedBySchema> | undefined> {
+  const user = task.requestedByUserId ? await getUserById(task.requestedByUserId) : undefined;
   if (user) {
     return {
       name: user.name,
@@ -203,7 +203,7 @@ function buildTriggerRequestedBy(task: {
     };
   }
   if (task.slackUserId) {
-    return { name: renderIdentity(resolveIdentity("slack", task.slackUserId)) };
+    return { name: renderIdentity(await resolveIdentity("slack", task.slackUserId)) };
   }
   return undefined;
 }
@@ -214,10 +214,10 @@ function buildTriggerRequestedBy(task: {
  * `/api/fs/tasks/{taskId}/files/{id}/raw` fetch recipe into the dispatch
  * prompt, without shipping the full capabilities/provider blob over poll.
  */
-function attachmentsForTrigger(
+async function attachmentsForTrigger(
   taskId: string,
-): Array<{ id: string; name: string; mimeType?: string; sizeBytes?: number }> {
-  return getTaskAttachments(taskId).map((a) => ({
+): Promise<Array<{ id: string; name: string; mimeType?: string; sizeBytes?: number }>> {
+  return (await getTaskAttachments(taskId)).map((a) => ({
     id: a.id,
     name: a.name,
     mimeType: a.mimeType,
@@ -269,7 +269,7 @@ export async function handlePoll(
     if (!parsed) return true;
     for (const { channelId, ts } of parsed.body.cursorUpdates) {
       if (channelId && ts) {
-        upsertChannelActivityCursor(channelId, ts);
+        await upsertChannelActivityCursor(channelId, ts);
       }
     }
     commitCursorsRoute.respond(res, 200, {
@@ -300,8 +300,8 @@ export async function handlePoll(
         };
     let result: PollTxnResult;
     try {
-      result = getDb().transaction(() => {
-        const agent = getAgentById(myAgentId);
+      result = await getDbClient().transaction(async () => {
+        const agent = await getAgentById(myAgentId);
         if (!agent) {
           return { error: "Agent not found", status: 404 };
         }
@@ -314,7 +314,7 @@ export async function handlePoll(
         // update only matches one that is still live.
         if (
           isMultiRuntimeEnabled() &&
-          !(runtimeInstanceId && touchRuntimeInstance(runtimeInstanceId, agent.id))
+          !(runtimeInstanceId && (await touchRuntimeInstance(runtimeInstanceId, agent.id)))
         ) {
           return { trigger: null };
         }
@@ -325,12 +325,14 @@ export async function handlePoll(
         // several runtimes serving one agent these polls run concurrently, and
         // an unguarded claim here would let each of them take a task past the
         // agent's logical limit.
-        const offeredTasks = hasCapacity(myAgentId) ? getOfferedTasksForAgent(myAgentId) : [];
+        const offeredTasks = (await hasCapacity(myAgentId))
+          ? await getOfferedTasksForAgent(myAgentId)
+          : [];
         const firstOfferedTask = offeredTasks[0];
         if (firstOfferedTask) {
-          const claimedTask = claimOfferedTask(firstOfferedTask.id, myAgentId);
+          const claimedTask = await claimOfferedTask(firstOfferedTask.id, myAgentId);
           if (claimedTask) {
-            const offeredRequestedBy = buildTriggerRequestedBy(claimedTask);
+            const offeredRequestedBy = await buildTriggerRequestedBy(claimedTask);
             return {
               trigger: {
                 type: "task_offered",
@@ -344,17 +346,17 @@ export async function handlePoll(
 
         // Check for pending tasks (assigned directly to this agent)
         // Only return a task if agent has capacity (server-side enforcement)
-        if (hasCapacity(myAgentId)) {
-          const pendingTask = getPendingTaskForAgent(myAgentId);
+        if (await hasCapacity(myAgentId)) {
+          const pendingTask = await getPendingTaskForAgent(myAgentId);
           if (pendingTask) {
             // Budget admission gate (Phase 3). Runs in the same transaction as
             // the capacity check so capacity AND budget gates share atomicity.
             // Phase 5 also records the dedup row + captures the side-effect
             // context here so the after-commit step can notify the lead.
-            const admission = canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
+            const admission = await canClaim(myAgentId, new Date(), pendingTask.requestedByUserId);
             if (!admission.allowed) {
               const utcDate = new Date().toISOString().slice(0, 10);
-              const dedup = recordBudgetRefusalNotification({
+              const dedup = await recordBudgetRefusalNotification({
                 taskId: pendingTask.id,
                 date: utcDate,
                 agentId: myAgentId,
@@ -395,34 +397,39 @@ export async function handlePoll(
             }
 
             // Mark task as in_progress immediately to prevent duplicate polling
-            startTask(pendingTask.id);
-            updateAgentStatusFromCapacity(myAgentId);
+            await startTask(pendingTask.id);
+            await updateAgentStatusFromCapacity(myAgentId);
 
-            ensure({
-              id: "started",
-              flow: "task",
-              runId: pendingTask.id,
-              depIds: ["created"],
-              data: {
+            // Lifecycle announcements go through `afterCommit`, not straight
+            // line: they must not claim "this task started" for a claim the
+            // transaction can still roll back.
+            getDbClient().afterCommit(() => {
+              ensure({
+                id: "started",
+                flow: "task",
+                runId: pendingTask.id,
+                depIds: ["created"],
+                data: {
+                  taskId: pendingTask.id,
+                  agentId: myAgentId,
+                  previousStatus: pendingTask.status,
+                },
+                validator: (data) => data.previousStatus === "pending",
+                // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
+                filter: ({}, ctx) => ctx.deps.length > 0,
+                conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
+              });
+
+              telemetry.taskEvent("started", {
                 taskId: pendingTask.id,
+                source: pendingTask.source,
                 agentId: myAgentId,
-                previousStatus: pendingTask.status,
-              },
-              validator: (data) => data.previousStatus === "pending",
-              // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
-              filter: ({}, ctx) => ctx.deps.length > 0,
-              conditions: [{ timeout_ms: 300_000 }], // 5 min: polling interval + queue wait
-            });
-
-            telemetry.taskEvent("started", {
-              taskId: pendingTask.id,
-              source: pendingTask.source,
-              agentId: myAgentId,
+              });
             });
 
             // Resolve requesting user if available (UNKNOWN sentinel handling
             // lives in buildTriggerRequestedBy).
-            const assignedRequestedBy = buildTriggerRequestedBy(pendingTask);
+            const assignedRequestedBy = await buildTriggerRequestedBy(pendingTask);
 
             return {
               trigger: {
@@ -431,7 +438,7 @@ export async function handlePoll(
                 task: {
                   ...pendingTask,
                   status: "in_progress",
-                  attachments: attachmentsForTrigger(pendingTask.id),
+                  attachments: await attachmentsForTrigger(pendingTask.id),
                 },
                 ...(assignedRequestedBy && { requestedBy: assignedRequestedBy }),
               },
@@ -445,10 +452,10 @@ export async function handlePoll(
         // Gated on the messaging capability: without it the read-messages /
         // post-message tools aren't registered, so an unread_mentions trigger
         // would instruct a missing tool and strand the claimed mentions.
-        const claimedChannels = hasCapability("messaging") ? claimMentions(myAgentId) : [];
+        const claimedChannels = hasCapability("messaging") ? await claimMentions(myAgentId) : [];
         if (claimedChannels.length > 0) {
           // Recalculate inbox summary now that we've claimed
-          const inbox = getInboxSummary(myAgentId);
+          const inbox = await getInboxSummary(myAgentId);
           return {
             trigger: {
               type: "unread_mentions",
@@ -478,8 +485,8 @@ export async function handlePoll(
           // `getUnassignedTaskIds`) pre-filters candidates through
           // `isAgentEligibleForTask`, so an ineligible task is never even
           // offered to the budget gate below or the claim loop.
-          if (hasCapacity(myAgentId)) {
-            const unassignedIds = getUnassignedTaskIdsForAgent(myAgentId, 5);
+          if (await hasCapacity(myAgentId)) {
+            const unassignedIds = await getUnassignedTaskIdsForAgent(myAgentId, 5);
             // Budget admission gate (Phase 3). Pool path is workers-only —
             // per-agent budgets matter most here, but we still check global.
             // Only run the gate when there's at least one candidate task; an
@@ -490,11 +497,15 @@ export async function handlePoll(
             // refusals on the same lead-candidate are suppressed.
             if (unassignedIds.length > 0) {
               const candidateId = unassignedIds[0]!;
-              const candidateTask = getTaskById(candidateId);
-              const admission = canClaim(myAgentId, new Date(), candidateTask?.requestedByUserId);
+              const candidateTask = await getTaskById(candidateId);
+              const admission = await canClaim(
+                myAgentId,
+                new Date(),
+                candidateTask?.requestedByUserId,
+              );
               if (!admission.allowed) {
                 const utcDate = new Date().toISOString().slice(0, 10);
-                const dedup = recordBudgetRefusalNotification({
+                const dedup = await recordBudgetRefusalNotification({
                   taskId: candidateId,
                   date: utcDate,
                   agentId: myAgentId,
@@ -537,20 +548,24 @@ export async function handlePoll(
               }
             }
             for (const candidateId of unassignedIds) {
-              const claimed = claimTask(candidateId, myAgentId);
+              const claimed = await claimTask(candidateId, myAgentId);
               if (claimed) {
-                updateAgentStatusFromCapacity(myAgentId);
-                telemetry.taskEvent("claimed", {
-                  taskId: claimed.id,
-                  source: claimed.source,
-                  agentId: myAgentId,
+                await updateAgentStatusFromCapacity(myAgentId);
+                // Post-commit (see the `started` path above): a rolled-back
+                // claim must not report the task as claimed.
+                getDbClient().afterCommit(() => {
+                  telemetry.taskEvent("claimed", {
+                    taskId: claimed.id,
+                    source: claimed.source,
+                    agentId: myAgentId,
+                  });
                 });
-                const claimedRequestedBy = buildTriggerRequestedBy(claimed);
+                const claimedRequestedBy = await buildTriggerRequestedBy(claimed);
                 return {
                   trigger: {
                     type: "task_assigned",
                     taskId: claimed.id,
-                    task: { ...claimed, attachments: attachmentsForTrigger(claimed.id) },
+                    task: { ...claimed, attachments: await attachmentsForTrigger(claimed.id) },
                     ...(claimedRequestedBy && { requestedBy: claimedRequestedBy }),
                   },
                 };
@@ -562,7 +577,7 @@ export async function handlePoll(
 
         // No trigger found
         return { trigger: null };
-      })();
+      });
     } catch (error) {
       console.error("[/api/poll] Database error:", error);
       jsonError(
@@ -583,7 +598,7 @@ export async function handlePoll(
     // follow-up + workflow event bus). Errors here are logged inside the
     // helper; we never let them affect the response the worker sees.
     if (result.refusalSideEffects) {
-      emitBudgetRefusalSideEffects(
+      await emitBudgetRefusalSideEffects(
         result.refusalSideEffects.context,
         result.refusalSideEffects.inserted,
       );
@@ -598,11 +613,11 @@ export async function handlePoll(
       process.env.LEAD_MONITOR_CHANNELS === "true" &&
       Date.now() - lastChannelActivityCheckAt >= CHANNEL_ACTIVITY_INTERVAL_MS
     ) {
-      const agent = getAgentById(myAgentId);
+      const agent = await getAgentById(myAgentId);
       if (agent?.isLead) {
         lastChannelActivityCheckAt = Date.now();
         try {
-          const cursors = getAllChannelActivityCursors();
+          const cursors = await getAllChannelActivityCursors();
           const cursorMap = new Map(cursors.map((c) => [c.channelId, c.lastSeenTs]));
 
           // Parse optional channel allowlist from env
@@ -616,7 +631,7 @@ export async function handlePoll(
 
           // Commit seed cursors immediately (cold-start initialization, no trigger)
           for (const [channelId, ts] of seedCursors) {
-            upsertChannelActivityCursor(channelId, ts);
+            await upsertChannelActivityCursor(channelId, ts);
           }
 
           if (messages.length > 0) {

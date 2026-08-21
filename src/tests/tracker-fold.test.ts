@@ -15,7 +15,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import {
   getAuthorizationById,
   getDefaultAuthorizationIdForProvider,
@@ -111,8 +111,11 @@ function setEnv(key: string, value: string): void {
 }
 
 /** Seed a tracker OAuth app whose token endpoint is the localhost mock. */
-function seedMockTrackerApp(provider: "linear" | "jira", scopeSeparator: string): string {
-  upsertOAuthApp(provider, {
+async function seedMockTrackerApp(
+  provider: "linear" | "jira",
+  scopeSeparator: string,
+): Promise<string> {
+  await upsertOAuthApp(provider, {
     clientId: `${provider}-client`,
     clientSecret: `${provider}-secret`,
     authorizeUrl: `${providerBase}/authorize`,
@@ -123,7 +126,7 @@ function seedMockTrackerApp(provider: "linear" | "jira", scopeSeparator: string)
     requiresRefreshTokenRotation: provider === "jira",
     ...(provider === "jira" ? { extraParams: { audience: "api.atlassian.com" } } : {}),
   });
-  const appId = getOAuthAppIdByProvider(provider);
+  const appId = await getOAuthAppIdByProvider(provider);
   if (!appId) throw new Error("seed failed");
   return appId;
 }
@@ -144,7 +147,7 @@ beforeAll(async () => {
   delete process.env.JIRA_DISABLE;
 
   initDb(TEST_DB_PATH);
-  createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
+  await createAgent({ id: LEAD_ID, name: "lead", isLead: true, status: "idle" });
 
   providerServer = Bun.serve({
     port: 0,
@@ -196,9 +199,10 @@ beforeEach(async () => {
   includeRefreshToken = true;
   cloudIdResolves = true;
   resetLinearClient();
-  getDb().query("DELETE FROM oauth_authorizations").run();
-  getDb().query("DELETE FROM oauth_pending").run();
-  getDb().query("DELETE FROM oauth_apps").run();
+  const client = getDbClient();
+  await client.run("DELETE FROM oauth_authorizations");
+  await client.run("DELETE FROM oauth_pending");
+  await client.run("DELETE FROM oauth_apps");
 });
 
 afterEach(async () => {
@@ -211,9 +215,9 @@ afterEach(async () => {
 describe("step-8: tracker fold onto the unified OAuth core", () => {
   test("initLinear seeds column-correct linear app (comma separator + keepAlive/actor metadata)", async () => {
     const { initLinear } = await import("../linear/app");
-    expect(initLinear()).toBe(true);
+    expect(await initLinear()).toBe(true);
 
-    const app = getOAuthApp("linear");
+    const app = await getOAuthApp("linear");
     expect(app).toBeTruthy();
     expect(app?.scopeSeparator).toBe(",");
     expect(Boolean(app?.requiresRefreshTokenRotation)).toBe(false);
@@ -227,7 +231,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   test("initLinear boot seeding preserves foreign metadata keys (idempotent, no clobber)", async () => {
     // A pre-existing row carrying an operator/runtime-added metadata key — now
     // possible since the carve-out removal made the linear row user-manageable.
-    upsertOAuthApp("linear", {
+    await upsertOAuthApp("linear", {
       clientId: "pre-existing",
       clientSecret: "pre-existing-secret",
       authorizeUrl: "https://linear.app/oauth/authorize",
@@ -238,9 +242,9 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     });
 
     const { initLinear } = await import("../linear/app");
-    expect(initLinear()).toBe(true);
+    expect(await initLinear()).toBe(true);
 
-    const metadata = JSON.parse(getOAuthApp("linear")?.metadata || "{}");
+    const metadata = JSON.parse((await getOAuthApp("linear"))?.metadata || "{}");
     // Foreign key survives the re-boot seed…
     expect(metadata.customKey).toBe("keep-me");
     // …and the seeded keys win + are present.
@@ -256,9 +260,9 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     );
     try {
       const { initJira } = await import("../jira/app");
-      expect(initJira()).toBe(true);
+      expect(await initJira()).toBe(true);
 
-      const app = getOAuthApp("jira");
+      const app = await getOAuthApp("jira");
       expect(app?.scopeSeparator).toBe(" ");
       expect(Boolean(app?.requiresRefreshTokenRotation)).toBe(true);
       expect(app?.extraParamsJson).toContain("api.atlassian.com");
@@ -268,15 +272,16 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("linear authorize→callback wrapper lands tokens on the default authorization", async () => {
-    const appId = seedMockTrackerApp("linear", ",");
+    const appId = await seedMockTrackerApp("linear", ",");
 
     const authorizeUrl = await getLinearAuthorizationUrl();
     expect(authorizeUrl).toBeTruthy();
     // Pending row is keyed flow='tracker'.
     const state = stateFromAuthorizeUrl(authorizeUrl as string);
-    const pending = getDb()
-      .query("SELECT flow, label FROM oauth_pending WHERE state = ?")
-      .get(state) as { flow: string; label: string } | null;
+    const pending = await getDbClient().get<{ flow: string; label: string }>(
+      "SELECT flow, label FROM oauth_pending WHERE state = ?",
+      [state],
+    );
     expect(pending?.flow).toBe("tracker");
     expect(pending?.label).toBe("default");
 
@@ -288,7 +293,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     );
     expect(res.status).toBe(200);
 
-    const authorizations = listAuthorizationsForApp(appId);
+    const authorizations = await listAuthorizationsForApp(appId);
     expect(authorizations).toHaveLength(1);
     expect(authorizations[0]?.label).toBe("default");
     expect(authorizations[0]?.status).toBe("active");
@@ -296,7 +301,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
   });
 
   test("jira authorize→callback wrapper lands tokens AND resolves cloudId into metadata", async () => {
-    const appId = seedMockTrackerApp("jira", " ");
+    const appId = await seedMockTrackerApp("jira", " ");
 
     const authorizeUrl = await getJiraAuthorizationUrl();
     const state = stateFromAuthorizeUrl(authorizeUrl as string);
@@ -306,19 +311,19 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     });
     expect(res.status).toBe(200);
 
-    const authorizations = listAuthorizationsForApp(appId);
+    const authorizations = await listAuthorizationsForApp(appId);
     expect(authorizations).toHaveLength(1);
     expect(authorizations[0]?.status).toBe("active");
 
     // cloudId post-processing (deferred from step-4) now runs in the unified
     // flow='tracker' branch.
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.cloudId).toBe("cloud-xyz");
     expect(meta.siteUrl).toBe("https://acme.atlassian.net");
   });
 
   test("jira callback cloudId-resolution failure surfaces an error but still lands the (half-connected) authorization", async () => {
-    const appId = seedMockTrackerApp("jira", " ");
+    const appId = await seedMockTrackerApp("jira", " ");
     cloudIdResolves = false; // accessible-resources returns 503
 
     const authorizeUrl = await getJiraAuthorizationUrl();
@@ -334,16 +339,16 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     // Tokens were already persisted before cloudId resolution ran, so the
     // authorization is "half-connected": active, but no cloudId. Re-running the
     // OAuth dance (once the provider recovers) resolves it.
-    const authorizations = listAuthorizationsForApp(appId);
+    const authorizations = await listAuthorizationsForApp(appId);
     expect(authorizations).toHaveLength(1);
     expect(authorizations[0]?.status).toBe("active");
-    expect(getJiraMetadata().cloudId).toBeUndefined();
+    expect((await getJiraMetadata()).cloudId).toBeUndefined();
   });
 
   test("jira refresh enforces rotation strictness — missing rotated refresh_token throws + marks refresh-failed", async () => {
-    seedMockTrackerApp("jira", " ");
-    const appId = getOAuthAppIdByProvider("jira") as string;
-    const authorization = upsertAuthorization({
+    await seedMockTrackerApp("jira", " ");
+    const appId = (await getOAuthAppIdByProvider("jira")) as string;
+    const authorization = await upsertAuthorization({
       appId,
       label: "default",
       accessToken: "stale-access",
@@ -356,7 +361,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
 
     await expect(forceRefreshAuthorizationOrThrow(authorization.id)).rejects.toThrow();
 
-    const after = getAuthorizationById(authorization.id);
+    const after = await getAuthorizationById(authorization.id);
     expect(after?.status).toBe("refresh-failed");
   });
 
@@ -377,17 +382,17 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     expect(res.status).toBe(200);
     const body = (await res.text()).toLowerCase();
     expect(body).not.toContain("reserved");
-    expect(getOAuthAppIdByProvider("linear")).toBeTruthy();
+    expect(await getOAuthAppIdByProvider("linear")).toBeTruthy();
   });
 
   test("sweep-driven refresh invalidates the cached Linear SDK client + notifies listeners", async () => {
     // initLinear() registers the resetLinearClient refresh listener + seeds the
     // real linear app; override the token endpoint to the localhost mock.
     const { initLinear } = await import("../linear/app");
-    expect(initLinear()).toBe(true);
-    const appId = seedMockTrackerApp("linear", ",");
+    expect(await initLinear()).toBe(true);
+    const appId = await seedMockTrackerApp("linear", ",");
 
-    const authorization = upsertAuthorization({
+    const authorization = await upsertAuthorization({
       appId,
       label: "default",
       accessToken: "initial-access",
@@ -395,10 +400,10 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
       expiresAt: new Date(Date.now() - 60_000).toISOString(),
       status: "active",
     });
-    expect(getDefaultAuthorizationIdForProvider("linear")).toBe(authorization.id);
+    expect(await getDefaultAuthorizationIdForProvider("linear")).toBe(authorization.id);
 
     // Prime the cached client.
-    const before = getLinearClient();
+    const before = await getLinearClient();
     expect(before).toBeTruthy();
 
     // Independently observe the notification mechanism.
@@ -413,7 +418,7 @@ describe("step-8: tracker fold onto the unified OAuth core", () => {
     expect(events).toContain("linear");
     // The cached client was reset by initLinear's listener, so a fresh instance
     // (carrying the rotated token) is built on the next read.
-    const after = getLinearClient();
+    const after = await getLinearClient();
     expect(after).not.toBe(before);
   });
 });

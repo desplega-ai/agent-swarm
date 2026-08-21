@@ -11,13 +11,13 @@ const APP_USER_ID_NAMESPACE = "integration:linear:bot-app-user-id";
  * quirk and `actor` extra-param are seeded as column/metadata by `initLinear()`
  * and surfaced by {@link oauthAppRowToProviderConfig}.
  */
-export function getLinearOAuthConfig(): OAuthProviderConfig | null {
-  const app = getOAuthApp("linear");
+export async function getLinearOAuthConfig(): Promise<OAuthProviderConfig | null> {
+  const app = await getOAuthApp("linear");
   return app ? oauthAppRowToProviderConfig(app) : null;
 }
 
 export async function getLinearAuthorizationUrl(): Promise<string | null> {
-  const config = getLinearOAuthConfig();
+  const config = await getLinearOAuthConfig();
   if (!config) return null;
   // flow='tracker' so the unified state-keyed callback runs the tracker
   // post-processing (appUserId capture) after landing tokens on the default
@@ -60,7 +60,7 @@ export async function captureLinearAppUserId(accessToken: string): Promise<void>
   if (!appUserId) {
     throw new Error("Linear viewer query returned no id");
   }
-  upsertKv({
+  await upsertKv({
     namespace: APP_USER_ID_NAMESPACE,
     key: workspaceId && workspaceId !== "" ? workspaceId : "default",
     value: appUserId,

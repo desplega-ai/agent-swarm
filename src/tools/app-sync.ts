@@ -60,7 +60,7 @@ export const registerAppSyncTool = (server: McpServer) => {
     },
     async ({ appId, model, source }, requestInfo) => {
       if (!requestInfo.agentId) return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       const decision = can({
         principal: { kind: "agent", agentId: requestInfo.agentId, isLead: agent?.isLead ?? false },
         verb: "app.use",
@@ -68,7 +68,7 @@ export const registerAppSyncTool = (server: McpServer) => {
         source: "mcp",
       });
       if (!decision.allow) return toolErr(decision.reason);
-      const app = getApp(appId);
+      const app = await getApp(appId);
       if (!app) return toolErr(`App ${appId} not found.`);
 
       const result = await runAppSync({

@@ -31,7 +31,7 @@ export const registerSlackDeleteTool = (server: McpServer) => {
         return toolErr("Agent ID not found.");
       }
 
-      const agent = getAgentById(requestInfo.agentId);
+      const agent = await getAgentById(requestInfo.agentId);
       if (!agent) {
         return toolErr("Agent not found.");
       }

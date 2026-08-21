@@ -21,4 +21,4 @@ export interface ScriptTypeContext {
  * `scriptSdkTypesWithGeneratedApis` / `scriptStdlibTypesWithGeneratedApis` —
  * never a compiler-host or files-Map change.
  */
-export type ScriptTypeContributor = (context: ScriptTypeContext) => string;
+export type ScriptTypeContributor = (context: ScriptTypeContext) => string | Promise<string>;

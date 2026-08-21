@@ -34,27 +34,34 @@ let userId: string;
 let otherUserId: string;
 let sourceTaskId: string;
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb("./test-asset-key-mcp.sqlite");
-  agentId = createAgent({
-    name: "asset-key-caller",
-    isLead: false,
-    status: "busy",
-    maxTasks: 10,
-  }).id;
-  targetAgentId = createAgent({
-    name: "asset-key-target",
-    isLead: false,
-    status: "idle",
-    maxTasks: 10,
-  }).id;
-  userId = createUser({ name: "MCP Namespace User", email: "mcp-namespace@example.com" }).id;
-  otherUserId = createUser({ name: "Other MCP User", email: "mcp-other@example.com" }).id;
-  sourceTaskId = createTaskExtended("trusted MCP source", {
-    agentId,
-    requestedByUserId: userId,
-    key: `personal/${userId}/work/`,
-  }).id;
+  agentId = (
+    await createAgent({
+      name: "asset-key-caller",
+      isLead: false,
+      status: "busy",
+      maxTasks: 10,
+    })
+  ).id;
+  targetAgentId = (
+    await createAgent({
+      name: "asset-key-target",
+      isLead: false,
+      status: "idle",
+      maxTasks: 10,
+    })
+  ).id;
+  userId = (await createUser({ name: "MCP Namespace User", email: "mcp-namespace@example.com" }))
+    .id;
+  otherUserId = (await createUser({ name: "Other MCP User", email: "mcp-other@example.com" })).id;
+  sourceTaskId = (
+    await createTaskExtended("trusted MCP source", {
+      agentId,
+      requestedByUserId: userId,
+      key: `personal/${userId}/work/`,
+    })
+  ).id;
 });
 
 afterAll(() => closeDb());

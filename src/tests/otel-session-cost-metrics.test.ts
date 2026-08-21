@@ -17,7 +17,7 @@ import {
   type ServerResponse,
 } from "node:http";
 import type { Counter } from "@opentelemetry/api";
-import { closeDb, createAgent, getDb, initDb, insertPricingRow } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, insertPricingRow } from "../be/db";
 import { handleCore } from "../http/core";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { SessionCostMetric } from "../otel";
@@ -195,7 +195,7 @@ let agentId: string;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  agentId = createAgent({ name: "otel-metrics-test", isLead: false, status: "idle" }).id;
+  agentId = (await createAgent({ name: "otel-metrics-test", isLead: false, status: "idle" })).id;
   server = createTestServer();
   port = await listen(server);
 });
@@ -206,10 +206,11 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-afterEach(() => {
+afterEach(async () => {
   recordSessionCostSpy.mockClear();
-  getDb().prepare("DELETE FROM session_costs").run();
-  getDb().prepare("DELETE FROM pricing WHERE effective_from > 0").run();
+  const client = getDbClient();
+  await client.run("DELETE FROM session_costs");
+  await client.run("DELETE FROM pricing WHERE effective_from > 0");
 });
 
 function authedPost(body: Record<string, unknown>): Promise<Response> {
@@ -224,9 +225,9 @@ function authedPost(body: Record<string, unknown>): Promise<Response> {
 }
 
 // Helper to seed a minimal two-class pricing row for recompute tests.
-function seedRates(provider: string, model: string, inputRate = 1, outputRate = 2) {
+async function seedRates(provider: string, model: string, inputRate = 1, outputRate = 2) {
   for (const tokenClass of ["input", "output"] as const) {
-    insertPricingRow({
+    await insertPricingRow({
       provider: provider as Parameters<typeof insertPricingRow>[0]["provider"],
       model,
       tokenClass,
@@ -257,7 +258,7 @@ describe("handleSessionData → recordSessionCost forwarding", () => {
   });
 
   test("pricing-table costSource: forwards recomputed totalCostUsd", async () => {
-    seedRates("claude", "claude-sonnet", 1, 5);
+    await seedRates("claude", "claude-sonnet", 1, 5);
 
     const res = await authedPost({
       sessionId: "otel-pricing-table-test",

@@ -74,7 +74,7 @@ let leadAgentId: string;
 beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
-  leadAgentId = createAgent({ name: "presets-lead", isLead: true, status: "idle" }).id;
+  leadAgentId = (await createAgent({ name: "presets-lead", isLead: true, status: "idle" })).id;
 });
 
 afterAll(async () => {
@@ -218,7 +218,7 @@ describe("oauth presets — HTTP", () => {
     expect(body.oauthApp.source).toBe("curated-prefill");
     expect(res.text).not.toContain("google-secret");
 
-    const stored = getOAuthApp("google");
+    const stored = await getOAuthApp("google");
     expect(stored?.source).toBe("curated-prefill");
     expect(stored?.authorizeUrl).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(stored?.tokenUrl).toBe("https://oauth2.googleapis.com/token");
@@ -239,7 +239,7 @@ describe("oauth presets — HTTP", () => {
     });
     expect(res.status).toBe(400);
     expect(res.text).toContain("authorizeUrl");
-    expect(getOAuthApp("bare_provider")).toBeNull();
+    expect(await getOAuthApp("bare_provider")).toBeNull();
   });
 
   test("explicit fields override the preset during hydration", async () => {
@@ -255,7 +255,7 @@ describe("oauth presets — HTTP", () => {
       },
     });
     expect(res.status).toBe(200);
-    const stored = getOAuthApp("google_custom");
+    const stored = await getOAuthApp("google_custom");
     expect(stored?.tokenUrl).toBe("https://custom.example.com/token");
     expect(stored?.authorizeUrl).toBe("https://accounts.google.com/o/oauth2/v2/auth");
     expect(stored?.source).toBe("curated-prefill");

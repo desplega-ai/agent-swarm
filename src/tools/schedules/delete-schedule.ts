@@ -43,28 +43,28 @@ export const registerDeleteScheduleTool = (server: McpServer) => {
 
       // Find the schedule
       const schedule = scheduleId
-        ? getScheduledTaskById(scheduleId)
+        ? await getScheduledTaskById(scheduleId)
         : name
-          ? getScheduledTaskByName(name)
+          ? await getScheduledTaskByName(name)
           : null;
 
       if (!schedule) {
         return toolErr("Schedule not found.");
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.");
       }
 
       try {
-        const deleted = deleteScheduledTask(schedule.id);
+        const deleted = await deleteScheduledTask(schedule.id);
 
         if (!deleted) {
           return toolErr("Failed to delete schedule.");
         }
 
-        createEvent({
+        await createEvent({
           category: "system",
           event: "schedule.deleted",
           source: "api",

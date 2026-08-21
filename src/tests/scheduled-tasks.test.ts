@@ -6,7 +6,7 @@ import {
   createScheduledTask,
   createUser,
   deleteScheduledTask,
-  getDb,
+  getDbClient,
   getScheduledTaskById,
   getScheduledTaskByName,
   getScheduledTasks,
@@ -34,7 +34,7 @@ describe("Scheduled Tasks Integration", () => {
     initDb(TEST_DB_PATH);
 
     // Create a test agent
-    testAgent = createAgent({
+    testAgent = await createAgent({
       name: "Test Schedule Agent",
       isLead: false,
       status: "idle",
@@ -56,8 +56,8 @@ describe("Scheduled Tasks Integration", () => {
   });
 
   describe("Scheduled Task CRUD Operations", () => {
-    test("should create a scheduled task with cron expression", () => {
-      const schedule = createScheduledTask({
+    test("should create a scheduled task with cron expression", async () => {
+      const schedule = await createScheduledTask({
         name: "test-cron-schedule",
         description: "Test schedule with cron",
         cronExpression: "0 9 * * *", // Daily at 9 AM
@@ -81,8 +81,8 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.timezone).toBe("UTC");
     });
 
-    test("should create a scheduled task with interval", () => {
-      const schedule = createScheduledTask({
+    test("should create a scheduled task with interval", async () => {
+      const schedule = await createScheduledTask({
         name: "test-interval-schedule",
         intervalMs: 3600000, // 1 hour
         taskTemplate: "Run hourly health check",
@@ -97,53 +97,53 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.cronExpression).toBeUndefined();
     });
 
-    test("should retrieve scheduled task by ID", () => {
-      const created = createScheduledTask({
+    test("should retrieve scheduled task by ID", async () => {
+      const created = await createScheduledTask({
         name: "test-get-by-id",
         intervalMs: 60000,
         taskTemplate: "Test task",
       });
 
-      const retrieved = getScheduledTaskById(created.id);
+      const retrieved = await getScheduledTaskById(created.id);
 
       expect(retrieved).not.toBeNull();
       expect(retrieved?.id).toBe(created.id);
       expect(retrieved?.name).toBe("test-get-by-id");
     });
 
-    test("should retrieve scheduled task by name", () => {
-      const created = createScheduledTask({
+    test("should retrieve scheduled task by name", async () => {
+      const created = await createScheduledTask({
         name: "test-get-by-name-unique",
         intervalMs: 60000,
         taskTemplate: "Test task",
       });
 
-      const retrieved = getScheduledTaskByName("test-get-by-name-unique");
+      const retrieved = await getScheduledTaskByName("test-get-by-name-unique");
 
       expect(retrieved).not.toBeNull();
       expect(retrieved?.id).toBe(created.id);
       expect(retrieved?.name).toBe("test-get-by-name-unique");
     });
 
-    test("should return null for non-existent schedule ID", () => {
-      const result = getScheduledTaskById("non-existent-id");
+    test("should return null for non-existent schedule ID", async () => {
+      const result = await getScheduledTaskById("non-existent-id");
       expect(result).toBeNull();
     });
 
-    test("should return null for non-existent schedule name", () => {
-      const result = getScheduledTaskByName("non-existent-name");
+    test("should return null for non-existent schedule name", async () => {
+      const result = await getScheduledTaskByName("non-existent-name");
       expect(result).toBeNull();
     });
 
-    test("should update scheduled task", () => {
-      const schedule = createScheduledTask({
+    test("should update scheduled task", async () => {
+      const schedule = await createScheduledTask({
         name: "test-update-schedule",
         intervalMs: 60000,
         taskTemplate: "Original task",
         enabled: true,
       });
 
-      const updated = updateScheduledTask(schedule.id, {
+      const updated = await updateScheduledTask(schedule.id, {
         taskTemplate: "Updated task",
         priority: 80,
         enabled: false,
@@ -155,75 +155,75 @@ describe("Scheduled Tasks Integration", () => {
       expect(updated?.enabled).toBe(false);
     });
 
-    test("should delete scheduled task", () => {
-      const schedule = createScheduledTask({
+    test("should delete scheduled task", async () => {
+      const schedule = await createScheduledTask({
         name: "test-delete-schedule",
         intervalMs: 60000,
         taskTemplate: "Task to delete",
       });
 
-      const deleted = deleteScheduledTask(schedule.id);
+      const deleted = await deleteScheduledTask(schedule.id);
       expect(deleted).toBe(true);
 
-      const retrieved = getScheduledTaskById(schedule.id);
+      const retrieved = await getScheduledTaskById(schedule.id);
       expect(retrieved).toBeNull();
     });
 
-    test("should return false when deleting non-existent schedule", () => {
-      const deleted = deleteScheduledTask("non-existent-id");
+    test("should return false when deleting non-existent schedule", async () => {
+      const deleted = await deleteScheduledTask("non-existent-id");
       expect(deleted).toBe(false);
     });
 
-    test("should list scheduled tasks with filters", () => {
+    test("should list scheduled tasks with filters", async () => {
       // Create enabled and disabled schedules
-      createScheduledTask({
+      await createScheduledTask({
         name: "test-filter-enabled",
         intervalMs: 60000,
         taskTemplate: "Enabled task",
         enabled: true,
       });
 
-      createScheduledTask({
+      await createScheduledTask({
         name: "test-filter-disabled",
         intervalMs: 60000,
         taskTemplate: "Disabled task",
         enabled: false,
       });
 
-      const enabledOnly = getScheduledTasks({ enabled: true });
-      const disabledOnly = getScheduledTasks({ enabled: false });
+      const enabledOnly = await getScheduledTasks({ enabled: true });
+      const disabledOnly = await getScheduledTasks({ enabled: false });
 
       expect(enabledOnly.every((s) => s.enabled)).toBe(true);
       expect(disabledOnly.every((s) => !s.enabled)).toBe(true);
     });
 
-    test("should filter scheduled tasks by triage error fields", () => {
-      const ok = createScheduledTask({
+    test("should filter scheduled tasks by triage error fields", async () => {
+      const ok = await createScheduledTask({
         name: "test-filter-last-run-ok",
         intervalMs: 60000,
         taskTemplate: "Healthy task",
       });
-      const failing = createScheduledTask({
+      const failing = await createScheduledTask({
         name: "test-filter-last-run-failed",
         intervalMs: 60000,
         taskTemplate: "Failing task",
       });
-      updateScheduledTask(ok.id, {
+      await updateScheduledTask(ok.id, {
         lastRunAt: new Date(Date.now() - 120000).toISOString(),
         consecutiveErrors: 0,
       });
-      updateScheduledTask(failing.id, {
+      await updateScheduledTask(failing.id, {
         lastRunAt: new Date(Date.now() - 60000).toISOString(),
         consecutiveErrors: 3,
         lastErrorAt: new Date().toISOString(),
         lastErrorMessage: "boom",
       });
 
-      const failingOnly = getScheduledTasks({
+      const failingOnly = await getScheduledTasks({
         lastRunStatus: "failed",
         consecutiveErrorsMin: 2,
       });
-      const succeededOnly = getScheduledTasks({ lastRunStatus: "succeeded" });
+      const succeededOnly = await getScheduledTasks({ lastRunStatus: "succeeded" });
 
       expect(failingOnly.some((s) => s.id === failing.id)).toBe(true);
       expect(failingOnly.some((s) => s.id === ok.id)).toBe(false);
@@ -231,14 +231,14 @@ describe("Scheduled Tasks Integration", () => {
       expect(succeededOnly.some((s) => s.id === failing.id)).toBe(false);
     });
 
-    test("should filter scheduled tasks by name", () => {
-      createScheduledTask({
+    test("should filter scheduled tasks by name", async () => {
+      await createScheduledTask({
         name: "unique-name-xyz-123",
         intervalMs: 60000,
         taskTemplate: "Unique task",
       });
 
-      const filtered = getScheduledTasks({ name: "xyz-123" });
+      const filtered = await getScheduledTasks({ name: "xyz-123" });
 
       expect(filtered.length).toBeGreaterThanOrEqual(1);
       expect(filtered.some((s) => s.name.includes("xyz-123"))).toBe(true);
@@ -247,7 +247,7 @@ describe("Scheduled Tasks Integration", () => {
 
   describe("runScheduleNow (Manual Trigger)", () => {
     test("should create a task when schedule is run manually", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-run-1",
         cronExpression: "0 9 * * *",
         taskTemplate: "Manual trigger test task",
@@ -259,23 +259,26 @@ describe("Scheduled Tasks Integration", () => {
       });
 
       // Get task count before
-      const tasksBefore = getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as {
+      const tasksBefore = (await getDbClient().get(
+        "SELECT COUNT(*) as count FROM agent_tasks",
+      )) as {
         count: number;
       };
 
       await runScheduleNow(schedule.id);
 
       // Get task count after
-      const tasksAfter = getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as {
+      const tasksAfter = (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
         count: number;
       };
 
       expect(tasksAfter.count).toBe(tasksBefore.count + 1);
 
       // Verify the created task has correct properties
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as {
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as {
         id: string;
         taskType: string;
         tags: string;
@@ -292,7 +295,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should update lastRunAt but NOT nextRunAt on manual run", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-run-2",
         cronExpression: "0 12 * * *", // Noon daily
         taskTemplate: "Manual run preserve nextRunAt",
@@ -301,15 +304,15 @@ describe("Scheduled Tasks Integration", () => {
 
       // Set a known nextRunAt
       const futureDate = new Date("2026-02-01T12:00:00.000Z").toISOString();
-      updateScheduledTask(schedule.id, { nextRunAt: futureDate });
+      await updateScheduledTask(schedule.id, { nextRunAt: futureDate });
 
-      const beforeRun = getScheduledTaskById(schedule.id);
+      const beforeRun = await getScheduledTaskById(schedule.id);
       expect(beforeRun?.nextRunAt).toBe(futureDate);
       expect(beforeRun?.lastRunAt).toBeUndefined();
 
       await runScheduleNow(schedule.id);
 
-      const afterRun = getScheduledTaskById(schedule.id);
+      const afterRun = await getScheduledTaskById(schedule.id);
 
       // nextRunAt should remain unchanged
       expect(afterRun?.nextRunAt).toBe(futureDate);
@@ -318,8 +321,11 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("fired task inherits the schedule's createdBy as requestedByUserId", async () => {
-      const requester = createUser({ name: "Schedule Requester", email: "sched-req@example.com" });
-      const schedule = createScheduledTask({
+      const requester = await createUser({
+        name: "Schedule Requester",
+        email: "sched-req@example.com",
+      });
+      const schedule = await createScheduledTask({
         name: "test-manual-run-createdby",
         cronExpression: "0 9 * * *",
         taskTemplate: "Task carrying schedule provenance",
@@ -330,15 +336,16 @@ describe("Scheduled Tasks Integration", () => {
 
       await runScheduleNow(schedule.id);
 
-      const createdTask = getDb()
-        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { id: string };
-      const task = getTaskById(createdTask.id);
+      const createdTask = (await getDbClient().get(
+        "SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { id: string };
+      const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId).toBe(requester.id);
     });
 
     test("fired task has no requestedByUserId when the schedule's createdBy is unset (first-ever schedules)", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-run-no-createdby",
         cronExpression: "0 9 * * *",
         taskTemplate: "Task with no schedule provenance",
@@ -348,10 +355,11 @@ describe("Scheduled Tasks Integration", () => {
 
       await runScheduleNow(schedule.id);
 
-      const createdTask = getDb()
-        .query("SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { id: string };
-      const task = getTaskById(createdTask.id);
+      const createdTask = (await getDbClient().get(
+        "SELECT id FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { id: string };
+      const task = await getTaskById(createdTask.id);
       expect(task?.requestedByUserId ?? null).toBeNull();
     });
 
@@ -362,7 +370,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should throw error for disabled schedule", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-disabled",
         intervalMs: 60000,
         taskTemplate: "Disabled schedule task",
@@ -373,13 +381,13 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should create task with target agent when specified", async () => {
-      const targetAgent = createAgent({
+      const targetAgent = await createAgent({
         name: "Target Agent",
         isLead: false,
         status: "idle",
       });
 
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-with-target",
         intervalMs: 60000,
         taskTemplate: "Task for specific agent",
@@ -390,9 +398,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { agentId: string; status: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { agentId: string; status: string };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBe(targetAgent.id);
@@ -400,7 +409,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should create unassigned task when no target agent specified", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-manual-no-target",
         intervalMs: 60000,
         taskTemplate: "Task for pool",
@@ -410,9 +419,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as { agentId: string | null; status: string };
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as { agentId: string | null; status: string };
 
       expect(createdTask).toBeDefined();
       expect(createdTask.agentId).toBeNull();
@@ -420,7 +430,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("should be transactional - task and schedule update are atomic", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-transactional",
         intervalMs: 60000,
         taskTemplate: "Transactional test task",
@@ -428,16 +438,20 @@ describe("Scheduled Tasks Integration", () => {
       });
 
       const taskCountBefore = (
-        getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as { count: number }
+        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
+          count: number;
+        }
       ).count;
 
       await runScheduleNow(schedule.id);
 
       const taskCountAfter = (
-        getDb().query("SELECT COUNT(*) as count FROM agent_tasks").get() as { count: number }
+        (await getDbClient().get("SELECT COUNT(*) as count FROM agent_tasks")) as {
+          count: number;
+        }
       ).count;
 
-      const updatedSchedule = getScheduledTaskById(schedule.id);
+      const updatedSchedule = await getScheduledTaskById(schedule.id);
 
       // Both operations should have completed
       expect(taskCountAfter).toBe(taskCountBefore + 1);
@@ -446,8 +460,8 @@ describe("Scheduled Tasks Integration", () => {
   });
 
   describe("calculateNextRun", () => {
-    test("should calculate next run for cron expression", () => {
-      const schedule = createScheduledTask({
+    test("should calculate next run for cron expression", async () => {
+      const schedule = await createScheduledTask({
         name: "test-calc-cron",
         cronExpression: "0 9 * * *", // Daily at 9 AM
         taskTemplate: "Test task",
@@ -461,8 +475,8 @@ describe("Scheduled Tasks Integration", () => {
       expect(nextRun).toBe("2026-01-15T09:00:00.000Z");
     });
 
-    test("should calculate next run for interval", () => {
-      const schedule = createScheduledTask({
+    test("should calculate next run for interval", async () => {
+      const schedule = await createScheduledTask({
         name: "test-calc-interval",
         intervalMs: 3600000, // 1 hour
         taskTemplate: "Test task",
@@ -497,7 +511,7 @@ describe("Scheduled Tasks Integration", () => {
 
   describe("Schedule with Target Agent", () => {
     test("should preserve all schedule properties when running", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-preserve-props",
         description: "Schedule with all properties",
         cronExpression: "0 6 * * 1", // Monday 6 AM
@@ -514,9 +528,10 @@ describe("Scheduled Tasks Integration", () => {
       await runScheduleNow(schedule.id);
 
       // Find the created task
-      const createdTask = getDb()
-        .query("SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1")
-        .get(schedule.taskTemplate) as {
+      const createdTask = (await getDbClient().get(
+        "SELECT * FROM agent_tasks WHERE task = ? ORDER BY createdAt DESC LIMIT 1",
+        [schedule.taskTemplate!],
+      )) as {
         task: string;
         taskType: string;
         tags: string;
@@ -542,7 +557,7 @@ describe("Scheduled Tasks Integration", () => {
 
   describe("Multiple Manual Runs", () => {
     test("should allow multiple consecutive manual runs", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "test-multiple-runs",
         intervalMs: 60000,
         taskTemplate: "Multiple run test",
@@ -550,14 +565,14 @@ describe("Scheduled Tasks Integration", () => {
       });
 
       await runScheduleNow(schedule.id);
-      const firstRunSchedule = getScheduledTaskById(schedule.id);
+      const firstRunSchedule = await getScheduledTaskById(schedule.id);
       const firstRunAt = firstRunSchedule?.lastRunAt;
 
       // Small delay to ensure different timestamps
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       await runScheduleNow(schedule.id);
-      const secondRunSchedule = getScheduledTaskById(schedule.id);
+      const secondRunSchedule = await getScheduledTaskById(schedule.id);
       const secondRunAt = secondRunSchedule?.lastRunAt;
 
       expect(firstRunAt).toBeDefined();
@@ -565,18 +580,19 @@ describe("Scheduled Tasks Integration", () => {
       expect(secondRunAt).not.toBe(firstRunAt);
 
       // Count tasks created
-      const tasks = getDb()
-        .query("SELECT COUNT(*) as count FROM agent_tasks WHERE task = ?")
-        .get("Multiple run test") as { count: number };
+      const tasks = (await getDbClient().get(
+        "SELECT COUNT(*) as count FROM agent_tasks WHERE task = ?",
+        ["Multiple run test"],
+      )) as { count: number };
 
       expect(tasks.count).toBe(2);
     });
   });
 
   describe("One-Time Schedules", () => {
-    test("create one-time schedule with delayMs computes nextRunAt", () => {
+    test("create one-time schedule with delayMs computes nextRunAt", async () => {
       const before = Date.now();
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "one-time-delay-test",
         taskTemplate: "One-time delay task",
         scheduleType: "one_time",
@@ -591,9 +607,9 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.intervalMs).toBeUndefined();
     });
 
-    test("create one-time schedule with runAt stores nextRunAt", () => {
+    test("create one-time schedule with runAt stores nextRunAt", async () => {
       const runAt = new Date(Date.now() + 120000).toISOString();
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "one-time-runat-test",
         taskTemplate: "One-time runAt task",
         scheduleType: "one_time",
@@ -605,8 +621,8 @@ describe("Scheduled Tasks Integration", () => {
       expect(schedule.nextRunAt).toBe(runAt);
     });
 
-    test("one-time schedule does not require cronExpression or intervalMs", () => {
-      const schedule = createScheduledTask({
+    test("one-time schedule does not require cronExpression or intervalMs", async () => {
+      const schedule = await createScheduledTask({
         name: "one-time-no-cron-test",
         taskTemplate: "No cron needed",
         scheduleType: "one_time",
@@ -619,7 +635,7 @@ describe("Scheduled Tasks Integration", () => {
     });
 
     test("executing one-time schedule auto-disables it", async () => {
-      const schedule = createScheduledTask({
+      const schedule = await createScheduledTask({
         name: "one-time-exec-test",
         taskTemplate: "Execute and disable",
         scheduleType: "one_time",
@@ -630,28 +646,28 @@ describe("Scheduled Tasks Integration", () => {
       // Run it manually
       await runScheduleNow(schedule.id);
 
-      const updated = getScheduledTaskById(schedule.id);
+      const updated = await getScheduledTaskById(schedule.id);
       expect(updated).not.toBeNull();
       expect(updated!.enabled).toBe(false);
       expect(updated!.lastRunAt).toBeDefined();
       expect(updated!.nextRunAt).toBeUndefined();
     });
 
-    test("one-time schedules hidden by default in list", () => {
+    test("one-time schedules hidden by default in list", async () => {
       // The executed one-time schedule from the previous test should be hidden
-      const allSchedules = getScheduledTasks({ hideCompleted: true });
+      const allSchedules = await getScheduledTasks({ hideCompleted: true });
       const executedOneTime = allSchedules.find((s) => s.name === "one-time-exec-test");
       expect(executedOneTime).toBeUndefined();
 
       // But visible when hideCompleted is false
-      const allIncluding = getScheduledTasks({ hideCompleted: false });
+      const allIncluding = await getScheduledTasks({ hideCompleted: false });
       const found = allIncluding.find((s) => s.name === "one-time-exec-test");
       expect(found).toBeDefined();
       expect(found!.scheduleType).toBe("one_time");
     });
 
-    test("filter by scheduleType works", () => {
-      const oneTimeOnly = getScheduledTasks({
+    test("filter by scheduleType works", async () => {
+      const oneTimeOnly = await getScheduledTasks({
         scheduleType: "one_time",
         hideCompleted: false,
       });
@@ -660,14 +676,14 @@ describe("Scheduled Tasks Integration", () => {
         expect(s.scheduleType).toBe("one_time");
       }
 
-      const recurringOnly = getScheduledTasks({ scheduleType: "recurring" });
+      const recurringOnly = await getScheduledTasks({ scheduleType: "recurring" });
       for (const s of recurringOnly) {
         expect(s.scheduleType).toBe("recurring");
       }
     });
 
-    test("existing recurring schedules default to scheduleType recurring", () => {
-      const schedule = createScheduledTask({
+    test("existing recurring schedules default to scheduleType recurring", async () => {
+      const schedule = await createScheduledTask({
         name: "recurring-default-test",
         taskTemplate: "Should be recurring",
         cronExpression: "0 * * * *",

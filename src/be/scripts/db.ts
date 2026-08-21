@@ -11,7 +11,7 @@ import type {
 import { registerVolatileSecret } from "../../utils/secret-scrubber";
 import { generateBearerToken, generateShortId } from "../../utils/short-id";
 import { decryptSecret, encryptSecret, getEncryptionKey } from "../crypto";
-import { computeContentHash, getDb } from "../db";
+import { computeContentHash, getDbClient } from "../db";
 import { embedScript } from "./embeddings";
 
 type ScriptRow = Omit<ScriptRecord, "isScratch" | "typeChecked"> & {
@@ -74,7 +74,7 @@ function rowToScriptVersion(row: ScriptVersionRow): ScriptVersionRecord {
   };
 }
 
-function insertScriptVersion(args: {
+async function insertScriptVersion(args: {
   scriptId: string;
   version: number;
   source: string;
@@ -84,16 +84,14 @@ function insertScriptVersion(args: {
   contentHash: string;
   changedByAgentId?: string | null;
   changeReason?: string | null;
-}): void {
-  getDb()
-    .prepare(
-      `INSERT INTO script_versions (
+}): Promise<void> {
+  await getDbClient().run(
+    `INSERT INTO script_versions (
         id, scriptId, version, source, description, intent, signatureJson,
         contentHash, changedByAgentId, changedAt, changeReason
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
+    [
       crypto.randomUUID(),
       args.scriptId,
       args.version,
@@ -105,10 +103,11 @@ function insertScriptVersion(args: {
       args.changedByAgentId ?? null,
       new Date().toISOString(),
       args.changeReason ?? null,
-    );
+    ],
+  );
 }
 
-export function insertScript(args: ScriptWriteArgs): ScriptRecord {
+export async function insertScript(args: ScriptWriteArgs): Promise<ScriptRecord> {
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
@@ -117,41 +116,16 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
   const isScratch = args.isScratch ? 1 : 0;
   const typeChecked = args.typeChecked ? 1 : 0;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
-      .prepare<
-        ScriptRow,
-        [
-          string,
-          string,
-          string,
-          ScriptScope,
-          string | null,
-          string,
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          number,
-          number,
-          string,
-          string | null,
-          string,
-          string,
-          string | null,
-          string | null,
-        ]
-      >(
-        `INSERT INTO scripts (
+  return await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<ScriptRow>(
+      `INSERT INTO scripts (
           id, "key", name, scope, scopeId, source, description, intent, signatureJson,
           argsJsonSchema, contentHash, isScratch, typeChecked, fsMode, createdByAgentId, createdAt, updatedAt,
           created_by, updated_by
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING *`,
-      )
-      .get(
+      [
         id,
         defaultAssetKey("script", id),
         args.name,
@@ -171,11 +145,12 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
         now,
         args.createdBy ?? null,
         args.createdBy ?? null,
-      );
+      ],
+    );
 
     if (!row) throw new Error("Failed to insert script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,
@@ -189,8 +164,6 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
 
     return rowToScript(row);
   });
-
-  return txn();
 }
 
 /**
@@ -200,9 +173,9 @@ export function insertScript(args: ScriptWriteArgs): ScriptRecord {
  */
 export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertScriptResult> {
   const shouldEmbed = args.embeddingMode !== "skip";
-  const existing = getScript(args);
+  const existing = await getScript(args);
   if (!existing) {
-    const script = insertScript(args);
+    const script = await insertScript(args);
     if (!script.isScratch && shouldEmbed) {
       await embedScript(script);
     }
@@ -238,29 +211,13 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
       trackedMetadataChanged ||
       refreshScratchLastUsed
     ) {
-      const row = getDb()
-        .prepare<
-          ScriptRow,
-          [
-            string,
-            string,
-            string,
-            string | null,
-            number,
-            number,
-            string,
-            string,
-            string | null,
-            string,
-          ]
-        >(
-          `UPDATE scripts
-          SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
-            isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
-          WHERE id = ?
-          RETURNING *`,
-        )
-        .get(
+      const row = await getDbClient().get<ScriptRow>(
+        `UPDATE scripts
+        SET description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
+          isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
+        WHERE id = ?
+        RETURNING *`,
+        [
           args.description,
           args.intent,
           args.signatureJson,
@@ -271,7 +228,8 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
           new Date().toISOString(),
           args.createdBy ?? null,
           existing.id,
-        );
+        ],
+      );
 
       if (!row) throw new Error("Failed to update script metadata");
       const script = rowToScript(row);
@@ -300,33 +258,14 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   const argsJsonSchema =
     args.argsJsonSchema !== undefined ? args.argsJsonSchema : existing.argsJsonSchema;
 
-  const txn = getDb().transaction(() => {
-    const row = getDb()
-      .prepare<
-        ScriptRow,
-        [
-          string,
-          string,
-          string,
-          string,
-          string | null,
-          string,
-          number,
-          number,
-          number,
-          string,
-          string,
-          string | null,
-          string,
-        ]
-      >(
-        `UPDATE scripts
+  const script = await getDbClient().transaction(async (tx) => {
+    const row = await tx.get<ScriptRow>(
+      `UPDATE scripts
         SET source = ?, description = ?, intent = ?, signatureJson = ?, argsJsonSchema = ?,
           contentHash = ?, version = ?, isScratch = ?, typeChecked = ?, fsMode = ?, updatedAt = ?, updated_by = ?
         WHERE id = ?
         RETURNING *`,
-      )
-      .get(
+      [
         args.source,
         args.description,
         args.intent,
@@ -340,11 +279,12 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
         now,
         args.createdBy ?? null,
         existing.id,
-      );
+      ],
+    );
 
     if (!row) throw new Error("Failed to update script");
 
-    insertScriptVersion({
+    await insertScriptVersion({
       scriptId: row.id,
       version: row.version,
       source: row.source,
@@ -359,7 +299,6 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
     return rowToScript(row);
   });
 
-  const script = txn();
   if (!script.isScratch && shouldEmbed) {
     await embedScript(script);
   }
@@ -371,59 +310,55 @@ export async function upsertScriptByName(args: ScriptWriteArgs): Promise<UpsertS
   };
 }
 
-export function getScript(args: ScriptIdentity): ScriptRecord | null {
+export async function getScript(args: ScriptIdentity): Promise<ScriptRecord | null> {
   const scopeId = normalizeScopeId(args.scope, args.scopeId);
   const row =
     scopeId === null
-      ? getDb()
-          .prepare<ScriptRow, [string, ScriptScope]>(
-            "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId IS NULL",
-          )
-          .get(args.name, args.scope)
-      : getDb()
-          .prepare<ScriptRow, [string, ScriptScope, string]>(
-            "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId = ?",
-          )
-          .get(args.name, args.scope, scopeId);
+      ? await getDbClient().get<ScriptRow>(
+          "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId IS NULL",
+          [args.name, args.scope],
+        )
+      : await getDbClient().get<ScriptRow>(
+          "SELECT * FROM scripts WHERE name = ? AND scope = ? AND scopeId = ?",
+          [args.name, args.scope, scopeId],
+        );
 
   return row ? rowToScript(row) : null;
 }
 
-export function getScriptById(id: string): ScriptRecord | null {
-  const row = getDb().prepare<ScriptRow, [string]>("SELECT * FROM scripts WHERE id = ?").get(id);
+export async function getScriptById(id: string): Promise<ScriptRecord | null> {
+  const row = await getDbClient().get<ScriptRow>("SELECT * FROM scripts WHERE id = ?", [id]);
   return row ? rowToScript(row) : null;
 }
 
-export function getScriptVersion(args: {
+export async function getScriptVersion(args: {
   scriptId: string;
   version?: number;
   contentHash?: string;
-}): ScriptVersionRecord | null {
+}): Promise<ScriptVersionRecord | null> {
   if (args.version === undefined && args.contentHash === undefined) {
     throw new Error("version or contentHash is required");
   }
 
   const row =
     args.version !== undefined
-      ? getDb()
-          .prepare<ScriptVersionRow, [string, number]>(
-            "SELECT * FROM script_versions WHERE scriptId = ? AND version = ?",
-          )
-          .get(args.scriptId, args.version)
-      : getDb()
-          .prepare<ScriptVersionRow, [string, string]>(
-            "SELECT * FROM script_versions WHERE scriptId = ? AND contentHash = ? ORDER BY version DESC LIMIT 1",
-          )
-          .get(args.scriptId, args.contentHash as string);
+      ? await getDbClient().get<ScriptVersionRow>(
+          "SELECT * FROM script_versions WHERE scriptId = ? AND version = ?",
+          [args.scriptId, args.version],
+        )
+      : await getDbClient().get<ScriptVersionRow>(
+          "SELECT * FROM script_versions WHERE scriptId = ? AND contentHash = ? ORDER BY version DESC LIMIT 1",
+          [args.scriptId, args.contentHash as string],
+        );
 
   return row ? rowToScriptVersion(row) : null;
 }
 
-export function listScripts(args?: {
+export async function listScripts(args?: {
   scope?: ScriptScope;
   scopeId?: string | null;
   includeScratch?: boolean;
-}): ScriptRecord[] {
+}): Promise<ScriptRecord[]> {
   const conditions: string[] = [];
   const params: (string | number | null)[] = [];
 
@@ -447,42 +382,39 @@ export function listScripts(args?: {
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  return getDb()
-    .prepare<ScriptRow, (string | number | null)[]>(
-      `SELECT * FROM scripts ${whereClause} ORDER BY scope ASC, scopeId ASC, name ASC`,
-    )
-    .all(...params)
-    .map(rowToScript);
+  const rows = await getDbClient().query<ScriptRow>(
+    `SELECT * FROM scripts ${whereClause} ORDER BY scope ASC, scopeId ASC, name ASC`,
+    params,
+  );
+  return rows.map(rowToScript);
 }
 
-export function listScriptVersions(scriptId: string): ScriptVersionRecord[] {
-  return getDb()
-    .prepare<ScriptVersionRow, [string]>(
-      "SELECT * FROM script_versions WHERE scriptId = ? ORDER BY version DESC",
-    )
-    .all(scriptId)
-    .map(rowToScriptVersion);
+export async function listScriptVersions(scriptId: string): Promise<ScriptVersionRecord[]> {
+  const rows = await getDbClient().query<ScriptVersionRow>(
+    "SELECT * FROM script_versions WHERE scriptId = ? ORDER BY version DESC",
+    [scriptId],
+  );
+  return rows.map(rowToScriptVersion);
 }
 
-export function deleteScript(args: ScriptIdentity): boolean {
-  const existing = getScript(args);
+export async function deleteScript(args: ScriptIdentity): Promise<boolean> {
+  const existing = await getScript(args);
   if (!existing) return false;
 
-  const result = getDb().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
+  const result = await getDbClient().run("DELETE FROM scripts WHERE id = ?", [existing.id]);
   return result.changes > 0;
 }
 
 /** Bumps updatedAt and returns the timestamp actually written, or null if the row didn't match. */
-export function touchScratchScriptLastUsed(
+export async function touchScratchScriptLastUsed(
   id: string,
   at: string = new Date().toISOString(),
-): string | null {
-  const result = getDb()
-    .prepare(
-      `UPDATE scripts SET updatedAt = ?
-       WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
-    )
-    .run(at, id);
+): Promise<string | null> {
+  const result = await getDbClient().run(
+    `UPDATE scripts SET updatedAt = ?
+     WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*'`,
+    [at, id],
+  );
   return result.changes > 0 ? at : null;
 }
 
@@ -493,19 +425,17 @@ export function touchScratchScriptLastUsed(
  * (CAS on updatedAt) — a concurrent run's touch, in-flight or successful,
  * always wins over this rollback.
  */
-export function restoreScratchScriptLastUsedIfUnchanged(
+export async function restoreScratchScriptLastUsedIfUnchanged(
   id: string,
   priorUpdatedAt: string,
   expectedUpdatedAt: string,
-): boolean {
-  return (
-    getDb()
-      .prepare(
-        `UPDATE scripts SET updatedAt = ?
-         WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*' AND updatedAt = ?`,
-      )
-      .run(priorUpdatedAt, id, expectedUpdatedAt).changes > 0
+): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE scripts SET updatedAt = ?
+     WHERE id = ? AND scope = 'agent' AND isScratch = 1 AND name GLOB 'scratch-*' AND updatedAt = ?`,
+    [priorUpdatedAt, id, expectedUpdatedAt],
   );
+  return result.changes > 0;
 }
 
 // ─── External script APIs (script_apis) ──────────────────────────────────────
@@ -553,13 +483,13 @@ function isUniqueConstraintError(err: unknown): boolean {
  * high-entropy token is generated and stored AES-256-GCM-encrypted; the
  * plaintext is returned ONCE (also revealable later via {@link getScriptApiSecret}).
  */
-export function createScriptApi(args: {
+export async function createScriptApi(args: {
   scriptId: string;
   agentId: string;
   authMode: ScriptApiAuthMode;
   label?: string | null;
   createdBy?: string | null;
-}): ScriptApiWithSecret {
+}): Promise<ScriptApiWithSecret> {
   const now = new Date().toISOString();
   const token = args.authMode === "bearer" ? generateBearerToken() : null;
   const encrypted = token ? encryptSecret(token, getEncryptionKey()) : null;
@@ -568,28 +498,13 @@ export function createScriptApi(args: {
   for (let attempt = 0; attempt < 5; attempt++) {
     const id = generateShortId(SCRIPT_API_ID_LEN);
     try {
-      const row = getDb()
-        .prepare<
-          ScriptApiRow,
-          [
-            string,
-            string,
-            string,
-            ScriptApiAuthMode,
-            string | null,
-            string | null,
-            string,
-            string | null,
-            string | null,
-          ]
-        >(
-          `INSERT INTO script_apis
-             (id, scriptId, agentId, authMode, bearerTokenEncrypted, enabled, label,
-              callCount, lastUsedAt, createdAt, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, 1, ?, 0, NULL, ?, ?, ?)
-           RETURNING *`,
-        )
-        .get(
+      const row = await getDbClient().get<ScriptApiRow>(
+        `INSERT INTO script_apis
+           (id, scriptId, agentId, authMode, bearerTokenEncrypted, enabled, label,
+            callCount, lastUsedAt, createdAt, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, 1, ?, 0, NULL, ?, ?, ?)
+         RETURNING *`,
+        [
           id,
           args.scriptId,
           args.agentId,
@@ -599,7 +514,8 @@ export function createScriptApi(args: {
           now,
           createdBy,
           createdBy,
-        );
+        ],
+      );
       if (!row) throw new Error("Failed to create script API endpoint");
       if (token) registerVolatileSecret(token, `script-api:${id}`);
       return { ...rowToScriptApi(row), token };
@@ -611,20 +527,17 @@ export function createScriptApi(args: {
   throw new Error("Failed to allocate a unique script API endpoint id");
 }
 
-export function listScriptApisForScript(scriptId: string): ScriptApiRecord[] {
-  return getDb()
-    .prepare<ScriptApiRow, [string]>(
-      "SELECT * FROM script_apis WHERE scriptId = ? ORDER BY createdAt DESC",
-    )
-    .all(scriptId)
-    .map(rowToScriptApi);
+export async function listScriptApisForScript(scriptId: string): Promise<ScriptApiRecord[]> {
+  const rows = await getDbClient().query<ScriptApiRow>(
+    "SELECT * FROM script_apis WHERE scriptId = ? ORDER BY createdAt DESC",
+    [scriptId],
+  );
+  return rows.map(rowToScriptApi);
 }
 
 /** Look up an endpoint incl. its `enabled` flag and (encrypted) token — for the execution path. */
-export function getScriptApiById(id: string): ScriptApiInternal | null {
-  const row = getDb()
-    .prepare<ScriptApiRow, [string]>("SELECT * FROM script_apis WHERE id = ?")
-    .get(id);
+export async function getScriptApiById(id: string): Promise<ScriptApiInternal | null> {
+  const row = await getDbClient().get<ScriptApiRow>("SELECT * FROM script_apis WHERE id = ?", [id]);
   if (!row) return null;
   return { ...rowToScriptApi(row), bearerTokenEncrypted: row.bearerTokenEncrypted ?? null };
 }
@@ -634,22 +547,21 @@ export function getScriptApiById(id: string): ScriptApiInternal | null {
  * none). Registers the plaintext with the secret scrubber so it is redacted
  * from any later log/telemetry egress — mirrors the config-reveal path.
  */
-export function getScriptApiSecret(id: string): string | null {
-  const row = getDb()
-    .prepare<{ bearerTokenEncrypted: string | null }, [string]>(
-      "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
-    )
-    .get(id);
+export async function getScriptApiSecret(id: string): Promise<string | null> {
+  const row = await getDbClient().get<{ bearerTokenEncrypted: string | null }>(
+    "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
+    [id],
+  );
   if (!row?.bearerTokenEncrypted) return null;
   const token = decryptSecret(row.bearerTokenEncrypted, getEncryptionKey());
   registerVolatileSecret(token, `script-api:${id}`);
   return token;
 }
 
-export function updateScriptApi(
+export async function updateScriptApi(
   id: string,
   args: { enabled?: boolean; label?: string | null; updatedBy?: string | null },
-): ScriptApiRecord | null {
+): Promise<ScriptApiRecord | null> {
   const sets: string[] = [];
   const vals: (string | number | null)[] = [];
   if (args.enabled !== undefined) {
@@ -665,47 +577,46 @@ export function updateScriptApi(
     vals.push(args.updatedBy);
   }
   if (sets.length === 0) {
-    const row = getDb()
-      .prepare<ScriptApiRow, [string]>("SELECT * FROM script_apis WHERE id = ?")
-      .get(id);
+    const row = await getDbClient().get<ScriptApiRow>("SELECT * FROM script_apis WHERE id = ?", [
+      id,
+    ]);
     return row ? rowToScriptApi(row) : null;
   }
   vals.push(id);
-  const row = getDb()
-    .prepare<ScriptApiRow, (string | number | null)[]>(
-      `UPDATE script_apis SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
-    )
-    .get(...vals);
+  const row = await getDbClient().get<ScriptApiRow>(
+    `UPDATE script_apis SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    vals,
+  );
   return row ? rowToScriptApi(row) : null;
 }
 
 /** Rotate the bearer secret of a `bearer` endpoint. Returns `null` if the endpoint is missing or `authMode: 'none'`. */
-export function rotateScriptApiSecret(
+export async function rotateScriptApiSecret(
   id: string,
   updatedBy?: string | null,
-): ScriptApiWithSecret | null {
-  const existing = getScriptApiById(id);
+): Promise<ScriptApiWithSecret | null> {
+  const existing = await getScriptApiById(id);
   if (!existing || existing.authMode !== "bearer") return null;
   const token = generateBearerToken();
   const encrypted = encryptSecret(token, getEncryptionKey());
-  const row = getDb()
-    .prepare<ScriptApiRow, [string, string | null, string]>(
-      "UPDATE script_apis SET bearerTokenEncrypted = ?, updated_by = ? WHERE id = ? RETURNING *",
-    )
-    .get(encrypted, updatedBy ?? null, id);
+  const row = await getDbClient().get<ScriptApiRow>(
+    "UPDATE script_apis SET bearerTokenEncrypted = ?, updated_by = ? WHERE id = ? RETURNING *",
+    [encrypted, updatedBy ?? null, id],
+  );
   if (!row) return null;
   registerVolatileSecret(token, `script-api:${id}`);
   return { ...rowToScriptApi(row), token };
 }
 
-export function deleteScriptApi(id: string): boolean {
-  return getDb().run("DELETE FROM script_apis WHERE id = ?", [id]).changes > 0;
+export async function deleteScriptApi(id: string): Promise<boolean> {
+  const result = await getDbClient().run("DELETE FROM script_apis WHERE id = ?", [id]);
+  return result.changes > 0;
 }
 
 /** Bump usage counters after an external invocation. Best-effort observability. */
-export function recordScriptApiUsage(id: string): void {
-  getDb().run("UPDATE script_apis SET callCount = callCount + 1, lastUsedAt = ? WHERE id = ?", [
-    new Date().toISOString(),
-    id,
-  ]);
+export async function recordScriptApiUsage(id: string): Promise<void> {
+  await getDbClient().run(
+    "UPDATE script_apis SET callCount = callCount + 1, lastUsedAt = ? WHERE id = ?",
+    [new Date().toISOString(), id],
+  );
 }

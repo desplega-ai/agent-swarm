@@ -15,10 +15,10 @@ async function main() {
   // createServer() initializes the DB, so this standalone stdio transport OWNS
   // the database and serves the same gated tools as src/http — wire the RBAC
   // permission-audit sink here too (DES-445 Phase 6; plan "stdio blind spot").
-  const server = createServer();
+  const server = await createServer();
   setAuditSink(enqueueAuditRow);
   startAuditWriter();
-  startAuditGc();
+  await startAuditGc();
 
   const transport = new StdioServerTransport();
 
@@ -33,27 +33,29 @@ async function main() {
 // NOTE: main() resolves right after the transport starts (the process stays
 // alive on stdin), so `.finally` below runs post-boot — NOT at shutdown.
 // getDb() lazily re-opens on the next query, which is why the existing
-// closeDb() here is harmless. Audit teardown therefore hangs off process
-// exit, where the synchronous final flush drains any buffered rows — and
-// because the `exit` event does NOT fire on SIGINT/SIGTERM, those signals get
-// explicit handlers that drain and then exit (supervisors stop stdio workers
-// with SIGTERM; without this, up to 199 buffered rows would be lost).
+// closeDb() here is harmless. Audit teardown therefore hangs off shutdown:
+// the final flush is asynchronous, so it runs from `beforeExit` (stdin closed,
+// event loop drained) and from explicit SIGINT/SIGTERM handlers — both of
+// which can await it, unlike the `exit` event. Supervisors stop stdio workers
+// with SIGTERM; without these handlers up to 199 buffered rows would be lost.
 let auditDrained = false;
-function drainAudit() {
+async function drainAudit(): Promise<void> {
   if (auditDrained) return;
   auditDrained = true;
   stopAuditGc();
   stopAuditWriter();
-  flushAuditBuffer();
+  await flushAuditBuffer();
   clearAuditSink();
 }
-process.on("exit", drainAudit);
-process.on("SIGINT", () => {
-  drainAudit();
+process.on("beforeExit", async () => {
+  await drainAudit();
+});
+process.on("SIGINT", async () => {
+  await drainAudit();
   process.exit(130);
 });
-process.on("SIGTERM", () => {
-  drainAudit();
+process.on("SIGTERM", async () => {
+  await drainAudit();
   process.exit(143);
 });
 

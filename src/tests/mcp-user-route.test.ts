@@ -12,7 +12,7 @@ import {
   createAgent,
   createTaskExtended,
   createUser,
-  getDb,
+  getDbClient,
   getTaskById,
   initDb,
 } from "../be/db";
@@ -20,6 +20,7 @@ import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleMcp } from "../http/mcp";
 import { handleMcpUser } from "../http/mcp-user";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-mcp-user-route.sqlite";
 const API_KEY = "test-mcp-user-key";
@@ -33,20 +34,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  const port = 15173;
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(): Server {
@@ -75,7 +62,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer();
-  port = await listen(server);
+  port = await listenOnFreePort(server, "127.0.0.1");
 });
 
 afterAll(async () => {
@@ -86,13 +73,13 @@ afterAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   // Clean slate between tests for deterministic token and task state.
-  const db = getDb();
-  db.run("DELETE FROM user_identity_events");
-  db.run("DELETE FROM user_tokens");
-  db.run("DELETE FROM agent_tasks");
-  db.run("DELETE FROM users");
+  const client = getDbClient();
+  await client.run("DELETE FROM user_identity_events");
+  await client.run("DELETE FROM user_tokens");
+  await client.run("DELETE FROM agent_tasks");
+  await client.run("DELETE FROM users");
 });
 
 function endpoint(path = "/mcp-user"): string {
@@ -198,9 +185,9 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request to /mcp-user with a revoked token returns 401", async () => {
-    const user = createUser({ name: "Revoked User" });
-    const token = mintToken(user.id, "revoked", ACTOR);
-    revokeToken(token.tokenId, ACTOR);
+    const user = await createUser({ name: "Revoked User" });
+    const token = await mintToken(user.id, "revoked", ACTOR);
+    await revokeToken(token.tokenId, ACTOR);
 
     const { response } = await mcpPost(token.plaintext, {
       jsonrpc: "2.0",
@@ -217,8 +204,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request to /mcp-user with a suspended user's valid token returns 401", async () => {
-    const user = createUser({ name: "Suspended User", status: "suspended" });
-    const token = mintToken(user.id, "suspended", ACTOR);
+    const user = await createUser({ name: "Suspended User", status: "suspended" });
+    const token = await mintToken(user.id, "suspended", ACTOR);
 
     const { response } = await mcpPost(token.plaintext, {
       jsonrpc: "2.0",
@@ -235,10 +222,10 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("request with a different user token than the opening session returns 401", async () => {
-    const userA = createUser({ name: "Session A" });
-    const userB = createUser({ name: "Session B" });
-    const tokenA = mintToken(userA.id, "a", ACTOR).plaintext;
-    const tokenB = mintToken(userB.id, "b", ACTOR).plaintext;
+    const userA = await createUser({ name: "Session A" });
+    const userB = await createUser({ name: "Session B" });
+    const tokenA = (await mintToken(userA.id, "a", ACTOR)).plaintext;
+    const tokenB = (await mintToken(userB.id, "b", ACTOR)).plaintext;
     const sessionId = await initialize(tokenA);
 
     const { response } = await mcpPost(
@@ -251,8 +238,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("valid active-user token initializes and tools/list returns exactly the 6 task tools", async () => {
-    const user = createUser({ name: "Active User" });
-    const token = mintToken(user.id, "active", ACTOR).plaintext;
+    const user = await createUser({ name: "Active User" });
+    const token = (await mintToken(user.id, "active", ACTOR)).plaintext;
     const sessionId = await initialize(token);
     await notifyInitialized(token, sessionId);
 
@@ -278,9 +265,9 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("send-task over /mcp-user records requestedByUserId and get-tasks returns only that user's tasks", async () => {
-    const user = createUser({ name: "Task Requester" });
-    const otherUser = createUser({ name: "Other Task Requester" });
-    const token = mintToken(user.id, "task", ACTOR).plaintext;
+    const user = await createUser({ name: "Task Requester" });
+    const otherUser = await createUser({ name: "Other Task Requester" });
+    const token = (await mintToken(user.id, "task", ACTOR)).plaintext;
     const sessionId = await initialize(token);
     await notifyInitialized(token, sessionId);
 
@@ -298,11 +285,11 @@ describe("/mcp-user auth and tool surface", () => {
     expect(response.status).toBe(200);
     const result = payload as { result: { structuredContent: { task: { id: string } } } };
     const taskId = result.result.structuredContent.task.id;
-    expect(getTaskById(taskId)?.requestedByUserId).toBe(user.id);
-    const foreignTask = createTaskExtended("foreign user mcp task", {
+    expect((await getTaskById(taskId))?.requestedByUserId).toBe(user.id);
+    const foreignTask = await createTaskExtended("foreign user mcp task", {
       requestedByUserId: otherUser.id,
     });
-    createTaskExtended("owner-only task");
+    await createTaskExtended("owner-only task");
 
     const listResponse = await mcpPost(
       token,
@@ -380,8 +367,8 @@ describe("/mcp-user auth and tool surface", () => {
   });
 
   test("owner /mcp path initializes with a known agent and rejects a different X-Agent-ID on the session", async () => {
-    const owner = createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
-    const other = createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
+    const owner = await createAgent({ name: "Owner MCP Agent", isLead: false, status: "idle" });
+    const other = await createAgent({ name: "Other MCP Agent", isLead: false, status: "idle" });
     const ownerHeaders = { "X-Agent-ID": owner.id };
     const sessionId = await initialize(API_KEY, "/mcp", ownerHeaders);
     await notifyInitialized(API_KEY, sessionId, "/mcp", ownerHeaders);

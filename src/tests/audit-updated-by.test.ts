@@ -71,15 +71,15 @@ beforeAll(async () => {
     } catch {}
   }
   initDb(TEST_DB_PATH);
-  const agent = createAgent({ name: "audit-test-agent", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "audit-test-agent", isLead: false, status: "idle" });
   agentId = agent.id;
 
   // Create a real user in the users table (requestedByUserId is a FK)
-  const user = createUser({ name: "Audit Test Human", email: "human@example.com" });
+  const user = await createUser({ name: "Audit Test Human", email: "human@example.com" });
   humanUserId = user.id;
 
   // Create a task with a human requester
-  const task = createTaskExtended("test task for audit", {
+  const task = await createTaskExtended("test task for audit", {
     agentId,
     requestedByUserId: humanUserId,
   });
@@ -98,8 +98,8 @@ afterAll(async () => {
 // ─── Schedule tests ────────────────────────────────────────────────────────────
 
 describe("updateScheduledTask — updated_by column", () => {
-  test("direct db call: sets updated_by when provided", () => {
-    const schedule = createScheduledTask({
+  test("direct db call: sets updated_by when provided", async () => {
+    const schedule = await createScheduledTask({
       name: `audit-sched-direct-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "test",
@@ -108,15 +108,15 @@ describe("updateScheduledTask — updated_by column", () => {
     });
     expect(schedule.updatedBy).toBeUndefined();
 
-    const updated = updateScheduledTask(schedule.id, {
+    const updated = await updateScheduledTask(schedule.id, {
       description: "patched",
       updatedBy: humanUserId,
     });
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", () => {
-    const schedule = createScheduledTask({
+  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", async () => {
+    const schedule = await createScheduledTask({
       name: `audit-sched-noclobber-${Date.now()}`,
       cronExpression: "0 * * * *",
       taskTemplate: "test",
@@ -125,10 +125,10 @@ describe("updateScheduledTask — updated_by column", () => {
     });
 
     // Set an initial updated_by
-    updateScheduledTask(schedule.id, { description: "first edit", updatedBy: humanUserId });
+    await updateScheduledTask(schedule.id, { description: "first edit", updatedBy: humanUserId });
 
     // Automation update without updatedBy — must NOT clear existing value
-    const after = updateScheduledTask(schedule.id, { description: "automation edit" });
+    const after = await updateScheduledTask(schedule.id, { description: "automation edit" });
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -138,7 +138,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-test", version: "1.0.0" });
     registerUpdateScheduleTool(server);
 
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `audit-sched-mcp-${Date.now()}`,
       intervalMs: 60_000,
       taskTemplate: "test",
@@ -155,7 +155,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getScheduledTaskById(schedule.id);
+    const updated = await getScheduledTaskById(schedule.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -163,7 +163,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-test-2", version: "1.0.0" });
     registerUpdateScheduleTool(server);
 
-    const schedule = createScheduledTask({
+    const schedule = await createScheduledTask({
       name: `audit-sched-nouser-${Date.now()}`,
       intervalMs: 60_000,
       taskTemplate: "test",
@@ -171,10 +171,10 @@ describe("update-schedule MCP tool — updated_by column", () => {
       timezone: "UTC",
     });
     // Pre-stamp
-    updateScheduledTask(schedule.id, { updatedBy: humanUserId });
+    await updateScheduledTask(schedule.id, { updatedBy: humanUserId });
 
     // Task with no human requester
-    const automationTask = createTaskExtended("automation task", { agentId });
+    const automationTask = await createTaskExtended("automation task", { agentId });
 
     const result = await callTool(
       server,
@@ -185,7 +185,7 @@ describe("update-schedule MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getScheduledTaskById(schedule.id);
+    const after = await getScheduledTaskById(schedule.id);
     expect(after?.updatedBy).toBe(humanUserId); // must not be cleared
   });
 });
@@ -198,25 +198,28 @@ const MINIMAL_DEFINITION = {
 };
 
 describe("updateWorkflow — updated_by column", () => {
-  test("direct db call: sets updated_by when provided", () => {
-    const wf = createWorkflow({
+  test("direct db call: sets updated_by when provided", async () => {
+    const wf = await createWorkflow({
       name: `audit-wf-direct-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
     expect(wf.updatedBy).toBeUndefined();
 
-    const updated = updateWorkflow(wf.id, { description: "patched", updatedBy: humanUserId });
+    const updated = await updateWorkflow(wf.id, {
+      description: "patched",
+      updatedBy: humanUserId,
+    });
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
-  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", () => {
-    const wf = createWorkflow({
+  test("direct db call: automation update (no updatedBy) does not clobber existing updated_by", async () => {
+    const wf = await createWorkflow({
       name: `audit-wf-noclobber-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
 
-    updateWorkflow(wf.id, { description: "first edit", updatedBy: humanUserId });
-    const after = updateWorkflow(wf.id, { description: "automation edit" });
+    await updateWorkflow(wf.id, { description: "first edit", updatedBy: humanUserId });
+    const after = await updateWorkflow(wf.id, { description: "automation edit" });
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -226,7 +229,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-wf-test", version: "1.0.0" });
     registerUpdateWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-wf-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -240,7 +243,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -248,13 +251,13 @@ describe("update-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-wf-test-2", version: "1.0.0" });
     registerUpdateWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-wf-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation wf task", { agentId });
+    const automationTask = await createTaskExtended("automation wf task", { agentId });
 
     const result = await callTool(
       server,
@@ -265,7 +268,7 @@ describe("update-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -275,7 +278,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patch-test", version: "1.0.0" });
     registerPatchWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patch-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -292,7 +295,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -300,13 +303,13 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patch-test-2", version: "1.0.0" });
     registerPatchWorkflowTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patch-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation patch task", { agentId });
+    const automationTask = await createTaskExtended("automation patch task", { agentId });
 
     const result = await callTool(
       server,
@@ -320,7 +323,7 @@ describe("patch-workflow MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });
@@ -328,36 +331,36 @@ describe("patch-workflow MCP tool — updated_by column", () => {
 // ─── Trusted audit-actor resolution (anti-spoofing) ──────────────────────────
 
 describe("resolveTaskAuditUserId — source-task ownership gate", () => {
-  test("returns the task requester when the source task is owned by the caller", () => {
-    expect(resolveTaskAuditUserId(sourceTaskId, agentId)).toBe(humanUserId);
+  test("returns the task requester when the source task is owned by the caller", async () => {
+    expect(await resolveTaskAuditUserId(sourceTaskId, agentId)).toBe(humanUserId);
   });
 
-  test("returns null when the source task belongs to a different agent (no spoofing)", () => {
-    const otherAgent = createAgent({
+  test("returns null when the source task belongs to a different agent (no spoofing)", async () => {
+    const otherAgent = await createAgent({
       name: `audit-other-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
     // A task owned by another agent but with a human requester — a caller must
     // NOT be able to attribute a write to this task's requester.
-    const foreignTask = createTaskExtended("foreign task", {
+    const foreignTask = await createTaskExtended("foreign task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
-    expect(resolveTaskAuditUserId(foreignTask.id, agentId)).toBeNull();
+    expect(await resolveTaskAuditUserId(foreignTask.id, agentId)).toBeNull();
   });
 
-  test("returns null when no source task id is present", () => {
-    expect(resolveTaskAuditUserId(undefined, agentId)).toBeNull();
+  test("returns null when no source task id is present", async () => {
+    expect(await resolveTaskAuditUserId(undefined, agentId)).toBeNull();
   });
 
-  test("returns null when the caller agent id is missing", () => {
-    expect(resolveTaskAuditUserId(sourceTaskId, undefined)).toBeNull();
+  test("returns null when the caller agent id is missing", async () => {
+    expect(await resolveTaskAuditUserId(sourceTaskId, undefined)).toBeNull();
   });
 
-  test("returns null when the owned source task has no human requester", () => {
-    const autoTask = createTaskExtended("automation only", { agentId });
-    expect(resolveTaskAuditUserId(autoTask.id, agentId)).toBeNull();
+  test("returns null when the owned source task has no human requester", async () => {
+    const autoTask = await createTaskExtended("automation only", { agentId });
+    expect(await resolveTaskAuditUserId(autoTask.id, agentId)).toBeNull();
   });
 });
 
@@ -372,32 +375,32 @@ describe("resolveHttpAuditUserId — trusted request context", () => {
     return req;
   }
 
-  test("prefers the authenticated request user over the source-task header", () => {
-    const user = createUser({ name: "Auth User", email: `auth-${Date.now()}@example.com` });
+  test("prefers the authenticated request user over the source-task header", async () => {
+    const user = await createUser({ name: "Auth User", email: `auth-${Date.now()}@example.com` });
     const req = makeReq(sourceTaskId);
     setRequestAuth(req, { kind: "user", userId: user.id, user });
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(user.id);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(user.id);
   });
 
-  test("falls back to the ownership-validated source task when not user-authenticated", () => {
+  test("falls back to the ownership-validated source task when not user-authenticated", async () => {
     const req = makeReq(sourceTaskId);
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
+    expect(await resolveHttpAuditUserId(req, agentId)).toBe(humanUserId);
   });
 
-  test("ignores a source task the caller does not own", () => {
-    const otherAgent = createAgent({
+  test("ignores a source task the caller does not own", async () => {
+    const otherAgent = await createAgent({
       name: `audit-other-http-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign http task", {
+    const foreignTask = await createTaskExtended("foreign http task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
     const req = makeReq(foreignTask.id);
     setRequestAuth(req, null);
-    expect(resolveHttpAuditUserId(req, agentId)).toBeNull();
+    expect(await resolveHttpAuditUserId(req, agentId)).toBeNull();
   });
 });
 
@@ -489,17 +492,17 @@ describe("HTTP create paths — created_by column", () => {
     );
     expect(status).toBe(201);
     expect(json.id).toBeDefined();
-    const created = getScheduledTaskById(json.id as string);
+    const created = await getScheduledTaskById(json.id as string);
     expect(created?.createdBy).toBe(humanUserId);
   });
 
   test("POST /api/schedules does not stamp created_by for a foreign source task", async () => {
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-sched-foreign-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign sched task", {
+    const foreignTask = await createTaskExtended("foreign sched task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -513,7 +516,7 @@ describe("HTTP create paths — created_by column", () => {
       foreignTask.id,
     );
     expect(status).toBe(201);
-    const created = getScheduledTaskById(json.id as string);
+    const created = await getScheduledTaskById(json.id as string);
     expect(created?.createdBy).toBeUndefined();
   });
 
@@ -525,17 +528,17 @@ describe("HTTP create paths — created_by column", () => {
     );
     expect(status).toBe(201);
     expect(json.id).toBeDefined();
-    const created = getWorkflow(json.id as string);
+    const created = await getWorkflow(json.id as string);
     expect(created?.createdBy).toBe(humanUserId);
   });
 
   test("POST /api/workflows does not stamp created_by for a foreign source task", async () => {
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-wf-foreign-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign wf task", {
+    const foreignTask = await createTaskExtended("foreign wf task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -545,7 +548,7 @@ describe("HTTP create paths — created_by column", () => {
       foreignTask.id,
     );
     expect(status).toBe(201);
-    const created = getWorkflow(json.id as string);
+    const created = await getWorkflow(json.id as string);
     expect(created?.createdBy).toBeUndefined();
   });
 });
@@ -557,7 +560,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-mcp-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
@@ -571,7 +574,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const updated = getWorkflow(wf.id);
+    const updated = await getWorkflow(wf.id);
     expect(updated?.updatedBy).toBe(humanUserId);
   });
 
@@ -579,13 +582,13 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test-2", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-nouser-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const automationTask = createTaskExtended("automation patchnode task", { agentId });
+    const automationTask = await createTaskExtended("automation patchnode task", { agentId });
 
     const result = await callTool(
       server,
@@ -596,7 +599,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     );
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 
@@ -604,18 +607,18 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     const server = new McpServer({ name: "audit-patchnode-test-3", version: "1.0.0" });
     registerPatchWorkflowNodeTool(server);
 
-    const wf = createWorkflow({
+    const wf = await createWorkflow({
       name: `audit-patchnode-foreign-${Date.now()}`,
       definition: MINIMAL_DEFINITION,
     });
-    updateWorkflow(wf.id, { updatedBy: humanUserId });
+    await updateWorkflow(wf.id, { updatedBy: humanUserId });
 
-    const otherAgent = createAgent({
+    const otherAgent = await createAgent({
       name: `audit-patchnode-other-${Date.now()}`,
       isLead: false,
       status: "idle",
     });
-    const foreignTask = createTaskExtended("foreign patchnode task", {
+    const foreignTask = await createTaskExtended("foreign patchnode task", {
       agentId: otherAgent.id,
       requestedByUserId: humanUserId,
     });
@@ -630,7 +633,7 @@ describe("patch-workflow-node MCP tool — updated_by column", () => {
     expect((result.structuredContent as { success: boolean }).success).toBe(true);
 
     // updated_by must be unchanged — the foreign task's requester is not trusted.
-    const after = getWorkflow(wf.id);
+    const after = await getWorkflow(wf.id);
     expect(after?.updatedBy).toBe(humanUserId);
   });
 });

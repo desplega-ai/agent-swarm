@@ -12,7 +12,7 @@ import {
   createUser,
   createWorkflowRun,
   createWorkflowRunStep,
-  getDb,
+  getDbClient,
   getWorkflowRun,
   getWorkflowVersions,
   initDb,
@@ -34,9 +34,9 @@ import type {
   WorkflowVersion,
 } from "../types";
 import { initWorkflows, stopRetryPoller } from "../workflows";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-workflow-http-v2.sqlite";
-const TEST_PORT = 13030;
 
 // ─── Test Server ─────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ function createTestServer(): Server {
 
 // ─── Helpers ────────────────────────────────────────────────
 
-const baseUrl = `http://localhost:${TEST_PORT}`;
+let baseUrl = "";
 const headers = {
   "Content-Type": "application/json",
   "X-Agent-ID": crypto.randomUUID(),
@@ -115,12 +115,11 @@ describe("Workflow HTTP API v2", () => {
       // ignore
     }
     initDb(TEST_DB_PATH);
-    initWorkflows();
+    await initWorkflows();
 
     server = createTestServer();
-    await new Promise<void>((resolve) => {
-      server.listen(TEST_PORT, () => resolve());
-    });
+    const port = await listenOnFreePort(server);
+    baseUrl = `http://localhost:${port}`;
   });
 
   afterAll(async () => {
@@ -346,13 +345,19 @@ describe("Workflow HTTP API v2", () => {
         body: JSON.stringify({ enabled: false }),
       });
 
-      const failedRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: failedLatest.id });
-      updateWorkflowRun(failedRun.id, { status: "failed", finishedAt: new Date().toISOString() });
-      const completedRun = createWorkflowRun({
+      const failedRun = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: failedLatest.id,
+      });
+      await updateWorkflowRun(failedRun.id, {
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+      });
+      const completedRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: completedLatest.id,
       });
-      updateWorkflowRun(completedRun.id, {
+      await updateWorkflowRun(completedRun.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
@@ -377,29 +382,32 @@ describe("Workflow HTTP API v2", () => {
       const recovered = await createTestWorkflow({ name: `recovered-${crypto.randomUUID()}` });
 
       for (const workflow of [twoFailures, recovered]) {
-        const oldFailedRun = createWorkflowRun({
+        const oldFailedRun = await createWorkflowRun({
           id: crypto.randomUUID(),
           workflowId: workflow.id,
         });
-        updateWorkflowRun(oldFailedRun.id, {
+        await updateWorkflowRun(oldFailedRun.id, {
           status: "failed",
           finishedAt: new Date().toISOString(),
         });
       }
 
       await Bun.sleep(2);
-      const recoveredRun = createWorkflowRun({ id: crypto.randomUUID(), workflowId: recovered.id });
-      updateWorkflowRun(recoveredRun.id, {
+      const recoveredRun = await createWorkflowRun({
+        id: crypto.randomUUID(),
+        workflowId: recovered.id,
+      });
+      await updateWorkflowRun(recoveredRun.id, {
         status: "completed",
         finishedAt: new Date().toISOString(),
       });
 
       await Bun.sleep(2);
-      const latestFailedRun = createWorkflowRun({
+      const latestFailedRun = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: twoFailures.id,
       });
-      updateWorkflowRun(latestFailedRun.id, {
+      await updateWorkflowRun(latestFailedRun.id, {
         status: "failed",
         finishedAt: new Date().toISOString(),
       });
@@ -435,7 +443,7 @@ describe("Workflow HTTP API v2", () => {
       expect(res2.status).toBe(200);
 
       // Verify versions were created
-      const versions = getWorkflowVersions(workflow.id);
+      const versions = await getWorkflowVersions(workflow.id);
       expect(versions.length).toBe(2);
       // Version 1 should have original description (undefined)
       expect(versions.find((v) => v.version === 1)?.snapshot.description).toBeUndefined();
@@ -511,7 +519,7 @@ describe("Workflow HTTP API v2", () => {
       expect(body.error).toContain("config.timeoutMs");
       expect(body.error).toContain("300001");
       expect(body.error).toContain("300000");
-      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
+      expect(await getWorkflowVersions(workflow.id)).toHaveLength(0);
 
       const storedRes = await fetch(`${baseUrl}/api/workflows/${workflow.id}`, { headers });
       const stored = (await storedRes.json()) as Workflow;
@@ -541,7 +549,7 @@ describe("Workflow HTTP API v2", () => {
       expect(body.error).toContain("config.timeoutMs");
       expect(body.error).toContain("300001");
       expect(body.error).toContain("300000");
-      expect(getWorkflowVersions(workflow.id)).toHaveLength(0);
+      expect(await getWorkflowVersions(workflow.id)).toHaveLength(0);
     });
 
     test("returns 404 for missing workflow", async () => {
@@ -608,12 +616,15 @@ describe("Workflow HTTP API v2", () => {
     });
 
     test("does not attribute a trigger with no user auth to the workflow author", async () => {
-      const author = createUser({
+      const author = await createUser({
         name: "Workflow Author",
         email: `workflow-author-${crypto.randomUUID()}@example.com`,
       });
       const workflow = await createTestWorkflow();
-      getDb().run("UPDATE workflows SET created_by = ? WHERE id = ?", [author.id, workflow.id]);
+      await getDbClient().run("UPDATE workflows SET created_by = ? WHERE id = ?", [
+        author.id,
+        workflow.id,
+      ]);
 
       const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}/trigger`, {
         method: "POST",
@@ -622,8 +633,8 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(res.status).toBe(201);
       const { runId } = (await res.json()) as { runId: string };
-      expect(getWorkflowRun(runId)?.createdBy).toBeUndefined();
-      expect(getWorkflowRun(runId)?.context?.swarm).toBeUndefined();
+      expect((await getWorkflowRun(runId))?.createdBy).toBeUndefined();
+      expect((await getWorkflowRun(runId))?.context?.swarm).toBeUndefined();
     });
 
     test("returns 400 for disabled workflow", async () => {
@@ -690,8 +701,8 @@ describe("Workflow HTTP API v2", () => {
       const statuses = ["running", "failed", "running", "failed", "running"] as const;
 
       for (const [index, id] of runIds.entries()) {
-        createWorkflowRun({ id, workflowId: workflow.id });
-        getDb().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
+        await createWorkflowRun({ id, workflowId: workflow.id });
+        await getDbClient().run("UPDATE workflow_runs SET status = ?, startedAt = ? WHERE id = ?", [
           statuses[index]!,
           new Date(Date.UTC(2026, 0, index + 1)).toISOString(),
           id,
@@ -748,12 +759,12 @@ describe("Workflow HTTP API v2", () => {
     test("MCP run listing defaults to bounded slim rows and preserves an explicit full-row opt-in", async () => {
       const workflow = await createTestWorkflow();
       const largeValue = "x".repeat(100_000);
-      const run = createWorkflowRun({
+      const run = await createWorkflowRun({
         id: crypto.randomUUID(),
         workflowId: workflow.id,
         triggerData: { largeValue },
       });
-      updateWorkflowRun(run.id, { context: { nodeOutput: largeValue } });
+      await updateWorkflowRun(run.id, { context: { nodeOutput: largeValue } });
       const parsed = listWorkflowRunsInputSchema.parse({ workflowId: workflow.id });
       expect(parsed.limit).toBe(20);
       expect(parsed.offset).toBe(0);
@@ -762,7 +773,7 @@ describe("Workflow HTTP API v2", () => {
         listWorkflowRunsInputSchema.parse({ workflowId: workflow.id, limit: 101 }),
       ).toThrow();
 
-      const result = listWorkflowRunsHandler(parsed);
+      const result = await listWorkflowRunsHandler(parsed);
       expect(result.ok).toBe(true);
       const data = result.data as {
         runs: Array<{
@@ -786,7 +797,7 @@ describe("Workflow HTTP API v2", () => {
       });
       expect(JSON.stringify(result).length).toBeLessThan(20_000);
 
-      const fullResult = listWorkflowRunsHandler({
+      const fullResult = await listWorkflowRunsHandler({
         ...parsed,
         includeContext: true,
       });
@@ -950,10 +961,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state (notify executor completes instantly)
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Create a step in 'running' state
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",
@@ -1016,7 +1027,7 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run directly in 'running' state
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       const cancelRes = await fetch(`${baseUrl}/api/workflow-runs/${runId}/cancel`, {
         method: "POST",
@@ -1036,10 +1047,10 @@ describe("Workflow HTTP API v2", () => {
 
       // Create a run with steps in various states
       const runId = crypto.randomUUID();
-      createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Running step — should be cancelled
-      createWorkflowRunStep({
+      await createWorkflowRunStep({
         id: crypto.randomUUID(),
         runId,
         nodeId: "n1",

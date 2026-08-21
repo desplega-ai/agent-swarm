@@ -78,8 +78,8 @@ describe("skill mutation tools", () => {
     closeDb();
     initDb(TEST_DB_PATH);
 
-    createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
-    createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
+    await createAgent({ id: LEAD_ID, name: "Test Lead", isLead: true, status: "idle" });
+    await createAgent({ id: WORKER_ID, name: "Test Worker", isLead: false, status: "idle" });
 
     server = new McpServer({ name: "test-skill-update-scope", version: "1.0.0" });
     registerSkillUpdateTool(server);
@@ -98,7 +98,7 @@ describe("skill mutation tools", () => {
   });
 
   test("worker cannot promote their own skill to swarm scope", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "worker-skill-self-promote",
       description: "Worker tries to promote",
       content:
@@ -116,13 +116,13 @@ describe("skill mutation tools", () => {
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("lead");
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
     expect(stored?.ownerAgentId).toBe(WORKER_ID);
   });
 
   test("lead can promote a worker's agent-scope skill to swarm without changing ownerAgentId", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "worker-skill-lead-promote",
       description: "Lead promotes",
       content: "---\nname: worker-skill-lead-promote\ndescription: Lead promotes\n---\n\nBody.",
@@ -140,13 +140,13 @@ describe("skill mutation tools", () => {
     expect(result.structuredContent.skill?.scope).toBe("swarm");
     expect(result.structuredContent.skill?.ownerAgentId).toBe(WORKER_ID);
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("swarm");
     expect(stored?.ownerAgentId).toBe(WORKER_ID);
   });
 
   test("lead demoting a swarm skill back to agent scope is allowed", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "swarm-skill-demote",
       description: "Demote test",
       content: "---\nname: swarm-skill-demote\ndescription: Demote test\n---\n\nBody.",
@@ -163,12 +163,12 @@ describe("skill mutation tools", () => {
     expect(result.structuredContent.success).toBe(true);
     expect(result.structuredContent.skill?.scope).toBe("agent");
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
   });
 
   test("omitting scope leaves it unchanged", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "scope-untouched",
       description: "No scope change",
       content: "---\nname: scope-untouched\ndescription: No scope change\n---\n\nBody.",
@@ -183,13 +183,13 @@ describe("skill mutation tools", () => {
     });
 
     expect(result.structuredContent.success).toBe(true);
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.scope).toBe("agent");
     expect(stored?.isEnabled).toBe(false);
   });
 
   test("system-default skill content updates are rejected", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "system-content-locked",
       description: "System content lock",
       content: "---\nname: system-content-locked\ndescription: System content lock\n---\n\nBody.",
@@ -207,13 +207,13 @@ describe("skill mutation tools", () => {
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("system-managed");
 
-    const stored = getSkillById(skill.id);
+    const stored = await getSkillById(skill.id);
     expect(stored?.description).toBe("System content lock");
     expect(stored?.version).toBe(1);
   });
 
   test("system-default skill enable toggle remains allowed", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "system-toggle-allowed",
       description: "System toggle",
       content: "---\nname: system-toggle-allowed\ndescription: System toggle\n---\n\nBody.",
@@ -229,11 +229,11 @@ describe("skill mutation tools", () => {
     });
 
     expect(result.structuredContent.success).toBe(true);
-    expect(getSkillById(skill.id)?.isEnabled).toBe(false);
+    expect((await getSkillById(skill.id))?.isEnabled).toBe(false);
   });
 
   test("system-default skill deletes are rejected", async () => {
-    const skill = createSkill({
+    const skill = await createSkill({
       name: "system-delete-locked",
       description: "System delete lock",
       content: "---\nname: system-delete-locked\ndescription: System delete lock\n---\n\nBody.",
@@ -247,6 +247,6 @@ describe("skill mutation tools", () => {
 
     expect(result.structuredContent.success).toBe(false);
     expect(result.structuredContent.message).toContain("system-managed");
-    expect(getSkillById(skill.id)).not.toBeNull();
+    expect(await getSkillById(skill.id)).not.toBeNull();
   });
 });

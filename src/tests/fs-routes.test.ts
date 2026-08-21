@@ -76,7 +76,7 @@ beforeAll(async () => {
   server = createTestServer(API_KEY);
   port = await listen(server);
 
-  const agent = createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
+  const agent = await createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
   agentId = agent.id;
 });
 
@@ -92,10 +92,12 @@ afterAll(async () => {
 beforeEach(async () => {
   await rm(TEST_FS_DIR, { recursive: true, force: true });
   resetFileStorageProviderForTests();
-  taskId = createTaskExtended("fs route task", {
-    agentId,
-    source: "mcp",
-  }).id;
+  taskId = (
+    await createTaskExtended("fs route task", {
+      agentId,
+      source: "mcp",
+    })
+  ).id;
 });
 
 function url(path: string): string {
@@ -187,7 +189,7 @@ describe("/api/fs REST", () => {
     expect(attachment.kind).toBe("shared-fs");
     expect(attachment.intent).toBe("input");
 
-    const rows = getTaskAttachments(taskId);
+    const rows = await getTaskAttachments(taskId);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(attachment.id);
 
@@ -203,7 +205,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("operator API key can upload and delete without X-Agent-ID for dashboard use", async () => {
@@ -219,7 +221,7 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("download resolves the row's stored key, not a reconstructed tasks/<id>/<name>", async () => {
@@ -230,7 +232,7 @@ describe("/api/fs REST", () => {
     await mkdir(dirname(onDisk), { recursive: true });
     await writeFile(onDisk, "resolved via stored key");
 
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "report.md",
@@ -250,7 +252,7 @@ describe("/api/fs REST", () => {
     const onDisk = join(TEST_FS_DIR, storedKey);
     await mkdir(dirname(onDisk), { recursive: true });
     await writeFile(onDisk, "report");
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "PR analytics backfill — dry-run report",
@@ -276,7 +278,7 @@ describe("/api/fs REST", () => {
     await mkdir(dirname(decoy), { recursive: true });
     await writeFile(decoy, "unrelated decoy — must survive");
 
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "notes.md",
@@ -295,13 +297,13 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
     // The decoy file was never resolved, so it must still exist.
     expect(await Bun.file(decoy).text()).toBe("unrelated decoy — must survive");
   });
 
   test("deleting a url pointer removes the row without a provider call", async () => {
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "PR #42",
@@ -316,13 +318,13 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
   test("deleting a provider-backed row whose blob is already gone still clears the pointer", async () => {
     // stored key points at a local-fs object that does not exist → provider NotFound.
     // Because the key is the row's real key, NotFound means truly gone → row cleared.
-    const attachment = insertTaskAttachment({
+    const attachment = await insertTaskAttachment({
       taskId,
       agentId,
       name: "vanished.txt",
@@ -336,11 +338,11 @@ describe("/api/fs REST", () => {
       method: "DELETE",
     });
     expect(del.status).toBe(204);
-    expect(getTaskAttachments(taskId)).toEqual([]);
+    expect(await getTaskAttachments(taskId)).toEqual([]);
   });
 
-  test("provider-aware renderers keep local-fs on swarm URLs and agent-fs on live URLs", () => {
-    const local = insertTaskAttachment({
+  test("provider-aware renderers keep local-fs on swarm URLs and agent-fs on live URLs", async () => {
+    const local = await insertTaskAttachment({
       taskId,
       agentId,
       name: "local.txt",
@@ -349,7 +351,7 @@ describe("/api/fs REST", () => {
       providerId: "local-fs",
       providerKey: "tasks/x/local.txt",
     });
-    const agentFs = insertTaskAttachment({
+    const agentFs = await insertTaskAttachment({
       taskId,
       agentId,
       name: "agent.txt",

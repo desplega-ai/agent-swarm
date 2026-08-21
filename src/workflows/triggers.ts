@@ -44,10 +44,10 @@ function resolveSignature(headers: HeaderBag, hmacHeader: string): string | unde
  * and `${ENV_VAR}` env refs (reusing the workflow input resolver); a plain
  * string is treated as a literal. Resolved per request, never at create time.
  */
-function resolveHmacSecret(raw: string): string {
+async function resolveHmacSecret(raw: string): Promise<string> {
   if (/^secret\..+$/.test(raw) || /^\$\{.+\}$/.test(raw)) {
     try {
-      return resolveInputValue(raw);
+      return await resolveInputValue(raw);
     } catch (err) {
       throw new WebhookError(
         `Failed to resolve webhook HMAC secret: ${err instanceof Error ? err.message : String(err)}`,
@@ -58,11 +58,11 @@ function resolveHmacSecret(raw: string): string {
   return raw;
 }
 
-export function verifyWebhookRequest(
+export async function verifyWebhookRequest(
   trigger: WebhookTriggerConfig,
   rawBody: string,
   headers: HeaderBag,
-): void {
+): Promise<void> {
   if (!trigger.hmacSecret) {
     // `verification` without a secret can never actually check anything — fail closed
     // instead of silently accepting unauthenticated requests on a trigger that looks protected.
@@ -82,7 +82,7 @@ export function verifyWebhookRequest(
     return;
   }
 
-  const secret = resolveHmacSecret(trigger.hmacSecret);
+  const secret = await resolveHmacSecret(trigger.hmacSecret);
   const verification = trigger.verification;
 
   if (!verification) {
@@ -161,7 +161,7 @@ export async function handleWebhookTrigger(
   registry: ExecutorRegistry,
   options: HandleWebhookTriggerOptions = {},
 ): Promise<{ runId: string }> {
-  const workflow = getWorkflow(workflowId);
+  const workflow = await getWorkflow(workflowId);
   if (!workflow) {
     throw new WebhookError("Workflow not found", 404);
   }
@@ -190,7 +190,7 @@ export async function handleWebhookTrigger(
     // for a trigger that declares neither `hmacSecret` nor `verification` (the
     // explicit open-endpoint opt-in); a trigger with `verification` but no
     // `hmacSecret` still fails closed there.
-    verifyWebhookRequest(
+    await verifyWebhookRequest(
       webhookTrigger,
       typeof payload === "string" ? payload : JSON.stringify(payload),
       headers,
@@ -233,9 +233,9 @@ function parseTriggerPayload(payload: unknown): unknown {
  * at startup, exactly which workflows anyone holding the URL can start. Never
  * throws — a scan failure must not block server startup.
  */
-export function logOpenWebhookTriggers(): void {
+export async function logOpenWebhookTriggers(): Promise<void> {
   try {
-    const open = listWorkflows({ enabled: true }).filter((workflow) =>
+    const open = (await listWorkflows({ enabled: true })).filter((workflow) =>
       workflow.triggers.some(
         (trigger) => trigger.type === "webhook" && !trigger.hmacSecret && !trigger.verification,
       ),
@@ -262,7 +262,7 @@ export async function handleScheduleTrigger(
   schedule: ScheduledTask,
   registry: ExecutorRegistry,
 ): Promise<string[]> {
-  const workflows = getWorkflowsByScheduleId(scheduleId);
+  const workflows = await getWorkflowsByScheduleId(scheduleId);
   if (workflows.length === 0) return [];
 
   const runIds: string[] = [];

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDb, initDb } from "../be/db";
+import { closeDb, getDbClient, initDb } from "../be/db";
 import { upsertOAuthApp } from "../be/db-queries/oauth";
 import { getJiraMetadata, updateJiraMetadata } from "../jira/metadata";
 
@@ -29,13 +29,13 @@ mock.module("../jira/client", () => ({
   getJiraCloudId: () => "cloud-1",
 }));
 
-beforeAll(() => {
+beforeAll(async () => {
   initDb(TEST_DB_PATH);
   process.env.JIRA_WEBHOOK_TOKEN = "test-token-32-chars-deadbeef-cafe-99";
   delete process.env.PUBLIC_MCP_BASE_URL;
   process.env.MCP_BASE_URL = "https://test.example.com";
 
-  upsertOAuthApp("jira", {
+  await upsertOAuthApp("jira", {
     clientId: "client-id",
     clientSecret: "client-secret",
     authorizeUrl: "https://auth.atlassian.com/authorize",
@@ -65,13 +65,13 @@ const { _test, refreshJiraWebhooks, registerJiraWebhook } = await import(
   "../jira/webhook-lifecycle"
 );
 
-beforeEach(() => {
+beforeEach(async () => {
   jiraFetchMock.mockClear();
   restoreSlackAlertsChannel();
   // Reset the webhookIds list each test (and clear metadata writebacks).
-  getDb()
-    .query("UPDATE oauth_apps SET metadata = ? WHERE provider = 'jira'")
-    .run(JSON.stringify({ cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" }));
+  await getDbClient().run("UPDATE oauth_apps SET metadata = ? WHERE provider = 'jira'", [
+    JSON.stringify({ cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" }),
+  ]);
 });
 
 describe("Jira webhook Slack alerts", () => {
@@ -130,7 +130,7 @@ describe("registerJiraWebhook", () => {
     expect(parsed.webhooks[0]?.fieldIdsFilter).toEqual(["assignee"]);
 
     // Persisted in metadata
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.webhookIds?.length).toBe(1);
     expect(meta.webhookIds?.[0]?.id).toBe(42);
     expect(meta.webhookIds?.[0]?.jql).toBe("project = KAN");
@@ -190,7 +190,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("handles 200 + expirationDate — applies new expiry to all webhooks", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [
         { id: 1, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" },
         { id: 2, expiresAt: "2026-04-15T00:00:00.000Z", jql: "p=B" },
@@ -216,14 +216,14 @@ describe("refreshJiraWebhooks", () => {
     const parsed = JSON.parse(init.body as string) as { webhookIds: number[] };
     expect(parsed.webhookIds.sort()).toEqual([1, 2]);
 
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     const sorted = [...(meta.webhookIds ?? [])].sort((a, b) => a.id - b.id);
     expect(sorted[0]?.expiresAt).toBe("2026-12-31T00:00:00.000Z");
     expect(sorted[1]?.expiresAt).toBe("2026-12-31T00:00:00.000Z");
   });
 
   test("handles 204 No Content — leaves local expiries unchanged", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 7, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 
@@ -233,12 +233,12 @@ describe("refreshJiraWebhooks", () => {
 
     await refreshJiraWebhooks();
 
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.webhookIds?.[0]?.expiresAt).toBe("2026-04-01T00:00:00.000Z");
   });
 
   test("throws on Atlassian non-OK response", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 8, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 
@@ -250,7 +250,7 @@ describe("refreshJiraWebhooks", () => {
   });
 
   test("malformed JSON response leaves expiries untouched (no crash)", async () => {
-    updateJiraMetadata({
+    await updateJiraMetadata({
       webhookIds: [{ id: 9, expiresAt: "2026-04-01T00:00:00.000Z", jql: "p=A" }],
     });
 
@@ -262,7 +262,7 @@ describe("refreshJiraWebhooks", () => {
     );
 
     await refreshJiraWebhooks();
-    const meta = getJiraMetadata();
+    const meta = await getJiraMetadata();
     expect(meta.webhookIds?.[0]?.expiresAt).toBe("2026-04-01T00:00:00.000Z");
   });
 });

@@ -163,19 +163,19 @@ describe("steering worker transport", () => {
   });
 
   test("missing provider delivery promotes a non-codex pending row to a follow-up", async () => {
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "transport fallback worker",
       isLead: false,
       status: "busy",
       maxTasks: 2,
       harnessProvider: "pi",
     });
-    const task = createTaskExtended("transport fallback parent", {
+    const task = await createTaskExtended("transport fallback parent", {
       agentId: agent.id,
       source: "api",
     });
-    expect(startTask(task.id)?.status).toBe("in_progress");
-    const requested = requestSteering({
+    expect((await startTask(task.id))?.status).toBe("in_progress");
+    const requested = await requestSteering({
       taskId: task.id,
       message: "continue as a follow-up",
       mode: "queue",
@@ -191,12 +191,12 @@ describe("steering worker transport", () => {
       createSteeringDispatchState(),
     );
 
-    expect(getPendingSteeringForTask(task.id)).toEqual([]);
-    expect(getSteeringMessageById(requested.steeringMessageId!)).toMatchObject({
+    expect(await getPendingSteeringForTask(task.id)).toEqual([]);
+    expect(await getSteeringMessageById(requested.steeringMessageId!)).toMatchObject({
       status: "promoted",
       promotedTaskId: expect.any(String),
     });
-    expect(getChildTasks(task.id)).toEqual([
+    expect(await getChildTasks(task.id)).toEqual([
       expect.objectContaining({
         parentTaskId: task.id,
         task: "continue as a follow-up",
@@ -209,20 +209,20 @@ describe("steering worker transport", () => {
     // request time, and the runner's dispatch poll must leave it untouched —
     // dispatching would synthesize a false undeliverable and promote it out
     // from under the hook.
-    const agent = createAgent({
+    const agent = await createAgent({
       name: "codex steering worker",
       isLead: false,
       status: "busy",
       maxTasks: 1,
       harnessProvider: "codex",
     });
-    const task = createTaskExtended("codex steering parent", {
+    const task = await createTaskExtended("codex steering parent", {
       agentId: agent.id,
       source: "api",
     });
-    expect(startTask(task.id)?.status).toBe("in_progress");
+    expect((await startTask(task.id))?.status).toBe("in_progress");
 
-    const requested = requestSteering({
+    const requested = await requestSteering({
       taskId: task.id,
       message: "codex follow-up",
       mode: "steer",
@@ -242,10 +242,10 @@ describe("steering worker transport", () => {
       createSteeringDispatchState(),
     );
 
-    expect(getPendingSteeringForTask(task.id)).toEqual([
+    expect(await getPendingSteeringForTask(task.id)).toEqual([
       expect.objectContaining({ id: requested.steeringMessageId, status: "pending" }),
     ]);
-    expect(getChildTasks(task.id)).toEqual([]);
+    expect(await getChildTasks(task.id)).toEqual([]);
   });
 
   test("accept-steer marks a delivered row handled and is idempotent", async () => {
@@ -254,38 +254,38 @@ describe("steering worker transport", () => {
     process.env.MCP_BASE_URL = baseUrl;
     process.env.AGENT_SWARM_API_KEY = "test-key";
     try {
-      const agent = createAgent({
+      const agent = await createAgent({
         name: "accept steering worker",
         isLead: false,
         status: "busy",
         maxTasks: 1,
         harnessProvider: "pi",
       });
-      const task = createTaskExtended("accept steering parent", {
+      const task = await createTaskExtended("accept steering parent", {
         agentId: agent.id,
         source: "api",
       });
-      expect(startTask(task.id)?.status).toBe("in_progress");
-      const steering = createSteeringMessage({
+      expect((await startTask(task.id))?.status).toBe("in_progress");
+      const steering = await createSteeringMessage({
         taskId: task.id,
         body: "acknowledge this",
         mode: "queue",
         source: "api",
         createdByKind: "system",
       });
-      expect(markSteeringDelivered(steering.id, "queue")?.status).toBe("delivered");
-      const otherAgent = createAgent({
+      expect((await markSteeringDelivered(steering.id, "queue"))?.status).toBe("delivered");
+      const otherAgent = await createAgent({
         name: "other accept steering worker",
         isLead: false,
         status: "busy",
         maxTasks: 1,
         harnessProvider: "pi",
       });
-      const otherTask = createTaskExtended("other accept steering parent", {
+      const otherTask = await createTaskExtended("other accept steering parent", {
         agentId: otherAgent.id,
         source: "api",
       });
-      expect(startTask(otherTask.id)?.status).toBe("in_progress");
+      expect((await startTask(otherTask.id))?.status).toBe("in_progress");
       // NEW CONTRACT: acceptSteerHandler returns a SwarmToolResult ({ ok,
       // message, data }), not a wire-level CallToolResult — isError/content
       // are synthesized only by finalizeSwarmToolResult at the registrar
@@ -302,12 +302,12 @@ describe("steering worker transport", () => {
       );
       expect(deniedResult.ok).toBe(false);
       expect(deniedResult.message).toContain("assigned to another agent");
-      const denied = finalizeSwarmToolResult("accept-steer", deniedResult);
+      const denied = await finalizeSwarmToolResult("accept-steer", deniedResult);
       expect(denied.isError).toBe(true);
       expect(denied.content[0]?.type).toBe("text");
       expect(denied.content[0]?.text).toContain("assigned to another agent");
       expect((denied.structuredContent as { success?: boolean })?.success).toBe(false);
-      expect(getSteeringMessageById(steering.id)?.status).toBe("delivered");
+      expect((await getSteeringMessageById(steering.id))?.status).toBe("delivered");
 
       const ctx = {
         kind: "owner" as const,
@@ -324,10 +324,10 @@ describe("steering worker transport", () => {
       // NEW CONTRACT: assert ok:true on the SwarmToolResult itself (see comment above).
       expect(first.ok).toBe(true);
       expect(second.ok).toBe(true);
-      const finalizedSecond = finalizeSwarmToolResult("accept-steer", second);
+      const finalizedSecond = await finalizeSwarmToolResult("accept-steer", second);
       expect(finalizedSecond.isError).not.toBe(true);
       expect((finalizedSecond.structuredContent as { success?: boolean })?.success).toBe(true);
-      expect(getSteeringMessageById(steering.id)).toMatchObject({
+      expect(await getSteeringMessageById(steering.id)).toMatchObject({
         status: "handled",
         handledAt: expect.any(String),
         // Acceptance note persists; the idempotent second call must not clear it.

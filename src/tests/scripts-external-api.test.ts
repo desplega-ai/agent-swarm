@@ -3,7 +3,7 @@ import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { __resetEncryptionKeyForTests } from "../be/crypto";
-import { closeDb, createAgent, createMcpServer, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, createMcpServer, getDbClient, initDb } from "../be/db";
 import {
   createScriptApi,
   getScriptApiById,
@@ -84,7 +84,7 @@ beforeAll(async () => {
   refreshSecretScrubberCache();
   setScriptEmbeddingProviderForTests(noOpEmbeddingProvider);
 
-  const worker = createAgent({ name: "ext-api-worker", isLead: false, status: "idle" });
+  const worker = await createAgent({ name: "ext-api-worker", isLead: false, status: "idle" });
   workerId = worker.id;
 });
 
@@ -103,10 +103,10 @@ afterAll(async () => {
   refreshSecretScrubberCache();
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM script_apis");
-  getDb().run("DELETE FROM script_runs");
-  getDb().run("DELETE FROM scripts");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM script_apis");
+  await getDbClient().run("DELETE FROM script_runs");
+  await getDbClient().run("DELETE FROM scripts");
 });
 
 type TestResponse = { status: number; text: string; json: () => Promise<unknown> };
@@ -166,9 +166,9 @@ async function dispatch(
 }
 
 describe("script_apis DB layer", () => {
-  test("bearer endpoint stores an encrypted token that decrypts back", () => {
-    const script = insertDoubler();
-    const created = createScriptApi({
+  test("bearer endpoint stores an encrypted token that decrypts back", async () => {
+    const script = await insertDoubler();
+    const created = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "bearer",
@@ -176,40 +176,43 @@ describe("script_apis DB layer", () => {
     expect(created.token).toMatch(/^xsk_/);
     expect(created.id).toMatch(/^[a-zA-Z]{12}$/);
 
-    const row = getDb()
-      .prepare<{ bearerTokenEncrypted: string }, [string]>(
-        "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
-      )
-      .get(created.id);
+    const row = await getDbClient().get<{ bearerTokenEncrypted: string }>(
+      "SELECT bearerTokenEncrypted FROM script_apis WHERE id = ?",
+      [created.id],
+    );
     // Stored value is ciphertext, not the plaintext token.
     expect(row?.bearerTokenEncrypted).toBeTruthy();
     expect(row?.bearerTokenEncrypted).not.toBe(created.token);
     // ...and round-trips via the reveal path.
-    expect(getScriptApiSecret(created.id)).toBe(created.token);
+    expect(await getScriptApiSecret(created.id)).toBe(created.token);
   });
 
-  test("none endpoint has no token", () => {
-    const script = insertDoubler();
-    const created = createScriptApi({ scriptId: script.id, agentId: workerId, authMode: "none" });
+  test("none endpoint has no token", async () => {
+    const script = await insertDoubler();
+    const created = await createScriptApi({
+      scriptId: script.id,
+      agentId: workerId,
+      authMode: "none",
+    });
     expect(created.token).toBeNull();
-    expect(getScriptApiSecret(created.id)).toBeNull();
+    expect(await getScriptApiSecret(created.id)).toBeNull();
   });
 
-  test("revealing the secret registers it with the scrubber", () => {
-    const script = insertDoubler();
-    const created = createScriptApi({
+  test("revealing the secret registers it with the scrubber", async () => {
+    const script = await insertDoubler();
+    const created = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "bearer",
     });
-    const token = getScriptApiSecret(created.id) as string;
+    const token = (await getScriptApiSecret(created.id)) as string;
     expect(scrubSecrets(`token is ${token}`)).not.toContain(token);
   });
 });
 
 describe("management routes", () => {
   test("create → list → reveal → disable → delete", async () => {
-    const script = insertDoubler();
+    const script = await insertDoubler();
 
     const create = await dispatch(`/api/scripts/${script.id}/apis`, {
       method: "POST",
@@ -240,11 +243,11 @@ describe("management routes", () => {
       method: "DELETE",
     });
     expect((await del.json()) as { deleted: boolean }).toEqual({ deleted: true });
-    expect(listScriptApisForScript(script.id)).toHaveLength(0);
+    expect(await listScriptApisForScript(script.id)).toHaveLength(0);
   });
 
   test("create on a global script with no owner requires agentId", async () => {
-    const script = insertScript({
+    const script = await insertScript({
       name: `orphan-${crypto.randomUUID().slice(0, 8)}`,
       scope: "global",
       source: DOUBLER_SOURCE,
@@ -264,10 +267,10 @@ describe("management routes", () => {
 
 describe("public execution route", () => {
   test("none-mode endpoint runs and returns the wrapped envelope", async () => {
-    const script = insertDoubler({ isScratch: true });
+    const script = await insertDoubler({ isScratch: true });
     const old = "2026-07-01T00:00:00.000Z";
-    getDb().prepare("UPDATE scripts SET updatedAt = ? WHERE id = ?").run(old, script.id);
-    const endpoint = createScriptApi({
+    await getDbClient().run("UPDATE scripts SET updatedAt = ? WHERE id = ?", [old, script.id]);
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
@@ -289,11 +292,11 @@ describe("public execution route", () => {
     expect(body.result).toEqual({ doubled: 42 });
     expect(body.error).toBeNull();
     expect(typeof body.durationMs).toBe("number");
-    expect(getScriptById(script.id)?.updatedAt).not.toBe(old);
+    expect((await getScriptById(script.id))?.updatedAt).not.toBe(old);
   });
 
   test("external endpoint runs receive ctx.mcp connections (parity with /api/scripts/run)", async () => {
-    const mcpServer = createMcpServer({
+    const mcpServer = await createMcpServer({
       name: `x-mcp-${crypto.randomUUID()}`,
       transport: "http",
       scope: "global",
@@ -305,15 +308,14 @@ describe("public execution route", () => {
       connectionId: crypto.randomUUID(),
       tools: [{ name: "ping", inputSchema: {} }],
     };
-    getDb()
-      .prepare(
-        `INSERT INTO script_connections
-           (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
-         VALUES (?, ?, 'mcp', 'global', '[]', ?, ?)`,
-      )
-      .run(runtimeDescriptor.connectionId, "xmcp", mcpServer.id, JSON.stringify(runtimeDescriptor));
+    await getDbClient().run(
+      `INSERT INTO script_connections
+         (id, slug, kind, scope, allowed_hosts_json, mcp_server_id, generated_runtime_json)
+       VALUES (?, ?, 'mcp', 'global', '[]', ?, ?)`,
+      [runtimeDescriptor.connectionId, "xmcp", mcpServer.id, JSON.stringify(runtimeDescriptor)],
+    );
 
-    const script = insertScript({
+    const script = await insertScript({
       name: `mcp-keys-${crypto.randomUUID().slice(0, 8)}`,
       scope: "agent",
       scopeId: workerId,
@@ -323,7 +325,7 @@ describe("public execution route", () => {
       intent: "test fixture",
       signatureJson: "{}",
     });
-    const endpoint = createScriptApi({
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
@@ -341,8 +343,8 @@ describe("public execution route", () => {
   });
 
   test("oversized body → 413 before execution, even for authMode 'none'", async () => {
-    const script = insertDoubler();
-    const endpoint = createScriptApi({
+    const script = await insertDoubler();
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
@@ -358,8 +360,8 @@ describe("public execution route", () => {
   });
 
   test("bearer mode: missing/invalid token → 401, valid → 200", async () => {
-    const script = insertDoubler();
-    const endpoint = createScriptApi({
+    const script = await insertDoubler();
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "bearer",
@@ -392,14 +394,14 @@ describe("public execution route", () => {
   });
 
   test("args validation failure returns an args_validation envelope without executing", async () => {
-    const script = insertDoubler({
+    const script = await insertDoubler({
       argsJsonSchema: JSON.stringify({
         type: "object",
         required: ["value"],
         properties: { value: { type: "number" } },
       }),
     });
-    const endpoint = createScriptApi({
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
@@ -417,13 +419,13 @@ describe("public execution route", () => {
   });
 
   test("disabled endpoint → 404", async () => {
-    const script = insertDoubler();
-    const endpoint = createScriptApi({
+    const script = await insertDoubler();
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
     });
-    getDb().run("UPDATE script_apis SET enabled = 0 WHERE id = ?", [endpoint.id]);
+    await getDbClient().run("UPDATE script_apis SET enabled = 0 WHERE id = ?", [endpoint.id]);
 
     const res = await dispatch(`/api/x/script/${endpoint.id}`, {
       method: "POST",
@@ -434,8 +436,8 @@ describe("public execution route", () => {
   });
 
   test("usage is tracked: callCount + an apiEndpointId-tagged run", async () => {
-    const script = insertDoubler();
-    const endpoint = createScriptApi({
+    const script = await insertDoubler();
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",
@@ -447,20 +449,19 @@ describe("public execution route", () => {
       auth: null,
     });
 
-    const after = getScriptApiById(endpoint.id);
+    const after = await getScriptApiById(endpoint.id);
     expect(after?.callCount).toBe(1);
 
-    const runs = getDb()
-      .prepare<{ apiEndpointId: string }, [string]>(
-        "SELECT apiEndpointId FROM script_runs WHERE apiEndpointId = ?",
-      )
-      .all(endpoint.id);
+    const runs = await getDbClient().query<{ apiEndpointId: string }>(
+      "SELECT apiEndpointId FROM script_runs WHERE apiEndpointId = ?",
+      [endpoint.id],
+    );
     expect(runs).toHaveLength(1);
   });
 
   test("an unparseable timeout header falls back to the default and still runs", async () => {
-    const script = insertDoubler();
-    const endpoint = createScriptApi({
+    const script = await insertDoubler();
+    const endpoint = await createScriptApi({
       scriptId: script.id,
       agentId: workerId,
       authMode: "none",

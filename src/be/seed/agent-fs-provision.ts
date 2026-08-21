@@ -59,24 +59,24 @@ export function resetAgentFsProvisionFetchForTests(): void {
 export const agentFsProvisionSeeder: Seeder<AgentFsSeedItem> = {
   kind: KIND,
 
-  items(): AgentFsSeedItem[] {
-    const apiUrl = resolveApiUrl();
+  async items(): Promise<AgentFsSeedItem[]> {
+    const apiUrl = await resolveApiUrl();
     if (!apiUrl) return [];
 
-    const registerEmail = resolveRegisterEmail();
-    const invites = resolveInviteTargets();
+    const registerEmail = await resolveRegisterEmail();
+    const invites = await resolveInviteTargets();
     const contentHash = provisionHash({ apiUrl, registerEmail, invites });
     return [{ key: ITEM_KEY, contentHash, apiUrl, registerEmail, invites }];
   },
 
-  upstreamHash(): string | null {
-    const existingHash = getConfigValue(PROVISION_HASH_KEY);
+  async upstreamHash(): Promise<string | null> {
+    const existingHash = await getConfigValue(PROVISION_HASH_KEY);
     if (existingHash) return existingHash;
 
-    const hasOrg = !!getConfigValue("AGENT_FS_DEFAULT_ORG_ID");
-    const hasDrive = !!getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID");
-    const hasKey = !!getConfigValue(API_KEY_CONFIG);
-    return hasOrg && hasDrive && hasKey ? provisionHashFromCurrentState() : null;
+    const hasOrg = !!(await getConfigValue("AGENT_FS_DEFAULT_ORG_ID"));
+    const hasDrive = !!(await getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID"));
+    const hasKey = !!(await getConfigValue(API_KEY_CONFIG));
+    return hasOrg && hasDrive && hasKey ? await provisionHashFromCurrentState() : null;
   },
 
   async apply(item): Promise<void> {
@@ -110,7 +110,7 @@ async function provisionAgentFs(item: AgentFsSeedItem): Promise<void> {
     await inviteToSharedOrg(item.apiUrl, shared.authHeaders, shared.orgId, invite);
   }
 
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "global",
     key: PROVISION_HASH_KEY,
     value: item.contentHash,
@@ -129,15 +129,15 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   driveId: string;
   authHeaders: Record<string, string>;
 }> {
-  const apiUrl = (options?.apiUrl ?? resolveApiUrl()).trim().replace(/\/+$/, "");
+  const apiUrl = (options?.apiUrl ?? (await resolveApiUrl())).trim().replace(/\/+$/, "");
   if (!apiUrl) throw new Error("AGENT_FS_API_URL is not configured");
 
-  const registerEmail = options?.registerEmail ?? resolveRegisterEmail();
+  const registerEmail = options?.registerEmail ?? (await resolveRegisterEmail());
   let apiKey =
-    getConfigValue(API_KEY_CONFIG) ||
+    (await getConfigValue(API_KEY_CONFIG)) ||
     process.env.API_AGENT_FS_API_KEY ||
     process.env.AGENT_FS_API_KEY ||
-    getConfigValue(LEGACY_SHARED_KEY_CONFIG) ||
+    (await getConfigValue(LEGACY_SHARED_KEY_CONFIG)) ||
     "";
 
   if (!apiKey) {
@@ -158,14 +158,14 @@ export async function ensureAgentFsSharedProvisioning(options?: {
   }
 
   process.env.API_AGENT_FS_API_KEY = apiKey;
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "global",
     key: API_KEY_CONFIG,
     value: apiKey,
     isSecret: true,
     description: `API-owned agent-fs bootstrap key for ${registerEmail}`,
   });
-  deleteSwarmConfigByKey("global", null, LEGACY_SHARED_KEY_CONFIG);
+  await deleteSwarmConfigByKey("global", null, LEGACY_SHARED_KEY_CONFIG);
 
   const authHeaders = { authorization: `Bearer ${apiKey}` };
   await agentFsRequest(apiUrl, "/auth/me", { headers: authHeaders });
@@ -178,7 +178,7 @@ export async function ensureAgentFsSharedProvisioning(options?: {
     ["AGENT_FS_DEFAULT_DRIVE_ID", driveId, "agent-fs default shared drive ID"],
   ] as const) {
     process.env[key] = value;
-    upsertSwarmConfig({ scope: "global", key, value, isSecret: false, description });
+    await upsertSwarmConfig({ scope: "global", key, value, isSecret: false, description });
   }
 
   // Export the URL and re-run provider selection: when provisioning lands
@@ -232,30 +232,34 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   orgId?: string;
   driveId?: string;
 }> {
-  const apiUrl = resolveApiUrl();
+  const apiUrl = await resolveApiUrl();
   if (!apiUrl) return { enabled: false, created: false, agentId };
 
-  const agent = getAgentById(agentId);
+  const agent = await getAgentById(agentId);
   if (!agent) throw new Error(`Agent not found: ${agentId}`);
 
-  const existing = getSwarmConfigs({
-    scope: "agent",
-    scopeId: agentId,
-    key: "AGENT_FS_API_KEY",
-  })[0];
+  const existing = (
+    await getSwarmConfigs({
+      scope: "agent",
+      scopeId: agentId,
+      key: "AGENT_FS_API_KEY",
+    })
+  )[0];
   if (existing?.value) {
     return {
       enabled: true,
       created: false,
       agentId,
-      email: resolveAgentEmail(agentId),
-      orgId: getConfigValue("AGENT_FS_DEFAULT_ORG_ID") || getConfigValue("AGENT_FS_SHARED_ORG_ID"),
-      driveId: getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID"),
+      email: await resolveAgentEmail(agentId),
+      orgId:
+        (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) ||
+        (await getConfigValue("AGENT_FS_SHARED_ORG_ID")),
+      driveId: await getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID"),
     };
   }
 
   const shared = await ensureAgentFsSharedProvisioning({ apiUrl });
-  const email = resolveAgentEmail(agentId);
+  const email = await resolveAgentEmail(agentId);
   const registered = await agentFsRequest<{ apiKey?: string }>(apiUrl, "/auth/register", {
     method: "POST",
     body: { email },
@@ -271,7 +275,7 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
     await inviteToSharedOrg(apiUrl, shared.authHeaders, shared.orgId, { email, role: "editor" });
   }
 
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "agent",
     scopeId: agentId,
     key: "AGENT_FS_API_KEY",
@@ -292,7 +296,8 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
 
 async function ensureSharedOrg(apiUrl: string, headers: Record<string, string>): Promise<string> {
   const configured =
-    getConfigValue("AGENT_FS_DEFAULT_ORG_ID") || getConfigValue("AGENT_FS_SHARED_ORG_ID");
+    (await getConfigValue("AGENT_FS_DEFAULT_ORG_ID")) ||
+    (await getConfigValue("AGENT_FS_SHARED_ORG_ID"));
   if (configured) return configured;
 
   const orgs = await agentFsRequest<{
@@ -316,7 +321,7 @@ async function ensureSharedDrive(
   headers: Record<string, string>,
   orgId: string,
 ): Promise<string> {
-  const configured = getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID");
+  const configured = await getConfigValue("AGENT_FS_DEFAULT_DRIVE_ID");
   if (configured) return configured;
 
   const drives = await agentFsRequest<{
@@ -426,29 +431,29 @@ async function agentFsRequest<T = unknown>(
   return (await response.json().catch(() => ({}))) as T;
 }
 
-function resolveApiUrl(): string {
-  const raw = process.env.AGENT_FS_API_URL || getConfigValue("AGENT_FS_API_URL") || "";
+async function resolveApiUrl(): Promise<string> {
+  const raw = process.env.AGENT_FS_API_URL || (await getConfigValue("AGENT_FS_API_URL")) || "";
   return raw.trim().replace(/\/+$/, "");
 }
 
-function resolveRegisterEmail(): string {
+async function resolveRegisterEmail(): Promise<string> {
   const configured =
-    process.env.AGENT_FS_REGISTER_EMAIL || getConfigValue("AGENT_FS_REGISTER_EMAIL");
+    process.env.AGENT_FS_REGISTER_EMAIL || (await getConfigValue("AGENT_FS_REGISTER_EMAIL"));
   if (configured?.trim()) return configured.trim();
 
   const installId =
     process.env.SWARM_INSTALLATION_ID ||
     process.env.SWARM_ORG_ID ||
-    getConfigValue("installation_id") ||
+    (await getConfigValue("installation_id")) ||
     "swarm";
   const domain = process.env.AGENT_FS_EMAIL_DOMAIN || "swarm.local";
   return `agent-fs-admin-${slugEmailPart(installId)}@${domain}`;
 }
 
-function resolveInviteTargets(): InviteTarget[] {
+async function resolveInviteTargets(): Promise<InviteTarget[]> {
   const targets = new Map<string, InviteTarget>();
 
-  for (const user of getAllUsers()) {
+  for (const user of await getAllUsers()) {
     if (!user.email) continue;
     const role = isExplicitViewerRole(user.role) ? "viewer" : "editor";
     targets.set(user.email.toLowerCase(), { email: user.email, role });
@@ -461,11 +466,11 @@ function isExplicitViewerRole(role: string | undefined): boolean {
   return /\b(viewer|read[-\s]?only|guest)\b/i.test(role ?? "");
 }
 
-function provisionHashFromCurrentState(): string {
+async function provisionHashFromCurrentState(): Promise<string> {
   return provisionHash({
-    apiUrl: resolveApiUrl(),
-    registerEmail: resolveRegisterEmail(),
-    invites: resolveInviteTargets(),
+    apiUrl: await resolveApiUrl(),
+    registerEmail: await resolveRegisterEmail(),
+    invites: await resolveInviteTargets(),
   });
 }
 
@@ -486,12 +491,12 @@ function provisionHash(input: {
     .digest("hex");
 }
 
-function getConfigValue(key: string): string | undefined {
-  return getSwarmConfigs({ scope: "global", key })[0]?.value;
+async function getConfigValue(key: string): Promise<string | undefined> {
+  return (await getSwarmConfigs({ scope: "global", key }))[0]?.value;
 }
 
-function resolveAgentEmail(agentId: string): string {
-  const configured = getResolvedConfig(agentId).find(
+async function resolveAgentEmail(agentId: string): Promise<string> {
+  const configured = (await getResolvedConfig(agentId)).find(
     (config) => config.key === "AGENT_EMAIL",
   )?.value;
   if (configured?.trim()) return configured.trim();

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createAgent, getDb, initDb, isSqliteVecAvailable } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb, isSqliteVecAvailable } from "../be/db";
 import { serializeEmbedding } from "../be/embedding";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
 
@@ -36,8 +36,8 @@ describe("SqliteMemoryStore", () => {
       } catch {}
     }
     initDb(TEST_DB_PATH);
-    createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
-    createAgent({ id: agentB, name: "Test Agent B", isLead: false, status: "idle" });
+    await createAgent({ id: agentA, name: "Test Agent A", isLead: false, status: "idle" });
+    await createAgent({ id: agentB, name: "Test Agent B", isLead: false, status: "idle" });
     store = new SqliteMemoryStore();
   });
 
@@ -51,8 +51,8 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("store()", () => {
-    test("creates memory with correct fields", () => {
-      const memory = store.store({
+    test("creates memory with correct fields", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "test memory",
@@ -67,9 +67,9 @@ describe("SqliteMemoryStore", () => {
       expect(memory.source).toBe("manual");
     });
 
-    test("task_completion → expiresAt ≈ now + 7d", () => {
+    test("task_completion → expiresAt ≈ now + 7d", async () => {
       const before = Date.now();
-      const memory = store.store({
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "task mem",
@@ -84,8 +84,8 @@ describe("SqliteMemoryStore", () => {
       expect(expires).toBeLessThan(expectedMax);
     });
 
-    test("session_summary → expiresAt ≈ now + 3d", () => {
-      const memory = store.store({
+    test("session_summary → expiresAt ≈ now + 3d", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "session mem",
@@ -98,8 +98,8 @@ describe("SqliteMemoryStore", () => {
       expect(Math.abs(expires - expected)).toBeLessThan(5000);
     });
 
-    test("manual → expiresAt is null", () => {
-      const memory = store.store({
+    test("manual → expiresAt is null", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "manual mem",
@@ -111,8 +111,8 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("storeBatch()", () => {
-    test("atomically stores multiple memories", () => {
-      const memories = store.storeBatch([
+    test("atomically stores multiple memories", async () => {
+      const memories = await store.storeBatch([
         { agentId: agentA, scope: "agent", name: "batch1", content: "c1", source: "manual" },
         { agentId: agentA, scope: "agent", name: "batch2", content: "c2", source: "manual" },
       ]);
@@ -123,8 +123,8 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("get() and peek()", () => {
-    test("get returns memory and increments accessCount", () => {
-      const created = store.store({
+    test("get returns memory and increments accessCount", async () => {
+      const created = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "get test",
@@ -132,20 +132,20 @@ describe("SqliteMemoryStore", () => {
         source: "manual",
       });
 
-      const first = store.get(created.id);
+      const first = await store.get(created.id);
       expect(first).toBeDefined();
       expect(first!.name).toBe("get test");
 
-      const second = store.get(created.id);
+      const second = await store.get(created.id);
       expect(second).toBeDefined();
 
       // Verify accessCount incremented by peeking (no side effects)
-      const peeked = store.peek(created.id);
+      const peeked = await store.peek(created.id);
       expect(peeked!.accessCount).toBe(2);
     });
 
-    test("peek does NOT increment accessCount", () => {
-      const created = store.store({
+    test("peek does NOT increment accessCount", async () => {
+      const created = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "peek test",
@@ -153,108 +153,108 @@ describe("SqliteMemoryStore", () => {
         source: "manual",
       });
 
-      store.peek(created.id);
-      store.peek(created.id);
-      store.peek(created.id);
+      await store.peek(created.id);
+      await store.peek(created.id);
+      await store.peek(created.id);
 
-      const peeked = store.peek(created.id);
+      const peeked = await store.peek(created.id);
       expect(peeked!.accessCount).toBe(0);
     });
 
-    test("get returns null for non-existent ID", () => {
-      expect(store.get("00000000-0000-0000-0000-000000000000")).toBeNull();
+    test("get returns null for non-existent ID", async () => {
+      expect(await store.get("00000000-0000-0000-0000-000000000000")).toBeNull();
     });
   });
 
   describe("search()", () => {
-    test("returns candidates sorted by similarity", () => {
+    test("returns candidates sorted by similarity", async () => {
       // Create memories with known embeddings
-      const m1 = store.store({
+      const m1 = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "search1",
         content: "first",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
+      await store.updateEmbedding(m1.id, new Float32Array([1, 0, 0]), "test-model");
 
-      const m2 = store.store({
+      const m2 = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "search2",
         content: "second",
         source: "manual",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0.9, 0.1, 0]), "test-model");
+      await store.updateEmbedding(m2.id, new Float32Array([0.9, 0.1, 0]), "test-model");
 
       const query = new Float32Array([1, 0, 0]);
-      const results = store.search(query, agentA, { limit: 10 });
+      const results = await store.search(query, agentA, { limit: 10 });
       expect(results.length).toBeGreaterThanOrEqual(2);
       // First result should be most similar (exact match)
       expect(results[0]!.similarity).toBeGreaterThan(results[1]!.similarity);
     });
 
-    test("respects scope filtering", () => {
-      const m1 = store.store({
+    test("respects scope filtering", async () => {
+      const m1 = await store.store({
         agentId: agentB,
         scope: "agent",
         name: "agent-only",
         content: "agent scoped",
         source: "manual",
       });
-      store.updateEmbedding(m1.id, new Float32Array([0, 0.5, 0.5]), "test-model");
+      await store.updateEmbedding(m1.id, new Float32Array([0, 0.5, 0.5]), "test-model");
 
-      const m2 = store.store({
+      const m2 = await store.store({
         agentId: agentB,
         scope: "swarm",
         name: "swarm-shared",
         content: "swarm scoped",
         source: "manual",
       });
-      store.updateEmbedding(m2.id, new Float32Array([0, 0.5, 0.5]), "test-model");
+      await store.updateEmbedding(m2.id, new Float32Array([0, 0.5, 0.5]), "test-model");
 
       const query = new Float32Array([0, 0.5, 0.5]);
 
-      const agentOnly = store.search(query, agentB, { scope: "agent", limit: 50 });
+      const agentOnly = await store.search(query, agentB, { scope: "agent", limit: 50 });
       expect(agentOnly.every((r) => r.scope === "agent")).toBe(true);
 
-      const swarmOnly = store.search(query, agentB, { scope: "swarm", limit: 50 });
+      const swarmOnly = await store.search(query, agentB, { scope: "swarm", limit: 50 });
       expect(swarmOnly.every((r) => r.scope === "swarm")).toBe(true);
     });
 
-    test("isLead=true sees all memories", () => {
+    test("isLead=true sees all memories", async () => {
       const query = new Float32Array([1, 0, 0]);
-      const results = store.search(query, agentA, { isLead: true, limit: 100 });
+      const results = await store.search(query, agentA, { isLead: true, limit: 100 });
       // Lead should see both agentA and agentB memories
       const agents = new Set(results.map((r) => r.agentId));
       expect(agents.size).toBeGreaterThanOrEqual(1);
     });
 
-    test("uses sqlite-vec for 512d embeddings with scope-filter parity", () => {
+    test("uses sqlite-vec for 512d embeddings with scope-filter parity", async () => {
       if (skipVecAssertionsWhenUnavailable()) return;
 
       for (let i = 0; i < 6; i++) {
-        const otherAgent = store.store({
+        const otherAgent = await store.store({
           agentId: agentB,
           scope: "agent",
           name: `vec-other-agent-exact-${i}`,
           content: "exact but invisible to agentA",
           source: "manual",
         });
-        store.updateEmbedding(otherAgent.id, vector({ 0: 1 }), "test-model");
+        await store.updateEmbedding(otherAgent.id, vector({ 0: 1 }), "test-model");
       }
 
-      const visible = store.store({
+      const visible = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "vec-agent-visible",
         content: "visible to agentA",
         source: "manual",
       });
-      store.updateEmbedding(visible.id, vector({ 0: 0.8, 1: 0.2 }), "test-model");
+      await store.updateEmbedding(visible.id, vector({ 0: 0.8, 1: 0.2 }), "test-model");
 
       const query = vector({ 0: 1 });
-      const results = store.search(query, agentA, { scope: "agent", limit: 5 });
+      const results = await store.search(query, agentA, { scope: "agent", limit: 5 });
 
       expect(results[0]!.id).toBe(visible.id);
       expect(results.every((r) => r.agentId === agentA && r.scope === "agent")).toBe(true);
@@ -267,20 +267,21 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("memory_vec population", () => {
-    test("populates existing embeddings on startup and reports health counts", () => {
+    test("populates existing embeddings on startup and reports health counts", async () => {
       if (skipVecAssertionsWhenUnavailable()) return;
 
-      const raw = store.store({
+      const raw = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "raw-existing-embedding",
         content: "raw existing embedding",
         source: "manual",
       });
-      getDb()
-        .prepare("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?")
-        .run(serializeEmbedding(vector({ 2: 1 })), "test-model", raw.id);
-      getDb().prepare("DELETE FROM memory_vec WHERE memory_id = ?").run(raw.id);
+      await getDbClient().run(
+        "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
+        [serializeEmbedding(vector({ 2: 1 })), "test-model", raw.id],
+      );
+      await getDbClient().run("DELETE FROM memory_vec WHERE memory_id = ?", [raw.id]);
 
       const freshStore = new SqliteMemoryStore();
       const health = freshStore.getHealth();
@@ -289,28 +290,29 @@ describe("SqliteMemoryStore", () => {
       expect(health.sqliteVec.lastPopulate?.attempted).toBeGreaterThanOrEqual(1);
       expect(health.sqliteVec.lastPopulate?.failed).toBe(0);
 
-      const resultIds = freshStore
-        .search(vector({ 2: 1 }), agentA, { scope: "agent", limit: 20 })
-        .map((r) => r.id);
+      const resultIds = (
+        await freshStore.search(vector({ 2: 1 }), agentA, { scope: "agent", limit: 20 })
+      ).map((r) => r.id);
       expect(resultIds).toContain(raw.id);
     });
 
-    test("rebuilds an old non-cosine memory_vec table from agent_memory", () => {
+    test("rebuilds an old non-cosine memory_vec table from agent_memory", async () => {
       if (skipVecAssertionsWhenUnavailable()) return;
 
-      const raw = store.store({
+      const raw = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "stale-schema-embedding",
         content: "stale schema embedding",
         source: "manual",
       });
-      getDb()
-        .prepare("UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?")
-        .run(serializeEmbedding(vector({ 3: 1 })), "test-model", raw.id);
+      await getDbClient().run(
+        "UPDATE agent_memory SET embedding = ?, embeddingModel = ? WHERE id = ?",
+        [serializeEmbedding(vector({ 3: 1 })), "test-model", raw.id],
+      );
 
-      getDb().run("DROP TABLE memory_vec");
-      getDb().run(`
+      await getDbClient().run("DROP TABLE memory_vec");
+      await getDbClient().run(`
         CREATE VIRTUAL TABLE memory_vec USING vec0(
           memory_id TEXT PRIMARY KEY,
           embedding float[512]
@@ -327,28 +329,28 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("delete()", () => {
-    test("removes memory", () => {
-      const memory = store.store({
+    test("removes memory", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "to delete",
         content: "deleteme",
         source: "manual",
       });
-      const deleted = store.delete(memory.id);
+      const deleted = await store.delete(memory.id);
       expect(deleted).toBe(true);
-      expect(store.peek(memory.id)).toBeNull();
+      expect(await store.peek(memory.id)).toBeNull();
     });
 
-    test("returns false for non-existent", () => {
-      expect(store.delete("00000000-0000-0000-0000-000000000000")).toBe(false);
+    test("returns false for non-existent", async () => {
+      expect(await store.delete("00000000-0000-0000-0000-000000000000")).toBe(false);
     });
   });
 
   describe("deleteBySourcePath()", () => {
-    test("removes all matching memories", () => {
+    test("removes all matching memories", async () => {
       const path = "/test/delete-path.ts";
-      store.store({
+      await store.store({
         agentId: agentA,
         scope: "agent",
         name: "chunk1",
@@ -356,7 +358,7 @@ describe("SqliteMemoryStore", () => {
         source: "file_index",
         sourcePath: path,
       });
-      store.store({
+      await store.store({
         agentId: agentA,
         scope: "agent",
         name: "chunk2",
@@ -365,51 +367,51 @@ describe("SqliteMemoryStore", () => {
         sourcePath: path,
       });
 
-      const deleted = store.deleteBySourcePath(path, agentA);
+      const deleted = await store.deleteBySourcePath(path, agentA);
       expect(deleted).toBe(2);
     });
   });
 
   describe("updateEmbedding()", () => {
-    test("sets embedding and model", () => {
-      const memory = store.store({
+    test("sets embedding and model", async () => {
+      const memory = await store.store({
         agentId: agentA,
         scope: "agent",
         name: "embed test",
         content: "embeddable",
         source: "manual",
       });
-      store.updateEmbedding(
+      await store.updateEmbedding(
         memory.id,
         new Float32Array([1, 2, 3]),
         "openai/text-embedding-3-small",
       );
 
-      const updated = store.peek(memory.id);
+      const updated = await store.peek(memory.id);
       expect(updated!.embeddingModel).toBe("openai/text-embedding-3-small");
     });
   });
 
   describe("getStats()", () => {
-    test("returns correct counts", () => {
+    test("returns correct counts", async () => {
       const statsAgent = "cccc0000-0000-4000-8000-000000000003";
-      createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
+      await createAgent({ id: statsAgent, name: "Stats Agent", isLead: false, status: "idle" });
 
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "s1",
         content: "c1",
         source: "manual",
       });
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "swarm",
         name: "s2",
         content: "c2",
         source: "task_completion",
       });
-      store.store({
+      await store.store({
         agentId: statsAgent,
         scope: "agent",
         name: "s3",
@@ -417,7 +419,7 @@ describe("SqliteMemoryStore", () => {
         source: "manual",
       });
 
-      const stats = store.getStats(statsAgent);
+      const stats = await store.getStats(statsAgent);
       expect(stats.total).toBe(3);
       expect(stats.bySource.manual).toBe(2);
       expect(stats.bySource.task_completion).toBe(1);
@@ -427,15 +429,15 @@ describe("SqliteMemoryStore", () => {
   });
 
   describe("listForReembedding()", () => {
-    test("returns id and content", () => {
-      const all = store.listForReembedding();
+    test("returns id and content", async () => {
+      const all = await store.listForReembedding();
       expect(all.length).toBeGreaterThan(0);
       expect(all[0]).toHaveProperty("id");
       expect(all[0]).toHaveProperty("content");
     });
 
-    test("filters by agentId", () => {
-      const filtered = store.listForReembedding({ agentId: agentA });
+    test("filters by agentId", async () => {
+      const filtered = await store.listForReembedding({ agentId: agentA });
       expect(filtered.every((_m) => true)).toBe(true); // just verifying it doesn't throw
       expect(filtered.length).toBeGreaterThan(0);
     });
@@ -444,31 +446,30 @@ describe("SqliteMemoryStore", () => {
   describe("purgeExpired()", () => {
     const purgeAgent = "cccc0000-0000-4000-8000-000000000003";
 
-    beforeAll(() => {
+    beforeAll(async () => {
       try {
-        createAgent({ id: purgeAgent, name: "Purge Agent", isLead: false, status: "idle" });
+        await createAgent({ id: purgeAgent, name: "Purge Agent", isLead: false, status: "idle" });
       } catch {
         // agent may already exist from a prior run
       }
     });
 
-    test("deletes rows past their expiresAt and returns count", () => {
-      const db = getDb();
-
+    test("deletes rows past their expiresAt and returns count", async () => {
       // Store a session_summary (3-day TTL) then backdateits expiresAt to the past
-      const mem = store.store({
+      const mem = await store.store({
         agentId: purgeAgent,
         scope: "agent",
         name: "expired session",
         content: "old session data",
         source: "session_summary",
       });
-      db.prepare("UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?").run(
-        mem.id,
+      await getDbClient().run(
+        "UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?",
+        [mem.id],
       );
 
       // Store a manual memory (never expires) — should survive
-      const keeper = store.store({
+      const keeper = await store.store({
         agentId: purgeAgent,
         scope: "agent",
         name: "keeper",
@@ -476,60 +477,59 @@ describe("SqliteMemoryStore", () => {
         source: "manual",
       });
 
-      const purged = store.purgeExpired();
+      const purged = await store.purgeExpired();
       expect(purged).toBeGreaterThanOrEqual(1);
 
-      expect(store.get(mem.id)).toBeNull();
-      expect(store.get(keeper.id)).not.toBeNull();
+      expect(await store.get(mem.id)).toBeNull();
+      expect(await store.get(keeper.id)).not.toBeNull();
     });
 
-    test("returns 0 when nothing is expired", () => {
-      const purged = store.purgeExpired();
+    test("returns 0 when nothing is expired", async () => {
+      const purged = await store.purgeExpired();
       expect(purged).toBe(0);
     });
 
-    test("also removes corresponding vec rows", () => {
+    test("also removes corresponding vec rows", async () => {
       if (skipVecAssertionsWhenUnavailable()) return;
 
-      const db = getDb();
+      const client = getDbClient();
       const emb = vector({ 0: 0.9, 100: 0.1 });
 
-      const mem = store.store({
+      const mem = await store.store({
         agentId: purgeAgent,
         scope: "agent",
         name: "vec-purge-test",
         content: "will be purged",
         source: "task_completion",
       });
-      store.updateEmbedding(mem.id, emb, "test-model");
+      await store.updateEmbedding(mem.id, emb, "test-model");
 
-      const vecBefore = db
-        .prepare<{ count: number }, [string]>(
-          "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
-        )
-        .get(mem.id);
+      const vecBefore = await client.get<{ count: number }>(
+        "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
+        [mem.id],
+      );
 
       // Only check vec cleanup if the row was actually inserted
       if (vecBefore && vecBefore.count > 0) {
-        db.prepare(
+        await client.run(
           "UPDATE agent_memory SET expiresAt = datetime('now', '-1 day') WHERE id = ?",
-        ).run(mem.id);
+          [mem.id],
+        );
 
-        store.purgeExpired();
+        await store.purgeExpired();
 
-        const vecAfter = db
-          .prepare<{ count: number }, [string]>(
-            "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
-          )
-          .get(mem.id);
+        const vecAfter = await client.get<{ count: number }>(
+          "SELECT COUNT(*) as count FROM memory_vec WHERE memory_id = ?",
+          [mem.id],
+        );
         expect(vecAfter?.count ?? 0).toBe(0);
       }
     });
   });
 
   describe("knn-k cap", () => {
-    test("search does not throw when vec table exceeds 4096 rows", () => {
-      const db = getDb();
+    test("search does not throw when vec table exceeds 4096 rows", async () => {
+      const client = getDbClient();
       const emb = vector({ 0: 1.0 });
       const embBuffer = serializeEmbedding(emb);
 
@@ -539,27 +539,28 @@ describe("SqliteMemoryStore", () => {
 
       // Insert enough rows to exceed 4096 in the vec table
       const currentCount =
-        db.prepare<{ c: number }, []>("SELECT COUNT(*) as c FROM memory_vec").get()?.c ?? 0;
+        (await client.get<{ c: number }>("SELECT COUNT(*) as c FROM memory_vec"))?.c ?? 0;
       const needed = Math.max(0, 4097 - currentCount);
 
       for (let i = 0; i < needed; i++) {
         const id = `knn-test-${i}-${Date.now()}`;
-        db.prepare(
+        await client.run(
           "INSERT INTO agent_memory (id, agentId, scope, name, content, source, embedding, chunkIndex, totalChunks, tags, alpha, beta, createdAt, accessedAt) VALUES (?, ?, 'agent', ?, 'knn test', 'manual', ?, 0, 1, '[]', 1, 1, datetime('now'), datetime('now'))",
-        ).run(id, agentA, `knn-${i}`, embBuffer);
+          [id, agentA, `knn-${i}`, embBuffer],
+        );
         const vecBuf = new Float32Array(emb);
-        db.prepare("INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)").run(
+        await client.run("INSERT INTO memory_vec (memory_id, embedding) VALUES (?, ?)", [
           id,
           Buffer.from(vecBuf.buffer),
-        );
+        ]);
       }
 
       const vecCount =
-        db.prepare<{ c: number }, []>("SELECT COUNT(*) as c FROM memory_vec").get()?.c ?? 0;
+        (await client.get<{ c: number }>("SELECT COUNT(*) as c FROM memory_vec"))?.c ?? 0;
       expect(vecCount).toBeGreaterThanOrEqual(4097);
 
       // This should NOT throw — it should clamp k to 4096
-      const results = store.search(emb, agentA, { scope: "agent", limit: 10 });
+      const results = await store.search(emb, agentA, { scope: "agent", limit: 10 });
       expect(results).toBeDefined();
       expect(Array.isArray(results)).toBe(true);
     });

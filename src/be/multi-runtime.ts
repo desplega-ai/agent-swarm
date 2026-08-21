@@ -13,7 +13,7 @@ import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import {
   getActiveTaskCount,
   getAgentById,
-  getDb,
+  getDbClient,
   getSwarmConfigs,
   updateAgentMaxTasks,
   updateAgentStatus,
@@ -47,10 +47,11 @@ export function defaultMaxTasksForAgent(agent: Pick<Agent, "isLead">): number {
   return agent.isLead ? 2 : 1;
 }
 
-export function getAgentMaxTasksConfig(agentId: string): SwarmConfig | null {
+export async function getAgentMaxTasksConfig(agentId: string): Promise<SwarmConfig | null> {
   return (
-    getSwarmConfigs({ scope: "agent", scopeId: agentId, key: AGENT_MAX_TASKS_CONFIG_KEY })[0] ??
-    null
+    (
+      await getSwarmConfigs({ scope: "agent", scopeId: agentId, key: AGENT_MAX_TASKS_CONFIG_KEY })
+    )[0] ?? null
   );
 }
 
@@ -65,18 +66,18 @@ export function getAgentMaxTasksConfig(agentId: string): SwarmConfig | null {
  * Runs inside the registration transaction so concurrent runtimes serialize:
  * the first seeds, the rest observe.
  */
-export function reconcileAgentMaxTasksPolicy(agentId: string): void {
-  const agent = getAgentById(agentId);
+export async function reconcileAgentMaxTasksPolicy(agentId: string): Promise<void> {
+  const agent = await getAgentById(agentId);
   if (!agent) return;
-  const existing = getAgentMaxTasksConfig(agentId);
+  const existing = await getAgentMaxTasksConfig(agentId);
   if (existing) {
     const authoritative = parseAgentMaxTasksValue(existing.value);
     if (authoritative !== null && authoritative !== (agent.maxTasks ?? 1)) {
-      updateAgentMaxTasks(agentId, authoritative);
+      await updateAgentMaxTasks(agentId, authoritative);
     }
     return;
   }
-  upsertSwarmConfig({
+  await upsertSwarmConfig({
     scope: "agent",
     scopeId: agentId,
     key: AGENT_MAX_TASKS_CONFIG_KEY,
@@ -90,10 +91,10 @@ export function reconcileAgentMaxTasksPolicy(agentId: string): void {
  * fixed single slot — otherwise resetting a lead would leave it unable to
  * start the follow-up its own task waits on.
  */
-export function resetAgentMaxTasksMirror(agentId: string): void {
-  const agent = getAgentById(agentId);
+export async function resetAgentMaxTasksMirror(agentId: string): Promise<void> {
+  const agent = await getAgentById(agentId);
   if (!agent) return;
-  updateAgentMaxTasks(agentId, defaultMaxTasksForAgent(agent));
+  await updateAgentMaxTasks(agentId, defaultMaxTasksForAgent(agent));
 }
 
 /**
@@ -102,20 +103,20 @@ export function resetAgentMaxTasksMirror(agentId: string): void {
  * and enforcement cannot diverge — including with no runtime connected.
  * Every other key passes straight through.
  */
-export function upsertSwarmConfigWithPolicyMirror(
+export async function upsertSwarmConfigWithPolicyMirror(
   data: Parameters<typeof upsertSwarmConfig>[0],
-): SwarmConfig {
+): Promise<SwarmConfig> {
   const scopeId = data.scope === "agent" ? data.scopeId : null;
   if (!scopeId || data.key !== AGENT_MAX_TASKS_CONFIG_KEY) {
     return upsertSwarmConfig(data);
   }
-  return getDb().transaction(() => {
-    const row = upsertSwarmConfig(data);
+  return await getDbClient().transaction(async () => {
+    const row = await upsertSwarmConfig(data);
     // Guard, not validation — both write paths already ran validateConfigValue.
     const value = parseAgentMaxTasksValue(data.value);
-    if (value !== null) updateAgentMaxTasks(scopeId, value);
+    if (value !== null) await updateAgentMaxTasks(scopeId, value);
     return row;
-  })();
+  });
 }
 
 // ─── Runtime instances ───────────────────────────────────────────────────────
@@ -180,34 +181,34 @@ function runtimeLivenessCutoff(): string {
  * duplicate id cannot move a live runtime between agents. Returns null in
  * that case (no row written).
  */
-export function upsertRuntimeInstance(instance: {
+export async function upsertRuntimeInstance(instance: {
   id: string;
   agentId: string;
   reportedSlots: number;
   metadata?: Record<string, unknown> | null;
-}): RuntimeInstance | null {
+}): Promise<RuntimeInstance | null> {
   const metadataJson = instance.metadata ? JSON.stringify(instance.metadata) : null;
-  const row = getDb()
-    .prepare<RuntimeInstanceRow, [string, string, number, string | null]>(
-      `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
-       VALUES (?, ?, 'active', ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         status = 'active',
-         reported_slots = excluded.reported_slots,
-         metadata = COALESCE(excluded.metadata, runtime_instances.metadata),
-         last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE runtime_instances.agent_id = excluded.agent_id
-       RETURNING *`,
-    )
-    .get(instance.id, instance.agentId, instance.reportedSlots, metadataJson);
+  const row = await getDbClient().get<RuntimeInstanceRow>(
+    `INSERT INTO runtime_instances (id, agent_id, status, reported_slots, metadata)
+     VALUES (?, ?, 'active', ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       status = 'active',
+       reported_slots = excluded.reported_slots,
+       metadata = COALESCE(excluded.metadata, runtime_instances.metadata),
+       last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE runtime_instances.agent_id = excluded.agent_id
+     RETURNING *`,
+    [instance.id, instance.agentId, instance.reportedSlots, metadataJson],
+  );
   return row ? rowToRuntimeInstance(row) : null;
 }
 
-export function getRuntimeInstanceById(id: string): RuntimeInstance | null {
-  const row = getDb()
-    .prepare<RuntimeInstanceRow, [string]>("SELECT * FROM runtime_instances WHERE id = ?")
-    .get(id);
+export async function getRuntimeInstanceById(id: string): Promise<RuntimeInstance | null> {
+  const row = await getDbClient().get<RuntimeInstanceRow>(
+    "SELECT * FROM runtime_instances WHERE id = ?",
+    [id],
+  );
   return row ? rowToRuntimeInstance(row) : null;
 }
 
@@ -219,27 +220,28 @@ export function getRuntimeInstanceById(id: string): RuntimeInstance | null {
  * runtime — registration stays the only path back to `active`. Returns false
  * when nothing matched, which callers use as "this identity is not live".
  */
-export function touchRuntimeInstance(id: string, agentId: string): boolean {
-  const result = getDb()
-    .prepare(
-      `UPDATE runtime_instances
-       SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
-    )
-    .run(id, agentId, runtimeLivenessCutoff());
+export async function touchRuntimeInstance(id: string, agentId: string): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE runtime_instances
+     SET last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    [id, agentId, runtimeLivenessCutoff()],
+  );
   return result.changes > 0;
 }
 
 /** Mark one runtime instance offline (scoped to its agent, like touch). */
-export function markRuntimeInstanceOffline(id: string, agentId: string): RuntimeInstance | null {
-  const row = getDb()
-    .prepare<RuntimeInstanceRow, [string, string]>(
-      `UPDATE runtime_instances
-       SET status = 'offline', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND agent_id = ? RETURNING *`,
-    )
-    .get(id, agentId);
+export async function markRuntimeInstanceOffline(
+  id: string,
+  agentId: string,
+): Promise<RuntimeInstance | null> {
+  const row = await getDbClient().get<RuntimeInstanceRow>(
+    `UPDATE runtime_instances
+     SET status = 'offline', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ? AND agent_id = ? RETURNING *`,
+    [id, agentId],
+  );
   return row ? rowToRuntimeInstance(row) : null;
 }
 
@@ -248,13 +250,12 @@ export function markRuntimeInstanceOffline(id: string, agentId: string): Runtime
  * `/close`, so `active` alone would keep a dead runtime counted forever;
  * liveness is therefore the conjunction of status and a fresh `last_seen_at`.
  */
-export function countActiveRuntimeInstancesForAgent(agentId: string): number {
-  const result = getDb()
-    .prepare<{ count: number }, [string, string]>(
-      `SELECT COUNT(*) as count FROM runtime_instances
-       WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
-    )
-    .get(agentId, runtimeLivenessCutoff());
+export async function countActiveRuntimeInstancesForAgent(agentId: string): Promise<number> {
+  const result = await getDbClient().get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM runtime_instances
+     WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    [agentId, runtimeLivenessCutoff()],
+  );
   return result?.count ?? 0;
 }
 
@@ -263,17 +264,16 @@ export function countActiveRuntimeInstancesForAgent(agentId: string): number {
  * status+freshness conjunction as `isRuntimeInstanceLive`, so a stale row
  * that the sweep has not pruned yet is never reported as live.
  */
-export function listRuntimeInstancesForAgent(
+export async function listRuntimeInstancesForAgent(
   agentId: string,
-): Array<RuntimeInstance & { isLive: boolean }> {
-  const rows = getDb()
-    .prepare<RuntimeInstanceRow & { is_live: number }, [string, string]>(
-      `SELECT *, (status = 'active' AND last_seen_at >= ?) AS is_live
-       FROM runtime_instances
-       WHERE agent_id = ?
-       ORDER BY created_at ASC, id ASC`,
-    )
-    .all(runtimeLivenessCutoff(), agentId);
+): Promise<Array<RuntimeInstance & { isLive: boolean }>> {
+  const rows = await getDbClient().query<RuntimeInstanceRow & { is_live: number }>(
+    `SELECT *, (status = 'active' AND last_seen_at >= ?) AS is_live
+     FROM runtime_instances
+     WHERE agent_id = ?
+     ORDER BY created_at ASC, id ASC`,
+    [runtimeLivenessCutoff(), agentId],
+  );
   return rows.map((row) => ({ ...rowToRuntimeInstance(row), isLive: row.is_live === 1 }));
 }
 
@@ -282,14 +282,16 @@ export function listRuntimeInstancesForAgent(
  * Dispatch uses it so a retired process cannot be handed work alongside its
  * replacement; an absent identity is never live.
  */
-export function isRuntimeInstanceLive(id: string | undefined, agentId: string): boolean {
+export async function isRuntimeInstanceLive(
+  id: string | undefined,
+  agentId: string,
+): Promise<boolean> {
   if (!id) return false;
-  const row = getDb()
-    .prepare<{ c: number }, [string, string, string]>(
-      `SELECT COUNT(*) c FROM runtime_instances
-       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
-    )
-    .get(id, agentId, runtimeLivenessCutoff());
+  const row = await getDbClient().get<{ c: number }>(
+    `SELECT COUNT(*) c FROM runtime_instances
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    [id, agentId, runtimeLivenessCutoff()],
+  );
   return (row?.c ?? 0) > 0;
 }
 
@@ -297,14 +299,17 @@ export function isRuntimeInstanceLive(id: string | undefined, agentId: string): 
  * Record this runtime's credential readiness. Process-local by design: a
  * sibling's state is never touched. Only a live runtime may report.
  */
-export function setRuntimeCredentialReady(id: string, agentId: string, ready: boolean): boolean {
-  const result = getDb()
-    .prepare(
-      `UPDATE runtime_instances
-       SET credential_ready = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
-    )
-    .run(ready ? 1 : 0, id, agentId, runtimeLivenessCutoff());
+export async function setRuntimeCredentialReady(
+  id: string,
+  agentId: string,
+  ready: boolean,
+): Promise<boolean> {
+  const result = await getDbClient().run(
+    `UPDATE runtime_instances
+     SET credential_ready = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE id = ? AND agent_id = ? AND status = 'active' AND last_seen_at >= ?`,
+    [ready ? 1 : 0, id, agentId, runtimeLivenessCutoff()],
+  );
   return result.changes > 0;
 }
 
@@ -313,14 +318,13 @@ export function setRuntimeCredentialReady(id: string, agentId: string, ready: bo
  * reported (NULL) counts as ready, so workers opting out of credential checks
  * stay dispatchable.
  */
-export function hasReadyLiveRuntime(agentId: string): boolean {
-  const row = getDb()
-    .prepare<{ c: number }, [string, string]>(
-      `SELECT COUNT(*) c FROM runtime_instances
-       WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?
-         AND (credential_ready IS NULL OR credential_ready = 1)`,
-    )
-    .get(agentId, runtimeLivenessCutoff());
+export async function hasReadyLiveRuntime(agentId: string): Promise<boolean> {
+  const row = await getDbClient().get<{ c: number }>(
+    `SELECT COUNT(*) c FROM runtime_instances
+     WHERE agent_id = ? AND status = 'active' AND last_seen_at >= ?
+       AND (credential_ready IS NULL OR credential_ready = 1)`,
+    [agentId, runtimeLivenessCutoff()],
+  );
   return (row?.c ?? 0) > 0;
 }
 
@@ -333,21 +337,26 @@ export function hasReadyLiveRuntime(agentId: string): boolean {
  * park an agent a ready sibling is serving, and a ready one cannot pull a
  * busy agent back to idle.
  */
-export function reconcileAgentStatusFromRuntimes(agentId: string): void {
-  const agent = getAgentById(agentId);
-  if (!agent) return;
-  if (countActiveRuntimeInstancesForAgent(agentId) === 0) {
-    if (agent.status !== "offline") updateAgentStatus(agentId, "offline");
-    return;
-  }
-  if (!hasReadyLiveRuntime(agentId)) {
-    if (agent.status !== "waiting_for_credentials") {
-      updateAgentStatus(agentId, "waiting_for_credentials");
+export async function reconcileAgentStatusFromRuntimes(agentId: string): Promise<void> {
+  // Reads and the status write commit together: register and retire are
+  // overlapping HTTP events, and a stale computation writing last would park
+  // an agent offline while a live runtime is serving it.
+  await getDbClient().transaction(async () => {
+    const agent = await getAgentById(agentId);
+    if (!agent) return;
+    if ((await countActiveRuntimeInstancesForAgent(agentId)) === 0) {
+      if (agent.status !== "offline") await updateAgentStatus(agentId, "offline");
+      return;
     }
-    return;
-  }
-  const next = getActiveTaskCount(agentId) > 0 ? "busy" : "idle";
-  if (agent.status !== next) updateAgentStatus(agentId, next);
+    if (!(await hasReadyLiveRuntime(agentId))) {
+      if (agent.status !== "waiting_for_credentials") {
+        await updateAgentStatus(agentId, "waiting_for_credentials");
+      }
+      return;
+    }
+    const next = (await getActiveTaskCount(agentId)) > 0 ? "busy" : "idle";
+    if (agent.status !== next) await updateAgentStatus(agentId, next);
+  });
 }
 
 /**
@@ -357,13 +366,12 @@ export function reconcileAgentStatusFromRuntimes(agentId: string): void {
  * flag was enabled — cannot poll for work, so assigning to it would strand
  * the task.
  */
-export function agentsWithLiveRuntime(): Set<string> {
-  const rows = getDb()
-    .prepare<{ agent_id: string }, [string]>(
-      `SELECT DISTINCT agent_id FROM runtime_instances
-       WHERE status = 'active' AND last_seen_at >= ?`,
-    )
-    .all(runtimeLivenessCutoff());
+export async function agentsWithLiveRuntime(): Promise<Set<string>> {
+  const rows = await getDbClient().query<{ agent_id: string }>(
+    `SELECT DISTINCT agent_id FROM runtime_instances
+     WHERE status = 'active' AND last_seen_at >= ?`,
+    [runtimeLivenessCutoff()],
+  );
   return new Set(rows.map((r) => r.agent_id));
 }
 
@@ -389,42 +397,40 @@ export function agentsWithLiveRuntime(): Set<string> {
  * task before reclaiming (and cleans the session when it does); the sweep's
  * 30-minute stale-session cleanup backstops any leftover row.
  */
-export function expireStaleRuntimeInstances(): {
+export async function expireStaleRuntimeInstances(): Promise<{
   expired: number;
   agentsOffline: number;
   pruned: number;
-} {
+}> {
   if (!isMultiRuntimeEnabled()) {
     return { expired: 0, agentsOffline: 0, pruned: 0 };
   }
 
-  return getDb().transaction(() => {
+  return await getDbClient().transaction(async (tx) => {
     const cutoff = runtimeLivenessCutoff();
     // Still-active rows past the window never reached /close; retiring them
     // removes the process from new-work eligibility. Whether its in-flight
     // work is dead is decided separately (see doc comment above).
-    const stale = getDb()
-      .prepare<{ id: string; agent_id: string }, [string]>(
-        `SELECT id, agent_id FROM runtime_instances
-         WHERE status = 'active' AND last_seen_at < ?`,
-      )
-      .all(cutoff);
+    const stale = await tx.query<{ id: string; agent_id: string }>(
+      `SELECT id, agent_id FROM runtime_instances
+       WHERE status = 'active' AND last_seen_at < ?`,
+      [cutoff],
+    );
 
     // Prune every row past the window, closed ones included. Runtime identity
     // is per boot, so keeping them would add a row per boot per agent forever
     // and nothing reads a runtime once it stops being live.
-    const pruned = getDb()
-      .prepare("DELETE FROM runtime_instances WHERE last_seen_at < ?")
-      .run(cutoff).changes;
+    const pruned = (await tx.run("DELETE FROM runtime_instances WHERE last_seen_at < ?", [cutoff]))
+      .changes;
 
     // Recompute every affected agent from what survived: losing the only
     // ready runtime has to park the agent even though a waiting sibling is
     // still live, or the same sweep would assign work it cannot execute.
     let agentsOffline = 0;
     for (const agentId of new Set(stale.map((r) => r.agent_id))) {
-      reconcileAgentStatusFromRuntimes(agentId);
-      if (getAgentById(agentId)?.status === "offline") agentsOffline++;
+      await reconcileAgentStatusFromRuntimes(agentId);
+      if ((await getAgentById(agentId))?.status === "offline") agentsOffline++;
     }
     return { expired: stale.length, agentsOffline, pruned };
-  })();
+  });
 }

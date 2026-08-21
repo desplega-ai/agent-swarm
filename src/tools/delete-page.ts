@@ -44,15 +44,15 @@ export const registerDeletePageTool = (server: McpServer) => {
         });
       }
 
-      const caller = getAgentById(requestInfo.agentId);
+      const caller = await getAgentById(requestInfo.agentId);
       if (!caller) {
         return toolErr("Agent not found.", { data: { yourAgentId: requestInfo.agentId } });
       }
 
       const page = pageId
-        ? getPage(pageId)
+        ? await getPage(pageId)
         : slug
-          ? getPageBySlug(requestInfo.agentId, slug)
+          ? await getPageBySlug(requestInfo.agentId, slug)
           : null;
       if (!page) {
         return toolErr("Page not found.", { data: { yourAgentId: requestInfo.agentId } });
@@ -71,7 +71,7 @@ export const registerDeletePageTool = (server: McpServer) => {
       }
 
       try {
-        const deleted = deletePage(page.id);
+        const deleted = await deletePage(page.id);
         if (!deleted) {
           return toolErr("Failed to delete page.", {
             data: { yourAgentId: requestInfo.agentId },

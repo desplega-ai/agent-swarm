@@ -8,7 +8,14 @@ import {
 } from "node:http";
 import { applyAppDefinitionPatch, parseAppDefinition } from "../apps/definition";
 import { getAppUserConfigValues, mergeUserConfigValues } from "../apps/user-config";
-import { closeDb, createAgent, createTaskExtended, createUser, getDb, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDbClient,
+  initDb,
+} from "../be/db";
 import { type IdentityActor, mintToken } from "../be/users";
 import { handleApps } from "../http/apps";
 import { resolveHttpRequestAuth } from "../http/auth";
@@ -60,7 +67,7 @@ function headers(principal: Principal): HeadersInit {
 
 function createTestServer(): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
-    setRequestAuth(req, resolveHttpRequestAuth(req, API_KEY));
+    setRequestAuth(req, await resolveHttpRequestAuth(req, API_KEY));
     res.setHeader("Content-Type", "application/json");
     if (
       await handleApps(
@@ -112,8 +119,8 @@ async function get(principal: Principal = "operator") {
   );
 }
 
-function expectDefinitionIssue(candidate: unknown, message: string): void {
-  const parsed = parseAppDefinition(candidate);
+async function expectDefinitionIssue(candidate: unknown, message: string): Promise<void> {
+  const parsed = await parseAppDefinition(candidate);
   expect(parsed.success).toBe(false);
   if (!parsed.success) {
     expect(parsed.issues.some((entry) => entry.message.includes(message))).toBe(true);
@@ -124,13 +131,18 @@ beforeAll(async () => {
   for (const suffix of ["", "-wal", "-shm"])
     await unlink(`${TEST_DB_PATH}${suffix}`).catch(() => undefined);
   initDb(TEST_DB_PATH);
-  createAgent({ id: AGENT_ID, name: "apps-user-config-agent", isLead: false, status: "idle" });
-  const user1 = createUser({ name: "User config one" });
-  const user2 = createUser({ name: "User config two" });
+  await createAgent({
+    id: AGENT_ID,
+    name: "apps-user-config-agent",
+    isLead: false,
+    status: "idle",
+  });
+  const user1 = await createUser({ name: "User config one" });
+  const user2 = await createUser({ name: "User config two" });
   user1Id = user1.id;
   user2Id = user2.id;
-  user1Token = mintToken(user1.id, "apps-user-config-one", OPERATOR_ACTOR).plaintext;
-  user2Token = mintToken(user2.id, "apps-user-config-two", OPERATOR_ACTOR).plaintext;
+  user1Token = (await mintToken(user1.id, "apps-user-config-one", OPERATOR_ACTOR)).plaintext;
+  user2Token = (await mintToken(user2.id, "apps-user-config-two", OPERATOR_ACTOR)).plaintext;
   server = createTestServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
@@ -140,7 +152,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   clearAuditSink();
-  getDb().run("DELETE FROM apps");
+  await getDbClient().run("DELETE FROM apps");
   appId = await createFixture();
   clearAuditSink();
 });
@@ -153,25 +165,27 @@ afterAll(async () => {
 });
 
 describe("userConfig definition", () => {
-  test("validates defaults, enum membership, required rejection, field cap, and atomic patches", () => {
-    expect(parseAppDefinition(definition()).success).toBe(true);
+  test("validates defaults, enum membership, required rejection, field cap, and atomic patches", async () => {
+    expect((await parseAppDefinition(definition())).success).toBe(true);
     for (const [field, patch] of [
       ["badEnum", { kind: "enum", enum: ["a"], default: "b" }],
       ["badNumber", { kind: "number", default: "2" }],
       ["required", { kind: "string", required: true }],
     ] as const) {
-      const parsed = parseAppDefinition({ ...definition(), userConfig: { [field]: patch } });
+      const parsed = await parseAppDefinition({ ...definition(), userConfig: { [field]: patch } });
       expect(parsed.success).toBe(false);
     }
     const tooMany = Object.fromEntries(
       Array.from({ length: 21 }, (_, i) => [`field${i}`, { kind: "string" }]),
     );
-    expect(parseAppDefinition({ ...definition(), userConfig: tooMany }).success).toBe(false);
-    expectDefinitionIssue(
+    expect((await parseAppDefinition({ ...definition(), userConfig: tooMany })).success).toBe(
+      false,
+    );
+    await expectDefinitionIssue(
       { ...definition(), userConfig: { mode: { kind: "enum", enum: [""] } } },
       "enum values must be non-empty",
     );
-    expectDefinitionIssue(
+    await expectDefinitionIssue(
       {
         ...definition(),
         models: { note: { columns: { status: { kind: "enum", enum: [""] } } } },
@@ -179,7 +193,7 @@ describe("userConfig definition", () => {
       "enum values must be non-empty",
     );
 
-    const patch = parseAppDefinition(definition());
+    const patch = await parseAppDefinition(definition());
     expect(patch.success).toBe(true);
     if (!patch.success) return;
     const atomic = applyAppDefinitionPatch(patch.definition, {
@@ -195,7 +209,7 @@ describe("userConfig definition", () => {
       });
   });
 
-  test("accepts exact declared page bindings and rejects every reusable or invalid /user path", () => {
+  test("accepts exact declared page bindings and rejects every reusable or invalid /user path", async () => {
     const pageBinding = {
       ...definition(),
       pages: {
@@ -207,10 +221,10 @@ describe("userConfig definition", () => {
         },
       },
     };
-    const parsed = parseAppDefinition(pageBinding);
+    const parsed = await parseAppDefinition(pageBinding);
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    const roundTripped = parseAppDefinition(JSON.parse(JSON.stringify(parsed.definition)));
+    const roundTripped = await parseAppDefinition(JSON.parse(JSON.stringify(parsed.definition)));
     expect(roundTripped.success).toBe(true);
     if (roundTripped.success) {
       expect(
@@ -224,20 +238,20 @@ describe("userConfig definition", () => {
 
     const undeclared = structuredClone(pageBinding);
     undeclared.pages.main.elements.density.props.content.$state = "/user/missing";
-    expectDefinitionIssue(
+    await expectDefinitionIssue(
       undeclared,
       'unknown userConfig field "missing"; declared fields: density, pageSize, title, visible',
     );
 
     const deep = structuredClone(pageBinding);
     deep.pages.main.elements.density.props.content.$state = "/user/density/value";
-    expectDefinitionIssue(
+    await expectDefinitionIssue(
       deep,
       "must target exactly /user/<field>; nested paths are not supported",
     );
 
     for (const mode of ["pure", "bound"] as const) {
-      expectDefinitionIssue(
+      await expectDefinitionIssue(
         {
           ...definition(),
           elements: {
@@ -295,17 +309,26 @@ describe("userConfig HTTP storage", () => {
     expect((await get("user2")).body.values).toMatchObject({ title: "two" });
     expect((await get("operator")).body.values).toMatchObject({ title: "operator" });
     expect(
-      getDb().query("SELECT COUNT(*) AS count FROM app_user_config WHERE appId = ?").get(appId),
+      await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM app_user_config WHERE appId = ?",
+        [appId],
+      ),
     ).toEqual({ count: 3 });
-    const scopes = getDb()
-      .query<{ scope: string }, [string]>("SELECT scope FROM app_user_config WHERE appId = ?")
-      .all(appId)
+    const scopes = (
+      await getDbClient().query<{ scope: string }>(
+        "SELECT scope FROM app_user_config WHERE appId = ?",
+        [appId],
+      )
+    )
       .map((row) => row.scope)
       .sort();
     expect(scopes).toEqual(["operator", `user:${user1Id}`, `user:${user2Id}`].sort());
     await put({ title: "one again" }, "user1");
     expect(
-      getDb().query("SELECT COUNT(*) AS count FROM app_user_config WHERE appId = ?").get(appId),
+      await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM app_user_config WHERE appId = ?",
+        [appId],
+      ),
     ).toEqual({ count: 3 });
   });
 
@@ -321,15 +344,15 @@ describe("userConfig HTTP storage", () => {
       "userConfig is per-user; agents have no user scope",
     );
     expect((await get("operator")).body.values.title).toBe("operator");
-    getDb().run("DELETE FROM apps");
+    await getDbClient().run("DELETE FROM apps");
     appId = await createFixture(null);
     expect((await get()).body).toEqual({ values: {}, schema: {} });
     expect((await put({})).status).toBe(400);
   });
 
   test("agents acting on owned user-requested tasks use the requester scope", async () => {
-    const requester = createUser({ name: "Delegated userConfig requester" });
-    const task = createTaskExtended("Edit requester app preferences", {
+    const requester = await createUser({ name: "Delegated userConfig requester" });
+    const task = await createTaskExtended("Edit requester app preferences", {
       agentId: AGENT_ID,
       requestedByUserId: requester.id,
     });
@@ -351,11 +374,10 @@ describe("userConfig HTTP storage", () => {
     );
     expect(read.body.values.title).toBe("delegated");
     expect(
-      getDb()
-        .query(
-          'SELECT scope, "values" AS storedValues FROM app_user_config WHERE appId = ? AND scope = ?',
-        )
-        .get(appId, `user:${requester.id}`),
+      await getDbClient().get<{ scope: string; storedValues: string }>(
+        'SELECT scope, "values" AS storedValues FROM app_user_config WHERE appId = ? AND scope = ?',
+        [appId, `user:${requester.id}`],
+      ),
     ).toEqual({ scope: `user:${requester.id}`, storedValues: '{"title":"delegated"}' });
   });
 
@@ -378,11 +400,10 @@ describe("userConfig HTTP storage", () => {
 
   test("rollback restores versioned schema without altering the stored values row", async () => {
     await put({ title: "persistent" });
-    const before = getDb()
-      .query(
-        "SELECT \"values\" AS storedValues FROM app_user_config WHERE appId = ? AND scope = 'operator'",
-      )
-      .get(appId);
+    const before = await getDbClient().get(
+      "SELECT \"values\" AS storedValues FROM app_user_config WHERE appId = ? AND scope = 'operator'",
+      [appId],
+    );
     expect(
       (
         await request(`/api/apps/${appId}`, "operator", {
@@ -396,11 +417,10 @@ describe("userConfig HTTP storage", () => {
       body: JSON.stringify({ version: 1 }),
     });
     expect(rollback.status).toBe(200);
-    const after = getDb()
-      .query(
-        "SELECT \"values\" AS storedValues FROM app_user_config WHERE appId = ? AND scope = 'operator'",
-      )
-      .get(appId);
+    const after = await getDbClient().get(
+      "SELECT \"values\" AS storedValues FROM app_user_config WHERE appId = ? AND scope = 'operator'",
+      [appId],
+    );
     expect(after).toEqual(before);
     expect((await get()).body.values).toMatchObject({ title: "persistent" });
   });
@@ -429,7 +449,7 @@ describe("userConfig HTTP storage", () => {
   });
 
   test("returns needs-repair for a broken definition", async () => {
-    getDb().run("UPDATE apps SET definition = ? WHERE id = ?", ["{", appId]);
+    await getDbClient().run("UPDATE apps SET definition = ? WHERE id = ?", ["{", appId]);
     expect((await get()).status).toBe(409);
     expect((await put({ title: "nope" })).status).toBe(409);
   });
@@ -493,12 +513,13 @@ describe("mergeUserConfigValues", () => {
 
   test("treats malformed stored JSON as empty before the tolerant merge", async () => {
     await put({ title: "stored" });
-    getDb().run('UPDATE app_user_config SET "values" = ? WHERE appId = ? AND scope = ?', [
-      "{",
-      appId,
-      "operator",
-    ]);
-    expect(mergeUserConfigValues(userConfig, getAppUserConfigValues(appId, "operator"))).toEqual({
+    await getDbClient().run(
+      'UPDATE app_user_config SET "values" = ? WHERE appId = ? AND scope = ?',
+      ["{", appId, "operator"],
+    );
+    expect(
+      mergeUserConfigValues(userConfig, await getAppUserConfigValues(appId, "operator")),
+    ).toEqual({
       density: "comfortable",
       title: "Inbox",
       visible: true,
@@ -518,10 +539,13 @@ describe("mergeUserConfigValues", () => {
 });
 
 describe("app theme", () => {
-  test("definition accepts a slug theme, rejects malformed ones, and suggests the key", () => {
-    expect(parseAppDefinition({ ...definition(), theme: "cobalt" }).success).toBe(true);
-    expectDefinitionIssue({ ...definition(), theme: "Not A Slug" }, "must be a lowercase slug");
-    expectDefinitionIssue({ ...definition(), styling: "cobalt" }, 'did you mean "theme"');
+  test("definition accepts a slug theme, rejects malformed ones, and suggests the key", async () => {
+    expect((await parseAppDefinition({ ...definition(), theme: "cobalt" })).success).toBe(true);
+    await expectDefinitionIssue(
+      { ...definition(), theme: "Not A Slug" },
+      "must be a lowercase slug",
+    );
+    await expectDefinitionIssue({ ...definition(), styling: "cobalt" }, 'did you mean "theme"');
   });
 
   test("PUT accepts the reserved $theme alongside declared fields and round-trips it", async () => {
@@ -533,7 +557,7 @@ describe("app theme", () => {
   });
 
   test("no-schema apps accept reserved-only writes but keep the historical 400 otherwise", async () => {
-    getDb().run("DELETE FROM apps");
+    await getDbClient().run("DELETE FROM apps");
     appId = await createFixture(null);
     expect((await put({})).status).toBe(400);
     expect((await put({ title: "author key" })).status).toBe(400);

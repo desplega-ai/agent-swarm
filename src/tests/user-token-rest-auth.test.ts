@@ -6,7 +6,14 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, createUser, getDb, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getDbClient,
+  initDb,
+} from "../be/db";
 import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
@@ -52,7 +59,7 @@ describe("normal REST API user-bound token auth", () => {
   beforeAll(async () => {
     cleanupDb();
     initDb(TEST_DB_PATH);
-    createAgent({ name: "Lead", isLead: true, status: "idle" });
+    await createAgent({ name: "Lead", isLead: true, status: "idle" });
     server = createTestServer();
     port = await listen(server);
   });
@@ -64,9 +71,9 @@ describe("normal REST API user-bound token auth", () => {
   });
 
   test("POST /api/tasks accepts active user token and forces requester/audit user", async () => {
-    const user = createUser({ name: "Token REST User" });
-    const other = createUser({ name: "Other User" });
-    const { plaintext } = mintToken(user.id, "rest", ACTOR);
+    const user = await createUser({ name: "Token REST User" });
+    const other = await createUser({ name: "Other User" });
+    const { plaintext } = await mintToken(user.id, "rest", ACTOR);
 
     const res = await fetch(`http://localhost:${port}/api/tasks`, {
       method: "POST",
@@ -84,12 +91,11 @@ describe("normal REST API user-bound token auth", () => {
     const body = (await res.json()) as { id: string; requestedByUserId?: string };
     expect(body.requestedByUserId).toBe(user.id);
 
-    const row = getDb()
-      .prepare<
-        { requestedByUserId: string | null; created_by: string | null; updated_by: string | null },
-        string
-      >("SELECT requestedByUserId, created_by, updated_by FROM agent_tasks WHERE id = ?")
-      .get(body.id);
+    const row = await getDbClient().get<{
+      requestedByUserId: string | null;
+      created_by: string | null;
+      updated_by: string | null;
+    }>("SELECT requestedByUserId, created_by, updated_by FROM agent_tasks WHERE id = ?", [body.id]);
     expect(row?.requestedByUserId).toBe(user.id);
     expect(row?.created_by).toBe(user.id);
     expect(row?.updated_by).toBe(user.id);
@@ -111,10 +117,10 @@ describe("normal REST API user-bound token auth", () => {
   });
 
   test("global API key caller cannot spoof requestedByUserId via body — falls back to owned task context", async () => {
-    const legitRequester = createUser({ name: "Legit Requester" });
-    const attacker = createUser({ name: "Attacker" });
-    const agent = createAgent({ name: "spoof-test-agent", isLead: false, status: "idle" });
-    const ownedTask = createTaskExtended("owned task for spoof test", {
+    const legitRequester = await createUser({ name: "Legit Requester" });
+    const attacker = await createUser({ name: "Attacker" });
+    const agent = await createAgent({ name: "spoof-test-agent", isLead: false, status: "idle" });
+    const ownedTask = await createTaskExtended("owned task for spoof test", {
       agentId: agent.id,
       requestedByUserId: legitRequester.id,
     });
@@ -145,7 +151,7 @@ describe("normal REST API user-bound token auth", () => {
     // body. This is the anti-spoofing behavior upstream #939 introduced.
     process.env.TRUST_BODY_REQUESTED_BY_USER_ID = "false";
     try {
-      const someUser = createUser({ name: "Some User (flag off)" });
+      const someUser = await createUser({ name: "Some User (flag off)" });
 
       const res = await fetch(`http://localhost:${port}/api/tasks`, {
         method: "POST",
@@ -179,7 +185,7 @@ describe("normal REST API user-bound token auth", () => {
       // to — the body-supplied id is the only signal available, and it is
       // trusted once validated against a real user row (opt out with
       // TRUST_BODY_REQUESTED_BY_USER_ID=false).
-      const uiUser = createUser({ name: "UI Picker User" });
+      const uiUser = await createUser({ name: "UI Picker User" });
 
       const res = await fetch(`http://localhost:${port}/api/tasks`, {
         method: "POST",
@@ -217,14 +223,14 @@ describe("normal REST API user-bound token auth", () => {
     });
 
     test("owned task context still takes precedence over body even when flag is on", async () => {
-      const legitRequester = createUser({ name: "Legit Requester (flag on)" });
-      const attacker = createUser({ name: "Attacker (flag on)" });
-      const agent = createAgent({
+      const legitRequester = await createUser({ name: "Legit Requester (flag on)" });
+      const attacker = await createUser({ name: "Attacker (flag on)" });
+      const agent = await createAgent({
         name: "spoof-test-agent-flag-on",
         isLead: false,
         status: "idle",
       });
-      const ownedTask = createTaskExtended("owned task for spoof test, flag on", {
+      const ownedTask = await createTaskExtended("owned task for spoof test, flag on", {
         agentId: agent.id,
         requestedByUserId: legitRequester.id,
       });
@@ -251,9 +257,9 @@ describe("normal REST API user-bound token auth", () => {
   });
 
   test("revoked user token is unauthorized for normal API", async () => {
-    const user = createUser({ name: "Revoked REST User" });
-    const { tokenId, plaintext } = mintToken(user.id, "revoked", ACTOR);
-    revokeToken(tokenId, ACTOR);
+    const user = await createUser({ name: "Revoked REST User" });
+    const { tokenId, plaintext } = await mintToken(user.id, "revoked", ACTOR);
+    await revokeToken(tokenId, ACTOR);
 
     const res = await fetch(`http://localhost:${port}/api/tasks`, {
       method: "POST",

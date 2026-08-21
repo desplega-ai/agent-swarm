@@ -56,7 +56,7 @@ export const registerGetSwarmTool = (server: McpServer) => {
       }),
     },
     async ({ includeFull }, requestInfo, _meta) => {
-      const agents = getAllAgents({ slim: !includeFull });
+      const agents = await getAllAgents({ slim: !includeFull });
 
       // Include the ID — send-task targets agents by ID, and text-only
       // harnesses never see the structured data to look it up.

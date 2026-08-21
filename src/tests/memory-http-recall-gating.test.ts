@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
-import { closeDb, createAgent, getDb, initDb } from "../be/db";
+import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import * as realMemoryModule from "../be/memory";
 import type { AgentMemory } from "../types";
 
@@ -46,24 +46,26 @@ mock.module("../be/memory", () => ({
     embedBatch: async (texts: string[]) => texts.map(() => new Float32Array([1, 0, 0])),
   }),
   getMemoryStore: () => ({
-    store: (input: import("../be/memory/types").MemoryInput): import("../types").AgentMemory => {
+    store: async (
+      input: import("../be/memory/types").MemoryInput,
+    ): Promise<import("../types").AgentMemory> => {
       const { SqliteMemoryStore } =
         require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
       return new SqliteMemoryStore().store(input);
     },
-    get: (id: string) => {
+    get: async (id: string) => {
       if (id === memory.id) return memory;
       const { SqliteMemoryStore } =
         require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
       return new SqliteMemoryStore().get(id);
     },
-    peek: (id: string) => {
+    peek: async (id: string) => {
       if (id === memory.id) return memory;
       const { SqliteMemoryStore } =
         require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
       return new SqliteMemoryStore().peek(id);
     },
-    search: () => [
+    search: async () => [
       {
         ...memory,
         similarity: 0.95,
@@ -131,8 +133,8 @@ async function callMemoryRoute(
   return capture;
 }
 
-function countRetrievals(): number {
-  return getDb().prepare<{ n: number }, []>("SELECT COUNT(*) AS n FROM memory_retrieval").get()!.n;
+async function countRetrievals(): Promise<number> {
+  return (await getDbClient().get<{ n: number }>("SELECT COUNT(*) AS n FROM memory_retrieval"))!.n;
 }
 
 beforeAll(async () => {
@@ -143,18 +145,22 @@ beforeAll(async () => {
   }
 
   initDb(TEST_DB_PATH);
-  createAgent({ id: agentId, name: "HTTP Memory Gating Agent", isLead: false, status: "idle" });
+  await createAgent({
+    id: agentId,
+    name: "HTTP Memory Gating Agent",
+    isLead: false,
+    status: "idle",
+  });
   const nowIso = new Date().toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
+  await getDbClient().run(
+    `INSERT INTO agent_tasks (id, agentId, task, status, source, createdAt, lastUpdatedAt)
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
-    )
-    .run(sourceTaskId, agentId, "HTTP memory recall gating task", nowIso, nowIso);
+    [sourceTaskId, agentId, "HTTP memory recall gating task", nowIso, nowIso],
+  );
 });
 
-beforeEach(() => {
-  getDb().run("DELETE FROM memory_retrieval");
+beforeEach(async () => {
+  await getDbClient().run("DELETE FROM memory_retrieval");
 });
 
 afterAll(async () => {
@@ -184,7 +190,7 @@ describe("memory HTTP recall capture gating", () => {
     expect(response.statusCode).toBe(200);
     expect(response.body.results).toHaveLength(1);
     expect(response.body.results[0].id).toBe(memoryId);
-    expect(countRetrievals()).toBe(0);
+    expect(await countRetrievals()).toBe(0);
   });
 
   test("GET /api/memory/:id accepts UI calls without intent and does not record retrievals", async () => {
@@ -198,6 +204,6 @@ describe("memory HTTP recall capture gating", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body.memory.id).toBe(memoryId);
-    expect(countRetrievals()).toBe(0);
+    expect(await countRetrievals()).toBe(0);
   });
 });

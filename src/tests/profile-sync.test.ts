@@ -142,7 +142,7 @@ describe("profile divergence audit", () => {
         headers: { "Content-Type": "application/json" },
       })) as typeof fetch;
 
-    expect(
+    await expect(
       runProfileSyncAudit(
         {
           agentId: "agent-unregistered",

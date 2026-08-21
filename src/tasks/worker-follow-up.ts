@@ -91,8 +91,8 @@ export const REBOOT_RETRY_PIN_TAG = "reboot-retry-pin";
  * pin and the heartbeat's reboot-retry pin (`runRebootSweep`) — both then
  * apply their own capacity (and, for resumes, freshness) rules on top.
  */
-export function getPinCandidateAgent(agentId: string): Agent | null {
-  const candidate = getAgentById(agentId);
+export async function getPinCandidateAgent(agentId: string): Promise<Agent | null> {
+  const candidate = await getAgentById(agentId);
   if (!candidate || candidate.status === "offline") return null;
   return candidate;
 }
@@ -123,21 +123,21 @@ function formatAttachmentsBlock(attachments: TaskAttachment[]): string {
   return `\n\nAttachments (${attachments.length}):\n${lines.join("\n")}`;
 }
 
-export function createWorkerTaskFollowUp(args: {
+export async function createWorkerTaskFollowUp(args: {
   task: AgentTask;
   status: "completed" | "failed";
   output?: string;
   failureReason?: string;
-}): AgentTask | null {
+}): Promise<AgentTask | null> {
   const { task, status, output, failureReason } = args;
 
   if (task.workflowRunId) return null;
   if (task.followUpConfig?.disabled === true) return null;
 
-  const taskAgent = getAgentById(task.agentId ?? "");
+  const taskAgent = await getAgentById(task.agentId ?? "");
   if (!taskAgent || taskAgent.isLead) return null;
 
-  const leadAgent = getLeadAgent();
+  const leadAgent = await getLeadAgent();
   if (!leadAgent) return null;
 
   const agentName = taskAgent.name || task.agentId?.slice(0, 8) || "Unknown";
@@ -155,7 +155,7 @@ export function createWorkerTaskFollowUp(args: {
 
   let followUpDescription: string;
   if (status === "completed") {
-    const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(task.id));
+    const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(task.id));
     const outputSummary = output
       ? `${output.slice(0, 500)}${output.length > 500 ? "..." : ""}${attachmentsBlock}`
       : `(no output)${attachmentsBlock}`;
@@ -181,7 +181,7 @@ export function createWorkerTaskFollowUp(args: {
     followUpDescription = failedResult.text;
 
     // Enrich with cascade info: list dependents that were cascade-failed.
-    const cascadedDeps = getDependentTasks(task.id, { includeTerminal: true }).filter(
+    const cascadedDeps = (await getDependentTasks(task.id, { includeTerminal: true })).filter(
       (t) => t.status === "failed" && t.failureReason?.includes("Blocked dependency"),
     );
     if (cascadedDeps.length > 0) {
@@ -192,7 +192,7 @@ export function createWorkerTaskFollowUp(args: {
     }
   }
 
-  return createTaskExtended(followUpDescription, {
+  return await createTaskExtended(followUpDescription, {
     agentId: leadAgent.id,
     source: "system",
     taskType: "follow-up",
@@ -252,11 +252,11 @@ export type CreateResumeFollowUpResult =
  * The crash pin is gated by `HEARTBEAT_PIN_CRASH_RESUME`; the graceful shutdown
  * pin is gated by `HEARTBEAT_PIN_GRACEFUL_RESUME`. Both default on.
  */
-export function createResumeFollowUp(args: {
+export async function createResumeFollowUp(args: {
   parentId: string;
   reason: ResumeReason;
-}): CreateResumeFollowUpResult {
-  const parent = getTaskById(args.parentId);
+}): Promise<CreateResumeFollowUpResult> {
+  const parent = await getTaskById(args.parentId);
   if (!parent) return { kind: "skipped", reason: "parent_not_found" };
 
   // Workflow carve-out — let the engine's retry policy handle recovery.
@@ -292,13 +292,13 @@ export function createResumeFollowUp(args: {
   //     responsive, so keep requiring `fresh`.
   let preferredAgentId: string | undefined;
   if (parent.agentId) {
-    const candidate = getPinCandidateAgent(parent.agentId);
+    const candidate = await getPinCandidateAgent(parent.agentId);
     if (candidate) {
       const lastActivity = candidate.lastActivityAt ? Date.parse(candidate.lastActivityAt) : 0;
       const fresh =
         Number.isFinite(lastActivity) &&
         Date.now() - lastActivity < WORKER_LIVENESS_WINDOW_SECONDS * 1000;
-      const activeCount = getActiveTaskCount(candidate.id);
+      const activeCount = await getActiveTaskCount(candidate.id);
       const hasCap = activeCount < (candidate.maxTasks ?? 1);
       const isCrashRecovery = args.reason === "crash_recovery" && isCrashResumePinEnabled();
       const isGracefulShutdown = args.reason === "graceful_shutdown";
@@ -365,9 +365,9 @@ export function createResumeFollowUp(args: {
   // parentTaskId inheritance block fall back to the parent's OWN
   // (already-inherited) `routingAffinity` instead.
   const routingAffinity = parent.agentId
-    ? (buildRoutingAffinityFromAgent(parent.agentId) ?? undefined)
+    ? ((await buildRoutingAffinityFromAgent(parent.agentId)) ?? undefined)
     : undefined;
-  const created = createTaskExtended(followUpDescription, {
+  const created = await createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
     source: "system",
@@ -385,7 +385,7 @@ export function createResumeFollowUp(args: {
   //
   // Safe to call when no tracker_sync rows exist for this parent (no-op).
   // Covers all providers (Linear AND Jira) and entity types in one call.
-  const repointed = repointTrackerSyncBySwarmId(parent.id, created.id);
+  const repointed = await repointTrackerSyncBySwarmId(parent.id, created.id);
   if (repointed > 0) {
     console.log(
       `[ResumeFollowUp] Repointed ${repointed} tracker_sync row(s) from ${parent.id.slice(0, 8)} → ${created.id.slice(0, 8)}`,
@@ -429,28 +429,28 @@ export type CreateRerouteDecisionResult =
  * @param maxGenerations passed in (rather than imported from heartbeat.ts) to
  *   avoid a circular import — heartbeat.ts already imports this module.
  */
-export function createRerouteDecisionTask(args: {
+export async function createRerouteDecisionTask(args: {
   original: AgentTask;
   staleResume: AgentTask;
   reason: ResumeReason;
   maxGenerations: number;
-}): CreateRerouteDecisionResult {
+}): Promise<CreateRerouteDecisionResult> {
   const { original, staleResume, reason, maxGenerations } = args;
 
-  const leadAgent = getLeadAgent();
+  const leadAgent = await getLeadAgent();
   if (!leadAgent) return { kind: "skipped", reason: "lead_not_found" };
 
   // Idempotency: a prior sweep may already have escalated this original.
-  if (hasNonTerminalRerouteDecisionChild(original.id)) {
+  if (await hasNonTerminalRerouteDecisionChild(original.id)) {
     return { kind: "skipped", reason: "duplicate_exists" };
   }
 
-  const crashedAgent = original.agentId ? getAgentById(original.agentId) : null;
+  const crashedAgent = original.agentId ? await getAgentById(original.agentId) : null;
   const agentName = crashedAgent?.name || original.agentId?.slice(0, 8) || "unknown";
   const identitySlice = crashedAgent?.identityMd
     ? `${crashedAgent.identityMd.slice(0, 500)}${crashedAgent.identityMd.length > 500 ? "..." : ""}`
     : "(no identity recorded)";
-  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+  const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
   const decision = resolveTemplate("task.reroute.decision", {
     original_agent_name: agentName,
@@ -469,7 +469,7 @@ export function createRerouteDecisionTask(args: {
   // Lead-owned `pending` decision task (createTaskExtended derives `pending`
   // from a set agentId). Slack/VCS/etc. context is inherited from the original
   // via parentTaskId. taskType is the distinct "reroute-decision" marker.
-  const created = createTaskExtended(decision.text, {
+  const created = await createTaskExtended(decision.text, {
     agentId: leadAgent.id,
     creatorAgentId: original.creatorAgentId,
     source: "system",
@@ -508,15 +508,15 @@ export type CreatePoolStarvationDecisionResult =
  * confirmed no registered agent (any status) satisfies `isAgentEligibleForTask`
  * for this task.
  */
-export function createPoolStarvationDecisionTask(args: {
+export async function createPoolStarvationDecisionTask(args: {
   original: AgentTask;
-}): CreatePoolStarvationDecisionResult {
+}): Promise<CreatePoolStarvationDecisionResult> {
   const { original } = args;
 
-  const leadAgent = getLeadAgent();
+  const leadAgent = await getLeadAgent();
   if (!leadAgent) return { kind: "skipped", reason: "lead_not_found" };
 
-  if (hasNonTerminalRerouteDecisionChild(original.id)) {
+  if (await hasNonTerminalRerouteDecisionChild(original.id)) {
     return { kind: "skipped", reason: "duplicate_exists" };
   }
 
@@ -526,7 +526,7 @@ export function createPoolStarvationDecisionTask(args: {
     affinity?.capabilities && affinity.capabilities.length > 0
       ? affinity.capabilities.join(", ")
       : "(none declared)";
-  const attachmentsBlock = formatAttachmentsBlock(getTaskAttachments(original.id));
+  const attachmentsBlock = formatAttachmentsBlock(await getTaskAttachments(original.id));
 
   const decision = resolveTemplate("task.pool.starved.decision", {
     original_task_id: original.id,
@@ -536,7 +536,7 @@ export function createPoolStarvationDecisionTask(args: {
     artifacts_block: attachmentsBlock,
   });
 
-  const created = createTaskExtended(decision.text, {
+  const created = await createTaskExtended(decision.text, {
     agentId: leadAgent.id,
     creatorAgentId: original.creatorAgentId,
     source: "system",

@@ -5,7 +5,7 @@
  * PR references, agent-UI URLs) and resolves them to typed `memory_link` rows.
  * Phase 1: capture layer only — no traversal tools, no reranker integration.
  */
-import { getDb } from "@/be/db";
+import { getDbClient } from "@/be/db";
 
 export type LinkType =
   | "wikilink"
@@ -164,23 +164,26 @@ export function resolveLinks(content: string): ResolvedLink[] {
   return results;
 }
 
-export function resolveWikilinksToMemoryIds(
+export async function resolveWikilinksToMemoryIds(
   agentId: string,
   links: ResolvedLink[],
-): ResolvedLink[] {
-  const db = getDb();
-  const findByName = db.prepare<{ id: string }, [string, string]>(
-    "SELECT id FROM agent_memory WHERE name = ? AND (agentId = ? OR scope = 'swarm') LIMIT 1",
-  );
+): Promise<ResolvedLink[]> {
+  const db = getDbClient();
+  const resolved: ResolvedLink[] = [];
 
-  return links.map((link) => {
-    if (link.linkType !== "wikilink") return link;
-    const row = findByName.get(link.targetId, agentId);
-    if (row) {
-      return { ...link, targetId: row.id };
+  for (const link of links) {
+    if (link.linkType !== "wikilink") {
+      resolved.push(link);
+      continue;
     }
-    return link;
-  });
+    const row = await db.get<{ id: string }>(
+      "SELECT id FROM agent_memory WHERE name = ? AND (agentId = ? OR scope = 'swarm') LIMIT 1",
+      [link.targetId, agentId],
+    );
+    resolved.push(row ? { ...link, targetId: row.id } : link);
+  }
+
+  return resolved;
 }
 
 const INSERT_LINK_SQL = `INSERT OR IGNORE INTO memory_link
@@ -207,20 +210,22 @@ function insertLinkArgs(
   ];
 }
 
-export function storeLinks(memoryId: string, agentId: string, content: string): void {
+export async function storeLinks(
+  memoryId: string,
+  agentId: string,
+  content: string,
+): Promise<void> {
   const links = resolveLinks(content);
   if (links.length === 0) return;
 
-  const resolved = resolveWikilinksToMemoryIds(agentId, links);
-  const db = getDb();
+  const resolved = await resolveWikilinksToMemoryIds(agentId, links);
   const now = new Date().toISOString();
-  const insert = db.prepare(INSERT_LINK_SQL);
 
-  db.transaction(() => {
+  await getDbClient().transaction(async (tx) => {
     for (const link of resolved) {
-      insert.run(...insertLinkArgs(memoryId, link, now));
+      await tx.run(INSERT_LINK_SQL, insertLinkArgs(memoryId, link, now));
     }
-  })();
+  });
 }
 
 /** The `memory_link` UNIQUE-constraint identity — the natural diff key for pruning. */
@@ -244,47 +249,46 @@ function linkIdentity(link: {
  * 'sequel-auto') and are not derivable from content. Fresh-store paths keep
  * plain `storeLinks`.
  */
-export function refreshLinks(memoryId: string, agentId: string, content: string): void {
-  const resolved = resolveWikilinksToMemoryIds(agentId, resolveLinks(content));
+export async function refreshLinks(
+  memoryId: string,
+  agentId: string,
+  content: string,
+): Promise<void> {
+  const resolved = await resolveWikilinksToMemoryIds(agentId, resolveLinks(content));
   const nextIdentities = new Set(resolved.map((link) => linkIdentity(link)));
 
-  const db = getDb();
   const now = new Date().toISOString();
-  const selectExisting = db.prepare<
-    {
+
+  await getDbClient().transaction(async (tx) => {
+    const existing = await tx.query<{
       id: string;
       linkType: string;
       targetKind: string;
       targetId: string;
       sourceText: string | null;
-    },
-    [string]
-  >(
-    `SELECT id, linkType, targetKind, targetId, sourceText
+    }>(
+      `SELECT id, linkType, targetKind, targetId, sourceText
        FROM memory_link
       WHERE from_memory_id = ? AND linkType != 'sequel'`,
-  );
-  const deleteById = db.prepare("DELETE FROM memory_link WHERE id = ?");
-  const insert = db.prepare(INSERT_LINK_SQL);
-
-  db.transaction(() => {
-    for (const row of selectExisting.all(memoryId)) {
+      [memoryId],
+    );
+    for (const row of existing) {
       if (!nextIdentities.has(linkIdentity(row))) {
-        deleteById.run(row.id);
+        await tx.run("DELETE FROM memory_link WHERE id = ?", [row.id]);
       }
     }
     for (const link of resolved) {
-      insert.run(...insertLinkArgs(memoryId, link, now));
+      await tx.run(INSERT_LINK_SQL, insertLinkArgs(memoryId, link, now));
     }
-  })();
+  });
 }
 
-export function storeSequelLink(fromMemoryId: string, toMemoryId: string): void {
-  const db = getDb();
+export async function storeSequelLink(fromMemoryId: string, toMemoryId: string): Promise<void> {
   const now = new Date().toISOString();
-  db.prepare(
+  await getDbClient().run(
     `INSERT OR IGNORE INTO memory_link
        (id, from_memory_id, linkType, targetKind, targetId, strength, resolver, sourceText, metadata, createdAt, updatedAt)
      VALUES (?, ?, 'sequel', 'memory', ?, 1.0, 'sequel-auto', NULL, NULL, ?, ?)`,
-  ).run(crypto.randomUUID(), fromMemoryId, toMemoryId, now, now);
+    [crypto.randomUUID(), fromMemoryId, toMemoryId, now, now],
+  );
 }

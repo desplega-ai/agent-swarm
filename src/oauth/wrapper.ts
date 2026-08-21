@@ -82,11 +82,11 @@ export async function buildAuthorizationUrl(
   const codeVerifier = oauth.generateRandomCodeVerifier();
   const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
 
-  const appId = options.appId ?? getOAuthAppIdByProvider(config.provider);
+  const appId = options.appId ?? (await getOAuthAppIdByProvider(config.provider));
   if (!appId) {
     throw new Error(`OAuth app ${config.provider} is not configured`);
   }
-  createOAuthPending({
+  await createOAuthPending({
     state,
     appId,
     label: options.label ?? "default",
@@ -210,7 +210,7 @@ export async function exchangeCode(
   code: string,
   state: string,
 ): Promise<OAuthTokenResponse> {
-  const pending = consumeOAuthPending(state);
+  const pending = await consumeOAuthPending(state);
   if (!pending) {
     throw new Error("Invalid or expired OAuth state");
   }
@@ -224,7 +224,7 @@ export async function exchangeCode(
   const expiresAt = tokens.expiresIn
     ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
     : null;
-  storeOAuthTokens(config.provider, {
+  await storeOAuthTokens(config.provider, {
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken ?? null,
     expiresAt,
@@ -361,7 +361,7 @@ export async function refreshAccessToken(
 
   const nextRefreshToken = refreshed.refreshToken ?? refreshToken;
   try {
-    updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
+    await updateOAuthTokensAfterRefresh(config.provider, refreshToken, {
       accessToken: refreshed.accessToken,
       refreshToken: nextRefreshToken,
       expiresAt: refreshed.expiresAt,

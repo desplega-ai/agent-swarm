@@ -43,7 +43,7 @@ export class NotifyExecutor extends BaseExecutor<
           };
         }
         try {
-          const result = this.deps.db.postMessage(config.target, null, message);
+          const result = await this.deps.db.postMessage(config.target, null, message);
           return {
             status: "success",
             output: { sent: true, messageId: result.id, message },

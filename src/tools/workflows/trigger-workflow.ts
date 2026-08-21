@@ -31,7 +31,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
     },
     async ({ id, triggerData }, requestInfo) => {
       try {
-        const workflow = getWorkflow(id);
+        const workflow = await getWorkflow(id);
         if (!workflow) {
           return toolErr(`Workflow not found: ${id}`);
         }
@@ -45,12 +45,13 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
           {
             triggerType: "manual",
             requestedByUserId:
-              resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId) ?? undefined,
+              (await resolveTaskAuditUserId(requestInfo.sourceTaskId, requestInfo.agentId)) ??
+              undefined,
           },
         );
 
         // Check if the run was skipped due to cooldown
-        const run = getWorkflowRun(runId);
+        const run = await getWorkflowRun(runId);
         const skipped = run?.status === "skipped";
 
         if (skipped) {
@@ -68,7 +69,7 @@ export const registerTriggerWorkflowTool = (server: McpServer) => {
         if (err instanceof TriggerSchemaError) {
           // Re-fetch workflow so we can echo its triggerSchema for self-correction.
           // (Workflow existence was already proven above; this is best-effort.)
-          const workflow = getWorkflow(id);
+          const workflow = await getWorkflow(id);
           const bulleted = err.validationErrors.map((e) => `- ${e}`).join("\n");
           const schemaBlock = workflow?.triggerSchema
             ? `\n\nExpected triggerSchema:\n\`\`\`json\n${JSON.stringify(workflow.triggerSchema, null, 2)}\n\`\`\``
