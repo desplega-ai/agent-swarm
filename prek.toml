@@ -83,6 +83,17 @@ stages = ["pre-push"]
 fail_fast = true
 
 [[repos.hooks]]
+id = "check-test-spawn-sync"
+name = "Test spawnSync boundary check"
+language = "system"
+entry = "bash scripts/check-test-spawn-sync.sh"
+# Validates tests never spawn synchronously; also re-run if the check script itself changes.
+files = '^(src/|scripts/check-test-spawn-sync\.sh$)'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
 id = "pi-skills-freshness"
 name = "Pi-skills freshness check"
 language = "system"

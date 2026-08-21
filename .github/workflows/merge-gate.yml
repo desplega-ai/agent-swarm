@@ -253,6 +253,18 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
 
+      - name: Check test spawnSync boundary
+        id: test-spawn-sync-boundary
+        run: |
+          start=$(date +%s%3N)
+          set +e
+          bash scripts/check-test-spawn-sync.sh
+          code=$?
+          set -e
+          echo "duration_ms=$(( $(date +%s%3N) - start ))" >> "$GITHUB_OUTPUT"
+          echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          exit $code
+
       - name: Check async DB seam
         id: async-db-seam
         run: |
@@ -392,6 +404,8 @@ jobs:
           STRUCTURAL_LINT_STATUS: ${{ steps.structural-lint.outputs.status || 'skipped' }}
           DB_BOUNDARY_DURATION: ${{ steps.db-boundary.outputs.duration_ms || '0' }}
           DB_BOUNDARY_STATUS: ${{ steps.db-boundary.outputs.status || 'skipped' }}
+          TEST_SPAWN_SYNC_BOUNDARY_DURATION: ${{ steps.test-spawn-sync-boundary.outputs.duration_ms || '0' }}
+          TEST_SPAWN_SYNC_BOUNDARY_STATUS: ${{ steps.test-spawn-sync-boundary.outputs.status || 'skipped' }}
           API_KEY_BOUNDARY_DURATION: ${{ steps.api-key-boundary.outputs.duration_ms || '0' }}
           API_KEY_BOUNDARY_STATUS: ${{ steps.api-key-boundary.outputs.status || 'skipped' }}
           RBAC_BOUNDARY_DURATION: ${{ steps.rbac-boundary.outputs.duration_ms || '0' }}
@@ -407,9 +421,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$TOKEN" ]; then echo "SWARM_CI_TIMINGS_TOKEN not available; skipping"; exit 0; fi
-          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
+          BOUNDARIES_DURATION=$((STRUCTURAL_LINT_DURATION + DB_BOUNDARY_DURATION + TEST_SPAWN_SYNC_BOUNDARY_DURATION + API_KEY_BOUNDARY_DURATION + RBAC_BOUNDARY_DURATION + DEPENDENCY_GRAPH_DURATION + AUDIT_COLUMNS_DURATION + SDK_TOOL_REGISTRATION_DURATION + RBAC_COVERAGE_DURATION))
           BOUNDARIES_STATUS=success
-          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
+          for status in "$STRUCTURAL_LINT_STATUS" "$DB_BOUNDARY_STATUS" "$TEST_SPAWN_SYNC_BOUNDARY_STATUS" "$API_KEY_BOUNDARY_STATUS" "$RBAC_BOUNDARY_STATUS" "$DEPENDENCY_GRAPH_STATUS" "$AUDIT_COLUMNS_STATUS" "$SDK_TOOL_REGISTRATION_STATUS" "$RBAC_COVERAGE_STATUS"; do
             if [ "$status" = failure ]; then BOUNDARIES_STATUS=failure; break; fi
             if [ "$status" = skipped ]; then BOUNDARIES_STATUS=skipped; fi
           done

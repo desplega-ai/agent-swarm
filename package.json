@@ -88,6 +88,7 @@
     "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
+    "check:test-spawn-sync": "bash scripts/check-test-spawn-sync.sh",
     "check:dep-graph": "depcruise src plugin/opencode-plugins --config .dependency-cruiser.cjs",
     "check:api-key-boundary": "bash scripts/check-api-key-boundary.sh",
     "check:vendored-openapi": "bun scripts/check-vendored-openapi.ts",
