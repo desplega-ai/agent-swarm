@@ -22,7 +22,11 @@ beforeEach(() => {
   main.run("DELETE FROM items");
   locker = new Database(TEST_DB_PATH);
   locker.exec("PRAGMA busy_timeout = 25");
-  client = createBunSqliteClient(() => main, { maxWaitMs: 2_000, backoffMs: [25, 50, 100, 200] });
+  client = createBunSqliteClient(() => main, {
+    maxWaitMs: 2_000,
+    backoffMs: [25, 50, 100, 200],
+    attemptSpinMs: 25,
+  });
 });
 
 afterEach(async () => {
@@ -74,12 +78,61 @@ describe("db-client SQLITE_BUSY retry", () => {
   });
 
   test("gives up with SQLITE_BUSY when the lock outlives the retry budget", async () => {
-    const tightClient = createBunSqliteClient(() => main, { maxWaitMs: 60, backoffMs: [20, 20] });
+    const tightClient = createBunSqliteClient(() => main, {
+      maxWaitMs: 60,
+      backoffMs: [20, 20],
+      attemptSpinMs: 25,
+    });
     const released = holdWriteLock(600);
     await expect(tightClient.run("INSERT INTO items (name) VALUES (?)", ["never"])).rejects.toThrow(
       /database is locked/,
     );
     await released;
+  });
+
+  test("readOnly transaction proceeds at full speed under an external write lock", async () => {
+    await client.run("INSERT INTO items (name) VALUES (?)", ["seed"]);
+    const released = holdWriteLock(400);
+    const started = Date.now();
+    const names = await client.transaction(
+      async (tx) => (await tx.query<{ name: string }>("SELECT name FROM items")).map((r) => r.name),
+      { readOnly: true },
+    );
+    // Deferred BEGIN never touches the write lock: no busy spin, no retry
+    // budget, done long before the locker releases.
+    expect(Date.now() - started).toBeLessThan(200);
+    expect(names).toEqual(["seed"]);
+    await released;
+  });
+
+  test("reads flow while a write retries in backoff (FIFO lock released between attempts)", async () => {
+    await client.run("INSERT INTO items (name) VALUES (?)", ["reader-food"]);
+    const released = holdWriteLock(400);
+    const write = client.run("INSERT INTO items (name) VALUES (?)", ["late-write"]);
+    // Let the write burn its first attempt and enter async backoff.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const started = Date.now();
+    const rows = await client.query<{ name: string }>(
+      "SELECT name FROM items WHERE name = 'reader-food'",
+    );
+    // Pre-fix, the retrying writer held the FIFO lock across its sleeps and
+    // this read queued behind the full retry span.
+    expect(Date.now() - started).toBeLessThan(150);
+    expect(rows.length).toBe(1);
+    await released;
+    await write;
+    const landed = await client.get<{ name: string }>(
+      "SELECT name FROM items WHERE name = 'late-write'",
+    );
+    expect(landed?.name).toBe("late-write");
+  });
+
+  test("short spin restores the ambient busy_timeout after a retried attempt", async () => {
+    const released = holdWriteLock(120);
+    await client.run("INSERT INTO items (name) VALUES (?)", ["spin-check"]);
+    await released;
+    const row = main.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
+    expect(row?.timeout).toBe(25);
   });
 
   test("non-BUSY errors are not retried", async () => {

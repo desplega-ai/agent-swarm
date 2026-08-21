@@ -249,7 +249,9 @@ export async function handleAssets(
     // auditAssetKeys stays sync (shared with the boot audit); run it inside a
     // client transaction so the read cannot observe another request's
     // uncommitted writes on the shared connection.
-    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()));
+    const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
+      readOnly: true,
+    });
     keyAuditRoute.respond(res, 200, audit);
     return true;
   }

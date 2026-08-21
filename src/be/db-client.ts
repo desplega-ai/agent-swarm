@@ -23,6 +23,23 @@ export interface DbExecutor {
   run(sql: string, params?: DbParam[]): Promise<{ changes: number }>;
 }
 
+export type TransactionOptions = {
+  /**
+   * Declare the callback SELECT-only. The transaction then opens with a
+   * deferred BEGIN and never contends for the cross-process write lock, so
+   * it reads the WAL snapshot at full speed even while an external process
+   * (litestream checkpoint, CLI) holds the file's write lock. Measured cost
+   * of NOT setting this on a read-only transaction under an external locker:
+   * 2x read throughput at a mild 250ms hold, 14x at a 6s hold.
+   *
+   * A callback that writes despite `readOnly: true` still works (SQLite
+   * upgrades the deferred transaction), but it loses BUSY retry and can fail
+   * mid-callback under cross-process contention. Only set it on genuinely
+   * SELECT-only callbacks.
+   */
+  readOnly?: boolean;
+};
+
 export interface DbClient extends DbExecutor {
   /**
    * Run `fn` atomically. The callback receives an executor bound to the
@@ -30,9 +47,9 @@ export interface DbClient extends DbExecutor {
    * through helpers) while the callback runs are routed into the same
    * transaction via AsyncLocalStorage, mirroring how synchronous helpers
    * sharing one connection behaved before this seam existed. Nested
-   * `transaction` calls become SAVEPOINTs.
+   * `transaction` calls become SAVEPOINTs (opts are ignored for them).
    */
-  transaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T>;
+  transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T>;
   /**
    * Schedule `fn` to run strictly after the currently-open transaction
    * COMMITs; if that transaction rolls back the hook is DROPPED (the write it
@@ -104,22 +121,43 @@ const txContext = new AsyncLocalStorage<TxContext>();
 
 /**
  * Cross-process SQLITE_BUSY retry posture (litestream checkpoints, CLI access
- * on the same file). bun:sqlite's own `busy_timeout` handles the wait while
- * the driver call runs; these retries kick in after it gives up, and the
- * backoff between attempts sleeps asynchronously, so the event loop breathes
- * between driver calls. Retries happen only where a repeat is exact:
- * top-level single statements, BEGIN IMMEDIATE (nothing ran yet), and COMMIT
- * (the transaction stays intact on a BUSY commit). Statements inside an open
- * transaction are never retried.
+ * on the same file). Retries happen only where a repeat is exact: top-level
+ * single statements, BEGIN IMMEDIATE (nothing ran yet), and COMMIT (the
+ * transaction stays intact on a BUSY commit). Statements inside an open
+ * transaction are never retried, and `readOnly` transactions opt out
+ * entirely (deferred BEGIN never contends for the write lock).
+ *
+ * Two properties keep a retrying operation from starving the rest of the
+ * process, both measured (see PR #1229's read-heavy probe):
+ * - each retryable driver attempt runs under a SHORT `busy_timeout`
+ *   (`attemptSpinMs`), so the driver's synchronous busy wait blocks the
+ *   event loop for at most that long per attempt; the real waiting happens
+ *   in the async backoff sleeps,
+ * - the FIFO lock is RELEASED during those sleeps (except after COMMIT
+ *   failures, where the open transaction pins the connection), so queued
+ *   reads flow while a writer waits out an external lock holder.
  */
 export type BusyRetryOptions = {
-  /** Ceiling on the summed async backoff (driver-level busy_timeout spins are extra). */
+  /** Ceiling on the summed async backoff across attempts. */
   maxWaitMs: number;
   /** Per-retry sleep; the attempt count is bounded by this array's length + 1. */
   backoffMs: number[];
+  /** `busy_timeout` applied for the duration of each retryable driver attempt. */
+  attemptSpinMs: number;
 };
 
-const DEFAULT_BUSY_RETRY: BusyRetryOptions = { maxWaitMs: 10_000, backoffMs: [50, 100, 250] };
+// The backoff sum (~6.9s) plus per-attempt spins must outlast a realistic
+// external hold (litestream checkpoint stalls measured in seconds) so writes
+// land in the holder's release gaps instead of failing at the driver cliff.
+const DEFAULT_BUSY_RETRY: BusyRetryOptions = {
+  maxWaitMs: 10_000,
+  backoffMs: [25, 50, 100, 250, 500, 1000, 1000, 1000, 1000, 1000, 1000],
+  attemptSpinMs: 100,
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function isSqliteBusy(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
@@ -130,6 +168,8 @@ function isSqliteBusy(err: unknown): boolean {
 class BunSqliteClient implements DbClient {
   private readonly lock = new FifoLock();
   private savepointSeq = 0;
+  /** Lazily captured ambient busy_timeout, restored after each short-spin attempt. */
+  private restoreBusyTimeoutMs: number | null = null;
 
   constructor(
     private readonly getDatabase: () => Database,
@@ -151,29 +191,74 @@ class BunSqliteClient implements DbClient {
     });
   }
 
-  async transaction<T>(fn: (tx: DbExecutor) => Promise<T>): Promise<T> {
+  async transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T> {
     const existing = txContext.getStore();
     if (existing && !existing.closed) {
       return this.savepoint(existing, fn);
     }
 
+    const readOnly = opts?.readOnly === true;
+    let sleptMs = 0;
+    for (let attemptIndex = 0; ; attemptIndex++) {
+      const attempt = await this.runTransactionAttempt(fn, readOnly);
+      if (attempt.ok) return attempt.value;
+      const backoff = this.busyRetry.backoffMs[attemptIndex];
+      if (backoff === undefined || sleptMs + backoff > this.busyRetry.maxWaitMs) {
+        throw attempt.busyBegin;
+      }
+      sleptMs += backoff;
+      // The FIFO lock is NOT held here: nothing began, so other DB work
+      // (reads especially) proceeds while this writer waits out the external
+      // lock holder.
+      await sleep(backoff);
+    }
+  }
+
+  /**
+   * One BEGIN..COMMIT attempt under the FIFO lock. Returns `busyBegin`
+   * instead of throwing when BEGIN IMMEDIATE hits a cross-process BUSY, so
+   * the caller can back off with the lock released.
+   */
+  private async runTransactionAttempt<T>(
+    fn: (tx: DbExecutor) => Promise<T>,
+    readOnly: boolean,
+  ): Promise<{ ok: true; value: T } | { ok: false; busyBegin: unknown }> {
     const release = await this.lock.acquire();
     const ctx: TxContext = { closed: false, afterCommit: [] };
     let began = false;
     try {
       const db = this.getDatabase();
       const tx = this.boundExecutor(ctx);
-      // IMMEDIATE takes the write lock at BEGIN: a cross-process BUSY then
-      // surfaces here, where a retry is exact (nothing ran yet), instead of
-      // on an arbitrary statement mid-callback where it is not.
-      await this.withBusyRetry(() => db.run("BEGIN IMMEDIATE"));
+      if (readOnly) {
+        // Deferred BEGIN executes no locking work, cannot BUSY, and keeps the
+        // whole transaction off the cross-process write lock.
+        db.run("BEGIN");
+      } else {
+        try {
+          // IMMEDIATE takes the write lock at BEGIN: a cross-process BUSY
+          // then surfaces here, where a retry is exact (nothing ran yet),
+          // instead of on an arbitrary statement mid-callback where it is
+          // not. The short spin keeps the driver's synchronous busy wait off
+          // the event loop; the real waiting is the caller's async backoff.
+          this.shortSpin(db, () => db.run("BEGIN IMMEDIATE"));
+        } catch (err) {
+          if (isSqliteBusy(err)) return { ok: false, busyBegin: err };
+          throw err;
+        }
+      }
       began = true;
       const result = await txContext.run(ctx, () => fn(tx));
-      // A BUSY COMMIT leaves the transaction open and intact, so a repeat is
-      // exact here too.
-      await this.withBusyRetry(() => db.run("COMMIT"));
+      if (readOnly) {
+        db.run("COMMIT");
+      } else {
+        // A BUSY COMMIT leaves the transaction open and intact, so a repeat
+        // is exact. The open transaction pins the connection, so these
+        // retries hold the FIFO lock and their sleeps block queued work;
+        // WAL-mode COMMIT BUSY is rare enough for that to be acceptable.
+        await this.retryHoldingLock(() => this.shortSpin(db, () => db.run("COMMIT")));
+      }
       for (const hook of ctx.afterCommit) this.scheduleHook(hook);
-      return result;
+      return { ok: true, value: result };
     } catch (err) {
       if (began) {
         try {
@@ -253,22 +338,52 @@ class BunSqliteClient implements DbClient {
     if (ctx && !ctx.closed) {
       return op(this.getDatabase());
     }
-    const release = await this.lock.acquire();
-    try {
-      // A top-level single statement is atomic, so a repeat on BUSY is exact.
-      return await this.withBusyRetry(() => op(this.getDatabase()));
-    } finally {
-      release();
+    let sleptMs = 0;
+    for (let attemptIndex = 0; ; attemptIndex++) {
+      const release = await this.lock.acquire();
+      let backoff = 0;
+      try {
+        // A top-level single statement is atomic, so a repeat on BUSY is exact.
+        return this.shortSpin(this.getDatabase(), () => op(this.getDatabase()));
+      } catch (err) {
+        if (!isSqliteBusy(err)) throw err;
+        const next = this.busyRetry.backoffMs[attemptIndex];
+        if (next === undefined || sleptMs + next > this.busyRetry.maxWaitMs) throw err;
+        backoff = next;
+        sleptMs += next;
+      } finally {
+        release();
+      }
+      // Lock released: queued reads flow while this statement waits out the
+      // external lock holder.
+      await sleep(backoff);
     }
   }
 
   /**
-   * Run `attempt` with async backoff on SQLITE_BUSY. The caller must ensure
-   * a repeat is exact (nothing partially applied by a failed attempt). Runs
-   * while the FIFO lock is held: queued in-process operations stay ordered
-   * behind the retrying one, and the loop stays free during the sleeps.
+   * Run a retryable driver attempt under a short `busy_timeout` so the
+   * synchronous in-driver busy wait blocks the event loop for at most
+   * `attemptSpinMs`. Only called while the FIFO lock is held, so the
+   * set/attempt/restore sequence cannot interleave with other client work.
    */
-  private async withBusyRetry<T>(attempt: () => T): Promise<T> {
+  private shortSpin<T>(db: Database, attempt: () => T): T {
+    if (this.restoreBusyTimeoutMs === null) {
+      const row = db.query<{ timeout: number }, []>("PRAGMA busy_timeout").get();
+      this.restoreBusyTimeoutMs = row?.timeout ?? 5000;
+    }
+    db.exec(`PRAGMA busy_timeout = ${this.busyRetry.attemptSpinMs}`);
+    try {
+      return attempt();
+    } finally {
+      db.exec(`PRAGMA busy_timeout = ${this.restoreBusyTimeoutMs}`);
+    }
+  }
+
+  /**
+   * COMMIT-only retry: the open transaction pins the shared connection, so
+   * the FIFO lock stays held and these sleeps block queued in-process work.
+   */
+  private async retryHoldingLock<T>(attempt: () => T): Promise<T> {
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
       try {
@@ -278,7 +393,7 @@ class BunSqliteClient implements DbClient {
         const backoff = this.busyRetry.backoffMs[attemptIndex];
         if (backoff === undefined || sleptMs + backoff > this.busyRetry.maxWaitMs) throw err;
         sleptMs += backoff;
-        await new Promise((resolve) => setTimeout(resolve, backoff));
+        await sleep(backoff);
       }
     }
   }
