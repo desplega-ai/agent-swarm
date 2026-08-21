@@ -10314,6 +10314,7 @@ export interface paths {
                                 taskId: string;
                                 task: components["schemas"]["AgentTask"];
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
@@ -10334,6 +10335,7 @@ export interface paths {
                                     }[];
                                 };
                                 requestedBy?: {
+                                    id?: string;
                                     name: string;
                                     email?: string;
                                     role?: string;
