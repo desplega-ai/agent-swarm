@@ -14,6 +14,18 @@ default_install_hook_types = ["pre-push"]
 repo = "local"
 
 [[repos.hooks]]
+id = "dedupe-check"
+name = "No duplicate lockfile versions"
+language = "system"
+entry = "bun dedupe --check"
+# Same CI "lint" domain: the check runs in the lint-and-typecheck job, right
+# after `bun install`, so it shares that job's path filter.
+files = '^(src/|apps/evals/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$|biome\.json$)'
+pass_filenames = false
+stages = ["pre-push"]
+fail_fast = true
+
+[[repos.hooks]]
 id = "biome-lint"
 name = "Biome lint"
 language = "system"

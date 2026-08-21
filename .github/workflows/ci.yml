@@ -39,6 +39,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # bun.lock must stay deduped. A removable duplicate ships two copies of the
+      # same dep (Biome, zod and openai were the last offenders), so the version a
+      # given import resolves to depends on where in the tree it sits. Runs in
+      # milliseconds. Like the Bun version pin check it needs no timing series.
+      - name: Check for duplicate lockfile versions
+        run: bun dedupe --check
+
       - name: Run Biome linter
         id: lint
         run: |
