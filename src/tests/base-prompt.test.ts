@@ -210,6 +210,19 @@ describe("getBasePrompt: composite selection", () => {
     expect(result).not.toContain(LOCAL_WORKSPACE);
   });
 
+  test("managed lead keeps the lead contract with the remote workspace", async () => {
+    const result = await getBasePrompt({
+      ...minimalArgs,
+      role: "lead",
+      traits: managedTraits,
+      provider: "claude-managed",
+    });
+    expect(result).toContain("## How you lead");
+    expect(result).not.toContain("## How you work");
+    expect(result).toContain(REMOTE_WORKSPACE);
+    expect(result).not.toContain(LOCAL_WORKSPACE);
+  });
+
   test("managed worker keeps the local memory block", async () => {
     const result = await getBasePrompt({
       ...minimalArgs,

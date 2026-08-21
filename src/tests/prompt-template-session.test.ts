@@ -25,6 +25,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.memory.remote",
   "system.agent.outputs",
   "system.agent.outputs.no_agent_fs",
+  "system.agent.repository",
   "system.agent.role",
   "system.agent.scripts_only_mode",
   "system.agent.scripts_only_mode.slack",
@@ -32,6 +33,7 @@ const SYSTEM_TEMPLATES = [
   "system.agent.slack",
   "system.agent.steering",
   "system.agent.steering.delivery",
+  "system.agent.tools_skills",
   "system.agent.worker",
   "system.agent.worker.remote",
   "system.agent.workspace",
@@ -41,6 +43,7 @@ const SYSTEM_TEMPLATES = [
 /** The four composites. base-prompt.ts picks one per session by traits, then role. */
 const SESSION_TEMPLATES = [
   "system.session.lead",
+  "system.session.lead.managed",
   "system.session.worker",
   "system.session.worker.managed",
   "system.session.worker.remote",
@@ -103,15 +106,15 @@ describe("Session templates: registration", () => {
     expect(sessionSystemEventTypes("system")).toEqual([...SYSTEM_TEMPLATES].sort());
   });
 
-  test("registers exactly the four session composites", () => {
+  test("registers exactly the five session composites", () => {
     expect(sessionSystemEventTypes("session")).toEqual([...SESSION_TEMPLATES].sort());
   });
 
-  test("registers 21 system and session templates in total", () => {
+  test("registers 24 system and session templates in total", () => {
     const all = getAllTemplateDefinitions();
     const sessionSystem = all.filter((d) => d.category === "system" || d.category === "session");
-    // 17 system blocks + 4 session composites.
-    expect(sessionSystem.length).toBe(21);
+    // 19 system blocks + 5 session composites.
+    expect(sessionSystem.length).toBe(24);
   });
 
   test("drops the v1 blocks that prompt v2 deleted", () => {

@@ -147,7 +147,8 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
     compositeEventType = "system.session.worker.remote";
   } else if (!hasLocalEnv) {
     // MCP tools but no container or /workspace mirrors (claude-managed).
-    compositeEventType = "system.session.worker.managed";
+    compositeEventType =
+      role === "lead" ? "system.session.lead.managed" : "system.session.worker.managed";
   } else if (role === "lead") {
     compositeEventType = "system.session.lead";
   } else {
@@ -212,12 +213,16 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // I. Tools and skills. Skipped without MCP: the discovery tools are MCP tools.
   if (hasMcp) {
-    prompt += renderToolsAndSkills({
-      skillsSummary: args.skillsSummary,
-      mcpServers: args.mcpServers,
-      nativeSkillDiscovery,
-      hasLocalEnv,
-    });
+    const toolsResult = await resolveTemplateAsync(
+      "system.agent.tools_skills",
+      renderToolsAndSkillsVars({
+        skillsSummary: args.skillsSummary,
+        mcpServers: args.mcpServers,
+        nativeSkillDiscovery,
+        hasLocalEnv,
+      }),
+    );
+    prompt += toolsResult.text;
   }
 
   // J. Agent notes (CLAUDE.md). Claude loads ~/.claude/CLAUDE.md and
@@ -238,21 +243,29 @@ export const getBasePrompt = async (args: BasePromptArgs): Promise<string> => {
 
   // K. Repository (per task). Never truncated except the inlined repo CLAUDE.md.
   if (args.repoContext) {
-    prompt += renderRepository(args.repoContext, { hasMcp, hasLocalEnv, provider });
+    const repoResult = await resolveTemplateAsync(
+      "system.agent.repository",
+      renderRepositoryVars(args.repoContext, { hasMcp, hasLocalEnv, provider }),
+    );
+    prompt += repoResult.text;
   }
 
   // Blocks start and end with a newline; collapse the seams to one blank line.
   return prompt.replace(/\n{3,}/g, "\n\n");
 };
 
-function renderToolsAndSkills(input: {
+/**
+ * Dynamic lines for `system.agent.tools_skills`. The static text lives in the
+ * template so operators can override or skip the section; only the lists that
+ * depend on the installed skills and MCP servers are built here.
+ */
+function renderToolsAndSkillsVars(input: {
   skillsSummary?: { name: string; description: string }[];
   mcpServers?: string[];
   nativeSkillDiscovery: boolean;
   hasLocalEnv: boolean;
-}): string {
-  let section =
-    "\n\n## Tools and skills\n\nMost swarm tools are deferred. Load one with your harness tool search before the first call.\n";
+}): { skills: string; mcp_servers: string } {
+  let section = "";
 
   const skills = input.skillsSummary ?? [];
   if (skills.length > 0) {
@@ -281,41 +294,55 @@ function renderToolsAndSkills(input: {
   }
 
   const servers = (input.mcpServers ?? []).filter((name) => name.trim().length > 0);
-  if (servers.length > 0) {
-    section += `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`;
-  }
+  const mcpLine =
+    servers.length > 0
+      ? `Connected MCP servers: ${servers.join(", ")}. Their tools are in your tool list.\n`
+      : "";
 
-  return section;
+  return { skills: section, mcp_servers: mcpLine };
 }
 
-function renderRepository(
+/**
+ * Dynamic parts of `system.agent.repository`. Same split as the tools section:
+ * the heading lives in the template, the per-task pieces are built here.
+ */
+function renderRepositoryVars(
   repo: NonNullable<BasePromptArgs["repoContext"]>,
   ctx: { hasMcp: boolean; hasLocalEnv: boolean; provider: string },
-): string {
-  let section = "\n\n## Repository\n\n";
+): Record<string, string> {
+  const vars: Record<string, string> = {
+    clone_note: "",
+    warning: "",
+    repo_claude_md: "",
+    auto_stashes: "",
+    guidelines: "",
+    code_quality: "",
+  };
 
   if (ctx.hasLocalEnv) {
-    section +=
+    vars.clone_note =
       "This task's repository is cloned locally. `get-repos` returns the path. Its `CLAUDE.md` applies inside that directory.\n";
   }
 
   if (repo.warning) {
-    section += `\nWARNING: ${repo.warning}\n`;
+    vars.warning = `\nWARNING: ${repo.warning}\n`;
   }
 
   if (ctx.hasLocalEnv && repo.claudeMd && REPO_CLAUDE_MD_INLINE_PROVIDERS.has(ctx.provider)) {
     // opencode does not load the repo CLAUDE.md natively (unverified), so it
     // is inlined there, capped so it cannot blow the bootstrap budget on its
     // own (Picateclas argv-E2BIG saga, 2026-05-28).
-    section += `\nThe repository's CLAUDE.md, cloned at \`${repo.clonePath}\`. It applies only inside that directory.\n\n`;
-    section += `${truncateRepoClaudeMd(repo.claudeMd, repo.clonePath, REPO_CLAUDE_MD_MAX_CHARS)}\n`;
+    vars.repo_claude_md =
+      `\nThe repository's CLAUDE.md, cloned at \`${repo.clonePath}\`. It applies only inside that directory.\n\n` +
+      `${truncateRepoClaudeMd(repo.claudeMd, repo.clonePath, REPO_CLAUDE_MD_MAX_CHARS)}\n`;
   }
 
   if (ctx.hasLocalEnv && repo.autoStashes && repo.autoStashes.length > 0) {
     const stashes = repo.autoStashes.map((stash) => `- ${stash.ref}: ${stash.message}`).join("\n");
-    section += `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
+    vars.auto_stashes = `\nPending auto-stashed work exists in this repo:\n${stashes}\nRestore if relevant with \`git stash apply <ref>\` or \`git stash pop <ref>\`.\n`;
   }
 
+  let section = "";
   const g = repo.guidelines;
   if (g === null || g === undefined) {
     section += `\n### Repository Guidelines\n\nNo repository guidelines are defined. Ask the lead before you push.\n`;
@@ -350,11 +377,13 @@ function renderRepository(
     }
   }
 
+  vars.guidelines = section;
+
   if (ctx.hasMcp) {
-    section += `\nYou MUST use the \`code-quality\` skill before you push, open a PR, or review one.\n`;
+    vars.code_quality = `\nYou MUST use the \`code-quality\` skill before you push, open a PR, or review one.\n`;
   }
 
-  return section;
+  return vars;
 }
 
 /**

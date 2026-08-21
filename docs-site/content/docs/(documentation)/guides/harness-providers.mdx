@@ -545,14 +545,14 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 
 | Source | Section | Gate |
 |---|---|---|
-| Composite `system.session.{lead\|worker\|worker.managed\|worker.remote}` | Role line, persona (description, SOUL.md, IDENTITY.md when edited), operating contract, workspace, memory, communication, secrets | Composite picked by traits: no MCP → `worker.remote`, MCP without a local environment → `worker.managed`, then by role |
+| Composite `system.session.{lead\|worker\|lead.managed\|worker.managed\|worker.remote}` | Role line, persona (description, SOUL.md, IDENTITY.md when edited), operating contract, workspace, memory, communication, secrets | Composite picked by traits, then role: no MCP → `worker.remote`, MCP without a local environment → `{lead\|worker}.managed` |
 | Template `system.agent.scripts_only_mode` | Code-mode instructions | `scriptsOnly` |
 | Template `system.agent.outputs` or `...outputs.no_agent_fs` | `## Outputs` | MCP + `pages` capability; agent-fs variant when `AGENT_FS_API_URL` is set on a local environment |
 | Template `system.agent.slack` | `## Slack` (both roles) | Slack tokens set, not scripts-only, `slack` capability |
 | Template `system.agent.steering` | `## Live task steering` | `STEERING_ENABLED`, adapter `steerModes`, `core` capability |
-| Skills + MCP server names | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
+| Template `system.agent.tools_skills` (skills + MCP server lines interpolated) | `## Tools and skills` | MCP. Count + discovery pointer for harnesses with native skill discovery (claude, pi), enumerated list otherwise |
 | `agentClaudeMd` | `## Your notes (CLAUDE.md)` (truncated at 20k) | Local environment, provider codex/opencode/pi, content differs from the generated default. Claude loads `~/.claude/CLAUDE.md` and `/workspace/CLAUDE.md` natively |
-| Repo context | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
+| Template `system.agent.repository` (per-task pieces interpolated) | `## Repository` | Task has a repo. Clone sentence + `get-repos` pointer, repo `CLAUDE.md` inlined for opencode only (12k cap), auto-stashes, guidelines, `code-quality` skill pointer |
 | `task.requester.profile` | `## Requester Profile` | Requester has role, notes, or comms |
 | `SYSTEM_PROMPT` env / `--system-prompt` | Appended | Operator config |
 | `task.additionalSystemPrompt` | Appended per-task | Task field |

@@ -308,6 +308,66 @@ registerTemplate({
 });
 
 // ============================================================================
+// I. Tools and skills, K. Repository (appended by base-prompt; the dynamic
+// lists are rendered at the call site and interpolated into the static text)
+// ============================================================================
+
+registerTemplate({
+  eventType: "system.agent.tools_skills",
+  header: "",
+  defaultBody: `
+## Tools and skills
+
+Most swarm tools are deferred. Load one with your harness tool search before the first call.
+{{skills}}{{mcp_servers}}`,
+  variables: [
+    {
+      name: "skills",
+      description:
+        "Rendered skills line(s): a count plus discovery pointer for harnesses with native skill discovery, an enumerated list otherwise. Empty when no skill is installed.",
+    },
+    {
+      name: "mcp_servers",
+      description: "Rendered 'Connected MCP servers' line, or empty when none are connected.",
+    },
+  ],
+  category: "system",
+});
+
+registerTemplate({
+  eventType: "system.agent.repository",
+  header: "",
+  defaultBody: `
+## Repository
+
+{{clone_note}}{{warning}}{{repo_claude_md}}{{auto_stashes}}{{guidelines}}{{code_quality}}`,
+  variables: [
+    {
+      name: "clone_note",
+      description:
+        "Local environments: the sentence that the repository is cloned locally and that get-repos returns the path. Empty for remote providers.",
+    },
+    { name: "warning", description: "Rendered repository warning, or empty." },
+    {
+      name: "repo_claude_md",
+      description:
+        "The repository's CLAUDE.md, inlined and capped, for providers that do not load it natively (opencode). Empty otherwise.",
+    },
+    { name: "auto_stashes", description: "Rendered list of pending swarm auto-stashes, or empty." },
+    {
+      name: "guidelines",
+      description:
+        "Rendered Repository Guidelines block (MANDATORY when configured, else the ask-the-lead sentence).",
+    },
+    {
+      name: "code_quality",
+      description: "The code-quality skill pointer, or empty without MCP.",
+    },
+  ],
+  category: "system",
+});
+
+// ============================================================================
 // Scripts-only mode (code-mode). Rewrite deferred; see design section 8.
 // ============================================================================
 
@@ -441,13 +501,26 @@ registerTemplate({
 });
 
 // Managed providers (claude-managed): MCP tools exist, the container and the
-// /workspace mirrors do not. Same contract as a local worker with the remote
-// workspace block.
+// /workspace mirrors do not. Same contracts as the local composites with the
+// remote workspace block.
 registerTemplate({
   eventType: "system.session.worker.managed",
   header: "",
   defaultBody: `{{@template[system.agent.role]}}
 {{@template[system.agent.worker]}}
+{{@template[system.agent.workspace.remote]}}
+{{@template[system.agent.memory]}}
+{{@template[system.agent.communication]}}
+{{@template[system.agent.secrets]}}`,
+  variables: compositeVariables,
+  category: "session",
+});
+
+registerTemplate({
+  eventType: "system.session.lead.managed",
+  header: "",
+  defaultBody: `{{@template[system.agent.role]}}
+{{@template[system.agent.lead]}}
 {{@template[system.agent.workspace.remote]}}
 {{@template[system.agent.memory]}}
 {{@template[system.agent.communication]}}

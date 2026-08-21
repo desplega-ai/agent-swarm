@@ -341,7 +341,8 @@ function describeBranches(variant: Variant, rendered: string): string[] {
 function detectComposite(variant: Variant): string {
   const { traits, role } = variant.args;
   if (!traits?.hasMcp) return "system.session.worker.remote";
-  if (traits.hasLocalEnvironment === false) return "system.session.worker.managed";
+  if (traits.hasLocalEnvironment === false)
+    return role === "lead" ? "system.session.lead.managed" : "system.session.worker.managed";
   return role === "lead" ? "system.session.lead" : "system.session.worker";
 }
 
