@@ -33,6 +33,11 @@ export interface UploadTaskAttachmentInput {
   isPrimary?: boolean;
 }
 
+// Dead-socket guard only. The server owns the real budget (it fails an upload
+// with 504 once the storage provider misses AGENT_FS_REQUEST_TIMEOUT_MS), so
+// this only exists to release a browser request whose socket died silently.
+const UPLOAD_CLIENT_TIMEOUT_MS = 300_000;
+
 function baseUrl(): string {
   const config = getConfig();
   if (import.meta.env.DEV && config.apiUrl === "http://localhost:3013") return "";
@@ -80,14 +85,23 @@ export async function uploadTaskAttachment({
   if (intent) params.set("intent", intent);
   if (description) params.set("description", description);
   if (isPrimary) params.set("isPrimary", "true");
-  const res = await fetch(
-    `${baseUrl()}/api/fs/tasks/${encodeURIComponent(taskId)}/files?${params.toString()}`,
-    {
-      method: "POST",
-      headers: authHeaders({ "Content-Type": file.type || "application/octet-stream" }),
-      body: file,
-    },
-  );
+  let res: Response;
+  try {
+    res = await fetch(
+      `${baseUrl()}/api/fs/tasks/${encodeURIComponent(taskId)}/files?${params.toString()}`,
+      {
+        method: "POST",
+        headers: authHeaders({ "Content-Type": file.type || "application/octet-stream" }),
+        body: file,
+        signal: AbortSignal.timeout(UPLOAD_CLIENT_TIMEOUT_MS),
+      },
+    );
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new Error("Upload timed out after 5 minutes");
+    }
+    throw error;
+  }
   if (!res.ok) throw await parseError(res, "Failed to upload attachment");
   return res.json();
 }

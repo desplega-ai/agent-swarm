@@ -1,5 +1,8 @@
 import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createBunSqliteClient, type DbClient, type DbExecutor } from "../be/db-client";
 
 let raw: Database;
@@ -341,5 +344,63 @@ describe("db-client transactions", () => {
       });
     });
     expect(await followUp).toEqual(["committed"]);
+  });
+});
+
+describe("db-client transactions on a shared WAL file (second connection)", () => {
+  // Mirrors the CI flake behind issue #1228: a test shares one DB file with a
+  // spawned `src/http.ts`, and a read-then-write transaction in one process
+  // raced a commit in the other. A deferred BEGIN fails that lock upgrade
+  // with SQLITE_BUSY_SNAPSHOT ("database is locked"), which busy_timeout
+  // never retries. BEGIN IMMEDIATE takes the write lock up front, so the
+  // other connection cannot commit inside the window at all.
+  let dir: string;
+  let fileDb: Database;
+  let other: Database;
+  let fileClient: DbClient;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "db-client-wal-"));
+    const path = join(dir, "shared.sqlite");
+    fileDb = new Database(path);
+    fileDb.run("PRAGMA journal_mode = WAL;");
+    fileDb.run("PRAGMA busy_timeout = 5000;");
+    fileDb.run("CREATE TABLE counters (id INTEGER PRIMARY KEY, n INTEGER NOT NULL)");
+    fileDb.run("INSERT INTO counters (id, n) VALUES (1, 0)");
+    other = new Database(path);
+    // Fail fast instead of blocking the (single) test thread for 5 s.
+    other.run("PRAGMA busy_timeout = 0;");
+    fileClient = createBunSqliteClient(() => fileDb);
+  });
+
+  afterEach(() => {
+    other.close();
+    fileDb.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("a read-then-write transaction holds the write lock from BEGIN, so no SQLITE_BUSY_SNAPSHOT", async () => {
+    await fileClient.transaction(async (tx) => {
+      const row = await tx.get<{ n: number }>("SELECT n FROM counters WHERE id = 1");
+      expect(row?.n).toBe(0);
+      // With a deferred BEGIN this write would succeed (WAL readers do not
+      // block writers) and the tx.run below would then throw "database is
+      // locked". With BEGIN IMMEDIATE the lock is already ours.
+      expect(() => other.run("UPDATE counters SET n = 100 WHERE id = 1")).toThrow(
+        /database is locked|SQLITE_BUSY/,
+      );
+      await tx.run("UPDATE counters SET n = ? WHERE id = 1", [(row?.n ?? 0) + 1]);
+    });
+    const after = other.query<{ n: number }, []>("SELECT n FROM counters WHERE id = 1").get();
+    expect(after?.n).toBe(1);
+  });
+
+  test("after COMMIT the other connection writes again", async () => {
+    await fileClient.transaction(async (tx) => {
+      await tx.run("UPDATE counters SET n = n + 1 WHERE id = 1");
+    });
+    other.run("UPDATE counters SET n = n + 10 WHERE id = 1");
+    const row = await fileClient.get<{ n: number }>("SELECT n FROM counters WHERE id = 1");
+    expect(row?.n).toBe(11);
   });
 });

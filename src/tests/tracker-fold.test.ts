@@ -35,6 +35,7 @@ import { getJiraAuthorizationUrl } from "../jira/oauth";
 import { getLinearClient, resetLinearClient } from "../linear/client";
 import { getLinearAuthorizationUrl } from "../linear/oauth";
 import { forceRefreshAuthorizationOrThrow, onAuthorizationRefreshed } from "../oauth/ensure-token";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-tracker-fold.sqlite";
 const LEAD_ID = "bbbb9200-0000-4000-8000-000000000001";
@@ -96,13 +97,6 @@ function appDispatcher(): Server {
 
 let appServer: Server;
 let appBase = "";
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind");
-  return address.port;
-}
 
 const savedEnv: Record<string, string | undefined> = {};
 function setEnv(key: string, value: string): void {
@@ -169,7 +163,7 @@ beforeAll(async () => {
   providerBase = `http://localhost:${providerServer.port}`;
 
   appServer = appDispatcher();
-  appBase = `http://localhost:${await listen(appServer)}`;
+  appBase = `http://localhost:${await listenOnFreePort(appServer)}`;
 
   installFetchInterceptor();
 });

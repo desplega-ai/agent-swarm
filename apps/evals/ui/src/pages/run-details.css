@@ -67,8 +67,11 @@
    only .rd-tab-content does — scrolled content can never bleed above the tabs.
    v7.6 §B1: position + z-index make the pane its own stacking context, so the
    transcript stickybar's raised z-index (transcript.css) stays contained and
-   can never paint above the page-level .rd-top sticky header (z-index 10). */
-.rd-right {
+   can never paint above the page-level .rd-top sticky header (z-index 10).
+   Written as a child selector so every .rd-right rule in this file carries the
+   same specificity as the --scroll-col-max rule above (ascending-specificity
+   cascade). The pane is always a direct child of .rd-body. */
+.rd-body > .rd-right {
   position: relative;
   z-index: 0;
   display: flex;
@@ -455,21 +458,9 @@ a.rd-cellsum-row:hover {
   min-width: 0;
 }
 
-.rd-task-blockwrap > .rd-task-copy {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  z-index: 1;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.rd-task-blockwrap:hover > .rd-task-copy,
-.rd-task-blockwrap > .rd-task-copy:focus-visible,
-.rd-task-blockwrap > .rd-task-copy.copied {
-  opacity: 1;
-}
-
+/* Button chrome first, then the wrapper-scoped placement/visibility rules, so
+   .rd-task-copy selectors run in ascending specificity order. The two groups
+   set disjoint properties, so the order carries no cascade meaning. */
 .rd-task-copy {
   background: var(--panel-2);
   border: 1px solid var(--border);
@@ -490,6 +481,21 @@ a.rd-cellsum-row:hover {
 .rd-task-copy.copied {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+.rd-task-blockwrap > .rd-task-copy {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.rd-task-blockwrap:hover > .rd-task-copy,
+.rd-task-blockwrap > .rd-task-copy:focus-visible,
+.rd-task-blockwrap > .rd-task-copy.copied {
+  opacity: 1;
 }
 
 .rd-task-outcome,
@@ -629,10 +635,6 @@ a.rd-cellsum-row:hover {
   background: var(--panel-2);
 }
 
-.wf-row:hover .wf-bar {
-  filter: brightness(1.3);
-}
-
 .wf-label {
   font-size: 11.5px;
   overflow: hidden;
@@ -669,6 +671,12 @@ a.rd-cellsum-row:hover {
   min-width: 3px;
   border-radius: 2px;
   transition: filter 0.12s ease;
+}
+
+/* Row-scoped bar rules stay below the base rule, keeping .wf-bar selectors in
+   ascending specificity order. */
+.wf-row:hover .wf-bar {
+  filter: brightness(1.3);
 }
 
 .wf-row.sub .wf-bar {
@@ -1335,7 +1343,7 @@ a.rd-cellsum-row:hover {
   }
 
   .rd-body > .scroll-col,
-  .rd-right {
+  .rd-body > .rd-right {
     max-height: none;
   }
 

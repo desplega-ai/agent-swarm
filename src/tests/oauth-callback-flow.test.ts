@@ -27,6 +27,7 @@ import { getPathSegments, parseQueryParams } from "../http/utils";
 import { ensureAuthorizationTokenOrThrow } from "../oauth/ensure-token";
 import { captureIdentity } from "../oauth/identity-capture";
 import { buildAuthorizationUrl } from "../oauth/wrapper";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-oauth-callback-flow.sqlite";
 const LEAD_ID = "aaaa9100-0000-4000-8000-000000000001";
@@ -55,13 +56,6 @@ function callbackServer(): Server {
 
 let appServer: Server;
 let appBase = "";
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind");
-  return address.port;
-}
 
 function testApp(provider: string) {
   return {
@@ -131,7 +125,7 @@ beforeAll(async () => {
   providerBase = `http://localhost:${providerServer.port}`;
 
   appServer = callbackServer();
-  appBase = `http://localhost:${await listen(appServer)}`;
+  appBase = `http://localhost:${await listenOnFreePort(appServer)}`;
 });
 
 afterAll(async () => {

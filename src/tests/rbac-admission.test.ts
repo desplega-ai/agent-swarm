@@ -23,6 +23,7 @@ import { handleMcpOAuth } from "../http/mcp-oauth";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { decideAdmission, decideToolAdmission, type PermissionVerb } from "../rbac";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-admission.sqlite";
 const API_KEY = "test-api-key";
@@ -64,13 +65,6 @@ function createTestServer(): Server {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
   });
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 async function closeServer(server: Server | undefined): Promise<void> {
@@ -166,7 +160,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM permission_audit");
 
   server = createTestServer();
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterEach(async () => {

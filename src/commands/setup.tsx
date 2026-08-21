@@ -33,6 +33,12 @@ interface SetupProps {
 
 const BACKUP_FILES = [".claude/settings.local.json", ".mcp.json", ".gitignore"];
 
+/** One appended log line. `id` is a stable per-line identity, usable as a React key. */
+interface LogLine {
+  id: number;
+  text: string;
+}
+
 interface SetupState {
   step: SetupStep;
   token: string;
@@ -40,7 +46,7 @@ interface SetupState {
   existingToken: string;
   existingAgentId: string;
   error: string | null;
-  logs: string[];
+  logs: LogLine[];
   isGitRepo: boolean;
 }
 
@@ -60,10 +66,14 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
   // Track which steps have been executed to prevent duplicates
   const executedSteps = useRef<Set<SetupStep>>(new Set());
 
+  // Monotonic counter, so every log line carries an identity that survives re-renders.
+  const nextLogId = useRef(0);
+
   const addLog = useCallback(
     (log: string, isDryRunAction = false) => {
       const prefix = isDryRunAction && dryRun ? "[DRY-RUN] Would: " : "";
-      setState((s) => ({ ...s, logs: [...s.logs, `${prefix}${log}`] }));
+      const id = nextLogId.current++;
+      setState((s) => ({ ...s, logs: [...s.logs, { id, text: `${prefix}${log}` }] }));
     },
     [dryRun],
   );
@@ -420,9 +430,9 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
     return (
       <Box flexDirection="column" padding={1}>
         <Box flexDirection="column" marginBottom={1}>
-          {state.logs.map((log, i) => (
-            <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-              {log}
+          {state.logs.map((log) => (
+            <Text key={log.id} dimColor>
+              {log.text}
             </Text>
           ))}
         </Box>
@@ -443,9 +453,9 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
     return (
       <Box flexDirection="column" padding={1}>
         <Box flexDirection="column" marginBottom={1}>
-          {state.logs.map((log, i) => (
-            <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-              {log}
+          {state.logs.map((log) => (
+            <Text key={log.id} dimColor>
+              {log.text}
             </Text>
           ))}
         </Box>
@@ -482,9 +492,9 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
     return (
       <Box flexDirection="column" padding={1}>
         <Box flexDirection="column" marginBottom={1}>
-          {state.logs.map((log, i) => (
-            <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-              {log}
+          {state.logs.map((log) => (
+            <Text key={log.id} dimColor>
+              {log.text}
             </Text>
           ))}
         </Box>
@@ -520,9 +530,9 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
     return (
       <Box flexDirection="column" padding={1}>
         <Box flexDirection="column" marginBottom={1}>
-          {state.logs.map((log, i) => (
-            <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-              {log}
+          {state.logs.map((log) => (
+            <Text key={log.id} dimColor>
+              {log.text}
             </Text>
           ))}
         </Box>
@@ -551,9 +561,9 @@ export function Setup({ dryRun = false, restore = false, yes = false }: SetupPro
           </Box>
         )}
         <Box flexDirection="column" marginBottom={1}>
-          {state.logs.map((log, i) => (
-            <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-              {log}
+          {state.logs.map((log) => (
+            <Text key={log.id} dimColor>
+              {log.text}
             </Text>
           ))}
         </Box>

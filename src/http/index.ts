@@ -298,10 +298,6 @@ const httpServer = createHttpServer(async (req, res) => {
     const handleRequest = async () => {
       setCorsHeaders(req, res);
 
-      // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
-      if (await handleCore(req, res, req.headers["x-agent-id"] as string | undefined, apiKey))
-        return;
-
       const queryParams = parseQueryParams(req.url || "");
       const myAgentId = req.headers["x-agent-id"] as string | undefined;
 
@@ -366,6 +362,13 @@ const httpServer = createHttpServer(async (req, res) => {
       ];
 
       try {
+        // ── Core routes (OPTIONS, health, auth, /me, /cancelled-tasks, /ping, /close) ──
+        // Inside the try: handleCore used to run before it, so a throw there
+        // (observed in prod: a BUSY_SNAPSHOT from updateAgentStatus) escaped
+        // the async listener as an unhandled rejection and the client got a
+        // dropped connection instead of a 500.
+        if (await handleCore(req, res, myAgentId, apiKey)) return;
+
         for (const handler of handlers) {
           if (await handler()) return;
         }

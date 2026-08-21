@@ -283,7 +283,8 @@ export function seedPricingFromModelsDev(opts?: { quiet?: boolean }): {
       if (result.changes > 0) inserted += 1;
     }
   });
-  tx(allRows);
+  // BEGIN IMMEDIATE: take the write lock at BEGIN (see DbClient.transaction).
+  tx.immediate(allRows);
 
   if (!opts?.quiet) {
     console.log(

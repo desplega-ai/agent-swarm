@@ -21,6 +21,7 @@ import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { formatAttachmentsBlockForSlack } from "../slack/blocks";
 import { attachmentContentDisposition } from "../utils/content-disposition";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-fs-routes.sqlite";
 const TEST_FS_DIR = "./test-fs-routes-data";
@@ -34,13 +35,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -74,7 +68,7 @@ beforeAll(async () => {
 
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 
   const agent = await createAgent({ name: "fs-route-worker", isLead: false, status: "idle" });
   agentId = agent.id;
@@ -366,5 +360,38 @@ describe("/api/fs REST", () => {
     const block = formatAttachmentsBlockForSlack([local, agentFs]);
     expect(block).toContain(`/api/fs/tasks/${taskId}/files/${local.id}/raw`);
     expect(block).toContain("live.agent-fs.dev/file/~/org_1/drive_1/tasks/x/agent.txt");
+  });
+
+  test("upload against a stalled agent-fs provider answers 504", async () => {
+    // A server that accepts the connection and never answers, i.e. exactly the
+    // stall that used to hang task creation until the socket gave up.
+    const stalled = createHttpServer(() => {});
+    const stalledPort = await listenOnFreePort(stalled);
+
+    process.env.AGENT_FS_API_URL = `http://localhost:${stalledPort}`;
+    process.env.API_AGENT_FS_API_KEY = "af_test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "200";
+    resetFileStorageProviderForTests();
+
+    try {
+      const res = await authedFetch(`/api/fs/tasks/${taskId}/files?name=stalled.txt`, {
+        method: "POST",
+        body: Buffer.from("never lands"),
+        headers: { "Content-Type": "text/plain" },
+      });
+      expect(res.status).toBe(504);
+      expect(((await res.json()) as { error: string }).error).toContain("did not respond");
+      expect(await getTaskAttachments(taskId)).toEqual([]);
+    } finally {
+      delete process.env.AGENT_FS_API_URL;
+      delete process.env.API_AGENT_FS_API_KEY;
+      delete process.env.AGENT_FS_DEFAULT_ORG_ID;
+      delete process.env.AGENT_FS_DEFAULT_DRIVE_ID;
+      delete process.env.AGENT_FS_REQUEST_TIMEOUT_MS;
+      resetFileStorageProviderForTests();
+      await new Promise<void>((resolve) => stalled.close(() => resolve()));
+    }
   });
 });

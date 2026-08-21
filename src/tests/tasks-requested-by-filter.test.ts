@@ -18,6 +18,7 @@ import {
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-tasks-requested-by-filter.sqlite";
 
@@ -113,13 +114,6 @@ async function removeDbFiles(path: string): Promise<void> {
   }
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 function createTestServer(apiKey: string): Server {
   return createHttpServer(async (req: IncomingMessage, res: ServerResponse) => {
     const myAgentId = req.headers["x-agent-id"] as string | undefined;
@@ -153,7 +147,7 @@ describe("GET /api/tasks — requestedByUserId route wiring", () => {
     ).id;
     routeUserId = (await createUser({ name: "Route User", email: "route-user@example.com" })).id;
     server = createTestServer(ROUTE_API_KEY);
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(async () => {

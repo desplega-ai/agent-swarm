@@ -4165,7 +4165,9 @@ export async function moveAssetKey(input: {
   // auditAssetKeys stays sync (shared with the boot audit); run it inside a
   // client transaction so this request-path read cannot observe another
   // request's uncommitted writes on the shared connection.
-  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()));
+  const audit = await getDbClient().transaction(async () => auditAssetKeys(getDb()), {
+    readOnly: true,
+  });
   if (!audit.ok) {
     throw new Error(
       "Asset namespace moves are blocked until structural errors, unknown personal users, or provider mapping drift are repaired.",
@@ -4571,25 +4573,31 @@ export async function hasPendingSteering(taskId: string): Promise<boolean> {
 // ============================================================================
 
 export async function getAgentWithTasks(id: string): Promise<AgentWithTasks | null> {
-  return await getDbClient().transaction(async () => {
-    const agent = await getAgentById(id);
-    if (!agent) return null;
+  return await getDbClient().transaction(
+    async () => {
+      const agent = await getAgentById(id);
+      if (!agent) return null;
 
-    const tasks = await getTasksByAgentId(id);
-    return { ...agent, tasks };
-  });
+      const tasks = await getTasksByAgentId(id);
+      return { ...agent, tasks };
+    },
+    { readOnly: true },
+  );
 }
 
 export async function getAllAgentsWithTasks(opts?: { slim?: boolean }): Promise<AgentWithTasks[]> {
-  return await getDbClient().transaction(async () => {
-    const agents = await getAllAgents({ slim: opts?.slim ?? false });
-    return await Promise.all(
-      agents.map(async (agent) => ({
-        ...agent,
-        tasks: await getTasksByAgentId(agent.id),
-      })),
-    );
-  });
+  return await getDbClient().transaction(
+    async () => {
+      const agents = await getAllAgents({ slim: opts?.slim ?? false });
+      return await Promise.all(
+        agents.map(async (agent) => ({
+          ...agent,
+          tasks: await getTasksByAgentId(agent.id),
+        })),
+      );
+    },
+    { readOnly: true },
+  );
 }
 
 // ============================================================================

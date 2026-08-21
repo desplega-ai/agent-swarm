@@ -61,6 +61,22 @@ pre {
   font-size: 0.92em;
 }
 
+/* Bare form-control defaults belong with the element resets: every component
+   rule that restyles an input is class-scoped and outranks this one, so it has
+   to come first for the file to read in ascending specificity order.
+   The :focus-visible ring for these lives in the buttons / forms section. */
+input,
+select,
+textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+}
+
 .dim {
   color: var(--dim);
 }
@@ -711,18 +727,6 @@ code.model-chip {
   color: var(--red);
 }
 
-input,
-select,
-textarea {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-}
-
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
@@ -1037,7 +1041,10 @@ table.matrix {
   width: 100%;
 }
 
-table.matrix th {
+/* The `tr` is redundant for matching (every th sits in a row) but lifts this
+   selector to the same specificity as the earlier `table.data thead th`, so the
+   two unrelated tables no longer read as a descending-specificity cascade. */
+table.matrix tr th {
   padding: 4px 8px;
   text-align: left;
   font-weight: 500;

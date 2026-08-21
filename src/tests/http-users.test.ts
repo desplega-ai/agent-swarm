@@ -38,6 +38,7 @@ import { fingerprintApiKey, linkIdentity } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleUsers } from "../http/users";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-http-users.sqlite";
 const API_KEY = "test-users-key";
@@ -50,13 +51,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -84,7 +78,7 @@ beforeAll(async () => {
   // operator-actor reads getApiKey() which uses AGENT_SWARM_API_KEY env.
   process.env.AGENT_SWARM_API_KEY = API_KEY;
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

@@ -17,6 +17,7 @@ import { normalizeModelKey } from "../be/pricing-normalize";
 import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-model-key-normalize.sqlite";
 const API_KEY = "test-model-key-normalize";
@@ -29,13 +30,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -66,7 +60,7 @@ beforeAll(async () => {
     status: "idle",
   });
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

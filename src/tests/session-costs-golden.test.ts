@@ -19,6 +19,7 @@ import { handleCore } from "../http/core";
 import { handleSessionData } from "../http/session-data";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import type { PricingProvider, PricingTokenClass } from "../types";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-session-costs-golden.sqlite";
 const API_KEY = "test-session-costs-golden";
@@ -34,13 +35,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("no port");
-  return address.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -91,7 +85,7 @@ beforeAll(async () => {
   seedPricingFromModelsDev({ quiet: true });
   agentId = (await createAgent({ name: "session-cost-golden", isLead: false, status: "idle" })).id;
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

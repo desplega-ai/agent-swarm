@@ -7,6 +7,7 @@ import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
@@ -25,17 +26,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-function listen(server: Server): Promise<number> {
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") reject(new Error("No server address"));
-      else resolve(address.port);
-    });
-  });
 }
 
 function closeServer(server: Server): Promise<void> {
@@ -110,7 +100,7 @@ beforeAll(async () => {
       res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
     });
   });
-  const port = await listen(server);
+  const port = await listenOnFreePort(server, "127.0.0.1");
   baseUrl = `http://127.0.0.1:${port}`;
   process.env.MCP_BASE_URL = baseUrl;
 });

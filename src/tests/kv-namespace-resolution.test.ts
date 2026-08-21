@@ -14,6 +14,7 @@ import { handleCore } from "../http/core";
 import { handleKv } from "../http/kv";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { githubContextKey, linearContextKey, slackContextKey } from "../tasks/context-key";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-kv-ns-resolution.sqlite";
 const API_KEY = "test-kv-ns-key";
@@ -26,13 +27,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 let server: Server;
@@ -53,7 +47,7 @@ beforeAll(async () => {
       res.end("Not Found");
     }
   });
-  port = await listen(server);
+  port = await listenOnFreePort(server);
   const a = await createAgent({ name: "kv-ns-test", isLead: false, status: "idle" });
   agentId = a.id;
 });

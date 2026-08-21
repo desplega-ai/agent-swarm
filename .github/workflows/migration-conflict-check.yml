@@ -9,6 +9,9 @@ jobs:
   migration-conflict:
     name: Migration Conflict Check
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository

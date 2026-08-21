@@ -1,16 +1,30 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   AgentFsProvider,
+  agentFsUploadTimeoutMs,
   FilesError,
   LocalFsProvider,
+  normalizeFilesError,
   resetFileStorageProviderForTests,
   selectProvider,
 } from "../fs";
 
 const originalEnv = { ...process.env };
+
+// Stands in for a provider that accepts the connection and never answers: the
+// promise only settles when the provider's own AbortController fires.
+const hangingFetch = ((_url: string | URL | Request, init?: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => {
+      const aborted = new Error("The operation was aborted.");
+      aborted.name = "AbortError";
+      reject(aborted);
+    });
+  })) as unknown as typeof fetch;
+
 const partialAgentFsScopeError = {
   code: "Provider",
   status: 400,
@@ -394,6 +408,96 @@ describe("AgentFsProvider", () => {
           driveId: "",
         }),
     ).toThrow(FilesError);
+  });
+
+  test("upload aborts with a Timeout error once the deadline passes", async () => {
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "50";
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "org-1",
+      driveId: "drive-1",
+      fetchImpl: hangingFetch,
+    });
+
+    const startedAt = performance.now();
+    await expect(
+      provider.upload({ taskId: "task-1", name: "file.bin" }, new Uint8Array([1, 2, 3])),
+    ).rejects.toMatchObject({ code: "Timeout" });
+    expect(performance.now() - startedAt).toBeLessThan(1000);
+  });
+
+  test("ops calls abort with a Timeout error once the deadline passes", async () => {
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "50";
+    const provider = new AgentFsProvider({
+      apiUrl: "http://agent-fs.test",
+      apiKey: "af_test",
+      orgId: "org-1",
+      driveId: "drive-1",
+      fetchImpl: hangingFetch,
+    });
+
+    const startedAt = performance.now();
+    await expect(provider.delete({ taskId: "task-1", name: "file.bin" })).rejects.toMatchObject({
+      code: "Timeout",
+      message: "agent-fs did not respond within 50 ms",
+    });
+    expect(performance.now() - startedAt).toBeLessThan(1000);
+  });
+
+  test("a request that settles clears its deadline timer", async () => {
+    const clearSpy = spyOn(globalThis, "clearTimeout");
+    try {
+      const provider = new AgentFsProvider({
+        apiUrl: "http://agent-fs.test",
+        apiKey: "af_test",
+        orgId: "org-1",
+        driveId: "drive-1",
+        fetchImpl: (async () => Response.json({ version: 3 })) as typeof fetch,
+      });
+
+      const result = await provider.upload(
+        { taskId: "task-1", name: "file.bin" },
+        new Uint8Array([1]),
+      );
+
+      expect(result.version).toBe("3");
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      clearSpy.mockRestore();
+    }
+  });
+});
+
+describe("agentFsUploadTimeoutMs", () => {
+  test("adds a size allowance of one ms per 256 bytes on top of the base deadline", () => {
+    delete process.env.AGENT_FS_REQUEST_TIMEOUT_MS;
+    expect(agentFsUploadTimeoutMs(0)).toBe(20_000);
+    expect(agentFsUploadTimeoutMs(300_000)).toBe(20_000 + 1172);
+    expect(agentFsUploadTimeoutMs(50 * 1024 * 1024)).toBe(20_000 + 204_800);
+  });
+
+  test("honours AGENT_FS_REQUEST_TIMEOUT_MS and ignores unusable values", () => {
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "5000";
+    expect(agentFsUploadTimeoutMs(0)).toBe(5_000);
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "not-a-number";
+    expect(agentFsUploadTimeoutMs(0)).toBe(20_000);
+    process.env.AGENT_FS_REQUEST_TIMEOUT_MS = "0";
+    expect(agentFsUploadTimeoutMs(0)).toBe(20_000);
+  });
+});
+
+describe("normalizeFilesError", () => {
+  test("maps abort and timeout errors to the Timeout code", () => {
+    for (const name of ["AbortError", "TimeoutError"]) {
+      const error = new Error("The operation timed out.");
+      error.name = name;
+      expect(normalizeFilesError(error)).toMatchObject({ code: "Timeout" });
+    }
+  });
+
+  test("keeps other errors on the Provider code", () => {
+    expect(normalizeFilesError(new Error("socket closed"))).toMatchObject({ code: "Provider" });
   });
 });
 

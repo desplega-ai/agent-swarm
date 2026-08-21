@@ -22,6 +22,12 @@ export type OnboardStep =
   | "done"
   | "error";
 
+/** One appended log line. `id` is a stable per-line identity, usable as a React key. */
+export interface LogLine {
+  id: number;
+  text: string;
+}
+
 export interface OnboardState {
   step: OnboardStep;
   deployType: "local" | "remote";
@@ -52,7 +58,7 @@ export interface OnboardState {
   outputDir: string;
   nonInteractive: boolean;
   error: string | null;
-  logs: string[];
+  logs: LogLine[];
 }
 
 export interface ServiceEntry {

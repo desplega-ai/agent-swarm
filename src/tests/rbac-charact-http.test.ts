@@ -46,6 +46,7 @@ import { resetFileStorageProviderForTests } from "../fs/registry";
 import { handleCore } from "../http/core";
 import { handleFs } from "../http/fs";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-rbac-charact-http.sqlite";
 const TEST_FS_DIR = "./test-rbac-charact-http-data";
@@ -60,13 +61,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 // Full production pipeline: auth via handleCore, then handleFs
@@ -124,9 +118,9 @@ beforeAll(async () => {
 
   initDb(TEST_DB_PATH);
   pipelineServer = createPipelineServer(API_KEY);
-  pipelinePort = await listen(pipelineServer);
+  pipelinePort = await listenOnFreePort(pipelineServer);
   bareServer = createNoAuthContextServer();
-  barePort = await listen(bareServer);
+  barePort = await listenOnFreePort(bareServer);
 
   assigneeId = (await createAgent({ name: "rbac-fs-assignee", isLead: false, status: "idle" })).id;
   creatorId = (await createAgent({ name: "rbac-fs-creator", isLead: false, status: "idle" })).id;

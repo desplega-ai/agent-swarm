@@ -9,6 +9,7 @@ import {
 import { closeDb, createAgent, initDb, upsertSwarmConfig } from "../be/db";
 import { handleConfig } from "../http/config";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 // Regression guard for the agent-fs bootstrap-key leak (PR #850 review): the
 // API-owned API_AGENT_FS_API_KEY must never be handed out over /api/config
@@ -29,13 +30,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 let server: Server;
@@ -72,7 +66,7 @@ beforeAll(async () => {
       res.end("Not Found");
     }
   });
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

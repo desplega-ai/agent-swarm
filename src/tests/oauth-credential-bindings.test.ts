@@ -25,6 +25,7 @@ import { handleGenericOAuth } from "../http/oauth-generic";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { _clearPendingStates, buildAuthorizationUrl } from "../oauth/wrapper";
 import { registerCredentialBindingsTool } from "../tools/credential-bindings";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-oauth-credential-bindings.sqlite";
 const LEAD_ID = "aaaa9000-0000-4000-8000-000000000001";
@@ -89,13 +90,6 @@ function createOAuthServer(): Server {
       res.end("not found");
     }
   });
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind");
-  return address.port;
 }
 
 async function cleanupRows(): Promise<void> {
@@ -480,7 +474,7 @@ describe("OAuth credential bindings", () => {
     }) as typeof fetch;
 
     const server = createOAuthServer();
-    const port = await listen(server);
+    const port = await listenOnFreePort(server);
     try {
       const res = await fetch(
         `http://localhost:${port}/api/oauth/${provider}/callback?code=callback-code&state=${state}`,
@@ -501,7 +495,7 @@ describe("OAuth credential bindings", () => {
     // provider routes through the unified, state-keyed handler. An unknown
     // state now reports the same invalid-state error as any other provider.
     const server = createOAuthServer();
-    const port = await listen(server);
+    const port = await listenOnFreePort(server);
     try {
       const res = await fetch(
         `http://localhost:${port}/api/oauth/linear/callback?code=callback-code&state=unknown-state`,

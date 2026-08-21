@@ -18,6 +18,7 @@ import { type IdentityActor, mintToken, revokeToken } from "../be/users";
 import { handleCore } from "../http/core";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-user-token-rest-auth.sqlite";
 const API_KEY = "test-api-key";
@@ -37,13 +38,6 @@ function createTestServer(): Server {
   });
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 function cleanupDb() {
   for (const suffix of ["", "-wal", "-shm"]) {
     try {
@@ -61,7 +55,7 @@ describe("normal REST API user-bound token auth", () => {
     initDb(TEST_DB_PATH);
     await createAgent({ name: "Lead", isLead: true, status: "idle" });
     server = createTestServer();
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(() => {

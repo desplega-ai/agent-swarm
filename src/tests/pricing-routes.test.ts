@@ -17,6 +17,7 @@ import { handleCore } from "../http/core";
 import { handlePricing } from "../http/pricing";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { CODEX_MODEL_PRICING } from "../providers/codex-models";
+import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-pricing-routes.sqlite";
 const API_KEY = "test-pricing-secret-key";
@@ -29,13 +30,6 @@ async function removeDbFiles(path: string): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
-}
-
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
 }
 
 function createTestServer(apiKey: string): Server {
@@ -60,7 +54,7 @@ beforeAll(async () => {
   await removeDbFiles(TEST_DB_PATH);
   initDb(TEST_DB_PATH);
   server = createTestServer(API_KEY);
-  port = await listen(server);
+  port = await listenOnFreePort(server);
 });
 
 afterAll(async () => {

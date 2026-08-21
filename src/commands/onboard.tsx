@@ -26,6 +26,7 @@ import { StartStep } from "./onboard/steps/start.tsx";
 import {
   getStepProgress,
   INITIAL_STATE,
+  type LogLine,
   nextStep,
   type OnboardProps,
   type OnboardState,
@@ -78,10 +79,14 @@ export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
 
   const executedSteps = useRef<Set<OnboardStep>>(new Set());
 
+  // Monotonic counter, so every log line carries an identity that survives re-renders.
+  const nextLogId = useRef(0);
+
   const addLog = useCallback(
     (log: string, isDryRunAction = false) => {
       const prefix = isDryRunAction && dryRun ? "[DRY-RUN] Would: " : "";
-      setState((s) => ({ ...s, logs: [...s.logs, `${prefix}${log}`] }));
+      const id = nextLogId.current++;
+      setState((s) => ({ ...s, logs: [...s.logs, { id, text: `${prefix}${log}` }] }));
     },
     [dryRun],
   );
@@ -414,13 +419,13 @@ function ProgressIndicator({ step, dryRun }: { step: OnboardStep; dryRun: boolea
   );
 }
 
-function Logs({ logs }: { logs: string[] }) {
+function Logs({ logs }: { logs: LogLine[] }) {
   if (logs.length === 0) return null;
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {logs.map((log, i) => (
-        <Text key={`log-${i}-${log.slice(0, 20)}`} dimColor>
-          {log}
+      {logs.map((log) => (
+        <Text key={log.id} dimColor>
+          {log.text}
         </Text>
       ))}
     </Box>

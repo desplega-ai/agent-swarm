@@ -13,6 +13,7 @@ import "../http/webhooks";
 import "../http/mcp-oauth";
 import "../http/trackers/linear";
 import "../http/workflows";
+import { listenOnFreePort } from "./test-net";
 
 const API_KEY = "test-secret-key";
 
@@ -27,20 +28,13 @@ function createTestServer(apiKey: string): Server {
   });
 }
 
-async function listen(server: Server): Promise<number> {
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  if (!addr || typeof addr === "string") throw new Error("no port");
-  return addr.port;
-}
-
 describe("handleCore auth middleware (route() auth.apiKey=false is honored)", () => {
   let server: Server;
   let port: number;
 
   beforeAll(async () => {
     server = createTestServer(API_KEY);
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(() => {
@@ -128,7 +122,7 @@ describe("handleCore auth middleware (no API_KEY configured)", () => {
 
   beforeAll(async () => {
     server = createTestServer(""); // empty == auth disabled
-    port = await listen(server);
+    port = await listenOnFreePort(server);
   });
 
   afterAll(() => {
