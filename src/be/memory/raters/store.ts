@@ -170,7 +170,14 @@ export function applyRating(
     return { applied, lateRejects, appliedEvents };
   });
 
-  const { applied, lateRejects, appliedEvents } = applyTx();
+  // BEGIN IMMEDIATE: the transaction reads (`checkExists`) before it writes. A
+  // deferred BEGIN would take a read snapshot first, and if another connection
+  // commits before the first write, SQLite fails the upgrade with
+  // SQLITE_BUSY_SNAPSHOT, which busy_timeout does not retry ("database is
+  // locked"). Taking the write lock up front waits on busy_timeout instead.
+  // Only reachable with more than one connection on the file (tests that
+  // spawn src/http.ts on the same DB); harmless for the single-process API.
+  const { applied, lateRejects, appliedEvents } = applyTx.immediate();
 
   // Business-use instrumentation — emit ONE `memory_rated` event in the `task`
   // flow per applied rating. Placed OUTSIDE the transaction (per CLAUDE.md BU
