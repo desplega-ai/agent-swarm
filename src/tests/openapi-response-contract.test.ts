@@ -3,9 +3,7 @@ import type { ServerResponse } from "node:http";
 import { z } from "zod";
 import { auditRouteResponses } from "../../scripts/check-openapi-response-coverage";
 import { route } from "../http/route-def";
-
-/** Hard ceiling for the spawned `bun -e` probe below. */
-const PROBE_TIMEOUT_MS = 30_000;
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -66,10 +64,16 @@ describe("route handle respond()", () => {
     expect(captured.status).toBeUndefined();
   });
 
-  test("validation is OFF when NODE_ENV is unset (production posture): invalid payload still sends", () => {
-    // VALIDATE_RESPONSES is baked at module load, so probe in a subprocess
-    // with a production-like env (NODE_ENV deliberately unset on deploys).
-    const probe = `
+  // Spawns a second `bun` (boot + transpile of the route-def import graph).
+  // Under --parallel=4 on a 4-vCPU runner that alone can take several seconds,
+  // so the test gets its own budget, and the child gets a hard timeout so a
+  // hung spawn fails with a clear signal instead of the suite's 10 s default.
+  test(
+    "validation is OFF when NODE_ENV is unset (production posture): invalid payload still sends",
+    async () => {
+      // VALIDATE_RESPONSES is baked at module load, so probe in a subprocess
+      // with a production-like env (NODE_ENV deliberately unset on deploys).
+      const probe = `
       import { z } from "zod";
       import { route } from "${import.meta.dir}/../http/route-def";
       const r = route({
@@ -80,20 +84,18 @@ describe("route handle respond()", () => {
       r.respond({ writeHead(s) { status = s; return this; }, end(b) { body = b; return this; } }, 200, { n: "not-a-number" });
       console.log(JSON.stringify({ status, body }));
     `;
-    const env = { ...process.env };
-    delete env.NODE_ENV;
-    delete env.VALIDATE_HTTP_RESPONSES;
-    const proc = Bun.spawnSync(["bun", "-e", probe], { env });
-    expect(proc.exitCode).toBe(0);
-    const out = JSON.parse(proc.stdout.toString().trim());
-    expect(out.status).toBe(200);
-    expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
-  });
+      const env = { ...process.env };
+      delete env.NODE_ENV;
+      delete env.VALIDATE_HTTP_RESPONSES;
+      const result = await runChild(["bun", "-e", probe], { env });
+      expectChildOk(result, "NODE_ENV-unset probe");
+      const out = JSON.parse(result.stdout.trim());
+      expect(out.status).toBe(200);
+      expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
-  // Spawns a second `bun` (boot + transpile of the route-def import graph).
-  // Under --parallel=4 on a 4-vCPU runner that alone can take several seconds,
-  // so the test gets its own budget, and the child gets a hard timeout so a
-  // hung spawn fails with a clear signal instead of the suite's 10 s default.
   test(
     "fail-open: gate armed outside tests logs the violation and still sends",
     async () => {
@@ -112,30 +114,14 @@ describe("route handle respond()", () => {
       console.log(JSON.stringify({ status, body }));
     `;
       const env = { ...process.env, NODE_ENV: "production", VALIDATE_HTTP_RESPONSES: "true" };
-      const proc = Bun.spawn(["bun", "-e", probe], {
-        env,
-        stdout: "pipe",
-        stderr: "pipe",
-        timeout: PROBE_TIMEOUT_MS,
-        killSignal: "SIGKILL",
-      });
-      const [stdout, stderr, exitCode] = await Promise.all([
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-        proc.exited,
-      ]);
-      if (exitCode !== 0) {
-        const why = proc.signalCode
-          ? `signal ${proc.signalCode} (timeout ${PROBE_TIMEOUT_MS} ms?)`
-          : "";
-        throw new Error(`probe failed (exit ${exitCode}) ${why}: ${stderr}`);
-      }
-      const out = JSON.parse(stdout.trim());
+      const result = await runChild(["bun", "-e", probe], { env });
+      expectChildOk(result, "fail-open probe");
+      const out = JSON.parse(result.stdout.trim());
       expect(out.status).toBe(200);
       expect(out.body).toBe(JSON.stringify({ n: "not-a-number" }));
-      expect(stderr).toContain("Response schema violation");
+      expect(result.stderr).toContain("Response schema violation");
     },
-    PROBE_TIMEOUT_MS + 5_000,
+    CHILD_PROCESS_TEST_BUDGET_MS,
   );
 });
 

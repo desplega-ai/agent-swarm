@@ -194,10 +194,18 @@ describe("script workflow runtime", () => {
   test.skipIf(process.platform === "darwin")(
     "resource ulimits actually apply to the durable run's process tree",
     async () => {
+      // Async Bun.spawn on purpose: scripts/check-test-spawn-sync.sh greps
+      // src/tests/ for a synchronous spawn call (Bun's sync variant, invoked
+      // with its trailing parenthesis), and that includes text inside a
+      // source string like this one that the script runtime executes in its
+      // own sandboxed subprocess. The ulimit is applied to that whole process
+      // tree regardless of how the probe spawns its own child, so an async
+      // spawn verifies the same thing without needing a gate exception.
       const source = `
       export default async function main() {
-        const proc = Bun.spawnSync(["sh", "-c", "ulimit -v"]);
-        const out = new TextDecoder().decode(proc.stdout).trim();
+        const proc = Bun.spawn(["sh", "-c", "ulimit -v"], { stdout: "pipe" });
+        const out = (await new Response(proc.stdout).text()).trim();
+        await proc.exited;
         return { ulimitV: out };
       }
     `;

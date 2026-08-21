@@ -10,6 +10,7 @@ import {
   sandboxSpawnEnv,
   snapshotCapped,
 } from "../utils/sandboxed-process";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const TEST_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: "/tmp" };
 
@@ -100,17 +101,21 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
     expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
   });
 
-  test("the raised profile starts a shell-wrapped Bun process with real nproc enforcement", () => {
-    const result = Bun.spawnSync(
-      buildSandboxedCommand(
-        ["bash", "-c", "bun -e 'console.log(JSON.stringify({ started: true }))'"],
-        TEST_ENV,
-      ),
-      { env: sandboxSpawnEnv(TEST_ENV) },
-    );
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout.toString())).toEqual({ started: true });
-  });
+  test(
+    "the raised profile starts a shell-wrapped Bun process with real nproc enforcement",
+    async () => {
+      const result = await runChild(
+        buildSandboxedCommand(
+          ["bash", "-c", "bun -e 'console.log(JSON.stringify({ started: true }))'"],
+          TEST_ENV,
+        ),
+        { env: sandboxSpawnEnv(TEST_ENV) },
+      );
+      expectChildOk(result, "sandboxed bun -e probe");
+      expect(JSON.parse(result.stdout)).toEqual({ started: true });
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 });
 
 // ─── readStreamCapped / snapshotCapped (Codex PRRT_kwDOQr3Tmc6XCRuy — deadline snapshot) ──

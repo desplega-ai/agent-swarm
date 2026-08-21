@@ -5,6 +5,7 @@ import {
   resolveCodexHookConfig,
 } from "../hooks/codex-hook";
 import type { SteeringMessage } from "../types";
+import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const config: CodexHookConfig = {
   apiUrl: "http://steering.test",
@@ -66,25 +67,22 @@ afterAll(() => {
 });
 
 describe("codex steering hook", () => {
-  test("standalone hook rendering loads the delivery template defaults", async () => {
-    const steeringMessageId = crypto.randomUUID();
-    const moduleUrl = new URL("../prompts/steering-delivery.ts", import.meta.url).href;
-    const script = [
-      `import { renderSteeringDelivery } from ${JSON.stringify(moduleUrl)};`,
-      `console.log(await renderSteeringDelivery(${JSON.stringify(steeringMessageId)}, "change course now"));`,
-    ].join("\n");
-    const subprocess = Bun.spawn([process.execPath, "-e", script], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [exitCode, stdout] = await Promise.all([
-      subprocess.exited,
-      new Response(subprocess.stdout).text(),
-    ]);
+  test(
+    "standalone hook rendering loads the delivery template defaults",
+    async () => {
+      const steeringMessageId = crypto.randomUUID();
+      const moduleUrl = new URL("../prompts/steering-delivery.ts", import.meta.url).href;
+      const script = [
+        `import { renderSteeringDelivery } from ${JSON.stringify(moduleUrl)};`,
+        `console.log(await renderSteeringDelivery(${JSON.stringify(steeringMessageId)}, "change course now"));`,
+      ].join("\n");
+      const result = await runChild([process.execPath, "-e", script]);
+      expectChildOk(result, "steering-delivery render probe");
 
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain(`[steering ${steeringMessageId}]`);
-  });
+      expect(result.stdout).toContain(`[steering ${steeringMessageId}]`);
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
 
   test("PostToolUse injects the envelope and marks the row delivered first", async () => {
     const pending = message();
