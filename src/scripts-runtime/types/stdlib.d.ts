@@ -117,6 +117,7 @@ declare module "swarm-sdk" {
       taskId: string;
       delayMs?: number;
       runAt?: string;
+      summary: string;
       note: string;
       checks?: string[];
     }): Promise<unknown>;

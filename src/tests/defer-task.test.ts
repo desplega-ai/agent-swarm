@@ -30,6 +30,9 @@ const TEST_DB_PATH = "./test-defer-task.sqlite";
 
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
+  // The handler is the raw callback: calling it directly bypasses the SDK's
+  // zod validation, so input-schema assertions go through this field.
+  inputSchema: { safeParse: (value: unknown) => { success: boolean } };
 };
 
 type DeferTaskResult = {
@@ -123,6 +126,8 @@ describe("defer-task handler", () => {
     );
   }
 
+  const SUMMARY = "pushed the config change and kicked off deploy 42";
+
   test("delayMs path: completes the task and books a one-off wake-up schedule", async () => {
     const task = await startedTask("wait for the deploy to finish");
     const before = Date.now();
@@ -131,6 +136,7 @@ describe("defer-task handler", () => {
       {
         taskId: task.id,
         delayMs: 1_800_000,
+        summary: SUMMARY,
         note: "deploy 42 is still running",
         checks: ["deploy 42 status is green", "smoke tests pass"],
       },
@@ -157,6 +163,8 @@ describe("defer-task handler", () => {
     expect(schedule.modelTier).toBe("smart");
     expect(schedule.taskTemplate).toContain(`Resume task ${task.id}`);
     expect(schedule.taskTemplate).toContain("- deploy 42 status is green");
+    // The wake-up run reads the summary through the parent task's context.
+    expect(schedule.taskTemplate).not.toContain(SUMMARY);
 
     // nextRunAt ≈ now + delay (generous window; the handler stamps its own now)
     const nextRunMs = new Date(schedule.nextRunAt!).getTime();
@@ -166,8 +174,12 @@ describe("defer-task handler", () => {
 
     const stored = await getTaskById(task.id);
     expect(stored?.status).toBe("completed");
-    expect(stored?.output).toContain("deploy 42 is still running");
+    // Summary first, then the deferral status line, then the checks.
+    expect(stored?.output?.startsWith(`${SUMMARY}\n\n`)).toBe(true);
+    expect(stored?.output).toContain("Pending: deploy 42 is still running");
+    expect(stored?.output).toContain(schedule.nextRunAt!);
     expect(stored?.output).toContain(schedule.id);
+    expect(stored?.output).toContain("- smoke tests pass");
   });
 
   test("runAt path is honoured verbatim", async () => {
@@ -175,7 +187,12 @@ describe("defer-task handler", () => {
     const runAt = new Date(Date.now() + 7_200_000).toISOString();
 
     const result = (await buildTool().handler(
-      { taskId: task.id, runAt, note: "waiting on the customer reply" },
+      {
+        taskId: task.id,
+        runAt,
+        summary: "asked the customer",
+        note: "waiting on the customer reply",
+      },
       meta(),
     )) as DeferTaskResult;
 
@@ -195,6 +212,7 @@ describe("defer-task handler", () => {
         taskId: both.id,
         delayMs: 60_000,
         runAt: new Date(Date.now() + 60_000).toISOString(),
+        summary: "did some work",
         note: "pending",
       },
       meta(),
@@ -206,7 +224,7 @@ describe("defer-task handler", () => {
 
     const neither = await startedTask("no timing");
     const neitherResult = (await buildTool().handler(
-      { taskId: neither.id, note: "pending" },
+      { taskId: neither.id, summary: "did some work", note: "pending" },
       meta(),
     )) as DeferTaskResult;
     expect(neitherResult.structuredContent.success).toBe(false);
@@ -220,7 +238,7 @@ describe("defer-task handler", () => {
     await completeTask(task.id, "finished");
 
     const result = (await buildTool().handler(
-      { taskId: task.id, delayMs: 60_000, note: "pending" },
+      { taskId: task.id, delayMs: 60_000, summary: "did some work", note: "pending" },
       meta(),
     )) as DeferTaskResult;
 
@@ -233,7 +251,7 @@ describe("defer-task handler", () => {
     const task = await startedTask("not yours", otherAgentId);
 
     const result = (await buildTool().handler(
-      { taskId: task.id, delayMs: 60_000, note: "pending" },
+      { taskId: task.id, delayMs: 60_000, summary: "did some work", note: "pending" },
       meta(),
     )) as DeferTaskResult;
 
@@ -243,9 +261,17 @@ describe("defer-task handler", () => {
     expect((await getTaskById(task.id))?.status).toBe("in_progress");
   });
 
+  test("summary is required by the input schema", () => {
+    const schema = buildTool().inputSchema;
+    const base = { taskId: crypto.randomUUID(), delayMs: 60_000, note: "pending" };
+    expect(schema.safeParse(base).success).toBe(false);
+    expect(schema.safeParse({ ...base, summary: "" }).success).toBe(false);
+    expect(schema.safeParse({ ...base, summary: SUMMARY }).success).toBe(true);
+  });
+
   test("an unknown task is refused", async () => {
     const result = (await buildTool().handler(
-      { taskId: crypto.randomUUID(), delayMs: 60_000, note: "pending" },
+      { taskId: crypto.randomUUID(), delayMs: 60_000, summary: "did some work", note: "pending" },
       meta(),
     )) as DeferTaskResult;
 

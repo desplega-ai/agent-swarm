@@ -43,7 +43,7 @@ Tasks created by a schedule are automatic tasks. Their completed output is not s
 
 ## Check back later
 
-A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt` and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.
+A task whose answer needs time (a build, a deploy, a reply) calls `defer-task` with `delayMs` or `runAt`, a `summary` of what you did so far, and a `note` that says what is pending. The tool completes the task and creates the one-off schedule for you. The task reaches its final state (`completed`) on this call, and the `summary` becomes its output. The wake-up task carries the deferred task as its parent, so you receive that task's context. Add `checks` to list what to verify on wake-up. Do not hand-roll this with `create-schedule`.
 
 ## Secrets
 

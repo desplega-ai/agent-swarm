@@ -544,7 +544,7 @@ See [Scheduled Tasks](/docs/concepts/scheduling) for details.
 
 Complete the current task now and wake up later to continue it. Use it when the result needs time: a build, a deploy, a reply.
 
-Pass `taskId`, one of `delayMs` or `runAt`, a `note` that says what is pending, and optional `checks` to verify on wake-up. The tool completes the task with a deferral note and creates a one-off schedule that targets you. The task that schedule creates carries the deferred task as its `parentTaskId`, so the wake-up run receives the deferred task's context. There is no new task status: the schedule row is the state. Do not hand-roll this with `create-schedule`.
+Pass `taskId`, one of `delayMs` or `runAt`, a `summary` of what you did and where things stand, a `note` that says what is pending, and optional `checks` to verify on wake-up. The task reaches its final state (`completed`) on this call. The tool stores the `summary` followed by the deferral note as the task output, and creates a one-off schedule that targets you. The task that schedule creates carries the deferred task as its `parentTaskId`, so the wake-up run receives the deferred task's context. There is no new task status: the schedule row is the state. Do not hand-roll this with `create-schedule`.
 
 ## Workflow Tools
 

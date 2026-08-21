@@ -915,13 +915,14 @@ Create a new scheduled task. For recurring: provide cronExpression or intervalMs
 
 **Defer Task**
 
-Complete the current task now and wake up later to continue it. Use when the result needs time: a build, a deploy, a reply. Creates a one-off schedule for yourself; the wake-up task carries this task as its parent. Provide delayMs or runAt, and a note that says what is pending and what to check.
+Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `taskId` | `string` | Yes | - | The ID of the task you are working on. |
 | `delayMs` | `number` | No | - | Wake up after this many milliseconds (e.g. 1800000 for 30 min). |
 | `runAt` | `string` | No | - | Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future. |
+| `summary` | `string` | Yes | - | What you did so far and where things stand. This becomes the task's output; the lead and your wake-up run both read it. |
 | `note` | `string` | Yes | - | What is pending, and what to check on wake-up. |
 | `checks` | `array` | No | - | Concrete things to verify on wake-up, one per entry. |
 

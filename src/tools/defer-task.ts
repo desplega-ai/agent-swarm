@@ -28,7 +28,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
       title: "Defer Task",
       annotations: { destructiveHint: false, idempotentHint: false },
       description:
-        "Complete the current task now and wake up later to continue it. Use when the result needs time: a build, a deploy, a reply. Creates a one-off schedule for yourself; the wake-up task carries this task as its parent. Provide delayMs or runAt, and a note that says what is pending and what to check.",
+        "Completes this task now with status `completed` and books a wake-up for you. Use when the result needs time: a build, a deploy, a reply. The task reaches its final state on this call; the lead sees your summary as its output. A one-off schedule wakes you up later with a child task that carries this task as its parent. Provide delayMs or runAt, a summary of what you did, and a note that says what is pending and what to check.",
       inputSchema: z.object({
         taskId: z.string().describe("The ID of the task you are working on."),
         delayMs: z
@@ -42,6 +42,13 @@ export const registerDeferTaskTool = (server: McpServer) => {
           .datetime()
           .optional()
           .describe("Wake up at this ISO datetime (e.g. '2026-03-06T15:00:00Z'). Must be future."),
+        summary: z
+          .string()
+          .min(1)
+          .max(4000)
+          .describe(
+            "What you did so far and where things stand. This becomes the task's output; the lead and your wake-up run both read it.",
+          ),
         note: z
           .string()
           .min(1)
@@ -60,7 +67,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
         nextRunAt: z.string().optional(),
       }),
     },
-    async ({ taskId, delayMs, runAt, note, checks }, requestInfo, _meta) => {
+    async ({ taskId, delayMs, runAt, summary, note, checks }, requestInfo, _meta) => {
       if (!requestInfo.agentId) {
         return toolErr('Agent ID not found. Set the "X-Agent-ID" header.');
       }
@@ -126,7 +133,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
             createdBy,
           });
 
-          const output = `Deferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
+          const output = `${summary}\n\nDeferred until ${nextRunAt} (schedule ${schedule.id}). Pending: ${note}${checksBlock}`;
 
           // Deliberately NOT running `getTaskOutputValidationError`: a deferral
           // note is a status line about pending work, not the task's structured
@@ -169,7 +176,7 @@ export const registerDeferTaskTool = (server: McpServer) => {
         });
 
         return toolOk(
-          `Task ${taskId} deferred. Wake-up at ${nextRunAt} (schedule ${committed.scheduleId}).`,
+          `Task ${taskId} completed and deferred. Wake-up at ${nextRunAt} (schedule ${committed.scheduleId}). This task is final; the wake-up task continues the work.`,
           {
             data: {
               yourAgentId: requestInfo.agentId,
