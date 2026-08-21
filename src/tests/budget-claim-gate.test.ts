@@ -157,6 +157,7 @@ describe("Phase 3 — /api/poll budget admission gate", () => {
     if ("error" in body) throw new Error("unexpected error response");
     expect(body.trigger?.type).toBe("task_assigned");
     expect(body.trigger?.requestedBy).toEqual({
+      id: requester.id,
       name: "Requester One",
       email: "requester@example.com",
       role: "engineering manager",
