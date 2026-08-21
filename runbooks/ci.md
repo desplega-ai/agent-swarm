@@ -99,6 +99,10 @@ docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worke
 
 `package.json` `packageManager` is the single source of truth. Bump it, then `bun run check:bun-version` tells you which Dockerfile pins to update; run `bun install --frozen-lockfile` on the new runtime to confirm it still accepts `bun.lock` (a lockfile-format change would surface here) and commit everything together. CI and the Docker images run exactly that version. `engines.bun` stays at the runtime floor the shipped CLI needs (`>=1.3.12`, text imports); `bun test --timings` / `--update-timings` and `bun pm licenses` are 1.4-only and only run in CI.
 
+## GITHUB_TOKEN permissions
+
+Every job in `ci.yml`, `merge-gate.yml`, and `migration-conflict-check.yml` declares its own `permissions:` block (CodeQL `actions/missing-workflow-permissions`). Most are `contents: read` (checkout only). Jobs with no checkout and no API calls (`restore-timings`, `save-timings`, `gate`) use `permissions: {}`. The ci-timings and ci-metrics reports use their own secrets, not `GITHUB_TOKEN`. When you add a job: give it a per-job block (never a workflow-level one, which widens every job), and grant only what its steps use (`packages: write` for GHCR pushes, `pull-requests: write` for PR comments). `docker-and-deploy.yml` and `helm-publish.yml` run on `main` pushes and tags and are scoped job by job in their own PRs.
+
 ## Lockfile discipline
 
 CI uses `bun install --frozen-lockfile`. A single root install now covers `apps/ui/`, `apps/templates-ui/`, and `apps/evals/` as Bun workspace members. This means:

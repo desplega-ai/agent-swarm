@@ -14,6 +14,9 @@ jobs:
   detect-changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     outputs:
       lint: ${{ steps.check.outputs.lint }}
       test: ${{ steps.check.outputs.test }}
@@ -132,6 +135,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.lint == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -609,6 +615,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.pi_skills == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -637,6 +646,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.seed_skills == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -672,6 +684,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.script_types == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -693,6 +708,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.openapi == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -734,6 +752,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.vendored_openapi == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -751,6 +772,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.docker == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     strategy:
       matrix:
@@ -869,6 +893,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.ui == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -969,6 +996,9 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.templates_workflows == 'true'
     runs-on: ubuntu-latest
+    # Checkout only; GITHUB_TOKEN needs nothing else.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -990,6 +1020,8 @@ jobs:
     needs: [detect-changes, restore-timings, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
+    # No checkout, no API calls; the job only inspects `needs` results.
+    permissions: {}
 
     steps:
       - name: Check results
