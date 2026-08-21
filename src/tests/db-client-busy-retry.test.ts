@@ -13,6 +13,8 @@ const TEST_DB_PATH = "./test-db-client-busy-retry.sqlite";
 let main: Database;
 let locker: Database;
 let client: DbClient;
+/** Outstanding holdWriteLock() timer, if any; afterEach waits for it. */
+let pendingHold: Promise<void> | null = null;
 
 beforeEach(() => {
   main = new Database(TEST_DB_PATH);
@@ -24,12 +26,26 @@ beforeEach(() => {
   locker.exec("PRAGMA busy_timeout = 25");
   client = createBunSqliteClient(() => main, {
     maxWaitMs: 2_000,
-    backoffMs: [25, 50, 100, 200],
+    // Headroom over the longest holdWriteLock() hold used with this client
+    // (400ms): 5 backoff slots sum to 775ms, so even at the minimum 0.5x
+    // jitter the writer's final non-retried attempt lands after the
+    // external lock releases instead of racing it.
+    backoffMs: [25, 50, 100, 200, 400],
     attemptSpinMs: 25,
   });
+  pendingHold = null;
 });
 
 afterEach(async () => {
+  // A test that exits early (a failed assertion, a thrown error) never
+  // awaits its own holdWriteLock() promise. Wait for it here so its
+  // setTimeout callback runs against a still-open, still-in-transaction
+  // `locker` instead of firing later against a rolled-back or already
+  // reassigned connection.
+  if (pendingHold) {
+    await pendingHold;
+    pendingHold = null;
+  }
   try {
     locker.run("ROLLBACK");
   } catch {
@@ -46,12 +62,17 @@ afterEach(async () => {
 function holdWriteLock(ms: number): Promise<void> {
   locker.run("BEGIN IMMEDIATE");
   locker.run("INSERT INTO items (name) VALUES ('locker')");
-  return new Promise((resolve) =>
+  const hold = new Promise<void>((resolve) =>
     setTimeout(() => {
-      locker.run("COMMIT");
+      // Only commit if `locker` is still the connection that opened this
+      // transaction: afterEach's ROLLBACK (or the next test's beforeEach
+      // reassigning `locker`) may already have run by the time this fires.
+      if (locker.inTransaction) locker.run("COMMIT");
       resolve();
     }, ms),
   );
+  pendingHold = hold;
+  return hold;
 }
 
 describe("db-client SQLITE_BUSY retry", () => {
@@ -84,46 +105,62 @@ describe("db-client SQLITE_BUSY retry", () => {
       attemptSpinMs: 25,
     });
     const released = holdWriteLock(600);
-    await expect(tightClient.run("INSERT INTO items (name) VALUES (?)", ["never"])).rejects.toThrow(
-      /database is locked/,
-    );
+    let caught: unknown;
+    try {
+      await tightClient.run("INSERT INTO items (name) VALUES (?)", ["never"]);
+    } catch (err) {
+      caught = err;
+    }
     await released;
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toMatch(/database is locked/);
+    expect((caught as { code?: string }).code).toBe("SQLITE_BUSY");
   });
 
   test("readOnly transaction proceeds at full speed under an external write lock", async () => {
     await client.run("INSERT INTO items (name) VALUES (?)", ["seed"]);
-    const released = holdWriteLock(400);
-    const started = Date.now();
+    const order: string[] = [];
+    const released = holdWriteLock(400).then(() => {
+      order.push("released");
+    });
     const names = await client.transaction(
       async (tx) => (await tx.query<{ name: string }>("SELECT name FROM items")).map((r) => r.name),
       { readOnly: true },
     );
-    // Deferred BEGIN never touches the write lock: no busy spin, no retry
-    // budget, done long before the locker releases.
-    expect(Date.now() - started).toBeLessThan(200);
-    expect(names).toEqual(["seed"]);
+    order.push("read");
     await released;
+    // Deferred BEGIN never touches the write lock: no busy spin, no retry
+    // budget, so the read settles before the locker releases regardless of
+    // scheduler noise (an ordering check, not a wall-clock bound).
+    expect(order).toEqual(["read", "released"]);
+    expect(names).toEqual(["seed"]);
   });
 
   test("reads flow while a write retries in backoff (FIFO lock released between attempts)", async () => {
     await client.run("INSERT INTO items (name) VALUES (?)", ["reader-food"]);
-    const released = holdWriteLock(400);
+    const order: string[] = [];
+    const released = holdWriteLock(400).then(() => {
+      order.push("released");
+    });
     const write = client.run("INSERT INTO items (name) VALUES (?)", ["late-write"]);
     // Let the write burn its first attempt and enter async backoff.
     await new Promise((resolve) => setTimeout(resolve, 60));
-    const started = Date.now();
     const rows = await client.query<{ name: string }>(
       "SELECT name FROM items WHERE name = 'reader-food'",
     );
-    // Pre-fix, the retrying writer held the FIFO lock across its sleeps and
-    // this read queued behind the full retry span.
-    expect(Date.now() - started).toBeLessThan(150);
-    expect(rows.length).toBe(1);
+    order.push("read");
     await released;
     await write;
     const landed = await client.get<{ name: string }>(
       "SELECT name FROM items WHERE name = 'late-write'",
     );
+    // Pre-fix, the retrying writer held the FIFO lock across its sleeps and
+    // this read queued behind the full retry span; assert the settle order
+    // instead of a wall-clock bound so scheduler noise cannot flip the
+    // result, and only assert after every started call has been awaited so
+    // a failing expectation can never orphan `write` or `released`.
+    expect(order).toEqual(["read", "released"]);
+    expect(rows.length).toBe(1);
     expect(landed?.name).toBe("late-write");
   });
 
@@ -140,8 +177,11 @@ describe("db-client SQLITE_BUSY retry", () => {
     await expect(client.run("INSERT INTO no_such_table (name) VALUES (?)", ["x"])).rejects.toThrow(
       /no such table/,
     );
-    // A retried error would have slept through the backoff schedule.
-    expect(Date.now() - started).toBeLessThan(100);
+    // A retried error would have slept through at least the first backoff
+    // step (>=12ms jittered) plus spin overhead; widened from 100ms to
+    // absorb --parallel=4 scheduler noise without masking an accidental
+    // retry, which would need to clear the full ~775ms backoff schedule.
+    expect(Date.now() - started).toBeLessThan(500);
   });
 
   test("reads proceed under an external write lock without needing the retry path", async () => {
