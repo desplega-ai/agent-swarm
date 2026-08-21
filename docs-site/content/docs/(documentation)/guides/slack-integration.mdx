@@ -14,11 +14,11 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 5. Add required bot token scopes:
    - `app_mentions:read`
    - `assistant:write`
-   - `channels:history`, `channels:join`, `channels:read`
+   - `channels:history`, `channels:join`, `channels:manage`, `channels:read`
    - `chat:write`, `chat:write.customize`, `chat:write.public`
    - `commands`
    - `files:read`, `files:write`
-   - `groups:history`, `groups:read`
+   - `groups:history`, `groups:read`, `groups:write`
    - `im:history`, `im:read`, `im:write`
    - `mpim:history`, `mpim:read`, `mpim:write`
    - `reactions:write`
@@ -26,7 +26,7 @@ Enable Slack for task creation, agent communication, and interactive workflows v
 6. Subscribe to bot events: `app_mention`, `assistant_thread_started`, `assistant_thread_context_changed`, `message.channels`, `message.groups`, `message.im`, `message.mpim`
 7. Install to your workspace and copy tokens
 
-A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically.
+A ready-to-use `slack-manifest.json` is included in the repository root — import it directly in the Slack App configuration page to set up all scopes, events, and features automatically. After adding channel-management scopes to an existing app, reinstall the app to the workspace so Slack grants them to the bot token.
 
 ## Configuration
 
@@ -174,6 +174,16 @@ Agents can read Slack threads using `slack-read`:
 ### Posting Messages
 
 The lead agent can post messages to channels using `slack-post`. By default each call creates a new top-level message. To run a multi-message conversation under a single Slack thread, the lead first calls `slack-start-thread` to create the parent message, then passes the returned `ts` as `threadTs` on subsequent `slack-post` calls — keeping the channel tidy and the conversation discoverable.
+
+### Managing Channels
+
+Lead agents can manage the Slack channel lifecycle through three MCP tools:
+
+- **`slack-create-channel`** — create a public or private channel. Slack naming rules are applied and the normalized name is returned.
+- **`slack-invite-to-channel`** — invite up to 100 workspace users. Users who are already members are treated as a successful no-op.
+- **`slack-archive-channel`** — archive a channel. Already-archived channels are a successful no-op, while Slack's general channel remains protected.
+
+These operations require lead privileges plus `channels:manage` for public channels and `groups:write` for private channels. If Slack reports a missing scope, update `slack-manifest.json`, apply the manifest, and reinstall the app before retrying.
 
 ### Updating or Deleting Messages
 
