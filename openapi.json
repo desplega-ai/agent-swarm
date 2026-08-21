@@ -2567,6 +2567,44 @@
           "review"
         ]
       },
+      "RepoGuidelinesInput": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "prChecks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          },
+          "mergeChecks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          },
+          "allowMerge": {
+            "type": "boolean",
+            "default": false
+          },
+          "review": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50
+          }
+        },
+        "required": [
+          "prChecks",
+          "mergeChecks",
+          "review"
+        ]
+      },
       "ScriptRun": {
         "type": "object",
         "properties": {
@@ -23566,7 +23604,7 @@
                     ]
                   },
                   "guidelines": {
-                    "$ref": "#/components/schemas/RepoGuidelines"
+                    "$ref": "#/components/schemas/RepoGuidelinesInput"
                   }
                 }
               }
@@ -23777,7 +23815,7 @@
                     "$ref": "#/components/schemas/RepoHooks"
                   },
                   "guidelines": {
-                    "$ref": "#/components/schemas/RepoGuidelines"
+                    "$ref": "#/components/schemas/RepoGuidelinesInput"
                   }
                 },
                 "required": [
@@ -24022,6 +24060,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -24353,6 +24394,9 @@
                               "createdByAgentId": {
                                 "type": "string"
                               },
+                              "parentTaskId": {
+                                "type": "string"
+                              },
                               "timezone": {
                                 "type": "string",
                                 "default": "UTC"
@@ -24507,6 +24551,9 @@
                                 "format": "date-time"
                               },
                               "createdByAgentId": {
+                                "type": "string"
+                              },
+                              "parentTaskId": {
                                 "type": "string"
                               },
                               "timezone": {
@@ -24706,6 +24753,9 @@
                           "format": "date-time"
                         },
                         "createdByAgentId": {
+                          "type": "string"
+                        },
+                        "parentTaskId": {
                           "type": "string"
                         },
                         "timezone": {
@@ -24920,6 +24970,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -25229,6 +25282,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -25559,6 +25615,9 @@
                       "format": "date-time"
                     },
                     "createdByAgentId": {
+                      "type": "string"
+                    },
+                    "parentTaskId": {
                       "type": "string"
                     },
                     "timezone": {
@@ -36959,6 +37018,9 @@
                             "format": "date-time"
                           },
                           "createdByAgentId": {
+                            "type": "string"
+                          },
+                          "parentTaskId": {
                             "type": "string"
                           },
                           "timezone": {

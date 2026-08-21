@@ -7,7 +7,7 @@ import {
   getSwarmRepos,
   updateSwarmRepo,
 } from "../be/db";
-import { RepoGuidelinesSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
+import { RepoGuidelinesInputSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
 
@@ -57,7 +57,7 @@ const createRepo = route({
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.optional(),
-    guidelines: RepoGuidelinesSchema.nullable().optional(),
+    guidelines: RepoGuidelinesInputSchema.nullable().optional(),
   }),
   responses: {
     201: { description: "Repo created", schema: SwarmRepoSchema },
@@ -80,7 +80,7 @@ const updateRepo = route({
     defaultBranch: z.string().optional(),
     autoClone: z.boolean().optional(),
     hooks: RepoHooksSchema.nullable().optional(),
-    guidelines: RepoGuidelinesSchema.nullable().optional(),
+    guidelines: RepoGuidelinesInputSchema.nullable().optional(),
   }),
   responses: {
     200: { description: "Repo updated", schema: SwarmRepoSchema },

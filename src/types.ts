@@ -1607,6 +1607,21 @@ export const RepoGuidelinesSchema = z
 
 export type RepoGuidelines = z.infer<typeof RepoGuidelinesSchema>;
 
+/** Upper bound per guideline list. The repository prompt section renders every
+ * entry outside the bootstrap budget, so the cap lives at the write boundary. */
+export const REPO_GUIDELINES_MAX_ENTRIES = 50;
+
+/** Write-side guidelines schema: same shape, bounded lists. Reads keep the
+ * unbounded `RepoGuidelinesSchema` so an older row never fails a response. */
+export const RepoGuidelinesInputSchema = z
+  .object({
+    prChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    mergeChecks: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+    allowMerge: z.boolean().optional().default(false),
+    review: z.array(z.string()).max(REPO_GUIDELINES_MAX_ENTRIES),
+  })
+  .openapi("RepoGuidelinesInput");
+
 export const RepoHooksSchema = z
   .object({
     enabled: z.boolean().default(false),
