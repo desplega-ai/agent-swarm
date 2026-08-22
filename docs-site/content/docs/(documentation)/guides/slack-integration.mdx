@@ -40,6 +40,8 @@ SLACK_SIGNING_SECRET=...      # Signing Secret (optional for Socket Mode)
 SLACK_DISABLE=true
 ```
 
+Development API processes do not open Socket Mode by default, even when Slack tokens are present in the ambient environment. This prevents a local `bun run start:http` process from consuming events intended for production. Set `SLACK_ALLOW_DEV_SOCKET_MODE=true` only when that development process must connect to the configured Slack app; the server logs the blocked reason and this opt-in name otherwise.
+
 ## How It Works
 
 ### Creating Tasks

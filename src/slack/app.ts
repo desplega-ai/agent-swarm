@@ -1,5 +1,6 @@
 import { App, LogLevel } from "@slack/bolt";
 import { ensureSlackRenderV2Activation } from "../be/db";
+import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
 let app: App | null = null;
@@ -29,6 +30,14 @@ export async function initSlackApp(): Promise<App | null> {
 
   if (!botToken || !appToken) {
     console.log("[Slack] Missing SLACK_BOT_TOKEN or SLACK_APP_TOKEN, Slack integration disabled");
+    return null;
+  }
+
+  const socketModeBlockReason = getSlackSocketModeBlockReason(process.env);
+  if (socketModeBlockReason) {
+    console.error(
+      `[Slack] SOCKET MODE BLOCKED: ${socketModeBlockReason}. Set ${SLACK_DEV_SOCKET_MODE_OPT_IN}=true to opt in explicitly.`,
+    );
     return null;
   }
 
