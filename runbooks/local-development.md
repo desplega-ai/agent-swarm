@@ -22,6 +22,7 @@ Bun auto-loads `.env`. Don't use `dotenv`.
 | `PUBLIC_MCP_BASE_URL` | falls back to `MCP_BASE_URL` | Public origin for OAuth redirect URIs + webhook URLs. No action needed locally — leave unset and it defaults to `MCP_BASE_URL`. Only relevant in split deploys where `MCP_BASE_URL` is an internal/cluster address. |
 | `APP_URL` | `http://localhost:5274` | Dashboard URL |
 | `SLACK_DISABLE` / `GITHUB_DISABLE` / `JIRA_DISABLE` / `LINEAR_DISABLE` | unset | Set `=true` to disable each integration |
+| `SLACK_ALLOW_DEV_SOCKET_MODE` | unset (off) | Explicitly allow a `NODE_ENV=development` API process to open Slack Socket Mode. `start:http` is blocked by default even when ambient Slack tokens exist. |
 | `SLACK_THREAD_STEERING` | unset (off) | Opt-in Slack thread steering: `lead` targets the latest in-progress lead task; `all` targets the latest active task. Other values preserve follow-up task routing. |
 | `SLACK_THREAD_STEERING_MODE` | `queue` | `steer` requests interrupt semantics; every other value queues and unsupported interrupts degrade. |
 | `CLAUDE_QUEUE_STEERING` | unset (probe) | Raw Claude queue steering gate. Unset probes for stock Claude Code `>=2.1.205`; `0\|false\|off\|no` forces the legacy `-p` path; `1\|true\|on\|yes` forces stream-json input. |

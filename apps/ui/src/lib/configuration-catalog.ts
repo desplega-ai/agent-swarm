@@ -400,6 +400,15 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_ALLOW_DEV_SOCKET_MODE",
+        label: "Allow Slack in development",
+        description:
+          "Explicitly allow a development API process to open a Slack Socket Mode connection. Keep this off unless the development process must consume events from the configured Slack app.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "SLACK_RENDER_V2",
         label: "Slack thread renderer v2",
         description:
