@@ -13,9 +13,9 @@
  * as `create-page-tool.test.ts`) and exercise:
  *   1. attachment insert on an in-progress task (smoke baseline)
  *   2. attachment insert on a COMPLETED task — the regression scenario
- *   3. agent-fs attachment with optional `orgId` + `driveId` round-trips
- *   4. agent-fs attachment without `orgId` / `driveId` still inserts (both
- *      shapes mandated by the task brief)
+ *   3. agent-fs attachment resolution uses the registering agent's explicit
+ *      org/drive and credentials
+ *   4. missing files and wrong drives both block attachment + task writes
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import crypto from "node:crypto";
@@ -28,6 +28,7 @@ import {
   createTaskExtended,
   getDbClient,
   getTaskAttachments,
+  getTaskById,
   initDb,
   startTask,
   upsertSwarmConfig,
@@ -35,6 +36,7 @@ import {
 import { registerStoreProgressTool } from "../tools/store-progress";
 
 const TEST_DB_PATH = "./test-store-progress-attachments-handler.sqlite";
+const ORIGINAL_FETCH = globalThis.fetch;
 
 type RegisteredTool = {
   handler: (args: unknown, extra: unknown) => Promise<unknown>;
@@ -71,6 +73,22 @@ function buildServer() {
 
 describe("store-progress handler — attachments insert path", () => {
   let agentId: string;
+  let requestedAgentFsUrls: string[] = [];
+
+  async function configureAgentFsTransport() {
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "AGENT_FS_API_URL",
+      value: "https://agent-fs.test",
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: agentId,
+      key: "AGENT_FS_API_KEY",
+      value: "caller-agent-key",
+      isSecret: true,
+    });
+  }
 
   beforeAll(async () => {
     for (const suffix of ["", "-wal", "-shm"]) {
@@ -89,9 +107,21 @@ describe("store-progress handler — attachments insert path", () => {
       capabilities: [],
     });
     agentId = agent.id;
+    await configureAgentFsTransport();
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requestedAgentFsUrls.push(url);
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer caller-agent-key");
+      const missing = url.includes("genuinely-absent.md") || url.includes("/drives/wrong-drive/");
+      return new Response(missing ? "File not found" : "ok", {
+        status: missing ? 404 : 200,
+        headers: missing ? undefined : { "content-length": "2" },
+      });
+    }) as typeof fetch;
   });
 
   afterAll(async () => {
+    globalThis.fetch = ORIGINAL_FETCH;
     closeDb();
     for (const suffix of ["", "-wal", "-shm"]) {
       try {
@@ -162,6 +192,7 @@ describe("store-progress handler — attachments insert path", () => {
   });
 
   test("agent-fs attachment with optional orgId + driveId round-trips through the handler", async () => {
+    requestedAgentFsUrls = [];
     const task = await createTaskExtended("handler agent-fs with org/drive", {
       agentId,
       source: "mcp",
@@ -194,9 +225,13 @@ describe("store-progress handler — attachments insert path", () => {
     expect(rows[0].path).toBe("/thoughts/doc.md");
     expect(rows[0].orgId).toBe("org-abc");
     expect(rows[0].driveId).toBe("drive-xyz");
+    expect(requestedAgentFsUrls).toEqual([
+      "https://agent-fs.test/orgs/org-abc/drives/drive-xyz/files/thoughts/doc.md/raw",
+    ]);
   });
 
-  test("agent-fs attachment WITHOUT orgId / driveId still inserts (legacy shape)", async () => {
+  test("agent-fs attachment without a resolvable org/drive hard-fails before registration", async () => {
+    await getDbClient().run("DELETE FROM swarm_config");
     const task = await createTaskExtended("handler agent-fs without org/drive", {
       agentId,
       source: "mcp",
@@ -219,19 +254,17 @@ describe("store-progress handler — attachments insert path", () => {
       buildMeta(),
     )) as StoreProgressResult;
 
-    expect(result.structuredContent.success).toBe(true);
+    expect(result.structuredContent.success).toBe(false);
+    expect(result.structuredContent.message).toContain("both orgId and driveId must resolve");
     const rows = await getTaskAttachments(task.id);
-    expect(rows.length).toBe(1);
-    expect(rows[0].kind).toBe("agent-fs");
-    expect(rows[0].path).toBe("/thoughts/legacy.md");
-    expect(rows[0].orgId).toBeUndefined();
-    expect(rows[0].driveId).toBeUndefined();
+    expect(rows).toHaveLength(0);
   });
 
   describe("agent-fs orgId/driveId auto-resolve from swarm config", () => {
     // Per-test cleanup so config rows from one case don't leak into the next.
     async function clearSwarmConfig() {
       await getDbClient().run("DELETE FROM swarm_config");
+      await configureAgentFsTransport();
     }
 
     test("missing orgId/driveId fills in from global swarm config", async () => {
@@ -331,10 +364,20 @@ describe("store-progress handler — attachments insert path", () => {
       expect(rows[0].driveId).toBe("agent-drive");
     });
 
-    test("missing config + missing row IDs leaves null IDs (no throw, renderer falls back)", async () => {
+    test("a genuinely absent file hard-fails without registering or completing the task", async () => {
       await clearSwarmConfig();
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "AGENT_FS_DEFAULT_ORG_ID",
+        value: "correct-org",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "AGENT_FS_DEFAULT_DRIVE_ID",
+        value: "correct-drive",
+      });
 
-      const task = await createTaskExtended("handler agent-fs no config no ids", {
+      const task = await createTaskExtended("handler agent-fs genuinely absent", {
         agentId,
         source: "mcp",
         priority: 50,
@@ -348,19 +391,22 @@ describe("store-progress handler — attachments insert path", () => {
           attachments: [
             {
               kind: "agent-fs",
-              name: "no-ids.md",
-              path: "/thoughts/no-ids.md",
+              name: "genuinely-absent.md",
+              path: "/thoughts/genuinely-absent.md",
             },
           ],
+          status: "completed",
+          output: "must not land",
         },
         buildMeta(),
       )) as StoreProgressResult;
 
-      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("driveId=correct-drive");
+      expect(result.structuredContent.message).toContain("File not found");
       const rows = await getTaskAttachments(task.id);
-      expect(rows.length).toBe(1);
-      expect(rows[0].orgId).toBeUndefined();
-      expect(rows[0].driveId).toBeUndefined();
+      expect(rows).toHaveLength(0);
+      expect((await getTaskById(task.id))?.status).toBe("in_progress");
     });
 
     test("per-row IDs always win — config defaults never overwrite explicit values", async () => {
@@ -407,7 +453,7 @@ describe("store-progress handler — attachments insert path", () => {
       expect(rows[0].driveId).toBe("row-drive");
     });
 
-    test("partial row IDs are preserved instead of mixing with config defaults", async () => {
+    test("a partial explicit scope hard-fails instead of mixing with config defaults", async () => {
       await clearSwarmConfig();
       await upsertSwarmConfig({
         scope: "global",
@@ -444,11 +490,98 @@ describe("store-progress handler — attachments insert path", () => {
         buildMeta(),
       )) as StoreProgressResult;
 
-      expect(result.structuredContent.success).toBe(true);
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("both orgId and driveId must resolve");
       const rows = await getTaskAttachments(task.id);
-      expect(rows.length).toBe(1);
-      expect(rows[0].orgId).toBe("row-org");
-      expect(rows[0].driveId).toBeUndefined();
+      expect(rows).toHaveLength(0);
+    });
+
+    test("an existing path on the wrong explicit drive hard-fails instead of falling back", async () => {
+      await clearSwarmConfig();
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "AGENT_FS_DEFAULT_ORG_ID",
+        value: "correct-org",
+      });
+      await upsertSwarmConfig({
+        scope: "global",
+        key: "AGENT_FS_DEFAULT_DRIVE_ID",
+        value: "correct-drive",
+      });
+
+      const task = await createTaskExtended("handler agent-fs wrong drive", {
+        agentId,
+        source: "mcp",
+        priority: 50,
+      });
+      await startTask(task.id);
+
+      const tool = buildServer();
+      const result = (await tool.handler(
+        {
+          taskId: task.id,
+          attachments: [
+            {
+              kind: "agent-fs",
+              name: "exists.md",
+              path: "/thoughts/exists.md",
+              orgId: "correct-org",
+              driveId: "wrong-drive",
+            },
+          ],
+        },
+        buildMeta(),
+      )) as StoreProgressResult;
+
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("driveId=wrong-drive");
+      expect(result.structuredContent.message).toContain("File not found");
+      expect(result.structuredContent.message).not.toContain("driveId=correct-drive");
+      expect(await getTaskAttachments(task.id)).toHaveLength(0);
+    });
+
+    test("verifies every attachment with its own scope before inserting the batch", async () => {
+      await clearSwarmConfig();
+      requestedAgentFsUrls = [];
+      const task = await createTaskExtended("handler agent-fs mixed-scope batch", {
+        agentId,
+        source: "mcp",
+        priority: 50,
+      });
+      await startTask(task.id);
+
+      const tool = buildServer();
+      const result = (await tool.handler(
+        {
+          taskId: task.id,
+          attachments: [
+            {
+              kind: "agent-fs",
+              name: "first.md",
+              path: "/thoughts/first.md",
+              orgId: "correct-org",
+              driveId: "correct-drive",
+            },
+            {
+              kind: "agent-fs",
+              name: "second.md",
+              path: "/thoughts/second.md",
+              orgId: "correct-org",
+              driveId: "wrong-drive",
+            },
+          ],
+        },
+        buildMeta(),
+      )) as StoreProgressResult;
+
+      expect(result.structuredContent.success).toBe(false);
+      expect(requestedAgentFsUrls).toContain(
+        "https://agent-fs.test/orgs/correct-org/drives/correct-drive/files/thoughts/first.md/raw",
+      );
+      expect(requestedAgentFsUrls).toContain(
+        "https://agent-fs.test/orgs/correct-org/drives/wrong-drive/files/thoughts/second.md/raw",
+      );
+      expect(await getTaskAttachments(task.id)).toHaveLength(0);
     });
   });
 
