@@ -2,6 +2,10 @@ name: Publish to MCP Registry
 
 on:
   workflow_dispatch:
+  # Fallback only: releases created by docker-and-deploy.yml's GITHUB_TOKEN do not
+  # reliably fire this event (observed: 1 of 4 releases triggered it, 2026-08-06 to
+  # 2026-08-22). The reliable path is docker-and-deploy.yml's explicit
+  # `gh workflow run publish-mcp-registry.yml` dispatch after npm publish succeeds.
   release:
     types: [published]
 

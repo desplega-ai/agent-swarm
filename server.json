@@ -3,7 +3,7 @@
   "name": "io.github.desplega-ai/agent-swarm",
   "title": "Agent Swarm",
   "description": "Full Agent Swarm API and MCP server with local SQLite storage for multi-agent orchestration.",
-  "version": "1.129.0",
+  "version": "1.135.0",
   "websiteUrl": "https://docs.agent-swarm.dev",
   "repository": {
     "url": "https://github.com/desplega-ai/agent-swarm",
@@ -14,7 +14,7 @@
     {
       "registryType": "npm",
       "identifier": "@desplega.ai/agent-swarm",
-      "version": "1.129.0",
+      "version": "1.135.0",
       "packageArguments": [
         {
           "type": "positional",

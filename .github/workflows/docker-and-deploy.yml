@@ -883,6 +883,7 @@ jobs:
     if: needs.detect-version-change.outputs.version_changed == 'true'
     permissions:
       contents: write
+      actions: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -958,3 +959,9 @@ jobs:
             --generate-notes \
             --verify-tag \
             $( [ -s /tmp/third-party-licenses.json ] && echo "/tmp/third-party-licenses.json#third-party-licenses.json" )
+
+      - name: Trigger MCP Registry publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.detect-version-change.outputs.version }}
+        run: gh workflow run publish-mcp-registry.yml --ref "v${VERSION}"
