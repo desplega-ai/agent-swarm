@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.0] - 2026-08-22
+
+### Added
+- **System prompt v2 gives every harness a shorter operating contract with pointer skills** (#1217) — agents receive the same core workflow, memory, scheduling, Slack, and code-quality guidance with substantially less prompt overhead, while the new `memory-store` MCP tool and script SDK operation provide an explicit memory write path.
+- **Database writes retry transient SQLite contention at the shared client boundary** (#1229) — `SQLITE_BUSY` handling is centralized so concurrent API work can recover without each caller implementing its own retry loop.
+
+### Changed
+- **Runtime database access now uses an asynchronous client seam** (#1204) — API-owned storage paths share transaction-aware async query primitives while preserving existing behavior.
+- **The worker and CI toolchain moves to Bun 1.4** (#1216, #1234, #1239) — parallel test execution, hard child-process timeouts, dependency deduplication, and consistency gates keep local and CI behavior aligned.
+- **Deployment workflows use least-privilege GitHub token permissions** (#1238), and bundled deployments track agent-fs 0.13.1 (#1232).
+
+### Fixed
+- **agent-fs operations fail within bounded deadlines and UI uploads run concurrently** (#1226, #1241) — stalled providers return a 504 instead of hanging requests, while multi-file attachments no longer upload serially.
+- **HTTP route failures reach the central request error handler** (#1233) instead of escaping before a structured response can be produced.
+- **Tool-loop detection serializes updates per session** (#1230), preventing fire-and-forget callers from losing loop state under concurrent writes.
+
 ## [1.134.0] - 2026-08-21
 
 ### Added
