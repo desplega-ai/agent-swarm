@@ -71,8 +71,8 @@ traffic from the runtime, including the polling loop, refreshes `last_seen_at`.
   task remediation uses the separate heartbeat crash-recovery paths.
 - A task still in the `offered` state when the offeree goes offline — because
   its last runtime expired or closed — is released back to `unassigned` by the
-  same heartbeat sweep, so it can be re-offered or auto-assigned to another
-  eligible agent in that same tick
+  same heartbeat sweep, so it can be auto-assigned to another eligible agent
+  in that same tick
   ([#1207](https://github.com/desplega-ai/agent-swarm/pull/1207)).
 
 ## Shared workspace state
