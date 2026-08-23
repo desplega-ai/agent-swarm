@@ -1184,10 +1184,17 @@ describe("script connections", () => {
     });
     const binding = await upsertCredentialBinding({
       configKey: "RUNTIME_VENDOR_KEY",
-      allowedHosts: [`127.0.0.1:${server.port}`],
+      allowedHosts: ["127.0.0.1"],
       headerTemplate: "Authorization: Bearer [REDACTED:RUNTIME_VENDOR_KEY]",
     });
     createdBindingIds.push(binding.id);
+    const secretConfig = await upsertSwarmConfig({
+      scope: "global",
+      key: "RUNTIME_VENDOR_KEY",
+      value: "runtime-vendor-secret",
+      isSecret: true,
+    });
+    createdConfigIds.push(secretConfig.id);
     const connection = await upsertScriptConnection({
       slug: "runtimeVendor",
       kind: "openapi",
@@ -1201,6 +1208,7 @@ describe("script connections", () => {
       const output = await runScript({
         agentId: "agent-1",
         resources,
+        egressSecrets: await buildScriptCredentialBindings({ agentId: "agent-1" }),
         apiConnections: getScriptApiConnectionDescriptors(),
         source: `
           export default async (_args, ctx) => {
@@ -1216,7 +1224,7 @@ describe("script connections", () => {
       expect(output.result).toEqual({ full_name: "desplega-ai/agent-swarm", private: false });
       expect(observed).toEqual({
         url: `http://127.0.0.1:${server.port}/repos/desplega-ai/agent-swarm?include=stats`,
-        authorization: "Bearer [REDACTED:RUNTIME_VENDOR_KEY]",
+        authorization: "Bearer runtime-vendor-secret",
       });
     } finally {
       server.stop(true);

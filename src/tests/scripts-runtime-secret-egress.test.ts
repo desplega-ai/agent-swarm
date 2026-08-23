@@ -45,6 +45,39 @@ describe("runtime secret egress", () => {
 
     expect(output.result).toEqual({ wrapped: "<redacted>" });
   });
+
+  test("drops unresolved placeholder headers when no credentials resolve", async () => {
+    delete process.env.GITHUB_TOKEN;
+    let observedAuthorization: string | null = null;
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        observedAuthorization = req.headers.get("authorization");
+        return new Response("ok");
+      },
+    });
+
+    try {
+      const output = await runScript({
+        agentId: "agent-1",
+        resources: { memoryMb: 2048 },
+        source: `
+          export default async () => {
+            const response = await fetch("http://127.0.0.1:${server.port}", {
+              headers: { Authorization: "Bearer [REDACTED:MISSING_VENDOR_KEY]" },
+            });
+            return response.text();
+          };
+        `,
+      });
+
+      expect(output.error).toBeUndefined();
+      expect(output.result).toBe("ok");
+      expect(observedAuthorization).toBeNull();
+    } finally {
+      server.stop(true);
+    }
+  });
 });
 
 describe("egress-substitution", () => {

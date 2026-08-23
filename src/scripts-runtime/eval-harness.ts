@@ -105,9 +105,7 @@ try {
   }
 
   const payload = JSON.parse(stdin) as SwarmConfigPayload;
-  if (payload.egressSecrets?.length || payload.failedBindings?.length) {
-    patchFetchWithEgressSubstitution(payload.egressSecrets ?? [], payload.failedBindings ?? []);
-  }
+  patchFetchWithEgressSubstitution(payload.egressSecrets ?? [], payload.failedBindings ?? []);
   const swarmConfig = new SwarmConfig(payload);
   const rawArgs = JSON.parse(await Bun.file(requiredEnv("SWARM_SCRIPT_ARGS_FILE")).text());
   // Accept both shapes: callers may pass an already-serialized JSON string.
