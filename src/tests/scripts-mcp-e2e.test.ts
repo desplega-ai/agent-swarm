@@ -447,6 +447,38 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(failed?.error).toBeTruthy();
   });
 
+  test("persists an actionable import violation under the inline discriminator", async () => {
+    const tools = buildToolServer();
+    const source = `import { randomUUID } from "node:crypto";
+      export default async () => randomUUID();`;
+
+    const run = (await tools.run.handler(
+      { source, intent: "import violation persistence e2e" },
+      meta(workerId),
+    )) as StructuredResult<unknown>;
+
+    expect(run.isError).toBe(true);
+    expect(run.structuredContent.details).toContain(
+      "The global crypto object already provides randomUUID, getRandomValues, and subtle.digest; delete the import and use crypto directly.",
+    );
+
+    const listed = (await tools.listScriptRuns.handler(
+      { limit: 10, offset: 0 },
+      meta(workerId),
+    )) as StructuredResult<{
+      runs: Array<{ kind: string; status: string; scriptName?: string; error?: string }>;
+    }>;
+    const failed = listed.structuredContent.data?.runs[0];
+    expect(failed?.kind).toBe("inline");
+    expect(failed?.status).toBe("failed");
+    expect(failed?.scriptName).toBe("(inline source)");
+    expect(failed?.error).toBe(
+      "import_violation — Import 'node:crypto' is not allowed in swarm scripts. " +
+        "The global crypto object already provides randomUUID, getRandomValues, and subtle.digest; " +
+        "delete the import and use crypto directly.",
+    );
+  });
+
   test("stdio-style missing agent identity short-circuits clearly", async () => {
     const tools = buildToolServer();
     const result = (await tools.search.handler(

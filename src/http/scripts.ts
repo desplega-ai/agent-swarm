@@ -809,6 +809,7 @@ export async function handleScripts(
       : scrubSecrets(
           [
             output.error,
+            output.stderr || undefined,
             output.runtimeError
               ? `${output.runtimeError.name}: ${output.runtimeError.message}`
               : undefined,
@@ -825,7 +826,7 @@ export async function handleScripts(
         // raw by GET /api/script-runs/{id} to the dashboard, so it needs the same
         // redaction guarantees as the scrubbed run response below.
         args: scrubObject(parsed.body.args ?? null),
-        scriptName: parsed.body.name,
+        scriptName: parsed.body.name ?? "(inline source)",
         status: ok ? "completed" : "failed",
         output: scrubObject(output.result),
         error: runError,

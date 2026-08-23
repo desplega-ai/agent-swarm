@@ -16,7 +16,29 @@ describe("script import allowlist", () => {
   test("rejects forbidden static imports", () => {
     const result = validateScriptImports("import fs from 'node:fs'; export default () => fs");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.diagnostic).toContain("node:fs");
+    if (!result.ok) {
+      expect(result.diagnostic).toContain("node:fs");
+      expect(result.diagnostic).toContain(
+        'Allowed imports are "swarm-sdk", "stdlib", "zod", and relative paths',
+      );
+    }
+  });
+
+  test("names the global crypto remedy", () => {
+    for (const specifier of ["crypto", "node:crypto"]) {
+      const result = validateScriptImports(
+        `import { randomUUID } from '${specifier}'; export default () => randomUUID()`,
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.diagnostic).toContain(`Import '${specifier}' is not allowed`);
+        expect(result.diagnostic).toContain("global crypto object");
+        expect(result.diagnostic).toContain("randomUUID");
+        expect(result.diagnostic).toContain("getRandomValues");
+        expect(result.diagnostic).toContain("subtle.digest");
+        expect(result.diagnostic).toContain("delete the import");
+      }
+    }
   });
 
   test("rejects child_process imports", () => {
