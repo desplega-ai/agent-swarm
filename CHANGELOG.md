@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.1] - 2026-08-24
+
+### Changed
+- **Requester attribution uses a single grouped database query** (#1251) — per-person usage reporting avoids repeated lookups while preserving the existing result shape.
+
+### Fixed
+- **Agent-fs attachment pointers are verified before task state changes** (#1247) — `store-progress` rejects missing or inaccessible files atomically and persists the exact verified organization and drive scope.
+- **Script credential egress stays enforced across runtime entry points** (#1249) — imported and MCP-executed scripts cannot bypass bound-secret handling.
+- **Development Slack processes require an explicit Socket Mode opt-in** (#1245) — local API runs no longer consume production events merely because Slack tokens are present.
+
 ## [1.135.0] - 2026-08-22
 
 ### Added

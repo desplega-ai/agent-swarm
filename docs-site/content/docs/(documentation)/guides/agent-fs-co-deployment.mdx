@@ -7,7 +7,7 @@ agent-swarm uses `local-fs` by default when no agent-fs endpoint is configured. 
 
 ## What Changes
 
-With agent-fs enabled, task attachments and `/api/fs/*` use a shared filesystem provider instead of the local data directory. The dashboard can upload, preview, download, and delete task files. Workers can also write agent-fs pointers through `store-progress`; the server fills in the shared org and drive IDs when they are available.
+With agent-fs enabled, task attachments and `/api/fs/*` use a shared filesystem provider instead of the local data directory. The dashboard can upload, preview, download, and delete task files. Workers can also write agent-fs pointers through `store-progress`; before changing task state, the server verifies that every pointer exists in the exact organization and drive supplied on the attachment or resolved from the registering agent's configured defaults. If scope, credentials, or a file is missing, the entire call fails without registering any attachment or terminal result.
 
 Assigned-task prompts now also include a ready-to-run download recipe for each attachment using the provider-agnostic raw route:
 
