@@ -39610,7 +39610,7 @@
       "get": {
         "summary": "List task templates ('To start' bucket)",
         "tags": [
-          "Task Templates"
+          "Tasks"
         ],
         "security": [
           {
@@ -43196,7 +43196,7 @@
         "summary": "Fire a run-scoped event signal",
         "description": "Emits an event onto the workflow event bus with `_runId` injected. Used by wait nodes in `event` mode with `scope: 'run'`. The body's `name` is the bus event name; `payload` is forwarded as-is plus `_runId`.",
         "tags": [
-          "WorkflowEvents"
+          "Workflows"
         ],
         "security": [
           {
@@ -43294,7 +43294,7 @@
         "summary": "Fire a global workflow event signal",
         "description": "Emits an event onto the workflow event bus. Wait-states with `scope: 'global'` may match. Run-scoped waits will NOT match this broadcast unless the payload carries a matching `workflowRunId`.",
         "tags": [
-          "WorkflowEvents"
+          "Workflows"
         ],
         "security": [
           {

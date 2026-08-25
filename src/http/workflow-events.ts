@@ -23,7 +23,7 @@ const runScopedSignalRoute = route({
     "Emits an event onto the workflow event bus with `_runId` injected. " +
     "Used by wait nodes in `event` mode with `scope: 'run'`. The body's `name` " +
     "is the bus event name; `payload` is forwarded as-is plus `_runId`.",
-  tags: ["WorkflowEvents"],
+  tags: ["Workflows"],
   params: z.object({ runId: z.string().uuid() }),
   body: z.object({
     name: z.string().min(1),
@@ -57,7 +57,7 @@ const globalSignalRoute = route({
     "Emits an event onto the workflow event bus. Wait-states with " +
     "`scope: 'global'` may match. Run-scoped waits will NOT match this " +
     "broadcast unless the payload carries a matching `workflowRunId`.",
-  tags: ["WorkflowEvents"],
+  tags: ["Workflows"],
   body: z.object({
     name: z.string().min(1),
     payload: z.record(z.string(), z.unknown()).optional(),

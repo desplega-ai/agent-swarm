@@ -12,6 +12,40 @@ const config = {
   turbopack: {
     root: __dirname,
   },
+  async redirects() {
+    return [
+      {
+        source: "/docs/api-reference/workflowevents",
+        destination: "/docs/api-reference/workflows",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates",
+        destination: "/docs/api-reference/tasks",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/workflowevents.md",
+        destination: "/docs/api-reference/workflows.md",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/workflowevents.mdx",
+        destination: "/docs/api-reference/workflows.mdx",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates.md",
+        destination: "/docs/api-reference/tasks.md",
+        statusCode: 301,
+      },
+      {
+        source: "/docs/api-reference/task-templates.mdx",
+        destination: "/docs/api-reference/tasks.mdx",
+        statusCode: 301,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

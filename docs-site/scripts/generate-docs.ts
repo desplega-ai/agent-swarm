@@ -144,12 +144,10 @@ const tagDescriptions: Record<string, string> = {
   "Skills": "Install, publish, and manage skills — reusable agent behaviors and tool sets",
   "Stats": "Aggregate statistics for swarm activity — task counts, agent utilization, and cost summaries",
   "Status": "Swarm dashboard status endpoint — identity, setup readiness, live activity, and harness provider credential testing",
-  "Task Templates": "List reusable task templates — pre-defined task definitions agents pick up to start common swarm workflows",
   "Tasks": "Core task API — create, assign, update, and monitor tasks across the swarm",
   "Trackers": "Integrate with Linear and Jira ticket trackers — sync issues to swarm tasks bidirectionally",
   "Users": "Manage the user registry — create users, link cross-platform identities, mint tokens, merge duplicates, and triage unmapped senders",
   "Webhooks": "Register and manage webhooks for real-time swarm event delivery to external systems",
-  "WorkflowEvents": "Subscribe to and manage workflow lifecycle events — run status, step completions, failures, and convergence gates for DAG orchestration",
   "Workflows": "Define and execute DAG-based multi-step workflows with branching, triggers, and agent task nodes",
 };
 
