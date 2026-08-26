@@ -135,6 +135,8 @@ File-based, forward-only SQL in `src/be/migrations/NNN_descriptive_name.sql`. Ru
 
 Test against a fresh DB (`rm agent-swarm-db.sqlite && bun run start:http`) **and** an existing one. Never modify an applied migration — create a new one. No `down` migrations (SQLite rollbacks flake). Keep `AgentTaskSourceSchema` in `src/types.ts` in sync with SQL CHECK constraints.
 
+Before adding a migration, check its ordinal against `main`'s tail and every other open PR that adds one; the conflict check only compares against `main`. A duplicate ordinal is applied once and silently skipped by the runner; a gap is harmless, but a duplicate is dangerous.
+
 </important>
 
 <important if="you are adding or editing an agent skill (templates/skills/ or src/be/seed-skills/)">
