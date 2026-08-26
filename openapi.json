@@ -8513,13 +8513,24 @@
                     },
                     "total": {
                       "type": "number"
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "rowLimit": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
                     "columns",
                     "rows",
                     "elapsed",
-                    "total"
+                    "total",
+                    "truncated",
+                    "rowLimit"
                   ]
                 }
               }

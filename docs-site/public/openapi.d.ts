@@ -2085,6 +2085,8 @@ export interface paths {
                             rows: unknown[][];
                             elapsed: number;
                             total: number;
+                            truncated: boolean;
+                            rowLimit: number | null;
                         };
                     };
                 };
