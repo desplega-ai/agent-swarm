@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.2] - 2026-08-26
+
+### Fixed
+- **API reference operations are grouped under their parent resources** (#1256) — task-template and workflow-event endpoints now live on the Tasks and Workflows pages, with permanent redirects preserving links to the retired tag pages.
+
 ## [1.135.1] - 2026-08-24
 
 ### Changed
