@@ -3,7 +3,11 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assertNotEmptyDatabase, resolveMigrationsDir, runMigrations } from "../be/migrations/runner";
+import {
+  assertNotEmptyDatabase,
+  resolveMigrationsDir,
+  runMigrations,
+} from "../be/migrations/runner";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 /**
@@ -91,7 +95,9 @@ describe("assertNotEmptyDatabase", () => {
     const db = new Database(":memory:");
     try {
       db.run("CREATE TABLE agents (id TEXT PRIMARY KEY)");
-      expect(() => assertNotEmptyDatabase(db, "no migrations directory could be located")).not.toThrow();
+      expect(() =>
+        assertNotEmptyDatabase(db, "no migrations directory could be located"),
+      ).not.toThrow();
     } finally {
       db.close();
     }

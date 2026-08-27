@@ -535,9 +535,7 @@ function ensureAgentProfileColumns(database: Database): void {
     )
     .get();
   if (!agentsTableExists) {
-    console.warn(
-      "[Migration] agents table does not exist yet — skipping profile column backfill",
-    );
+    console.warn("[Migration] agents table does not exist yet — skipping profile column backfill");
     return;
   }
 
