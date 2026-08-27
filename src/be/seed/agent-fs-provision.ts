@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { scrubSecrets } from "../../utils/secret-scrubber";
 import {
   deleteSwarmConfigByKey,
@@ -39,6 +39,15 @@ type OrgMember = {
 };
 
 type FetchLike = typeof fetch;
+
+class AgentFsRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 // The provision seeder runs synchronously before the HTTP server binds its port.
 // Without a timeout, a co-deployed agent-fs that accepts the TCP connection but
@@ -259,12 +268,24 @@ export async function ensureAgentFsCredentialsForAgent(agentId: string): Promise
   }
 
   const shared = await ensureAgentFsSharedProvisioning({ apiUrl });
-  const email = await resolveAgentEmail(agentId);
-  const registered = await agentFsRequest<{ apiKey?: string }>(apiUrl, "/auth/register", {
-    method: "POST",
-    body: { email },
-    allowConflict: false,
-  });
+  let email = await resolveAgentEmail(agentId);
+  let registered: { apiKey?: string };
+  try {
+    registered = await agentFsRequest(apiUrl, "/auth/register", {
+      method: "POST",
+      body: { email },
+      allowConflict: false,
+    });
+  } catch (error) {
+    if (!(error instanceof AgentFsRequestError) || error.status !== 409) throw error;
+
+    email = recoveryAgentEmail(email);
+    registered = await agentFsRequest(apiUrl, "/auth/register", {
+      method: "POST",
+      body: { email },
+      allowConflict: false,
+    });
+  }
 
   const apiKey = registered.apiKey ?? "";
   if (!apiKey) throw new Error(`agent-fs registration did not return an apiKey for ${agentId}`);
@@ -423,8 +444,9 @@ async function agentFsRequest<T = unknown>(
 
   if (!response.ok && !(options.allowConflict && response.status === 409)) {
     const text = await response.text().catch(() => "");
-    throw new Error(
+    throw new AgentFsRequestError(
       `agent-fs ${options.method ?? "GET"} ${path} failed: HTTP ${response.status}${text ? ` ${text}` : ""}`,
+      response.status,
     );
   }
 
@@ -502,6 +524,13 @@ async function resolveAgentEmail(agentId: string): Promise<string> {
   if (configured?.trim()) return configured.trim();
   const domain = process.env.AGENT_FS_EMAIL_DOMAIN || "swarm.local";
   return `${agentId}@${domain}`;
+}
+
+function recoveryAgentEmail(email: string): string {
+  const separator = email.lastIndexOf("@");
+  const localPart = separator === -1 ? email : email.slice(0, separator);
+  const domain = separator === -1 ? "swarm.local" : email.slice(separator + 1);
+  return `${localPart}+recovery-${randomUUID()}@${domain}`;
 }
 
 function slugEmailPart(value: string): string {
