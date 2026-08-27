@@ -521,6 +521,26 @@ const BUDGETED_IDENTITY_FIELDS: BudgetedIdentityField[] = [
 ];
 
 function ensureAgentProfileColumns(database: Database): void {
+  // `PRAGMA table_info` on a nonexistent table returns an empty result set
+  // rather than erroring, which used to make every column below look
+  // "missing" on a table that was never created and throw `no such table:
+  // agents` from the ALTER below. This is a legacy-compat shim for
+  // pre-migration-system databases; runMigrations() (and its own
+  // assertNotEmptyDatabase guard) is what's responsible for the `agents`
+  // table existing at all, and already fails loudly if it doesn't. This
+  // function must never be the thing that crashes startup instead.
+  const agentsTableExists = database
+    .prepare<{ name: string }, []>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='agents'",
+    )
+    .get();
+  if (!agentsTableExists) {
+    console.warn(
+      "[Migration] agents table does not exist yet — skipping profile column backfill",
+    );
+    return;
+  }
+
   const existingColumns = new Set(
     database
       .prepare<{ name: string }, []>("PRAGMA table_info(agents)")
