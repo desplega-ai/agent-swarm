@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.2] - 2026-08-27
+
+### Fixed
+- **API reference endpoints use consolidated task and workflow categories** (#1256) — task-template and workflow-event routes now appear alongside their related APIs instead of fragmenting generated navigation into one- and two-endpoint sections.
+
 ## [1.135.1] - 2026-08-24
 
 ### Changed
