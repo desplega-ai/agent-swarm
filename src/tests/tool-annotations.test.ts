@@ -131,7 +131,6 @@ describe("Tool Annotations & Classification", () => {
       "list-services",
       "list-schedules",
       "list-config",
-      "memory-search",
       "memory-get",
       "my-agent-info",
       "poll-task",
@@ -145,6 +144,10 @@ describe("Tool Annotations & Classification", () => {
         expect(tools[name].annotations?.readOnlyHint).toBe(true);
       }
     }
+  });
+
+  test("memory-search is not read-only because it records access telemetry", () => {
+    expect(tools["memory-search"]?.annotations?.readOnlyHint).toBe(false);
   });
 
   test("no tool has both readOnlyHint and destructiveHint set to true", () => {
