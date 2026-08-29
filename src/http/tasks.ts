@@ -887,9 +887,7 @@ export async function handleTasks(
     // retried request) is returned as-is rather than erroring — the UI calls
     // this exactly once per upload batch but must stay safe under retry.
     const promoted =
-      existingTask.status === "draft"
-        ? await promoteDraftTask(parsed.params.id)
-        : existingTask;
+      existingTask.status === "draft" ? await promoteDraftTask(parsed.params.id) : existingTask;
     if (!promoted) {
       jsonError(res, "Task not found", 404);
       return true;

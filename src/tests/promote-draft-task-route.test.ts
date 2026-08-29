@@ -161,20 +161,14 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
     expect(created.body.status).toBe("draft");
     expect(created.body.requestedByUserId).toBe(owner.id);
 
-    const deniedRes = await api(
-      "POST",
-      `/api/tasks/${created.body.id}/promote-draft`,
-      undefined,
-      { "x-test-user-id": stranger.id },
-    );
+    const deniedRes = await api("POST", `/api/tasks/${created.body.id}/promote-draft`, undefined, {
+      "x-test-user-id": stranger.id,
+    });
     expect(deniedRes.status).toBe(403);
 
-    const allowedRes = await api(
-      "POST",
-      `/api/tasks/${created.body.id}/promote-draft`,
-      undefined,
-      { "x-test-user-id": owner.id },
-    );
+    const allowedRes = await api("POST", `/api/tasks/${created.body.id}/promote-draft`, undefined, {
+      "x-test-user-id": owner.id,
+    });
     expect(allowedRes.status).toBe(200);
     expect(allowedRes.body.status).toBe("pending");
   });
