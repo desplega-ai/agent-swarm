@@ -53,7 +53,7 @@ const SHOW_SYSTEM_STORAGE_KEY = "agent-swarm-sessions-show-system";
  * from the sidebar by default and only revealed via the filters dropdown.
  */
 const SESSION_SOURCES = ["ui"] as const;
-const RUNNING_STATUSES = new Set<string>(["in_progress", "pending", "offered", "backlog"]);
+const RUNNING_STATUSES = new Set<string>(["in_progress", "pending", "offered", "backlog", "draft"]);
 
 function readBool(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;

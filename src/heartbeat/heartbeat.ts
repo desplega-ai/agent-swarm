@@ -29,6 +29,7 @@ import {
   isAgentEligibleForTask,
   isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
+  promoteAbandonedDraftTasks,
   releaseStaleMentionProcessing,
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
@@ -115,6 +116,16 @@ export const STEERING_STALL_GRACE_MIN = Number(process.env.HEARTBEAT_STEERING_GR
 
 /** Stale resource cleanup threshold (minutes) */
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
+
+/**
+ * Abandoned-draft promotion threshold (minutes, #1240). Deliberately much
+ * shorter than STALE_CLEANUP_THRESHOLD_MINUTES: a draft only exists while a
+ * UI-composer attachment batch uploads, which even against slow storage
+ * (#1226) took tens of seconds — 5 minutes is generous headroom above that
+ * worst case while still surfacing an abandoned session (tab closed
+ * mid-upload) to its owner within one coffee break, not half an hour.
+ */
+const DRAFT_TASK_TIMEOUT_MINUTES = Number(process.env.HEARTBEAT_DRAFT_TASK_TIMEOUT_MIN) || 5;
 
 /** Max pool tasks to auto-assign per sweep */
 function maxAutoAssignPerSweep(): number {
@@ -221,6 +232,7 @@ export interface HeartbeatFindings {
     workflowRuns: number;
     staleRuntimes: number;
     staleOfferedTasks: number;
+    abandonedDraftTasks: number;
   };
 }
 
@@ -296,6 +308,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       workflowRuns: 0,
       staleRuntimes: 0,
       staleOfferedTasks: 0,
+      abandonedDraftTasks: 0,
     },
   };
 
@@ -1026,6 +1039,9 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.inboxProcessing = await releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
+  findings.staleCleanup.abandonedDraftTasks = await promoteAbandonedDraftTasks(
+    DRAFT_TASK_TIMEOUT_MINUTES,
+  );
   // DES-523 Phase 3: escalate pinned crash-recovery resumes that were never
   // reclaimed within the grace window to a Lead re-delegation decision.
   await escalateUnreclaimedResumes(findings);
@@ -1331,6 +1347,7 @@ export async function runHeartbeatSweep(): Promise<void> {
           workflowRuns: 0,
           staleRuntimes: 0,
           staleOfferedTasks: 0,
+          abandonedDraftTasks: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
@@ -1396,6 +1413,7 @@ function logFindings(findings: HeartbeatFindings): void {
     inboxProcessing,
     workflowRuns,
     staleOfferedTasks,
+    abandonedDraftTasks,
   } = findings.staleCleanup;
   const totalCleanup =
     sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
@@ -1404,6 +1422,9 @@ function logFindings(findings: HeartbeatFindings): void {
   }
   if (staleOfferedTasks > 0) {
     parts.push(`stale_offers_released=${staleOfferedTasks}`);
+  }
+  if (abandonedDraftTasks > 0) {
+    parts.push(`abandoned_drafts_promoted=${abandonedDraftTasks}`);
   }
 
   if (parts.length > 0) {

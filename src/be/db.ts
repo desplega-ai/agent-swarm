@@ -4782,13 +4782,19 @@ export async function createTaskExtended(
   let requestedByUserIdInherited = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  const status: AgentTaskStatus = options?.offeredTo
-    ? "offered"
-    : options?.agentId
-      ? "pending"
-      : options?.status === "backlog"
-        ? "backlog"
-        : "unassigned";
+  // `status: "draft"` wins over offeredTo/agentId — a draft task keeps its
+  // intended owner/offer for when it's promoted (#1240), but must not be
+  // dispatch-eligible while attachments are still uploading.
+  const status: AgentTaskStatus =
+    options?.status === "draft"
+      ? "draft"
+      : options?.offeredTo
+        ? "offered"
+        : options?.agentId
+          ? "pending"
+          : options?.status === "backlog"
+            ? "backlog"
+            : "unassigned";
 
   // Inherit Slack/AgentMail metadata from parent task (unless explicitly overridden)
   if (options?.parentTaskId) {
@@ -5353,6 +5359,75 @@ export async function moveTaskFromBacklog(taskId: string): Promise<AgentTask | n
   }
 
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Promote a task out of `draft` status into whichever status it should have
+ * had at creation time — `offered` if it was offered to an agent, `pending`
+ * if it has an owning agent (the common UI-composer case, which defaults to
+ * Lead), otherwise `unassigned`. `draft` exists solely to keep a task
+ * dispatch-ineligible while its UI-uploaded attachments are still in flight
+ * (#1240); this is the promote half of that window. Called once the upload
+ * batch settles — success, partial failure, or total failure all promote, a
+ * draft is never left stranded by upload errors — or by
+ * `promoteAbandonedDraftTasks` for drafts nobody ever promoted.
+ */
+export async function promoteDraftTask(taskId: string): Promise<AgentTask | null> {
+  const now = new Date().toISOString();
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks
+       SET status = CASE
+           WHEN offeredTo IS NOT NULL THEN 'offered'
+           WHEN agentId IS NOT NULL THEN 'pending'
+           ELSE 'unassigned'
+         END,
+         lastUpdatedAt = ?
+       WHERE id = ? AND status = 'draft'
+       RETURNING *`,
+    [now, taskId],
+  );
+
+  if (row) {
+    try {
+      await createLogEntry({
+        eventType: "task_status_change",
+        taskId,
+        agentId: row.agentId ?? undefined,
+        oldValue: "draft",
+        newValue: row.status,
+      });
+    } catch {}
+  }
+
+  return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Heartbeat sweep: promote drafts abandoned mid-upload (tab closed, network
+ * dropped) instead of leaving them permanently dispatch-ineligible — the
+ * composer's UI-driven promote (`promoteDraftTask`) never fires if the user
+ * never comes back. Same target-status logic, applied in bulk by elapsed
+ * time. Default 5 minutes is well above the tens-of-seconds worst-case
+ * upload-batch duration seen against slow storage (#1226) while still
+ * surfacing an abandoned session to its owner promptly.
+ */
+export async function promoteAbandonedDraftTasks(timeoutMinutes: number = 5): Promise<number> {
+  const cutoffTime = new Date(Date.now() - timeoutMinutes * 60 * 1000).toISOString();
+  const now = new Date().toISOString();
+
+  const result = await getDbClient().run(
+    `UPDATE agent_tasks
+       SET status = CASE
+           WHEN offeredTo IS NOT NULL THEN 'offered'
+           WHEN agentId IS NOT NULL THEN 'pending'
+           ELSE 'unassigned'
+         END,
+         lastUpdatedAt = ?
+       WHERE status = 'draft' AND lastUpdatedAt < ?`,
+    [now, cutoffTime],
+  );
+
+  return result.changes;
 }
 
 /**

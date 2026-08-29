@@ -237,6 +237,7 @@ export function resolveTaskModelSelection(opts: {
 
 // Task status - includes new unassigned and offered states
 export const AgentTaskStatusSchema = z.enum([
+  "draft", // Created but not yet dispatch-eligible (UI attachments still uploading, #1240); promoted to pending/offered/unassigned once the upload batch settles or times out
   "backlog", // Task is in backlog, not yet ready for pool
   "unassigned", // Task pool - no owner yet
   "offered", // Offered to agent, awaiting accept/reject
@@ -654,7 +655,7 @@ export const CreateTaskOptionsSchema = z.object({
   dependsOn: z.array(z.string()).optional(),
   offeredTo: z.string().optional(),
   /** Explicitly set initial status. */
-  status: z.enum(["backlog", "unassigned"]).optional(),
+  status: z.enum(["draft", "backlog", "unassigned"]).optional(),
   slackChannelId: z.string().optional(),
   slackThreadTs: z.string().optional(),
   /** Exact Slack message that directly triggered this task; never inherited. */
