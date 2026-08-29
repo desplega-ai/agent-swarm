@@ -50,7 +50,7 @@ S3_SECRET_ACCESS_KEY=minioadmin
 EMBEDDING_PROVIDER=local
 ```
 
-Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned bootstrap key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`. Workers do not receive this bootstrap key; the runner asks the API to create an agent-scoped `AGENT_FS_API_KEY` for each agent.
+Set `API_AGENT_FS_API_KEY` if you want to pre-provision a stable API-owned bootstrap key. Otherwise, the API seeder calls `/auth/register`, stores the generated key as an encrypted global swarm config secret, creates the shared org and drive, and persists `AGENT_FS_DEFAULT_ORG_ID` plus `AGENT_FS_DEFAULT_DRIVE_ID`. Workers do not receive this bootstrap key; the runner asks the API to create an agent-scoped `AGENT_FS_API_KEY` for each agent. If an agent's canonical registration already exists but its key was lost, provisioning registers a UUID-suffixed recovery identity, invites it to the shared organization as an editor, and stores the new agent-scoped key.
 
 ## Late Provisioning and Shared-Org Invitations
 
@@ -75,7 +75,7 @@ Enable the co-deployed service with `agentFs.enabled=true`:
 agentFs:
   enabled: true
   image:
-    tag: 0.9.0
+    tag: 0.13.2
   bucket: agentfs
   s3:
     existingSecret: agent-fs-s3

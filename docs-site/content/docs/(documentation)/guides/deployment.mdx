@@ -422,17 +422,17 @@ docker pull ghcr.io/desplega-ai/agent-swarm-worker:latest
 ```bash
 docker build -f Dockerfile.worker -t agent-swarm-worker .
 
-# Override the pinned Claude Code version (default: 2.1.235)
+# Override the pinned Claude Code version (default: 2.1.246)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.235`
-- `PI_CODING_AGENT_VERSION=0.84.2`
-- `CODEX_VERSION=0.148.0`
-- `OPENCODE_VERSION=1.18.18`
-- `OPENCODE_SDK_VERSION=1.18.18`
+- `CLAUDE_CODE_VERSION=2.1.246`
+- `PI_CODING_AGENT_VERSION=0.84.3`
+- `CODEX_VERSION=0.149.1`
+- `OPENCODE_VERSION=1.18.23`
+- `OPENCODE_SDK_VERSION=1.18.23`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
