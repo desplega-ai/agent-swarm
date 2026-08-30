@@ -1,0 +1,13 @@
+{
+  "kind": "schedule",
+  "name": "nightly-main-sync",
+  "displayName": "Nightly Main Checkout Sync",
+  "slug": "nightly-main-sync",
+  "title": "Nightly Main Checkout Sync",
+  "description": "Fail-closed nightly fast-forward of only local main refs in isolated agent and Finn host checkout roots.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": ["FINN_HOST_CAPABLE_AGENT_ID"],
+  "runAllSeedersCandidate": false,
+  "tags": ["git", "maintenance", "reliability"]
+}
