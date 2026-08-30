@@ -633,6 +633,9 @@ export const AgentTaskSchema = z
     // behavior. Inherited from parentTaskId when not explicitly set (see
     // `createTaskExtended` in src/be/db.ts). See `isAgentEligibleForTask`.
     routingAffinity: RoutingAffinitySchema.optional(),
+    // Stored affinity that fails validation is quarantined rather than silently
+    // treated as an ordinary, claimable task. Internal read-path signal.
+    routingAffinityInvalid: z.boolean().optional(),
   })
   .openapi("AgentTask");
 

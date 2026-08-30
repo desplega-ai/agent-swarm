@@ -426,6 +426,9 @@
           },
           "routingAffinity": {
             "$ref": "#/components/schemas/RoutingAffinity"
+          },
+          "routingAffinityInvalid": {
+            "type": "boolean"
           }
         },
         "required": [

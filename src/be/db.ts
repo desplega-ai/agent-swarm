@@ -1202,32 +1202,39 @@ export async function buildRoutingAffinityFromAgent(
  * either side is treated as INELIGIBLE — never fail-open to "anyone" — so a
  * capability-only requirement (no `role` set) can only ever be claimed by
  * its `sourceAgentId`, and otherwise queues until the starvation escalation
- * hands it to the Lead.
+ * hands it to the Lead. Lead-only work is different: any Lead may claim it
+ * (subject to explicitly required capabilities), because its source/role is
+ * only recovery provenance and must not turn a worker's old role into a
+ * constraint on the Lead pool.
  */
 export function isAgentEligibleForTask(
   agent: Pick<Agent, "id" | "isLead" | "role" | "capabilities">,
-  task: Pick<AgentTask, "routingAffinity">,
+  task: Pick<AgentTask, "routingAffinity" | "routingAffinityInvalid">,
 ): boolean {
   const affinity = task.routingAffinity;
-  // Lead-only is an authorization boundary, never a best-effort pool hint or
-  // a source-agent exception. It remains enforced even if the affinity
-  // kill-switch is used to roll back role/capability matching.
-  if (affinity?.leadOnly && !agent.isLead) return false;
-  if (!isPoolAffinityEnforcementEnabled()) return true;
+  // A malformed persisted blob is a security boundary failure, not an
+  // untagged task. Quarantine it from every assignment/claim path.
+  if (task.routingAffinityInvalid) return false;
   if (!affinity) return true; // Untagged task — unchanged behavior.
+
+  const requiredCapabilities = affinity.capabilities ?? [];
+  const hasRequiredCapabilities = () => {
+    const agentCapabilities = new Set(agent.capabilities ?? []);
+    return requiredCapabilities.every((cap) => agentCapabilities.has(cap));
+  };
+  // Lead-only is an authorization boundary, never a best-effort pool hint or
+  // a source-agent exception. Its explicit capability requirements remain
+  // enforced even if the role/capability affinity kill-switch is enabled.
+  // Do not require an unrelated worker role/source to match a Lead-only task.
+  if (affinity.leadOnly) return agent.isLead && hasRequiredCapabilities();
+  if (!isPoolAffinityEnforcementEnabled()) return true;
 
   if (affinity.sourceAgentId && affinity.sourceAgentId === agent.id) return true; // Own work.
 
   if (!agent.role || !affinity.role) return false; // Missing role data — no fail-open.
   if (agent.role !== affinity.role) return false;
 
-  const requiredCapabilities = affinity.capabilities ?? [];
-  if (requiredCapabilities.length > 0) {
-    const agentCapabilities = new Set(agent.capabilities ?? []);
-    if (!requiredCapabilities.every((cap) => agentCapabilities.has(cap))) return false;
-  }
-
-  return true;
+  return hasRequiredCapabilities();
 }
 
 // ============================================================================
@@ -1332,20 +1339,23 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
   }
 
   let routingAffinity: RoutingAffinity | undefined;
+  let routingAffinityInvalid = false;
   if (row.routingAffinity) {
     try {
       const parsed = RoutingAffinitySchema.safeParse(JSON.parse(row.routingAffinity));
       if (parsed.success) {
         routingAffinity = parsed.data;
       } else {
+        routingAffinityInvalid = true;
         console.warn(
-          `[db] Ignoring invalid agent_tasks.routingAffinity for task ${row.id}:`,
+          `[db] Quarantining invalid agent_tasks.routingAffinity for task ${row.id}:`,
           parsed.error.message,
         );
       }
     } catch (error) {
+      routingAffinityInvalid = true;
       console.warn(
-        `[db] Ignoring malformed agent_tasks.routingAffinity for task ${row.id}:`,
+        `[db] Quarantining malformed agent_tasks.routingAffinity for task ${row.id}:`,
         error instanceof Error ? error.message : String(error),
       );
     }
@@ -1425,6 +1435,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
     harnessVariantMeta: row.harnessVariantMeta ? JSON.parse(row.harnessVariantMeta) : undefined,
     totalCostUsd: row.totalCostUsd ?? undefined,
     routingAffinity,
+    routingAffinityInvalid: routingAffinityInvalid || undefined,
   };
 }
 
@@ -1516,13 +1527,16 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
     [agentId],
   );
 
-  // Find the first task whose dependencies are met
+  const agent = await getAgentById(agentId);
+  if (!agent) return null;
+
+  // A persisted legacy task may already be pending on an unauthorized agent.
+  // Do not dispatch it merely because it bypassed creation-time checks.
   for (const row of rows) {
     const task = rowToAgentTask(row);
+    if (!isAgentEligibleForTask(agent, task)) continue;
     const { ready } = await checkDependencies(task.id);
-    if (ready) {
-      return task;
-    }
+    if (ready) return task;
   }
 
   return null;
@@ -1537,17 +1551,17 @@ export async function assignUnassignedTaskPending(
   {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
-    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+    if (task && (!agent || !isAgentEligibleForTask(agent, task))) {
       try {
         await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
           metadata: {
-            agentRole: agent.role ?? null,
+            agentRole: agent?.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
             leadOnly: task.routingAffinity?.leadOnly === true,
-            agentIsLead: agent.isLead,
+            agentIsLead: agent?.isLead ?? false,
           },
         });
       } catch {}
@@ -4935,8 +4949,21 @@ export async function createTaskExtended(
       if (parent.followUpConfig && !options.followUpConfig) {
         options.followUpConfig = parent.followUpConfig;
       }
-      if (parent.routingAffinity && !options.routingAffinity) {
-        options.routingAffinity = parent.routingAffinity;
+      if (parent.routingAffinityInvalid) {
+        // Never let a corrupt parent affinity create an apparently untagged
+        // continuation. This is a fail-closed quarantine, including recovery.
+        throw new Error(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
+      }
+      if (parent.routingAffinity) {
+        // Privilege cannot be shed by a continuation. A child can narrow or
+        // replace ordinary routing provenance, but a Lead-only parent always
+        // stamps Lead-only onto the child (including callers that supplied
+        // requiredCapabilities and therefore built a fresh affinity object).
+        if (!options.routingAffinity) {
+          options.routingAffinity = parent.routingAffinity;
+        } else if (parent.routingAffinity.leadOnly) {
+          options.routingAffinity = { ...options.routingAffinity, leadOnly: true };
+        }
       }
     }
   }
@@ -5019,21 +5046,27 @@ export async function createTaskExtended(
   }
 
   // Direct assignment and offers bypass the pool claim gate, so enforce the
-  // structured lead-only constraint at task creation as well. This is after
-  // parent inheritance so continuations cannot shed the parent's boundary.
+  // complete structured affinity here. This is after parent inheritance so
+  // continuations cannot shed a Lead-only boundary or its capabilities.
   const targetAgentId = options.agentId ?? options.offeredTo;
-  if (options.routingAffinity?.leadOnly && targetAgentId) {
+  if (options.routingAffinity && targetAgentId) {
     const target = await getAgentById(targetAgentId);
-    if (!target?.isLead) {
+    if (!target || !isAgentEligibleForTask(target, { routingAffinity: options.routingAffinity })) {
       try {
         await createLogEntry({
           eventType: "task_authorization_rejected",
           agentId: options.creatorAgentId,
-          metadata: { leadOnly: true, targetAgentId, decision: "reject_non_lead_assignment" },
+          metadata: {
+            leadOnly: options.routingAffinity.leadOnly === true,
+            targetAgentId,
+            decision: "reject_ineligible_assignment",
+          },
         });
       } catch {}
       throw new Error(
-        `Lead-only task cannot be assigned or offered to non-Lead agent "${targetAgentId}".`,
+        options.routingAffinity.leadOnly
+          ? `Lead-only task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`
+          : `Task routing affinity does not authorize assignment or offer to agent "${targetAgentId}".`,
       );
     }
   }
@@ -5190,17 +5223,17 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
   {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
-    if (task && agent && !isAgentEligibleForTask(agent, task)) {
+    if (task && (!agent || !isAgentEligibleForTask(agent, task))) {
       try {
         await createLogEntry({
           eventType: "task_claim_rejected_affinity",
           agentId,
           taskId,
           metadata: {
-            agentRole: agent.role ?? null,
+            agentRole: agent?.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
             leadOnly: task.routingAffinity?.leadOnly === true,
-            agentIsLead: agent.isLead,
+            agentIsLead: agent?.isLead ?? false,
           },
         });
       } catch {}
@@ -5271,7 +5304,10 @@ export async function acceptTask(taskId: string, agentId: string): Promise<Agent
   const task = await getTaskById(taskId);
   if (!task) return null;
   const agent = await getAgentById(agentId);
-  if (task.routingAffinity?.leadOnly && (!agent || !isAgentEligibleForTask(agent, task))) {
+  if (
+    (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
+    (!agent || !isAgentEligibleForTask(agent, task))
+  ) {
     try {
       await createLogEntry({
         eventType: "task_claim_rejected_affinity",
@@ -5546,7 +5582,10 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
   const agent = await getAgentById(agentId);
-  if (task.routingAffinity?.leadOnly && (!agent || !isAgentEligibleForTask(agent, task))) {
+  if (
+    (task.routingAffinity?.leadOnly || task.routingAffinityInvalid) &&
+    (!agent || !isAgentEligibleForTask(agent, task))
+  ) {
     try {
       await createLogEntry({
         eventType: "task_claim_rejected_affinity",

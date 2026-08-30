@@ -19790,6 +19790,7 @@ export interface components {
             };
             totalCostUsd?: number;
             routingAffinity?: components["schemas"]["RoutingAffinity"];
+            routingAffinityInvalid?: boolean;
         };
         FollowUpConfig: {
             disabled?: boolean;

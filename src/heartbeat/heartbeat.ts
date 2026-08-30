@@ -3,6 +3,7 @@ import {
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
   cleanupStaleSessions,
+  createLogEntry,
   createTaskExtended,
   deleteActiveSession,
   failPendingResumeIfUnclaimed,
@@ -53,6 +54,7 @@ import {
   getPinCandidateAgent,
   getResumeGeneration,
   REBOOT_RETRY_PIN_TAG,
+  resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
@@ -673,6 +675,16 @@ export async function runRebootSweep(): Promise<void> {
       // Auto-retry: create a replacement task with parentTaskId
       let retryTaskId: string | null = null;
 
+      // A corrupt persisted affinity is never converted into an untagged
+      // retry by this independent recovery path.
+      if (task.routingAffinityInvalid) {
+        console.error(
+          `[Heartbeat] Reboot retry suppressed for ${task.id.slice(0, 8)}: invalid routing affinity`,
+        );
+        rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+        continue;
+      }
+
       // Guard: only retry if parent doesn't already have a retry child
       const existingRetry = await getDbClient().get<{ id: string }>(
         `SELECT id FROM agent_tasks
@@ -693,21 +705,36 @@ export async function runRebootSweep(): Promise<void> {
           // the pool-fallback leg (agent gone/offline/at-capacity) — so that
           // leg is still role/capability-gated instead of role-blind.
           let preferredAgentId: string | undefined;
-          const candidate = await getPinCandidateAgent(task.agentId);
-          if (candidate) {
-            const activeCount = await getActiveTaskCount(candidate.id);
-            const hasCap = activeCount < (candidate.maxTasks ?? 1);
+          let sourceCandidate = await getPinCandidateAgent(task.agentId);
+          if (sourceCandidate) {
+            const activeCount = await getActiveTaskCount(sourceCandidate.id);
+            const maxTasks = sourceCandidate.maxTasks ?? 1;
+            const hasCap = activeCount < maxTasks;
             if (hasCap) {
-              preferredAgentId = candidate.id;
+              preferredAgentId = sourceCandidate.id;
             } else {
+              sourceCandidate = null;
               console.warn(
-                `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${candidate.id.slice(0, 8)} at capacity (${activeCount}/${candidate.maxTasks ?? 1}); falling back to affinity-gated pool`,
+                `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${task.agentId.slice(0, 8)} at capacity (${activeCount}/${maxTasks}); falling back to affinity-gated pool`,
               );
             }
           }
 
+          const leadOnly = task.routingAffinity?.leadOnly === true;
+          const authorization = await resolveLeadOnlyRecoveryAssignment(task, sourceCandidate);
+          if (leadOnly) preferredAgentId = authorization.agentId;
+
           const tags = ["reboot-retry", "auto-generated"];
           if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
+          const sourceAffinity = (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined;
+          const routingAffinity = leadOnly
+            ? {
+                ...(sourceAffinity ?? task.routingAffinity),
+                capabilities:
+                  task.routingAffinity?.capabilities ?? sourceAffinity?.capabilities ?? [],
+                leadOnly: true,
+              }
+            : sourceAffinity;
 
           const retryTask = await createTaskExtended(task.task, {
             parentTaskId: task.id,
@@ -716,8 +743,21 @@ export async function runRebootSweep(): Promise<void> {
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
-            routingAffinity: (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined,
+            routingAffinity,
           });
+          if (authorization.decision) {
+            await createLogEntry({
+              eventType: "task_recovery_authorization",
+              taskId: retryTask.id,
+              agentId: preferredAgentId,
+              metadata: {
+                leadOnly: true,
+                parentTaskId: task.id,
+                sourceAgentId: task.agentId,
+                decision: authorization.decision,
+              },
+            });
+          }
           retryTaskId = retryTask.id;
           console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
         } catch (err) {

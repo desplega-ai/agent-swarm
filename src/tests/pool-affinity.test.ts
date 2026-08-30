@@ -92,6 +92,46 @@ describe("Pool Affinity", () => {
       expect(task.agentId).toBe(lead.id);
     });
 
+    test("an unassigned lead-only task is claimable by a Lead but not a worker", async () => {
+      const worker = await createAgent({ name: "pool-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "pool-lead", isLead: true, status: "idle" });
+      const task = await createTaskExtended("Merge", {
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+
+      expect(await claimTask(task.id, worker.id)).toBeNull();
+      expect(await claimTask(task.id, lead.id)).not.toBeNull();
+    });
+
+    test("malformed and schema-invalid persisted affinities are quarantined", async () => {
+      const worker = await createAgent({
+        name: "quarantine-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const lead = await createAgent({ name: "quarantine-lead", isLead: true, status: "idle" });
+      const malformed = await createTaskExtended("Malformed affinity");
+      const schemaInvalid = await createTaskExtended("Invalid affinity", {
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        "{not-json",
+        malformed.id,
+      ]);
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        JSON.stringify({ leadOnly: true, capabilities: "bad" }),
+        schemaInvalid.id,
+      ]);
+
+      for (const task of [malformed, schemaInvalid]) {
+        expect((await getTaskById(task.id))?.routingAffinityInvalid).toBe(true);
+        expect(await claimTask(task.id, worker.id)).toBeNull();
+        expect(await assignUnassignedTaskPending(task.id, lead.id)).toBeNull();
+        expect(await getUnassignedTaskIdsForAgent(lead.id)).not.toContain(task.id);
+        expect((await getTaskById(task.id))?.status).toBe("unassigned");
+      }
+    });
+
     test("sourceAgentId bypass: own work is eligible even with a mismatched role", async () => {
       const owner = await createAgent({ name: "owner", isLead: false, status: "idle" });
       await updateAgentProfile(owner.id, { role: "researcher" });
@@ -251,6 +291,28 @@ describe("Pool Affinity", () => {
       const claimed = await claimTask(task.id, agent.id);
       expect(claimed).not.toBeNull();
       expect(claimed?.agentId).toBe(agent.id);
+    });
+
+    test("a child cannot downgrade a lead-only parent's affinity", async () => {
+      const worker = await createAgent({ name: "child-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "child-lead", isLead: true, status: "idle" });
+      const parent = await createTaskExtended("Merge", {
+        agentId: lead.id,
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+
+      await expect(
+        createTaskExtended("Child", {
+          parentTaskId: parent.id,
+          agentId: worker.id,
+          routingAffinity: affinity({ leadOnly: false, capabilities: ["typescript"] }),
+        }),
+      ).rejects.toThrow("Lead-only task");
+      const child = await createTaskExtended("Child", {
+        parentTaskId: parent.id,
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["typescript"] }),
+      });
+      expect(child.routingAffinity?.leadOnly).toBe(true);
     });
   });
 

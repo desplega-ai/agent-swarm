@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  claimTask,
   closeDb,
   createAgent,
   createTaskExtended,
@@ -679,6 +680,69 @@ describe("Heartbeat Triage", () => {
       expect(tags).toContain("reboot-retry");
       expect(tags).toContain("auto-generated");
       expect(tags).toContain("reboot-retry-pin");
+    });
+
+    test("reboot recovery reroutes a legacy worker-owned lead-only task to a Lead", async () => {
+      const worker = await createAgent({
+        name: "reboot-misrouted-worker",
+        isLead: false,
+        status: "busy",
+      });
+      const lead = await createAgent({
+        name: "reboot-recovery-lead",
+        isLead: true,
+        status: "idle",
+      });
+      const task = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      await startTask(task.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET routingAffinity = ?, lastUpdatedAt = ? WHERE id = ?",
+        [
+          JSON.stringify({ sourceAgentId: worker.id, capabilities: [], leadOnly: true }),
+          new Date(Date.now() - 1000).toISOString(),
+          task.id,
+        ],
+      );
+
+      await runRebootSweep();
+
+      const retryId = getRebootAffectedTasks()[0]?.retryTaskId;
+      const retry = retryId ? await getTaskById(retryId) : null;
+      expect(retry?.agentId).toBe(lead.id);
+      expect(retry?.routingAffinity?.leadOnly).toBe(true);
+      const audit = await getDbClient().get<{ metadata: string }>(
+        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_recovery_authorization'",
+        [retryId],
+      );
+      expect(audit?.metadata).toContain("rerouted_to_lead");
+    });
+
+    test("no-Lead reboot fallback remains claimable after an eligible Lead arrives", async () => {
+      const worker = await createAgent({ name: "no-lead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      await startTask(task.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET routingAffinity = ?, lastUpdatedAt = ? WHERE id = ?",
+        [
+          JSON.stringify({
+            sourceAgentId: worker.id,
+            role: "worker",
+            capabilities: [],
+            leadOnly: true,
+          }),
+          new Date(Date.now() - 1000).toISOString(),
+          task.id,
+        ],
+      );
+
+      await runRebootSweep();
+      const retryId = getRebootAffectedTasks()[0]?.retryTaskId;
+      const retry = retryId ? await getTaskById(retryId) : null;
+      expect(retry?.status).toBe("unassigned");
+      expect(retry?.routingAffinity?.leadOnly).toBe(true);
+
+      const lead = await createAgent({ name: "arriving-lead", isLead: true, status: "idle" });
+      expect(await claimTask(retryId!, lead.id)).not.toBeNull();
     });
 
     test("falls back to an affinity-stamped pool retry when the agent is at capacity", async () => {

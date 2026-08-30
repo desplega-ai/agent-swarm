@@ -1,6 +1,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, createTaskExtended, createUser, getTaskById, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  getTaskById,
+  initDb,
+} from "../be/db";
 import { getTasksHandler } from "../tools/get-tasks";
 import { sendTaskHandler } from "../tools/send-task";
 import { assertOwnsTask, ownerCtx, userCtx } from "../tools/task-tool-ctx";
@@ -46,6 +53,31 @@ describe("task tool ctx", () => {
     const stored = await getTaskById(data.task.id);
     expect(stored?.creatorAgentId).toBeUndefined();
     expect(stored?.requestedByUserId).toBe(user.id);
+  });
+
+  test("send-task continuation cannot shed a lead-only parent boundary", async () => {
+    const lead = await createAgent({ name: "continuation lead", isLead: true, status: "idle" });
+    const sender = await createAgent({
+      name: "continuation sender",
+      isLead: false,
+      status: "idle",
+    });
+    const parent = await createTaskExtended("privileged parent", {
+      agentId: lead.id,
+      routingAffinity: { capabilities: [], leadOnly: true },
+    });
+
+    const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
+      task: "attempted ordinary child",
+      parentTaskId: parent.id,
+      requiredCapabilities: [],
+      offerMode: true,
+      allowDuplicate: false,
+    });
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { task: { id: string } };
+    expect((await getTaskById(data.task.id))?.routingAffinity?.leadOnly).toBe(true);
   });
 
   test("getTasksHandler with user ctx only returns that user's tasks", async () => {

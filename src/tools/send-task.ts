@@ -245,6 +245,14 @@ export async function sendTaskHandler(
   const effectiveParentTask = effectiveParentTaskId
     ? await getTaskById(effectiveParentTaskId)
     : null;
+  if (effectiveParentTask?.routingAffinityInvalid) {
+    return toolErr("Cannot continue a task with an invalid routing affinity.", {
+      data: { yourAgentId: creatorAgentId },
+    });
+  }
+  // A public continuation cannot accidentally declassify its parent before
+  // createTaskExtended performs the authoritative merge.
+  const effectiveLeadOnly = leadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
@@ -429,8 +437,8 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
         routingAffinity:
-          leadOnly || requiredCapabilities?.length
-            ? { leadOnly, capabilities: requiredCapabilities ?? [] }
+          effectiveLeadOnly || requiredCapabilities?.length
+            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
             : undefined,
       });
       await transferTrackerSyncToResumeChild({
@@ -455,10 +463,10 @@ export async function sendTaskHandler(
       };
     }
 
-    if (agent.isLead !== leadOnly) {
+    if (agent.isLead !== effectiveLeadOnly) {
       return {
         success: false,
-        message: leadOnly
+        message: effectiveLeadOnly
           ? `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`
           : `Cannot assign a non-Lead-only task to Lead agent "${agent.name}".`,
       };
@@ -497,8 +505,8 @@ export async function sendTaskHandler(
         overrideSlackContext,
         followUpConfig,
         routingAffinity:
-          leadOnly || requiredCapabilities?.length
-            ? { leadOnly, capabilities: requiredCapabilities ?? [] }
+          effectiveLeadOnly || requiredCapabilities?.length
+            ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
             : undefined,
       });
       await transferTrackerSyncToResumeChild({
@@ -537,8 +545,8 @@ export async function sendTaskHandler(
       overrideSlackContext,
       followUpConfig,
       routingAffinity:
-        leadOnly || requiredCapabilities?.length
-          ? { leadOnly, capabilities: requiredCapabilities ?? [] }
+        effectiveLeadOnly || requiredCapabilities?.length
+          ? { leadOnly: effectiveLeadOnly, capabilities: requiredCapabilities ?? [] }
           : undefined,
     });
     await transferTrackerSyncToResumeChild({

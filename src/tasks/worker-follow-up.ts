@@ -9,6 +9,7 @@ import {
   getTaskAttachments,
   getTaskById,
   hasNonTerminalRerouteDecisionChild,
+  isAgentEligibleForTask,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
@@ -96,6 +97,29 @@ export async function getPinCandidateAgent(agentId: string): Promise<Agent | nul
   const candidate = await getAgentById(agentId);
   if (!candidate || candidate.status === "offline") return null;
   return candidate;
+}
+
+/**
+ * Applies the Lead-only recovery boundary shared by normal resume and reboot
+ * recovery. A worker source is never a valid pin; use an available Lead or
+ * leave the task unassigned so only a Lead can claim it.
+ */
+export async function resolveLeadOnlyRecoveryAssignment(
+  task: Pick<AgentTask, "routingAffinity" | "routingAffinityInvalid">,
+  sourceCandidate: Agent | null,
+): Promise<{
+  agentId?: string;
+  decision?: "source_lead_pin" | "rerouted_to_lead" | "escalated_unassigned";
+}> {
+  if (!task.routingAffinity?.leadOnly) return {};
+  if (sourceCandidate?.isLead && isAgentEligibleForTask(sourceCandidate, task)) {
+    return { agentId: sourceCandidate.id, decision: "source_lead_pin" };
+  }
+  const lead = await getLeadAgent();
+  if (lead && lead.status !== "offline" && isAgentEligibleForTask(lead, task)) {
+    return { agentId: lead.id, decision: "rerouted_to_lead" };
+  }
+  return { decision: "escalated_unassigned" };
 }
 
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
@@ -330,19 +354,14 @@ export async function createResumeFollowUp(args: {
     }
   }
 
-  // A worker-assigned privileged parent must never be pinned back to that
-  // worker. Route to the current Lead when one is available; otherwise leave
-  // the child unassigned. The leadOnly pool predicate keeps workers from
-  // claiming that fallback and starvation escalation gives the Lead an
-  // inspectable decision path.
-  if (leadOnly && !preferredAgentId) {
-    const lead = await getLeadAgent();
-    if (lead && lead.status !== "offline") {
-      preferredAgentId = lead.id;
-      authorizationDecision = "rerouted_to_lead";
-    } else {
-      authorizationDecision = "escalated_unassigned";
-    }
+  // Apply the same Lead-only recovery decision used by reboot recovery. A
+  // non-Lead source can never win the earlier pin attempt, so this chooses a
+  // Lead reroute or an authorization-gated unassigned fallback.
+  if (leadOnly) {
+    const source = preferredAgentId ? await getAgentById(preferredAgentId) : null;
+    const resolution = await resolveLeadOnlyRecoveryAssignment(parent, source);
+    preferredAgentId = resolution.agentId;
+    authorizationDecision = resolution.decision;
   }
 
   const parentDesc = parent.task.slice(0, 200);
