@@ -71,6 +71,7 @@ import {
   EX_CONFIG,
   retryBootStep,
 } from "./credential-wait.ts";
+import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   contentSha256,
   prependProfileSyncRejectionBanner,
@@ -6024,6 +6025,37 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
             );
           }
+        }
+
+        // Per-task identity hot-reload. `GET /me` is otherwise read once at
+        // boot, so a SOUL/IDENTITY/TOOLS/CLAUDE.md change landing after boot
+        // (Lead via `update-profile`, or the agent's own file edit synced by
+        // the PostToolUse hook) never reached the injected system prompt until
+        // the container restarted — the DB and the workspace file were fresh
+        // while every task kept getting the boot-time copy.
+        const identityResult = await refreshIdentityIfChanged(
+          { apiUrl, apiKey, agentId, role },
+          {
+            soulMd: agentSoulMd,
+            identityMd: agentIdentityMd,
+            toolsMd: agentToolsMd,
+            claudeMd: agentClaudeMd,
+            heartbeatMd: agentHeartbeatMd,
+            name: agentProfileName,
+            description: agentDescription,
+          },
+        );
+        if (identityResult.changed) {
+          agentSoulMd = identityResult.fields.soulMd;
+          agentIdentityMd = identityResult.fields.identityMd;
+          agentToolsMd = identityResult.fields.toolsMd;
+          agentClaudeMd = identityResult.fields.claudeMd;
+          agentHeartbeatMd = identityResult.fields.heartbeatMd;
+          agentProfileName = identityResult.fields.name;
+          agentDescription = identityResult.fields.description;
+          console.log(
+            `[${role}] Identity changed — refreshing system prompt (${identityResult.changedFields.join(", ")})`,
+          );
         }
 
         // Rebuild system prompt with per-task repo context
