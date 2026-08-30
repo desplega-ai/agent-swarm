@@ -31,6 +31,7 @@ import {
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-heartbeat.sqlite";
 
@@ -488,6 +489,45 @@ describe("Heartbeat Triage", () => {
 
       const findings = await codeLevelTriage();
       expect(findings.stalledTasks.length).toBe(0);
+    });
+
+    test("privileged crash recovery reroutes a legacy worker parent to the Lead", async () => {
+      const worker = await createAgent({ name: "misrouted-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "recovery-lead", isLead: true, status: "idle" });
+      const parent = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      // Simulate a legacy row created before the structured constraint existed.
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'superseded', routingAffinity = ? WHERE id = ?",
+        [JSON.stringify({ sourceAgentId: worker.id, capabilities: [], leadOnly: true }), parent.id],
+      );
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.routingAffinity?.leadOnly).toBe(true);
+      const audit = await getDbClient().get<{ metadata: string }>(
+        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_recovery_authorization'",
+        [result.task.id],
+      );
+      expect(audit?.metadata).toContain("rerouted_to_lead");
+    });
+
+    test("privileged recovery retains a safe Lead source pin", async () => {
+      const lead = await createAgent({ name: "source-lead", isLead: true, status: "idle" });
+      const parent = await createTaskExtended("Merge this PR", {
+        agentId: lead.id,
+        routingAffinity: { capabilities: [], leadOnly: true },
+      });
+      await getDbClient().run("UPDATE agent_tasks SET status = 'superseded' WHERE id = ?", [
+        parent.id,
+      ]);
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.tags).toContain("crash-recovery-pin");
     });
 
     test("sets agent to idle after auto-superseding its only task", async () => {

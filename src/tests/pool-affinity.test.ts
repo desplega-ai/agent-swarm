@@ -63,6 +63,35 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(agent, task)).toBe(true);
     });
 
+    test("lead-only blocks a worker even when it is the affinity source", async () => {
+      const worker = await createAgent({
+        name: "privileged-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const task = await createTaskExtended("Merge", {
+        routingAffinity: affinity({ sourceAgentId: worker.id, leadOnly: true }),
+      });
+      expect(isAgentEligibleForTask(worker, task)).toBe(false);
+      expect(await claimTask(task.id, worker.id)).toBeNull();
+    });
+
+    test("lead-only accepts a Lead and rejects direct worker assignment", async () => {
+      const worker = await createAgent({ name: "direct-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "privileged-lead", isLead: true, status: "idle" });
+      await expect(
+        createTaskExtended("Merge", {
+          agentId: worker.id,
+          routingAffinity: affinity({ leadOnly: true }),
+        }),
+      ).rejects.toThrow("Lead-only task");
+      const task = await createTaskExtended("Merge", {
+        agentId: lead.id,
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+      expect(task.agentId).toBe(lead.id);
+    });
+
     test("sourceAgentId bypass: own work is eligible even with a mismatched role", async () => {
       const owner = await createAgent({ name: "owner", isLead: false, status: "idle" });
       await updateAgentProfile(owner.id, { role: "researcher" });

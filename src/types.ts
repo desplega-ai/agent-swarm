@@ -475,6 +475,8 @@ export const RoutingAffinitySchema = z
     role: z.string().max(100).optional(),
     harnessProvider: ProviderNameSchema.optional(),
     capabilities: z.array(z.string()).default([]),
+    /** Explicit authorization boundary for merge and other control-plane work. */
+    leadOnly: z.boolean().optional(),
   })
   .openapi("RoutingAffinity");
 export type RoutingAffinity = z.infer<typeof RoutingAffinitySchema>;
@@ -722,8 +724,10 @@ export const CreateTaskOptionsSchema = z.object({
    */
   bypassTrackerContextDedup: z.boolean().optional(),
   /**
-   * Routing-affinity snapshot gating pool eligibility (see
-   * `isAgentEligibleForTask`). Inherited from the parent (via `parentTaskId`)
+   * Routing-affinity snapshot gating task authorization (see
+   * `isAgentEligibleForTask`). `leadOnly: true` is an explicit, structured
+   * constraint: only an agent with `isLead` may be assigned, offered, claim,
+   * or recover this task. It is never inferred from task text. Inherited from the parent (via `parentTaskId`)
    * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
    */
   routingAffinity: RoutingAffinitySchema.optional(),
@@ -1296,6 +1300,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_rejected",
   "task_claimed",
   "task_claim_rejected_affinity",
+  "task_authorization_rejected",
+  "task_recovery_authorization",
   "task_released",
   "channel_message",
   // Service registry events

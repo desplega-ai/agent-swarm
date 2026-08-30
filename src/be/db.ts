@@ -1205,12 +1205,15 @@ export async function buildRoutingAffinityFromAgent(
  * hands it to the Lead.
  */
 export function isAgentEligibleForTask(
-  agent: Pick<Agent, "id" | "role" | "capabilities">,
+  agent: Pick<Agent, "id" | "isLead" | "role" | "capabilities">,
   task: Pick<AgentTask, "routingAffinity">,
 ): boolean {
-  if (!isPoolAffinityEnforcementEnabled()) return true;
-
   const affinity = task.routingAffinity;
+  // Lead-only is an authorization boundary, never a best-effort pool hint or
+  // a source-agent exception. It remains enforced even if the affinity
+  // kill-switch is used to roll back role/capability matching.
+  if (affinity?.leadOnly && !agent.isLead) return false;
+  if (!isPoolAffinityEnforcementEnabled()) return true;
   if (!affinity) return true; // Untagged task — unchanged behavior.
 
   if (affinity.sourceAgentId && affinity.sourceAgentId === agent.id) return true; // Own work.
@@ -1529,11 +1532,9 @@ export async function assignUnassignedTaskPending(
   taskId: string,
   agentId: string,
 ): Promise<AgentTask | null> {
-  // Eligibility pre-check (routing affinity) — defense in depth for the
-  // heartbeat's `autoAssignPoolTasks`, which already filters candidates via
-  // `isAgentEligibleForTask` before calling this, but any other caller gets
-  // the same guard for free.
-  if (isPoolAffinityEnforcementEnabled()) {
+  // This guard is always needed for lead-only tasks; the predicate itself
+  // handles the optional role/capability kill-switch.
+  {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
@@ -1545,6 +1546,8 @@ export async function assignUnassignedTaskPending(
           metadata: {
             agentRole: agent.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
+            leadOnly: task.routingAffinity?.leadOnly === true,
+            agentIsLead: agent.isLead,
           },
         });
       } catch {}
@@ -5015,6 +5018,26 @@ export async function createTaskExtended(
     }
   }
 
+  // Direct assignment and offers bypass the pool claim gate, so enforce the
+  // structured lead-only constraint at task creation as well. This is after
+  // parent inheritance so continuations cannot shed the parent's boundary.
+  const targetAgentId = options.agentId ?? options.offeredTo;
+  if (options.routingAffinity?.leadOnly && targetAgentId) {
+    const target = await getAgentById(targetAgentId);
+    if (!target?.isLead) {
+      try {
+        await createLogEntry({
+          eventType: "task_authorization_rejected",
+          agentId: options.creatorAgentId,
+          metadata: { leadOnly: true, targetAgentId, decision: "reject_non_lead_assignment" },
+        });
+      } catch {}
+      throw new Error(
+        `Lead-only task cannot be assigned or offered to non-Lead agent "${targetAgentId}".`,
+      );
+    }
+  }
+
   const auditUserId = getCurrentRequestUserId() ?? null;
   const assetKey = normalizeAssetKey(options?.key ?? defaultAssetKey("task", id));
   // The Linear tracker dedup guard and the INSERT commit as one unit. Two
@@ -5115,7 +5138,13 @@ export async function createTaskExtended(
       agentId: options?.creatorAgentId,
       taskId: id,
       newValue: status,
-      metadata: { source: options?.source ?? "mcp" },
+      metadata: {
+        source: options?.source ?? "mcp",
+        leadOnly: options?.routingAffinity?.leadOnly === true,
+        authorization: options?.routingAffinity?.leadOnly
+          ? { decision: "authorized", targetAgentId: options.agentId ?? options.offeredTo ?? null }
+          : undefined,
+      },
     });
   } catch {}
 
@@ -5156,10 +5185,9 @@ export async function createTaskExtended(
 }
 
 export async function claimTask(taskId: string, agentId: string): Promise<AgentTask | null> {
-  // Eligibility pre-check (routing affinity): static per (agent, task), so
-  // pre-filtering here does NOT reopen the claim race — the atomic UPDATE
-  // below still arbitrates concurrent claims by eligible agents.
-  if (isPoolAffinityEnforcementEnabled()) {
+  // Static per (agent, task), so this pre-check does not reopen the atomic
+  // claim race. It always applies to lead-only authorization.
+  {
     const task = await getTaskById(taskId);
     const agent = await getAgentById(agentId);
     if (task && agent && !isAgentEligibleForTask(agent, task)) {
@@ -5171,6 +5199,8 @@ export async function claimTask(taskId: string, agentId: string): Promise<AgentT
           metadata: {
             agentRole: agent.role ?? null,
             requiredRole: task.routingAffinity?.role ?? null,
+            leadOnly: task.routingAffinity?.leadOnly === true,
+            agentIsLead: agent.isLead,
           },
         });
       } catch {}
@@ -5240,6 +5270,22 @@ export async function releaseTask(taskId: string): Promise<AgentTask | null> {
 export async function acceptTask(taskId: string, agentId: string): Promise<AgentTask | null> {
   const task = await getTaskById(taskId);
   if (!task) return null;
+  const agent = await getAgentById(agentId);
+  if (task.routingAffinity?.leadOnly && (!agent || !isAgentEligibleForTask(agent, task))) {
+    try {
+      await createLogEntry({
+        eventType: "task_claim_rejected_affinity",
+        agentId,
+        taskId,
+        metadata: {
+          leadOnly: true,
+          agentIsLead: agent?.isLead ?? false,
+          decision: "reject_offer_accept",
+        },
+      });
+    } catch {}
+    return null;
+  }
   // Accept both 'offered' and 'reviewing' statuses
   if (!(task.status === "offered" || task.status === "reviewing") || task.offeredTo !== agentId)
     return null;
@@ -5499,6 +5545,22 @@ export async function claimOfferedTask(taskId: string, agentId: string): Promise
   const task = await getTaskById(taskId);
   if (!task) return null;
   if (task.status !== "offered" || task.offeredTo !== agentId) return null;
+  const agent = await getAgentById(agentId);
+  if (task.routingAffinity?.leadOnly && (!agent || !isAgentEligibleForTask(agent, task))) {
+    try {
+      await createLogEntry({
+        eventType: "task_claim_rejected_affinity",
+        agentId,
+        taskId,
+        metadata: {
+          leadOnly: true,
+          agentIsLead: agent?.isLead ?? false,
+          decision: "reject_offer_claim",
+        },
+      });
+    } catch {}
+    return null;
+  }
 
   const now = new Date().toISOString();
   const row = await getDbClient().get<AgentTaskRow>(

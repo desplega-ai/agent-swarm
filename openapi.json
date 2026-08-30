@@ -481,6 +481,9 @@
               "type": "string"
             },
             "default": []
+          },
+          "leadOnly": {
+            "type": "boolean"
           }
         }
       },
@@ -3407,6 +3410,8 @@
               "task_rejected",
               "task_claimed",
               "task_claim_rejected_affinity",
+              "task_authorization_rejected",
+              "task_recovery_authorization",
               "task_released",
               "channel_message",
               "service_registered",

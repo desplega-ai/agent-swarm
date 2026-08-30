@@ -1,5 +1,6 @@
 import {
   buildRoutingAffinityFromAgent,
+  createLogEntry,
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
@@ -291,6 +292,12 @@ export async function createResumeFollowUp(args: {
   //   - `context_limits` / `manual_supersede`: the worker is alive and
   //     responsive, so keep requiring `fresh`.
   let preferredAgentId: string | undefined;
+  let authorizationDecision:
+    | "source_lead_pin"
+    | "rerouted_to_lead"
+    | "escalated_unassigned"
+    | undefined;
+  const leadOnly = parent.routingAffinity?.leadOnly === true;
   if (parent.agentId) {
     const candidate = await getPinCandidateAgent(parent.agentId);
     if (candidate) {
@@ -306,8 +313,13 @@ export async function createResumeFollowUp(args: {
       const isFreshPinnedReason = !isGracefulShutdown && fresh;
       // crash_recovery and graceful_shutdown pins ignore `fresh` when their
       // kill-switches are on; context_limits/manual_supersede still require it.
-      if (hasCap && (isCrashRecovery || isGracefulPin || isFreshPinnedReason)) {
+      if (
+        hasCap &&
+        (isCrashRecovery || isGracefulPin || isFreshPinnedReason) &&
+        (!leadOnly || candidate.isLead)
+      ) {
         preferredAgentId = candidate.id;
+        if (leadOnly) authorizationDecision = "source_lead_pin";
       } else if ((isCrashRecovery || isGracefulPin) && !hasCap) {
         // Surface capacity-driven pool fallback instead of letting a protected
         // pinned-reason skip happen silently.
@@ -315,6 +327,21 @@ export async function createResumeFollowUp(args: {
           `[Heartbeat] ${args.reason} resume for task ${parent.id.slice(0, 8)} NOT pinned: agent ${candidate.id.slice(0, 8)} at capacity (${activeCount}/${candidate.maxTasks ?? 1}); falling back to unassigned pool`,
         );
       }
+    }
+  }
+
+  // A worker-assigned privileged parent must never be pinned back to that
+  // worker. Route to the current Lead when one is available; otherwise leave
+  // the child unassigned. The leadOnly pool predicate keeps workers from
+  // claiming that fallback and starvation escalation gives the Lead an
+  // inspectable decision path.
+  if (leadOnly && !preferredAgentId) {
+    const lead = await getLeadAgent();
+    if (lead && lead.status !== "offline") {
+      preferredAgentId = lead.id;
+      authorizationDecision = "rerouted_to_lead";
+    } else {
+      authorizationDecision = "escalated_unassigned";
     }
   }
 
@@ -342,10 +369,10 @@ export async function createResumeFollowUp(args: {
   // pooled resume — including a crash_recovery resume that fell to the pool at
   // capacity — never gets this tag, so it can't be mistaken for a stale pin
   // after autoAssignPoolTasks flips it to `pending`.
-  if (args.reason === "crash_recovery" && preferredAgentId !== undefined) {
+  if (args.reason === "crash_recovery" && preferredAgentId === parent.agentId) {
     tags.push(CRASH_RECOVERY_PIN_TAG);
   }
-  if (args.reason === "graceful_shutdown" && preferredAgentId !== undefined) {
+  if (args.reason === "graceful_shutdown" && preferredAgentId === parent.agentId) {
     tags.push(GRACEFUL_SHUTDOWN_PIN_TAG);
   }
 
@@ -364,9 +391,16 @@ export async function createResumeFollowUp(args: {
   // `null` and we pass `undefined`, letting `createTaskExtended`'s
   // parentTaskId inheritance block fall back to the parent's OWN
   // (already-inherited) `routingAffinity` instead.
-  const routingAffinity = parent.agentId
+  const sourceAffinity = parent.agentId
     ? ((await buildRoutingAffinityFromAgent(parent.agentId)) ?? undefined)
     : undefined;
+  const routingAffinity = leadOnly
+    ? {
+        ...(sourceAffinity ?? parent.routingAffinity),
+        capabilities: sourceAffinity?.capabilities ?? parent.routingAffinity?.capabilities ?? [],
+        leadOnly: true,
+      }
+    : sourceAffinity;
   const created = await createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
@@ -377,6 +411,22 @@ export async function createResumeFollowUp(args: {
     parentTaskId: parent.id,
     routingAffinity,
   });
+
+  if (authorizationDecision) {
+    try {
+      await createLogEntry({
+        eventType: "task_recovery_authorization",
+        taskId: created.id,
+        agentId: preferredAgentId,
+        metadata: {
+          leadOnly: true,
+          parentTaskId: parent.id,
+          sourceAgentId: parent.agentId,
+          decision: authorizationDecision,
+        },
+      });
+    } catch {}
+  }
 
   // Repoint Linear / Jira `tracker_sync` rows from the (now terminal) parent
   // to the resume child. Without this, outbound completion posts for the
