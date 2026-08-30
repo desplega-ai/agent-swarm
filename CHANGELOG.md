@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.3] - 2026-08-30
+
+### Fixed
+- **Root tests isolate shared process state reliably** (#1271) — environment variables and Slack handler caches are restored between production-handler tests, preventing order-dependent failures in the full suite.
+
 ## [1.135.2] - 2026-08-29
 
 ### Changed
