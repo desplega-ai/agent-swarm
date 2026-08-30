@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  claimTask,
   closeDb,
   createAgent,
   createTaskExtended,
   createUser,
   getTaskById,
   initDb,
+  updateAgentProfile,
 } from "../be/db";
 import { getTasksHandler } from "../tools/get-tasks";
 import { sendTaskHandler } from "../tools/send-task";
@@ -55,29 +57,40 @@ describe("task tool ctx", () => {
     expect(stored?.requestedByUserId).toBe(user.id);
   });
 
-  test("send-task continuation cannot shed a lead-only parent boundary", async () => {
+  test("send-task continuations cannot shed lead-only parent capabilities when omitted or empty", async () => {
     const lead = await createAgent({ name: "continuation lead", isLead: true, status: "idle" });
+    const underprivilegedLead = await createAgent({
+      name: "continuation underprivileged lead",
+      isLead: true,
+      status: "idle",
+    });
     const sender = await createAgent({
       name: "continuation sender",
       isLead: false,
       status: "idle",
     });
+    await updateAgentProfile(lead.id, { capabilities: ["merge"] });
+    await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
     const parent = await createTaskExtended("privileged parent", {
       agentId: lead.id,
-      routingAffinity: { capabilities: [], leadOnly: true },
+      routingAffinity: { capabilities: ["merge"], leadOnly: true },
     });
 
-    const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
-      task: "attempted ordinary child",
-      parentTaskId: parent.id,
-      requiredCapabilities: [],
-      offerMode: true,
-      allowDuplicate: false,
-    });
+    for (const requiredCapabilities of [undefined, []] as const) {
+      const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
+        task: `attempted ordinary child ${requiredCapabilities ? "empty" : "omitted"}`,
+        parentTaskId: parent.id,
+        ...(requiredCapabilities !== undefined ? { requiredCapabilities } : {}),
+        offerMode: true,
+        allowDuplicate: false,
+      });
 
-    expect(result.ok).toBe(true);
-    const data = result.data as { task: { id: string } };
-    expect((await getTaskById(data.task.id))?.routingAffinity?.leadOnly).toBe(true);
+      expect(result.ok).toBe(true);
+      const data = result.data as { task: { id: string } };
+      const child = await getTaskById(data.task.id);
+      expect(child?.routingAffinity).toMatchObject({ leadOnly: true, capabilities: ["merge"] });
+      expect(await claimTask(data.task.id, underprivilegedLead.id)).toBeNull();
+    }
   });
 
   test("getTasksHandler with user ctx only returns that user's tasks", async () => {

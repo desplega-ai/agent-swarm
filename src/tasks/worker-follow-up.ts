@@ -405,9 +405,11 @@ export async function createResumeFollowUp(args: {
   //
   // Routing affinity: stamp a FRESH snapshot from the parent's own agent —
   // this covers every leg (pinned AND the pool-fallback legs) so a resume
-  // that falls to the unassigned pool is still role/capability-gated. When
-  // the agent row is already gone, `buildRoutingAffinityFromAgent` returns
-  // `null` and we pass `undefined`, letting `createTaskExtended`'s
+  // that falls to the unassigned pool is still role/capability-gated. A
+  // Lead-only task retains its parent-declared required capabilities instead:
+  // the source snapshot is provenance, not an authorization requirement.
+  // When the agent row is already gone, `buildRoutingAffinityFromAgent`
+  // returns `null` and we pass `undefined`, letting `createTaskExtended`'s
   // parentTaskId inheritance block fall back to the parent's OWN
   // (already-inherited) `routingAffinity` instead.
   const sourceAffinity = parent.agentId
@@ -416,7 +418,7 @@ export async function createResumeFollowUp(args: {
   const routingAffinity = leadOnly
     ? {
         ...(sourceAffinity ?? parent.routingAffinity),
-        capabilities: sourceAffinity?.capabilities ?? parent.routingAffinity?.capabilities ?? [],
+        capabilities: parent.routingAffinity?.capabilities ?? [],
         leadOnly: true,
       }
     : sourceAffinity;

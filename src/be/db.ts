@@ -4962,7 +4962,20 @@ export async function createTaskExtended(
         if (!options.routingAffinity) {
           options.routingAffinity = parent.routingAffinity;
         } else if (parent.routingAffinity.leadOnly) {
-          options.routingAffinity = { ...options.routingAffinity, leadOnly: true };
+          // Child-supplied affinity may add requirements, but never remove an
+          // authorization-affecting requirement inherited from a Lead-only
+          // parent. This includes public continuations that default their
+          // requiredCapabilities to an empty array.
+          options.routingAffinity = {
+            ...options.routingAffinity,
+            capabilities: [
+              ...new Set([
+                ...(parent.routingAffinity.capabilities ?? []),
+                ...(options.routingAffinity.capabilities ?? []),
+              ]),
+            ],
+            leadOnly: true,
+          };
         }
       }
     }

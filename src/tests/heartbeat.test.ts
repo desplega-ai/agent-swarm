@@ -19,6 +19,7 @@ import {
   MAX_EMPTY_POLLS,
   resetOrphanedInProgressTasksForAgent,
   startTask,
+  updateAgentProfile,
   updateAgentStatus,
   updateTaskClaudeSessionId,
 } from "../be/db";
@@ -512,6 +513,41 @@ describe("Heartbeat Triage", () => {
         [result.task.id],
       );
       expect(audit?.metadata).toContain("rerouted_to_lead");
+    });
+
+    test("privileged crash recovery preserves parent capabilities on an unassigned child", async () => {
+      const worker = await createAgent({
+        name: "capability-source-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const underprivilegedLead = await createAgent({
+        name: "capability-underprivileged-lead",
+        isLead: true,
+        status: "idle",
+      });
+      await updateAgentProfile(worker.id, { capabilities: ["typescript"] });
+      await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
+      const parent = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      // Simulate legacy privileged work whose source snapshot has capabilities
+      // unrelated to its authorization requirement.
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'superseded', routingAffinity = ? WHERE id = ?",
+        [
+          JSON.stringify({ sourceAgentId: worker.id, capabilities: ["merge"], leadOnly: true }),
+          parent.id,
+        ],
+      );
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.status).toBe("unassigned");
+      expect(result.task.routingAffinity).toMatchObject({
+        leadOnly: true,
+        capabilities: ["merge"],
+      });
+      expect(await claimTask(result.task.id, underprivilegedLead.id)).toBeNull();
     });
 
     test("privileged recovery retains a safe Lead source pin", async () => {

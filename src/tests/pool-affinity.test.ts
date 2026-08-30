@@ -293,12 +293,19 @@ describe("Pool Affinity", () => {
       expect(claimed?.agentId).toBe(agent.id);
     });
 
-    test("a child cannot downgrade a lead-only parent's affinity", async () => {
+    test("a child cannot downgrade a lead-only parent's affinity or capabilities", async () => {
       const worker = await createAgent({ name: "child-worker", isLead: false, status: "idle" });
       const lead = await createAgent({ name: "child-lead", isLead: true, status: "idle" });
+      const underprivilegedLead = await createAgent({
+        name: "child-underprivileged-lead",
+        isLead: true,
+        status: "idle",
+      });
+      await updateAgentProfile(lead.id, { capabilities: ["merge"] });
+      await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
       const parent = await createTaskExtended("Merge", {
         agentId: lead.id,
-        routingAffinity: affinity({ leadOnly: true }),
+        routingAffinity: affinity({ leadOnly: true, capabilities: ["merge"] }),
       });
 
       await expect(
@@ -312,7 +319,9 @@ describe("Pool Affinity", () => {
         parentTaskId: parent.id,
         routingAffinity: affinity({ leadOnly: false, capabilities: ["typescript"] }),
       });
-      expect(child.routingAffinity?.leadOnly).toBe(true);
+      expect(child.routingAffinity).toMatchObject({ leadOnly: true });
+      expect(child.routingAffinity?.capabilities).toEqual(["merge", "typescript"]);
+      expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
   });
 
