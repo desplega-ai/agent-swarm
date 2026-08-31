@@ -10,21 +10,34 @@ const TEST_API_KEY = "test-events-http-key";
 
 let serverProc: Subprocess;
 
-async function waitForEventsApi(timeoutMs = 10_000): Promise<void> {
+/**
+ * Poll the child until the authenticated events route answers.
+ *
+ * A refused connection means the child is still booting: keep waiting. The
+ * ceiling matches waitForServer() in test-net.ts because a boot under
+ * --parallel load on a shared runner takes far longer than the ~1 s it takes
+ * idle, and restarting a slow child only resets its progress.
+ *
+ * Any HTTP response that is not a 200 events list comes from another server:
+ * a parallel test claimed the released getFreePort() socket first and the
+ * child's own listen failed with EADDRINUSE. Report "foreign" so the caller
+ * retries on a fresh port right away.
+ */
+async function waitForEventsApi(timeoutMs = 60_000): Promise<"ready" | "foreign"> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       const response = await fetch(`${BASE}/api/events`, {
         headers: { Authorization: `Bearer ${TEST_API_KEY}` },
       });
-      const body = (await response.json()) as { events?: unknown };
-      if (response.status === 200 && Array.isArray(body.events)) return;
+      const body = (await response.json().catch(() => null)) as { events?: unknown } | null;
+      return response.status === 200 && Array.isArray(body?.events) ? "ready" : "foreign";
     } catch {
-      // The child may still be booting, or another parallel test may own the port.
+      // Connection refused: the child has not bound the port yet.
     }
     await Bun.sleep(50);
   }
-  throw new Error(`Events API did not become ready on ${BASE}`);
+  throw new Error(`Events API did not become ready on ${BASE} within ${timeoutMs}ms`);
 }
 
 async function cleanupTestDb(): Promise<void> {
@@ -61,8 +74,10 @@ async function api(
 const get = (p: string) => api("GET", p);
 const post = (p: string, body?: unknown) => api("POST", p, { body });
 
+const PORT_CLAIM_ATTEMPTS = 3;
+
 beforeAll(async () => {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= PORT_CLAIM_ATTEMPTS; attempt++) {
     TEST_PORT = await getFreePort();
     BASE = `http://localhost:${TEST_PORT}`;
     await cleanupTestDb();
@@ -83,18 +98,16 @@ beforeAll(async () => {
       stderr: "ignore",
     });
 
-    try {
-      // A generic /health response can come from another parallel test that
-      // claimed the released getFreePort() socket first. Verify this child
-      // serves the authenticated events route before the suite sends requests.
-      await waitForEventsApi();
-      return;
-    } catch (error) {
-      serverProc.kill();
-      await serverProc.exited.catch(() => {});
-      if (attempt === 3) throw error;
-    }
+    // A slow boot throws here and fails the suite: afterAll still kills the child.
+    if ((await waitForEventsApi()) === "ready") return;
+
+    // Another server owns this port. Drop the child and try a fresh port.
+    serverProc.kill();
+    await serverProc.exited.catch(() => {});
   }
+  throw new Error(
+    `another server claimed the events-http port on ${PORT_CLAIM_ATTEMPTS} consecutive attempts`,
+  );
 }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
