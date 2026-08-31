@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.135.3] - 2026-08-31
+
+### Fixed
+- **Root test suites isolate shared process state** (#1271) — artifact tests restore previously unset environment variables correctly, and production Slack handler tests reset module-level caches before and after execution to prevent order-dependent failures.
+
 ## [1.135.2] - 2026-08-29
 
 ### Changed
