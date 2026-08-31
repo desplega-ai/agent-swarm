@@ -463,12 +463,10 @@ export async function sendTaskHandler(
       };
     }
 
-    if (agent.isLead !== effectiveLeadOnly) {
+    if (effectiveLeadOnly && !agent.isLead) {
       return {
         success: false,
-        message: effectiveLeadOnly
-          ? `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`
-          : `Cannot assign a non-Lead-only task to Lead agent "${agent.name}".`,
+        message: `Lead-only task requires a Lead agent; "${agent.name}" is not a Lead.`,
       };
     }
 

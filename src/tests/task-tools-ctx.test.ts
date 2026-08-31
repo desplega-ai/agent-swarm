@@ -57,6 +57,48 @@ describe("task tool ctx", () => {
     expect(stored?.requestedByUserId).toBe(user.id);
   });
 
+  test("send-task directly assigns an ordinary task to a Lead", async () => {
+    const sender = await createAgent({
+      name: "ordinary-task sender",
+      isLead: false,
+      status: "idle",
+    });
+    const lead = await createAgent({ name: "ordinary-task lead", isLead: true, status: "idle" });
+
+    const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
+      task: "ordinary direct assignment",
+      agentId: lead.id,
+      offerMode: false,
+      allowDuplicate: false,
+    });
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { task: { id: string; agentId?: string } };
+    expect(data.task.agentId).toBe(lead.id);
+    expect((await getTaskById(data.task.id))?.agentId).toBe(lead.id);
+  });
+
+  test("send-task offers an ordinary task to a Lead", async () => {
+    const sender = await createAgent({
+      name: "ordinary-offer sender",
+      isLead: false,
+      status: "idle",
+    });
+    const lead = await createAgent({ name: "ordinary-offer lead", isLead: true, status: "idle" });
+
+    const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
+      task: "ordinary offer",
+      agentId: lead.id,
+      offerMode: true,
+      allowDuplicate: false,
+    });
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { task: { id: string; offeredTo?: string } };
+    expect(data.task.offeredTo).toBe(lead.id);
+    expect((await getTaskById(data.task.id))?.offeredTo).toBe(lead.id);
+  });
+
   test("send-task continuations cannot shed lead-only parent capabilities when omitted or empty", async () => {
     const lead = await createAgent({ name: "continuation lead", isLead: true, status: "idle" });
     const underprivilegedLead = await createAgent({
