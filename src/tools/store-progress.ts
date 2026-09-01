@@ -302,11 +302,21 @@ export const registerStoreProgressTool = (server: McpServer) => {
           }
         }
 
+        // A common harness failure mode is completing with the final answer in
+        // `progress` while omitting `output`. Preserve the explicit output when
+        // supplied; otherwise promote the latest useful progress for ordinary
+        // (non-structured) tasks so the UI never renders a blank completion.
+        const completionOutput = output ?? (
+          status === "completed" && !existingTask.outputSchema
+            ? progress ?? updatedTask.progress ?? existingTask.progress ?? undefined
+            : undefined
+        );
+
         // Validate structured output against outputSchema if present
         if (status === "completed") {
           const outputValidationError = getTaskOutputValidationError(
             existingTask.outputSchema,
-            output,
+            completionOutput,
           );
           if (outputValidationError) {
             return { success: false, message: outputValidationError };
@@ -315,7 +325,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
 
         // Handle status change
         if (status === "completed") {
-          const result = await completeTask(taskId, output);
+          const result = await completeTask(taskId, completionOutput);
           if (result) {
             updatedTask = result;
 
@@ -332,13 +342,12 @@ export const registerStoreProgressTool = (server: McpServer) => {
                   taskId,
                   agentId: existingTask.agentId,
                   previousStatus: existingTask.status,
-                  hasOutput: !!output,
+                  hasOutput: !!completionOutput,
                 },
                 validator: (data) => data.previousStatus === "in_progress",
                 // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
                 filter: ({}, ctx) => ctx.deps.length > 0,
                 conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
-              });
             });
 
             if (existingTask.agentId) {

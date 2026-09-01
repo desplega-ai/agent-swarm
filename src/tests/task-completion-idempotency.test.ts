@@ -389,6 +389,25 @@ async function countTaskCompletionMemories(taskId: string): Promise<number> {
 }
 
 describe("store-progress terminal result reporting", () => {
+  test("completion promotes final progress when explicit output is omitted", async () => {
+    const agent = createAgent({
+      name: "progress-output-fallback",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const task = createTaskExtended("progress output fallback", { agentId: agent.id });
+    startTask(task.id);
+
+    const result = (await buildStoreProgressHandler().handler(
+      { taskId: task.id, progress: "Final user-visible answer", status: "completed" },
+      storeProgressMeta(agent.id),
+    )) as StoreProgressResult;
+
+    expect(result.structuredContent.success).toBe(true);
+    expect(getTaskById(task.id)!.output).toBe("Final user-visible answer");
+  });
+
   test("identical and content-free retries remain benign no-ops", async () => {
     const agent = await createAgent({
       name: "terminal-handler-identical",
