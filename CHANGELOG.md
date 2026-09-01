@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Worker harness pins track current compatible releases** (#1296) — Claude Code moves to 2.1.258, Codex plus its SDK to 0.152.1, and OpenCode plus its SDK to 1.18.26.
 
 ### Fixed
+- **Crash recovery preserves professional task ownership** — Lead reroute decisions can resume work only on the original stable agent, recovered Leads may enqueue their own role-owned resume, and cross-agent recovery now fails closed for human intervention.
 - **Workflow retries restore checkpointed inputs and preserve the branch originally taken** (#1297, #1298), preventing empty interpolations and execution of inactive branches after a retry.
 - **Cancelling a workflow closes its pending approval gates** (#1300), rejects stale responses, and notifies linked Slack approval threads.
 - **Lead-only task authorization is enforced across assignment, offers, claims, and recovery** (#1276), while ordinary tasks may still target Lead agents.

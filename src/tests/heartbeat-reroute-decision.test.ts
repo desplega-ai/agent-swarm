@@ -369,7 +369,6 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   test("tracker_sync chain on the gone-agent path: original → R1 → original → R2", async () => {
     const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
     const agentA = await createAgent({ name: "coder-A", isLead: false, status: "idle" });
-    const agentB = await createAgent({ name: "coder-B", isLead: false, status: "idle" });
     const original = await createTaskExtended("tracked crashed work", { agentId: agentA.id });
     await startTask(original.id);
     await createTrackerSync({
@@ -405,13 +404,14 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     );
     expect(decision).toBeDefined();
 
-    // Lead re-delegates to agent B via send-task (taskType resume, parentTaskId original).
+    // Lead resumes on the original owner via send-task (taskType resume,
+    // parentTaskId original). Crash recovery preserves professional ownership.
     // transferTrackerSyncToResumeChild repoints the tracker original → R2.
     const result = await callSendTask(
       sendTaskServer,
       {
-        task: "Resume the crashed work on B",
-        agentId: agentB.id,
+        task: "Resume the crashed work on the original owner",
+        agentId: agentA.id,
         taskType: "resume",
         parentTaskId: original.id,
         allowDuplicate: true,
@@ -425,6 +425,75 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect((await getTrackerSync("linear", "task", r2Id))?.externalId).toBe("ENG-900");
     expect(await getTrackerSync("linear", "task", original.id)).toBeNull();
     expect(await getTrackerSync("linear", "task", r1.id)).toBeNull();
+  });
+
+  test("reroute-decision rejects cross-agent crash recovery", async () => {
+    const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+    const { agent: originalOwner, original, r1 } = await seedPinnedCrash("flow-owner");
+    const peer = await createAgent({ name: "adjacent-peer", isLead: false, status: "idle" });
+    const created = createRerouteDecisionTask({
+      original,
+      staleResume: r1,
+      reason: "crash_recovery",
+      maxGenerations: maxResumeGenerations(),
+    });
+    expect(created.kind).toBe("created");
+    if (created.kind !== "created") throw new Error("expected decision");
+
+    const result = await callSendTask(
+      sendTaskServer,
+      {
+        task: "Move role-owned flow work to a peer",
+        agentId: peer.id,
+        taskType: "resume",
+        parentTaskId: original.id,
+        allowDuplicate: true,
+      },
+      lead.id,
+      created.task.id,
+    );
+    const s = structuredOf(result);
+    expect(s.success).toBe(false);
+    expect(s.message).toContain(`must preserve the original assignee ${originalOwner.id}`);
+  });
+
+  test("recovered Lead may enqueue its own role-owned resume", async () => {
+    const lead = await createAgent({ name: "pm-lead", isLead: true, status: "busy", maxTasks: 3 });
+    const original = await createTaskExtended("Review the Product Manager-owned flows", {
+      agentId: lead.id,
+    });
+    await startTask(original.id);
+    const r1 = await createTaskExtended("Pinned PM resume", {
+      agentId: lead.id,
+      parentTaskId: original.id,
+      taskType: "resume",
+      tags: [`${RESUME_GENERATION_TAG_PREFIX}1`, CRASH_RECOVERY_PIN_TAG],
+    });
+    await supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
+    const created = createRerouteDecisionTask({
+      original: (await getTaskById(original.id))!,
+      staleResume: r1,
+      reason: "crash_recovery",
+      maxGenerations: maxResumeGenerations(),
+    });
+    expect(created.kind).toBe("created");
+    if (created.kind !== "created") throw new Error("expected decision");
+
+    const result = await callSendTask(
+      sendTaskServer,
+      {
+        task: "Resume PM-owned flow review on the PM",
+        agentId: lead.id,
+        taskType: "resume",
+        parentTaskId: original.id,
+        allowDuplicate: true,
+      },
+      lead.id,
+      created.task.id,
+    );
+    const s = structuredOf(result);
+    expect(s.success).toBe(true);
+    expect((await getTaskById(s.task!.id))?.agentId).toBe(lead.id);
   });
 
   test("a fresh (within-grace) crash pin is NOT escalated by the reaper", async () => {

@@ -201,6 +201,14 @@ Every consumer of the `unassigned` pool calls the **same** `isAgentEligibleForTa
 2. **`runRebootSweep`**'s retry-child creation (§1) now applies the *same* recoverability gate `createResumeFollowUp` uses for its same-agent pin (row exists, not `offline`, has capacity — via the shared `getPinCandidateAgent` helper) — a recoverable retry is pinned `pending` to the original agent and tagged `reboot-retry-pin`; otherwise it falls to the pool with the snapshot stamped anyway. `getStalePinnedResumes`'s reaper scope (§3) now also covers `reboot-retry-pin`, so an unreclaimed reboot pin escalates to the Lead exactly like a crash/graceful pin (retry children are fresh tasks with no `resume-generation` tag, so the generation budget is 0 at first escalation — expected).
 3. **`send-task`** / **`task-action create`** accept an optional `requiredCapabilities: string[]` — written into a fresh pool task's `routingAffinity` with `role` left unset. Per the predicate above, a capabilities-only snapshot (no `role`) is eligible for nobody but its declaring agent (n/a here — there is none), so such a task always ends up escalated to the Lead by §4's starvation check below; it's a way to *record* a requirement for the Lead's judgment, not to auto-route today.
 
+Crash-recovery `reroute-decision` tasks are stricter than ordinary delegation. A
+`send-task(taskType="resume")` originating from that control task must target the
+original task's exact `agentId`; cross-agent recovery is rejected. When the
+original owner is also the Lead, this is the one self-dispatch exception: the
+recovered Lead may enqueue its own fresh resume. If the stable owner cannot
+accept it, recovery stops for Human intervention rather than transferring
+professional ownership to an adjacent role.
+
 **Starvation escalation** (`escalateStarvedPoolTasks`, wired into `cleanupStaleResources` — runs every sweep): an `unassigned` task carrying a `routingAffinity`, queued longer than `POOL_AFFINITY_ESCALATION_MIN`, with **zero eligible registered agents** (any status — an offline-but-matching agent still counts as "not starved"; this is "nobody of that role exists", not "everyone's busy right now") gets a Lead `task.pool.starved.decision` follow-up (`createPoolStarvationDecisionTask`, same `taskType: "reroute-decision"` discriminator and idempotency check as §3's `createRerouteDecisionTask` — no `staleResume`/generation budget since the task was never pinned).
 
 ### Pseudocode (current)

@@ -525,6 +525,7 @@ export async function createRerouteDecisionTask(args: {
 
   const decision = resolveTemplate("task.reroute.decision", {
     original_agent_name: agentName,
+    original_agent_id: original.agentId ?? "unknown",
     original_agent_identity: identitySlice,
     original_task_id: original.id,
     reason,

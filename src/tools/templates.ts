@@ -191,20 +191,21 @@ Resume generation: {{generation_next}} of {{max_generations}} (max).{{artifacts_
 
 ## Your job
 
-The worker that was handling this task crashed and did not come back within the grace window, so its pinned resume was never reclaimed. Pick an agent to take this work over and RE-DELEGATE it — do NOT execute it yourself, and do NOT leave routing to the default.
+The worker session handling this task crashed and did not come back within the grace window, so its pinned resume was never reclaimed. Preserve the original task owner: dispatch a fresh resume to the exact original agent ID. A worker-session crash does not transfer professional ownership or authorize a peer role.
 
-Use the crashed agent's identity above as context for who was on it and what kind of work it is. You may re-delegate to the same kind of agent, a peer, or whoever you judge appropriate — the choice is yours, but you MUST choose explicitly.
+Do not send the work to another agent, even if that agent appears idle or has adjacent skills. If the original agent cannot accept a fresh resume, report BLOCKED for Human intervention instead of changing owner.
 
 Dispatch via \`send-task\` with ALL of:
-- an explicit \`agentId\` (the chosen worker) — REQUIRED. If you omit it, \`send-task\` auto-routes to the original task's agent, which is the dead worker, and the work re-strands.
+- explicit \`agentId: {{original_agent_id}}\` — REQUIRED.
 - \`taskType: "resume"\`
 - the tag \`resume-generation:{{generation_next}}\`
 - \`parentTaskId: {{original_task_id}}\`
 - do NOT inherit the original task's \`model\` (the new worker runs on its own).
 
-This work will NOT fall back to the unassigned pool — you are the only re-delegation path.`,
+This work will NOT fall back to the unassigned pool and must not cross role ownership.`,
   variables: [
     { name: "original_agent_name", description: "Name or ID prefix of the crashed agent" },
+    { name: "original_agent_id", description: "Stable ID of the original task owner" },
     {
       name: "original_agent_identity",
       description:

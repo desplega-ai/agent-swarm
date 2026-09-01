@@ -228,14 +228,11 @@ export async function sendTaskHandler(
 
   const creatorAgentId = ctx.kind === "owner" ? ctx.agentId : undefined;
   const sourceTaskId = ctx.kind === "owner" ? ctx.sourceTaskId : undefined;
+  const callerTask = sourceTaskId ? await getTaskById(sourceTaskId) : null;
   const requestedByUserId =
-    ctx.kind === "user" ? ctx.userId : (inputRequestedByUserId ?? undefined);
-
-  if (ctx.kind === "owner" && agentId === ctx.agentId) {
-    return toolErr("Cannot send a task to yourself, are you drunk?", {
-      data: { yourAgentId: ctx.agentId },
-    });
-  }
+    ctx.kind === "user"
+      ? ctx.userId
+      : (inputRequestedByUserId ?? callerTask?.requestedByUserId ?? undefined);
 
   const effectiveVcsRepo = vcsRepo;
   const normalizedModel = splitLegacyModelAlias({ model, modelTier });
@@ -253,6 +250,28 @@ export async function sendTaskHandler(
   // A public continuation cannot accidentally declassify its parent before
   // createTaskExtended performs the authoritative merge.
   const effectiveLeadOnly = leadOnly || effectiveParentTask?.routingAffinity?.leadOnly === true;
+
+  // A crash-recovery reroute decision for role-owned work must preserve the
+  // original assignee. The decision task is a control-plane fallback, not
+  // authorization to move work to an arbitrary peer. This also permits the
+  // recovered Lead to enqueue a fresh resume for itself after its previous
+  // worker session crashed.
+  const preservesCrashedOwner =
+    callerTask?.taskType === "reroute-decision" &&
+    taskType === "resume" &&
+    effectiveParentTask?.agentId != null;
+  if (preservesCrashedOwner && agentId !== effectiveParentTask.agentId) {
+    return toolErr(
+      `Crash-recovery resume must preserve the original assignee ${effectiveParentTask.agentId}. Cross-agent rerouting requires explicit human intervention.`,
+      { data: { yourAgentId: creatorAgentId } },
+    );
+  }
+
+  if (ctx.kind === "owner" && agentId === ctx.agentId && !preservesCrashedOwner) {
+    return toolErr("Cannot send a task to yourself, are you drunk?", {
+      data: { yourAgentId: ctx.agentId },
+    });
+  }
 
   // Slack-routing coherence guard: reject a hand-typed slackChannelId/slackThreadTs
   // that disagrees with the parent task or the contextKey this child will inherit.
