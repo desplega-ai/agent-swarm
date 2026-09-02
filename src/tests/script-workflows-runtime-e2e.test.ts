@@ -21,6 +21,7 @@ let agentId: string;
 let server: Server;
 let baseUrl: string;
 let savedEnv: NodeJS.ProcessEnv;
+let heartbeatCount = 0;
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -40,7 +41,28 @@ function closeServer(server: Server): Promise<void> {
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const agentId = req.headers["x-agent-id"] as string | undefined;
+  if (req.method === "POST" && req.url?.endsWith("/heartbeat")) heartbeatCount += 1;
   if (await handleCore(req, res, agentId, API_KEY)) return;
+  if (req.method === "POST" && req.url === "/api/mcp-bridge") {
+    if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    let rawBody = "";
+    for await (const chunk of req) rawBody += String(chunk);
+    const requestBody = JSON.parse(rawBody) as {
+      args?: { forceError?: unknown };
+    };
+    if (requestBody.args?.forceError === true) {
+      res.writeHead(418, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "teapot" }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ brokered: true }));
+    return;
+  }
   const pathSegments = getPathSegments(req.url || "");
   const queryParams = parseQueryParams(req.url || "");
   if (await handleScriptRuns(req, res, pathSegments, queryParams, agentId)) return;
@@ -64,7 +86,7 @@ async function api(path: string, init: RequestInit = {}): Promise<Response> {
 async function waitForRun(
   id: string,
 ): Promise<{ status: string; output?: unknown; error?: string }> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     const res = await api(`/api/script-runs/${id}`);
     const body = (await res.json()) as {
@@ -125,6 +147,7 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  heartbeatCount = 0;
   await getDbClient().run("DELETE FROM script_run_journal");
   await getDbClient().run("DELETE FROM script_runs");
 });
@@ -194,6 +217,77 @@ describe("script workflow runtime", () => {
       expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
     },
   );
+
+  spawnTest(
+    "user fetch replacement cannot observe brokered swarm or lifecycle bearer",
+    async () => {
+      const source = `
+      export default async function main(_args, ctx) {
+        const observed = [];
+        globalThis.fetch = async (input, init) => {
+          observed.push({
+            url: String(input),
+            authorization: new Headers(init?.headers).get("authorization"),
+          });
+          return new Response(JSON.stringify({ intercepted: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        };
+        await Bun.sleep(10_250);
+        const info = await ctx.swarm.agent_info();
+        let errorMessage = null;
+        try {
+          await ctx.swarm.agent_info({ forceError: true });
+        } catch (error) {
+          errorMessage = error.message;
+        }
+        return {
+          observed,
+          info,
+          errorMessage,
+          apiKeyEnv: process.env.AGENT_SWARM_API_KEY ?? null,
+          configType: typeof ctx.swarm.config,
+        };
+      }
+    `;
+
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
+
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      expect(run.output).toMatchObject({
+        observed: [],
+        apiKeyEnv: null,
+        configType: "function",
+        errorMessage: "/api/mcp-bridge failed with 418: teapot",
+      });
+      expect(heartbeatCount).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(run.output)).not.toContain(API_KEY);
+      expect((run.output as { info: unknown }).info).toEqual({ brokered: true });
+    },
+    { timeout: 20_000 },
+  );
+
+  spawnTest("guest failures preserve the prior terminal error message shape", async () => {
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({
+        source: `export default async function main() { throw new TypeError("guest boom"); }`,
+        background: true,
+      }),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("guest boom");
+  });
 
   // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);
   // Linux CI is the enforcing environment. Skip only unblocks local macOS

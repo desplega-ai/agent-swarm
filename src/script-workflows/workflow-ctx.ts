@@ -55,7 +55,7 @@ type AgentTaskConfig = {
    * Default: 2 hours. Each poll round-trip already long-polls server-side
    * for up to ~30s, so this is checked with ~30s granularity. The
    * *effective* deadline is always clamped to the run's shared, absolute
-   * `SCRIPT_RUN_MAX_WALL_MS` cap (same clamp for every step in the run,
+   * run wall-clock cap (same clamp for every step in the run,
    * concurrent or not — never divided across concurrently waiting steps).
    * If the run-level cap fires first, the supervisor kills the harness
    * process, and every step resumes polling its own journaled taskId (no
@@ -83,15 +83,19 @@ function sleep(ms: number): Promise<void> {
 /**
  * Absolute wall-clock deadline shared by every `ctx.step.agentTask` wait in
  * this run — sourced from the persisted run row's `startedAt` (survives
- * supervisor restarts) and the server-resolved `SCRIPT_RUN_MAX_WALL_MS`
- * (see executor.ts). N concurrent `Promise.all` waits each clamp their own
+ * supervisor restarts) and the server-resolved run wall-clock limit passed
+ * by executor.ts. N concurrent `Promise.all` waits each clamp their own
  * per-step deadline to this SAME absolute point — never divided by N, never
  * re-derived per step.
  */
-function runWallDeadlineMs(): number | undefined {
-  const startedAt = Date.parse(process.env.SCRIPT_RUN_STARTED_AT ?? "");
-  const maxWallMs = Number(process.env.SCRIPT_RUN_MAX_WALL_MS);
-  if (!Number.isFinite(startedAt) || !Number.isFinite(maxWallMs) || maxWallMs <= 0) {
+function runWallDeadlineMs(startedAtValue?: string, maxWallMs?: number): number | undefined {
+  const startedAt = Date.parse(startedAtValue ?? "");
+  if (
+    !Number.isFinite(startedAt) ||
+    typeof maxWallMs !== "number" ||
+    !Number.isFinite(maxWallMs) ||
+    maxWallMs <= 0
+  ) {
     return undefined;
   }
   return startedAt + maxWallMs;
@@ -166,6 +170,8 @@ export function buildWorkflowCtx(input: {
   apiKey: string;
   baseUrl: string;
   args: unknown;
+  runStartedAt?: string;
+  runMaxWallMs?: number;
 }): BuiltWorkflowCtx {
   const baseUrl = input.baseUrl.replace(/\/$/, "");
   const authHeaders = headers(input.apiKey, input.agentId);
@@ -245,7 +251,7 @@ export function buildWorkflowCtx(input: {
     // Clamp to the run's shared absolute wall-clock cap — every concurrent
     // step clamps to the SAME point, not budgetMs/N.
     const requestedDeadline = Date.now() + budgetMs;
-    const sharedDeadline = runWallDeadlineMs();
+    const sharedDeadline = runWallDeadlineMs(input.runStartedAt, input.runMaxWallMs);
     const deadline =
       sharedDeadline !== undefined
         ? Math.min(requestedDeadline, sharedDeadline)
