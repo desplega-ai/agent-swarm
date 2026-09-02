@@ -55,6 +55,7 @@ export interface OnboardState {
   sentryToken: string;
   sentryOrg: string;
   apiPort: number;
+  pullPolicy: PullPolicy;
   outputDir: string;
   nonInteractive: boolean;
   error: string | null;
@@ -73,6 +74,13 @@ export interface OnboardProps {
   dryRun?: boolean;
   yes?: boolean;
   preset?: string;
+  pullPolicy?: string;
+}
+
+export type PullPolicy = "always" | "missing" | "never";
+
+export function isPullPolicy(value: string): value is PullPolicy {
+  return value === "always" || value === "missing" || value === "never";
 }
 
 export interface StepProps {
@@ -149,6 +157,7 @@ export const INITIAL_STATE: OnboardState = {
   sentryToken: "",
   sentryOrg: "",
   apiPort: 0,
+  pullPolicy: "always",
   outputDir: process.cwd(),
   nonInteractive: false,
   error: null,

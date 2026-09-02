@@ -56,7 +56,7 @@ export function generateCompose(state: OnboardState): string {
   lines.push("  swarm-api:");
   lines.push('    image: "ghcr.io/desplega-ai/agent-swarm:latest"');
   lines.push("    container_name: swarm-api");
-  lines.push("    pull_policy: always");
+  lines.push(`    pull_policy: ${state.pullPolicy}`);
   lines.push("    stop_grace_period: 60s");
   lines.push("");
   const port = state.apiPort || 3013;
@@ -107,7 +107,7 @@ export function generateCompose(state: OnboardState): string {
     lines.push(`  ${svc.name}:`);
     lines.push('    image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"');
     lines.push(`    container_name: ${svc.containerName}`);
-    lines.push("    pull_policy: always");
+    lines.push(`    pull_policy: ${state.pullPolicy}`);
     lines.push("    stop_grace_period: 60s");
     lines.push("");
     lines.push("    depends_on:");

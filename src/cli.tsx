@@ -37,6 +37,7 @@ interface ParsedArgs {
   systemPromptFile: string;
   additionalArgs: string[];
   preset: string;
+  pullPolicy: string | undefined;
   open: boolean;
   showHelp: boolean;
   dbPath: string;
@@ -56,6 +57,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let systemPromptFile = "";
   let additionalArgs: string[] = [];
   let preset = "";
+  let pullPolicy: string | undefined;
   let open = false;
   let showHelp = false;
   let dbPath = "";
@@ -97,6 +99,12 @@ function parseArgs(args: string[]): ParsedArgs {
       i++;
     } else if (arg?.startsWith("--preset=")) {
       preset = arg.slice("--preset=".length);
+    } else if (arg === "--pull-policy") {
+      const value = mainArgs[i + 1];
+      pullPolicy = value && !value.startsWith("-") ? value : "";
+      if (value && !value.startsWith("-")) i++;
+    } else if (arg?.startsWith("--pull-policy=")) {
+      pullPolicy = arg.slice("--pull-policy=".length);
     } else if (arg === "--open") {
       open = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -121,6 +129,7 @@ function parseArgs(args: string[]): ParsedArgs {
     systemPromptFile,
     additionalArgs,
     preset,
+    pullPolicy,
     open,
     showHelp,
     dbPath,
@@ -141,6 +150,7 @@ const COMMAND_HELP: Record<
       "  --dry-run              Preview what would be generated without writing",
       "  -y, --yes              Non-interactive mode (reads from env vars)",
       "  --preset <name>        Preset: dev, content, research, solo",
+      "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [
@@ -624,12 +634,21 @@ function App({ args }: { args: ParsedArgs }) {
     systemPromptFile,
     additionalArgs,
     preset,
+    pullPolicy,
   } = args;
 
   switch (command) {
     case "onboard":
       return (
-        <LazyComponent load={loadOnboard} props={{ dryRun, yes, preset: preset || undefined }} />
+        <LazyComponent
+          load={loadOnboard}
+          props={{
+            dryRun,
+            yes,
+            preset: preset || undefined,
+            pullPolicy,
+          }}
+        />
       );
     case "connect":
       return <LazyComponent load={loadConnect} props={{ dryRun, restore, yes }} />;
