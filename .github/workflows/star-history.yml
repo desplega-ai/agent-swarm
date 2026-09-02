@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: star-history-refresh
@@ -17,20 +18,25 @@ jobs:
     if: github.repository == 'desplega-ai/agent-swarm'
     runs-on: ubuntu-latest
     steps:
+      - name: Report authentication path
+        env:
+          TOKEN_SOURCE: ${{ secrets.STAR_HISTORY_TOKEN && 'STAR_HISTORY_TOKEN' || 'github.token' }}
+        run: echo "Using ${TOKEN_SOURCE} for checkout, chart generation, and pull request creation."
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # A repository token is required so the generated PR triggers the normal CI workflows.
-          token: ${{ secrets.STAR_HISTORY_TOKEN }}
+          # Prefer the PAT because a PR opened with github.token does not trigger pull_request CI.
+          token: ${{ secrets.STAR_HISTORY_TOKEN || github.token }}
 
       - name: Generate charts
         env:
-          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN || github.token }}
         run: node scripts/generate-star-history.mjs
 
       - name: Open refresh pull request
         env:
-          GH_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN }}
+          GH_TOKEN: ${{ secrets.STAR_HISTORY_TOKEN || github.token }}
         run: |
           if git diff --quiet -- assets/star-history-light.svg assets/star-history-dark.svg; then
             echo "Star history charts are already current."
