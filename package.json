@@ -101,6 +101,7 @@
     "prepare-release": "bun scripts/prepare-release.ts",
     "refresh:vendored-openapi": "bun scripts/refresh-vendored-openapi.ts",
     "sync-chart-version": "bun scripts/sync-chart-version.ts",
+    "bump:agent-fs": "bun scripts/bump-agent-fs.ts",
     "check-chart-version": "bun scripts/sync-chart-version.ts --check-if-package-version-changed",
     "cli": "bun src/cli.tsx",
     "hook": "bun src/hooks/hook.ts",
