@@ -11,6 +11,7 @@ import { getSuccessors } from "./definition";
 import {
   buildNodeInterpolationCtx,
   interpolateNodeConfig,
+  rehydrateCompletedStepOutputs,
   scriptBodyInterpolationError,
   walkGraph,
 } from "./engine";
@@ -69,6 +70,11 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
           // context, so `run.id` may be absent here — mirror the hydration or the
           // builtin resolves to "" on every retry.
           if (!("run" in ctx)) ctx.run = { id: run.id };
+
+          // The persisted run context can lag behind completed step checkpoints.
+          // Reuse walkGraph's recovery path before resolving declared inputs so
+          // retries see the same upstream outputs as the original execution.
+          await rehydrateCompletedStepOutputs(workflow.definition, run.id, ctx, registry);
 
           // Deep-interpolate config against the node's declared-inputs context —
           // the raw run context has no `inputs` aliases, so interpolating against

@@ -12,7 +12,7 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { telemetry } from "../telemetry";
-import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
+import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
@@ -189,7 +189,12 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
-  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const { completedNodeIds, latestSteps } = await rehydrateCompletedStepOutputs(
+    def,
+    runId,
+    ctx,
+    registry,
+  );
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
@@ -205,22 +210,10 @@ export async function walkGraph(
       // but only the parent aggregate belongs in workflow context or routing.
       if (resolveForeachParent(def, nodeId)) continue;
 
-      const step = await getLatestStepForNode(runId, nodeId);
-      if (step?.output !== undefined) {
-        // Bug 5 fix: Validate stored output against executor schema on recovery
-        const node = def.nodes.find((n) => n.id === nodeId);
-        if (node && registry.has(node.type)) {
-          const executor = registry.get(node.type);
-          const parseResult = executor.outputSchema.safeParse(step.output);
-          if (!parseResult.success) {
-            console.warn(
-              `[workflow] Recovery: step ${nodeId} output failed validation: ${parseResult.error.message}`,
-            );
-            continue; // Skip corrupted output
-          }
-        }
-        ctx[nodeId] = step.output;
-      }
+      const step = latestSteps.get(nodeId);
+      // Invalid stored output is omitted during rehydration. Preserve the
+      // existing recovery behavior by skipping its routing edges as well.
+      if (!step) continue;
       // Reconstruct active edges from the stored nextPort.
       // If nextPort is set, use it for port-specific routing.
       // If not set, get all successors (fan-out).
@@ -419,6 +412,52 @@ export async function walkGraph(
       }
     }
   });
+}
+
+/**
+ * Restore completed node outputs from their step checkpoints into workflow context.
+ * Every recovery path must do this before resolving a node's declared inputs.
+ */
+export async function rehydrateCompletedStepOutputs(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  registry: ExecutorRegistry,
+): Promise<{
+  completedNodeIds: Set<string>;
+  latestSteps: Map<string, WorkflowRunStep>;
+}> {
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const latestSteps = new Map<string, WorkflowRunStep>();
+
+  for (const nodeId of completedNodeIds) {
+    // Synthetic foreach children persist their own step output for the join,
+    // but only the parent aggregate belongs in workflow context or routing.
+    if (resolveForeachParent(def, nodeId)) continue;
+
+    const step = await getLatestStepForNode(runId, nodeId);
+    if (!step) continue;
+
+    if (step.output !== undefined) {
+      // Validate stored output against the executor schema before recovery.
+      const node = def.nodes.find((candidate) => candidate.id === nodeId);
+      if (node && registry.has(node.type)) {
+        const executor = registry.get(node.type);
+        const parseResult = executor.outputSchema.safeParse(step.output);
+        if (!parseResult.success) {
+          console.warn(
+            `[workflow] Recovery: step ${nodeId} output failed validation: ${parseResult.error.message}`,
+          );
+          continue;
+        }
+      }
+      ctx[nodeId] = step.output;
+    }
+
+    latestSteps.set(nodeId, step);
+  }
+
+  return { completedNodeIds, latestSteps };
 }
 
 /**
