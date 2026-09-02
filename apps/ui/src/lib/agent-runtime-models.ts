@@ -220,6 +220,8 @@ function directModel(
 
 const DIRECT_MODELS: Record<"claude" | "codex", ModelOption[]> = {
   claude: [
+    directModel("claude", "claude-fable-5-1", "Claude Fable 5.1", ANTHROPIC_META),
+    directModel("claude", "claude-mythos-5-1", "Claude Mythos 5.1", ANTHROPIC_META),
     directModel("claude", "claude-opus-5", "Claude Opus 5", ANTHROPIC_META),
     directModel("claude", "claude-fable-5", "Claude Fable 5", ANTHROPIC_META),
     directModel("claude", "claude-mythos-5", "Claude Mythos 5", ANTHROPIC_META),
@@ -449,8 +451,8 @@ export function findModelOption(
 // may report these verbatim — we map them to the canonical id so the row reads
 // "Claude Sonnet 5" instead of a bare "sonnet".
 const ANTHROPIC_SHORTNAME_TO_ID: Record<string, string> = {
-  fable: "claude-fable-5",
-  mythos: "claude-mythos-5",
+  fable: "claude-fable-5-1",
+  mythos: "claude-mythos-5-1",
   opus: "claude-opus-5",
   sonnet: "claude-sonnet-5",
   haiku: "claude-haiku-4-5",
