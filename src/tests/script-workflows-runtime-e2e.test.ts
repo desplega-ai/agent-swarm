@@ -242,12 +242,18 @@ describe("script workflow runtime", () => {
         } catch (error) {
           errorMessage = error.message;
         }
+        let rejectedConfig = null;
+        let rejectedUnknown = null;
+        try { await ctx.swarm.config(); } catch (error) { rejectedConfig = error.message; }
+        try { await ctx.swarm.future_sensitive_property(); } catch (error) { rejectedUnknown = error.message; }
         return {
           observed,
           info,
           errorMessage,
           apiKeyEnv: process.env.AGENT_SWARM_API_KEY ?? null,
           configType: typeof ctx.swarm.config,
+          rejectedConfig,
+          rejectedUnknown,
         };
       }
     `;
@@ -266,6 +272,10 @@ describe("script workflow runtime", () => {
         apiKeyEnv: null,
         configType: "function",
         errorMessage: "/api/mcp-bridge failed with 418: teapot",
+        rejectedConfig:
+          "Tool 'config' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent",
+        rejectedUnknown:
+          "Tool 'future_sensitive_property' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent",
       });
       expect(heartbeatCount).toBeGreaterThanOrEqual(1);
       expect(JSON.stringify(run.output)).not.toContain(API_KEY);

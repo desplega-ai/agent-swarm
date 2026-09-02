@@ -1,3 +1,4 @@
+import { isSdkToolAllowed } from "../scripts-runtime/sdk-allowlist";
 import { stdlib } from "../scripts-runtime/stdlib";
 import type { WorkflowCtx } from "./workflow-ctx";
 
@@ -29,7 +30,18 @@ export function buildGuestWorkflowCtx(input: {
   const swarm = new Proxy({} as Record<string, (args?: unknown) => Promise<unknown>>, {
     get(_target, prop) {
       if (typeof prop !== "string") return undefined;
-      return (args?: unknown) => invokeJson(input.invokeTool, `swarm.${prop}`, args ?? {});
+      return (args?: unknown) => {
+        // Match createSwarmSdk's public error while rejecting unknown or
+        // sensitive properties before they cross the process boundary.
+        if (!isSdkToolAllowed(prop)) {
+          return Promise.reject(
+            new Error(
+              `Tool '${prop}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
+            ),
+          );
+        }
+        return invokeJson(input.invokeTool, `swarm.${prop}`, args ?? {});
+      };
     },
   });
 

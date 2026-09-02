@@ -5,6 +5,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SCRIPT_SDK_RESPONSE_LIMIT_BYTES } from "../scripts-runtime/response-limit";
+import { isSdkToolAllowed } from "../scripts-runtime/sdk-allowlist";
 import type { ScriptRun } from "../types";
 import {
   buildSandboxedCommand,
@@ -73,6 +74,14 @@ async function dispatchCapability(
   if (path.startsWith("swarm.")) {
     const method = path.slice("swarm.".length);
     if (!method || method.includes(".")) throw new Error(`Invalid swarm capability path: ${path}`);
+    // Keep the broker boundary closed by default. The SDK allowlist is the
+    // versioned public capability contract; new host context properties do
+    // not become guest-callable merely because they exist.
+    if (!isSdkToolAllowed(method)) {
+      throw new Error(
+        `Tool '${method}' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent`,
+      );
+    }
     const capability = built.ctx.swarm[method];
     if (!capability) throw new Error(`Unknown workflow capability: ${path}`);
     return stringifyResult(await capability(args));

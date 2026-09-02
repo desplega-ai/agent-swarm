@@ -3,8 +3,29 @@ import {
   createCapabilityClient,
   handleCapabilityRequest,
 } from "../script-workflows/capability-bridge";
+import { buildGuestWorkflowCtx } from "../script-workflows/guest-ctx";
 
 describe("script workflow capability bridge", () => {
+  test("guest exposes only the explicit SDK capability allowlist", async () => {
+    const calls: Array<{ path: string; argsJson: string }> = [];
+    const ctx = buildGuestWorkflowCtx({
+      runId: "run-1",
+      agentId: "agent-1",
+      args: null,
+      invokeTool: async (path, argsJson) => {
+        calls.push({ path, argsJson });
+        return JSON.stringify({ ok: true });
+      },
+    });
+
+    await expect(ctx.swarm.agent_info()).resolves.toEqual({ ok: true });
+    await expect(ctx.swarm.config()).rejects.toThrow("Tool 'config' is not exposed to scripts");
+    await expect(ctx.swarm.future_sensitive_property()).rejects.toThrow(
+      "Tool 'future_sensitive_property' is not exposed to scripts",
+    );
+    expect(calls).toEqual([{ path: "swarm.agent_info", argsJson: "{}" }]);
+  });
+
   test("correlates concurrent JSON calls when responses arrive out of order", async () => {
     const requests: string[] = [];
     const client = createCapabilityClient((message) => requests.push(message));
