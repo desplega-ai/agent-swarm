@@ -40,7 +40,7 @@ export async function finalizeSlackMessageReaction(
   client: SlackReactionClient,
   channel: string,
   timestamp: string,
-  outcome: "white_check_mark" | "x",
+  outcome: "white_check_mark" | "x" | "warning",
 ): Promise<void> {
   for (const name of ["eyes", "heavy_plus_sign", "zap", "speech_balloon"]) {
     try {
@@ -55,6 +55,29 @@ export async function finalizeSlackMessageReaction(
   }
 
   await ackSlackMessage(client, channel, timestamp, outcome);
+}
+
+/** Finalize acknowledgement reactions that were added to Slack steer messages. */
+export async function finalizeSlackSteerReactions(
+  tasks: AgentTask[],
+  outcomeFor: (task: AgentTask) => "white_check_mark" | "x" | "warning",
+): Promise<void> {
+  const app = getSlackApp();
+  if (!app) return;
+
+  for (const task of tasks) {
+    const outcome = outcomeFor(task);
+    for (const log of await getLogsByTaskIdChronological(task.id)) {
+      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
+      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
+      void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
+        console.error(
+          `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
+          error,
+        ),
+      );
+    }
+  }
 }
 
 export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promise<void> {
@@ -90,17 +113,7 @@ export async function finalizeTerminalSlackReactions(tasks: AgentTask[]): Promis
     );
   }
 
-  for (const task of tasks) {
-    const outcome = task.status === "completed" ? "white_check_mark" : "x";
-    for (const log of await getLogsByTaskIdChronological(task.id)) {
-      if (log.eventType !== "task_steering" || log.newValue !== "slack_reaction") continue;
-      const { slackChannelId: channelId, slackMessageTs: timestamp } = JSON.parse(log.metadata!);
-      void finalizeSlackMessageReaction(app.client, channelId, timestamp, outcome).catch((error) =>
-        console.error(
-          `[Slack] Failed to finalize steer reaction for ${channelId}/${timestamp}:`,
-          error,
-        ),
-      );
-    }
-  }
+  await finalizeSlackSteerReactions(tasks, (task) =>
+    task.status === "completed" ? "white_check_mark" : "x",
+  );
 }

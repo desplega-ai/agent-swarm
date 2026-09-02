@@ -454,6 +454,45 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
+        key: "SLACK_RENDER_V2_DELEGATION",
+        label: "Slack delegated-result delivery",
+        description:
+          "Master switch for deferred ask conclusion, child result cards, and the closure-based reaction gate. Requires SLACK_RENDER_V2. Off reverts to the legacy per-ask outcome card on the next tick.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_CONCLUSION_SETTLE_SEC",
+        label: "Conclusion settle window (sec)",
+        description:
+          "Quiet seconds after every member of an ask's closure goes terminal before the conclusion card posts. Absorbs the gap between a child's terminal write and its follow-up task.",
+        kind: "number",
+        defaultValue: "10",
+        placeholder: "10",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_CONCLUSION_TIMEOUT_MIN",
+        label: "Conclusion timeout (min)",
+        description:
+          "Idle minutes before an ask's closure concludes with unfinished work, posting a timeout card and a warning reaction. Last-resort backstop behind heartbeat stall remediation.",
+        kind: "number",
+        defaultValue: "240",
+        placeholder: "240",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_TREE_STALL_MIN",
+        label: "Tree stall threshold (min)",
+        description:
+          "Minutes without a task update before the thread tree shows a stalled glyph for that task.",
+        kind: "number",
+        defaultValue: "15",
+        placeholder: "15",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
         key: "GITHUB_DISABLE",
         label: "Disable GitHub",
         description:

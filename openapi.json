@@ -3418,7 +3418,8 @@
               "pricing.deleted",
               "pricing.refresh",
               "pricing.refresh.failed",
-              "task_superseded"
+              "task_superseded",
+              "slack_delivery"
             ]
           },
           "agentId": {

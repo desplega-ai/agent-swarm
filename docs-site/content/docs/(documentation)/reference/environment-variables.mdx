@@ -252,6 +252,10 @@ Run the one-time `bunx @desplega.ai/agent-swarm claude-managed-setup` from your 
 | `SLACK_DISABLE` | Set to `true` to disable Slack |
 | `SLACK_ALLOW_DEV_SOCKET_MODE` | Set to `true` to explicitly allow a `NODE_ENV=development` API process to connect through Socket Mode (default: `false`) |
 | `SLACK_RENDER_V2` | Set to `true` to opt in to one persistent task tree per physical Slack thread plus streamed, immutable outcome cards (default: `false`) |
+| `SLACK_RENDER_V2_DELEGATION` | Set to `true` to defer an ask's conclusion card until its whole closure (delegated tasks, children, follow-ups) settles, post child result cards, and gate the checkmark reaction on the closure instead of the ask alone. Requires `SLACK_RENDER_V2=true` (default: `false`) |
+| `SLACK_CONCLUSION_SETTLE_SEC` | Quiet seconds after a closure goes fully terminal before its conclusion card posts (default: `10`) |
+| `SLACK_CONCLUSION_TIMEOUT_MIN` | Idle minutes before a closure concludes with unfinished work and a `warning` reaction (default: `240`) |
+| `SLACK_TREE_STALL_MIN` | Minutes without a task update before the thread tree shows a stalled glyph for that task (default: `15`) |
 | `SLACK_ALLOWED_EMAIL_DOMAINS` | Comma-separated email domains |
 | `SLACK_ALLOWED_USER_IDS` | Comma-separated user IDs to always allow |
 | `ADDITIVE_SLACK` | Set to `true` to enable non-mention thread message buffering and batching |
