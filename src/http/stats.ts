@@ -50,6 +50,24 @@ const DashboardStatsSchema = z.object({
   steeringEnabled: z.boolean(),
 });
 
+/** Mirrors `DbRetentionTableStats` (src/be/db-retention.ts). */
+const RetentionTableStatsSchema = z.object({
+  at: z.string(),
+  rowsDeleted: z.number(),
+  batches: z.number(),
+  durationMs: z.number(),
+  dryRun: z.boolean(),
+  cumulativeRowsDeleted: z.number(),
+  outcome: z.enum(["converged", "budget_exhausted", "error"]),
+  drained: z.boolean(),
+  backlogRemaining: z.number(),
+  batchSize: z.number(),
+  slowestStatementMs: z.number(),
+  lastError: z.string().optional(),
+  lastErrorAt: z.string().optional(),
+  lastSuccessAt: z.string().optional(),
+});
+
 /** Mirrors `SwarmMetrics` (src/be/db.ts). */
 const SwarmMetricsSchema = z.object({
   tasks: z.object({ total: z.number(), by_status: z.record(z.string(), z.number()) }),
@@ -59,36 +77,9 @@ const SwarmMetricsSchema = z.object({
   sessions: z.object({ active: z.number() }),
   skills: z.object({ total: z.number() }),
   retention: z.object({
-    sessionLogs: z
-      .object({
-        at: z.string(),
-        rowsDeleted: z.number(),
-        batches: z.number(),
-        durationMs: z.number(),
-        dryRun: z.boolean(),
-        cumulativeRowsDeleted: z.number(),
-      })
-      .optional(),
-    agentLog: z
-      .object({
-        at: z.string(),
-        rowsDeleted: z.number(),
-        batches: z.number(),
-        durationMs: z.number(),
-        dryRun: z.boolean(),
-        cumulativeRowsDeleted: z.number(),
-      })
-      .optional(),
-    events: z
-      .object({
-        at: z.string(),
-        rowsDeleted: z.number(),
-        batches: z.number(),
-        durationMs: z.number(),
-        dryRun: z.boolean(),
-        cumulativeRowsDeleted: z.number(),
-      })
-      .optional(),
+    sessionLogs: RetentionTableStatsSchema.optional(),
+    agentLog: RetentionTableStatsSchema.optional(),
+    events: RetentionTableStatsSchema.optional(),
   }),
 });
 

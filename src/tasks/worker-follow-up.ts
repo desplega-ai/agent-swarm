@@ -1,5 +1,6 @@
 import {
   buildRoutingAffinityFromAgent,
+  createLogEntry,
   createTaskExtended,
   getActiveTaskCount,
   getAgentById,
@@ -8,6 +9,7 @@ import {
   getTaskAttachments,
   getTaskById,
   hasNonTerminalRerouteDecisionChild,
+  isAgentEligibleForTask,
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
@@ -95,6 +97,29 @@ export async function getPinCandidateAgent(agentId: string): Promise<Agent | nul
   const candidate = await getAgentById(agentId);
   if (!candidate || candidate.status === "offline") return null;
   return candidate;
+}
+
+/**
+ * Applies the Lead-only recovery boundary shared by normal resume and reboot
+ * recovery. A worker source is never a valid pin; use an available Lead or
+ * leave the task unassigned so only a Lead can claim it.
+ */
+export async function resolveLeadOnlyRecoveryAssignment(
+  task: Pick<AgentTask, "routingAffinity" | "routingAffinityInvalid">,
+  sourceCandidate: Agent | null,
+): Promise<{
+  agentId?: string;
+  decision?: "source_lead_pin" | "rerouted_to_lead" | "escalated_unassigned";
+}> {
+  if (!task.routingAffinity?.leadOnly) return {};
+  if (sourceCandidate?.isLead && isAgentEligibleForTask(sourceCandidate, task)) {
+    return { agentId: sourceCandidate.id, decision: "source_lead_pin" };
+  }
+  const lead = await getLeadAgent();
+  if (lead && lead.status !== "offline" && isAgentEligibleForTask(lead, task)) {
+    return { agentId: lead.id, decision: "rerouted_to_lead" };
+  }
+  return { decision: "escalated_unassigned" };
 }
 
 export function getResumeGeneration(task: Pick<AgentTask, "tags">): number {
@@ -291,6 +316,12 @@ export async function createResumeFollowUp(args: {
   //   - `context_limits` / `manual_supersede`: the worker is alive and
   //     responsive, so keep requiring `fresh`.
   let preferredAgentId: string | undefined;
+  let authorizationDecision:
+    | "source_lead_pin"
+    | "rerouted_to_lead"
+    | "escalated_unassigned"
+    | undefined;
+  const leadOnly = parent.routingAffinity?.leadOnly === true;
   if (parent.agentId) {
     const candidate = await getPinCandidateAgent(parent.agentId);
     if (candidate) {
@@ -306,8 +337,13 @@ export async function createResumeFollowUp(args: {
       const isFreshPinnedReason = !isGracefulShutdown && fresh;
       // crash_recovery and graceful_shutdown pins ignore `fresh` when their
       // kill-switches are on; context_limits/manual_supersede still require it.
-      if (hasCap && (isCrashRecovery || isGracefulPin || isFreshPinnedReason)) {
+      if (
+        hasCap &&
+        (isCrashRecovery || isGracefulPin || isFreshPinnedReason) &&
+        (!leadOnly || candidate.isLead)
+      ) {
         preferredAgentId = candidate.id;
+        if (leadOnly) authorizationDecision = "source_lead_pin";
       } else if ((isCrashRecovery || isGracefulPin) && !hasCap) {
         // Surface capacity-driven pool fallback instead of letting a protected
         // pinned-reason skip happen silently.
@@ -316,6 +352,16 @@ export async function createResumeFollowUp(args: {
         );
       }
     }
+  }
+
+  // Apply the same Lead-only recovery decision used by reboot recovery. A
+  // non-Lead source can never win the earlier pin attempt, so this chooses a
+  // Lead reroute or an authorization-gated unassigned fallback.
+  if (leadOnly) {
+    const source = preferredAgentId ? await getAgentById(preferredAgentId) : null;
+    const resolution = await resolveLeadOnlyRecoveryAssignment(parent, source);
+    preferredAgentId = resolution.agentId;
+    authorizationDecision = resolution.decision;
   }
 
   const parentDesc = parent.task.slice(0, 200);
@@ -342,10 +388,10 @@ export async function createResumeFollowUp(args: {
   // pooled resume — including a crash_recovery resume that fell to the pool at
   // capacity — never gets this tag, so it can't be mistaken for a stale pin
   // after autoAssignPoolTasks flips it to `pending`.
-  if (args.reason === "crash_recovery" && preferredAgentId !== undefined) {
+  if (args.reason === "crash_recovery" && preferredAgentId === parent.agentId) {
     tags.push(CRASH_RECOVERY_PIN_TAG);
   }
-  if (args.reason === "graceful_shutdown" && preferredAgentId !== undefined) {
+  if (args.reason === "graceful_shutdown" && preferredAgentId === parent.agentId) {
     tags.push(GRACEFUL_SHUTDOWN_PIN_TAG);
   }
 
@@ -359,14 +405,23 @@ export async function createResumeFollowUp(args: {
   //
   // Routing affinity: stamp a FRESH snapshot from the parent's own agent —
   // this covers every leg (pinned AND the pool-fallback legs) so a resume
-  // that falls to the unassigned pool is still role/capability-gated. When
-  // the agent row is already gone, `buildRoutingAffinityFromAgent` returns
-  // `null` and we pass `undefined`, letting `createTaskExtended`'s
+  // that falls to the unassigned pool is still role/capability-gated. A
+  // Lead-only task retains its parent-declared required capabilities instead:
+  // the source snapshot is provenance, not an authorization requirement.
+  // When the agent row is already gone, `buildRoutingAffinityFromAgent`
+  // returns `null` and we pass `undefined`, letting `createTaskExtended`'s
   // parentTaskId inheritance block fall back to the parent's OWN
   // (already-inherited) `routingAffinity` instead.
-  const routingAffinity = parent.agentId
+  const sourceAffinity = parent.agentId
     ? ((await buildRoutingAffinityFromAgent(parent.agentId)) ?? undefined)
     : undefined;
+  const routingAffinity = leadOnly
+    ? {
+        ...(sourceAffinity ?? parent.routingAffinity),
+        capabilities: parent.routingAffinity?.capabilities ?? [],
+        leadOnly: true,
+      }
+    : sourceAffinity;
   const created = await createTaskExtended(followUpDescription, {
     agentId: preferredAgentId,
     creatorAgentId: parent.creatorAgentId,
@@ -377,6 +432,22 @@ export async function createResumeFollowUp(args: {
     parentTaskId: parent.id,
     routingAffinity,
   });
+
+  if (authorizationDecision) {
+    try {
+      await createLogEntry({
+        eventType: "task_recovery_authorization",
+        taskId: created.id,
+        agentId: preferredAgentId,
+        metadata: {
+          leadOnly: true,
+          parentTaskId: parent.id,
+          sourceAgentId: parent.agentId,
+          decision: authorizationDecision,
+        },
+      });
+    } catch {}
+  }
 
   // Repoint Linear / Jira `tracker_sync` rows from the (now terminal) parent
   // to the resume child. Without this, outbound completion posts for the

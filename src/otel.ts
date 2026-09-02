@@ -28,6 +28,18 @@ export interface SpanOptions {
 import type { SessionCostMetric } from "./otel-impl";
 export type { SessionCostMetric };
 
+export interface DbRetentionSweepMetric {
+  table: string;
+  dryRun: boolean;
+  outcome: "converged" | "budget_exhausted" | "error";
+  rowsDeleted: number;
+  backlogRemaining: number;
+  batches: number;
+  tableDurationMs: number;
+  slowestStatementMs: number;
+  batchSize: number;
+}
+
 /**
  * Whether OTLP export is configured.
  *
@@ -72,6 +84,10 @@ let realInjectTraceContext:
   | undefined;
 let realShutdown: (() => Promise<void>) | undefined;
 let realRecordSessionCost: ((m: SessionCostMetric) => void) | undefined;
+let realRecordDbRetentionSweep: ((m: DbRetentionSweepMetric) => void) | undefined;
+let realRecordDbRetentionStatement:
+  | ((table: string, dryRun: boolean, durationMs: number) => void)
+  | undefined;
 
 export function isOtelEnabled(): boolean {
   return otelConfigured();
@@ -96,6 +112,8 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realInjectTraceContext = impl.injectTraceContext;
     realShutdown = impl.shutdown;
     realRecordSessionCost = impl.recordSessionCost;
+    realRecordDbRetentionSweep = impl.recordDbRetentionSweep;
+    realRecordDbRetentionStatement = impl.recordDbRetentionStatement;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -154,6 +172,20 @@ export function recordSessionCost(m: SessionCostMetric): void {
   realRecordSessionCost(m);
 }
 
+export function recordDbRetentionSweep(m: DbRetentionSweepMetric): void {
+  if (!otelConfigured() || !realRecordDbRetentionSweep) return;
+  realRecordDbRetentionSweep(m);
+}
+
+export function recordDbRetentionStatement(
+  table: string,
+  dryRun: boolean,
+  durationMs: number,
+): void {
+  if (!otelConfigured() || !realRecordDbRetentionStatement) return;
+  realRecordDbRetentionStatement(table, dryRun, durationMs);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
@@ -163,4 +195,6 @@ export function _resetOtelForTests() {
   realInjectTraceContext = undefined;
   realShutdown = undefined;
   realRecordSessionCost = undefined;
+  realRecordDbRetentionSweep = undefined;
+  realRecordDbRetentionStatement = undefined;
 }

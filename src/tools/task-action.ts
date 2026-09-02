@@ -102,8 +102,12 @@ export const taskActionInputSchema = z.object({
   requiredCapabilities: z
     .array(z.string())
     .optional()
+    .describe("Capabilities required for pool routing."),
+  leadOnly: z
+    .boolean()
+    .default(false)
     .describe(
-      "Capabilities a claiming agent must have (declared via join-swarm/update-profile) to be pool-eligible for this task. Written into the created task's routingAffinity (role is left unset). Only used with 'create' action.",
+      "Structured authorization constraint: only Lead agents may claim this privileged task.",
     ),
 });
 
@@ -193,6 +197,7 @@ export async function taskActionHandler(
     dir,
     model,
     requiredCapabilities,
+    leadOnly,
   } = input;
   const normalizedModel = splitLegacyModelAlias({ model, modelTier: input.modelTier });
 
@@ -296,9 +301,10 @@ export async function taskActionHandler(
           model: normalizedModel.model,
           modelTier: normalizedModel.modelTier,
           effort: input.effort,
-          routingAffinity: requiredCapabilities?.length
-            ? { capabilities: requiredCapabilities }
-            : undefined,
+          routingAffinity:
+            leadOnly || requiredCapabilities?.length
+              ? { leadOnly, capabilities: requiredCapabilities ?? [] }
+              : undefined,
         });
         return {
           success: true,
@@ -349,7 +355,9 @@ export async function taskActionHandler(
         if (claimingAgent && !isAgentEligibleForTask(claimingAgent, existingTask)) {
           return {
             success: false,
-            message: `Task "${taskId}" requires role "${existingTask.routingAffinity?.role ?? "(unspecified)"}"; yours is "${claimingAgent.role ?? "(unspecified)"}". Cannot claim.`,
+            message: existingTask.routingAffinity?.leadOnly
+              ? `Task "${taskId}" is Lead-only; you are not authorized to claim it.`
+              : `Task "${taskId}" requires role "${existingTask.routingAffinity?.role ?? "(unspecified)"}"; yours is "${claimingAgent.role ?? "(unspecified)"}". Cannot claim.`,
           };
         }
         // Atomic claim — only one agent can win this race

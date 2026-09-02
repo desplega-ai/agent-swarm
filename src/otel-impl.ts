@@ -1,6 +1,8 @@
 import {
   type Counter,
   context,
+  type Gauge,
+  type Histogram,
   metrics,
   propagation,
   ROOT_CONTEXT,
@@ -22,7 +24,7 @@ import { PeriodicExportingMetricReader } from "@opentelemetry/sdk-metrics";
 import { NodeSDK } from "@opentelemetry/sdk-node";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions";
 import pkg from "../package.json";
-import type { SpanOptions, SwarmSpan, SwarmSpanKind } from "./otel";
+import type { DbRetentionSweepMetric, SpanOptions, SwarmSpan, SwarmSpanKind } from "./otel";
 import { scrubSecrets } from "./utils/secret-scrubber";
 
 type AttributeValue = string | number | boolean | string[] | number[] | boolean[];
@@ -36,6 +38,14 @@ let sdk: NodeSDK | undefined;
 let costCounter: Counter | undefined;
 let tokenCounter: Counter | undefined;
 let costDriftCounter: Counter | undefined;
+let retentionSweepCounter: Counter | undefined;
+let retentionRowsDeletedCounter: Counter | undefined;
+let retentionBacklogGauge: Gauge | undefined;
+let retentionBatchesCounter: Counter | undefined;
+let retentionTableDurationHistogram: Histogram | undefined;
+let retentionSlowestStatementGauge: Gauge | undefined;
+let retentionStatementDurationHistogram: Histogram | undefined;
+let retentionBatchSizeGauge: Gauge | undefined;
 
 function decodeResourceAttributeValue(value: string): string {
   try {
@@ -291,6 +301,47 @@ function ensureInstruments(): void {
     description: "Absolute USD drift between stored and harness-reported session costs",
     unit: "{usd}",
   });
+  retentionSweepCounter = meter.createCounter("agentswarm.db.retention.sweeps", {
+    description: "One point per table attempt per tick, tagged with the terminal outcome",
+    unit: "{sweep}",
+  });
+  retentionRowsDeletedCounter = meter.createCounter("agentswarm.db.retention.rows_deleted", {
+    description: "Rows deleted per table per tick (always 0 in dry run)",
+    unit: "{row}",
+  });
+  retentionBacklogGauge = meter.createGauge("agentswarm.db.retention.backlog", {
+    description: "Rows still older than the horizon at the end of a table's slice",
+    unit: "{row}",
+  });
+  retentionBatchesCounter = meter.createCounter("agentswarm.db.retention.batches", {
+    description: "DELETE statements issued per table per tick",
+    unit: "{batch}",
+  });
+  retentionTableDurationHistogram = meter.createHistogram(
+    "agentswarm.db.retention.table_duration_ms",
+    {
+      description: "Wall clock of one table's slice",
+      unit: "ms",
+    },
+  );
+  retentionSlowestStatementGauge = meter.createGauge(
+    "agentswarm.db.retention.slowest_statement_ms",
+    {
+      description: "Slowest single DELETE in a table's slice — the event-loop stall signal",
+      unit: "ms",
+    },
+  );
+  retentionStatementDurationHistogram = meter.createHistogram(
+    "agentswarm.db.retention.statement_duration_ms",
+    {
+      description: "Distribution of individual DELETE statement durations",
+      unit: "ms",
+    },
+  );
+  retentionBatchSizeGauge = meter.createGauge("agentswarm.db.retention.batch_size", {
+    description: "The adaptive batch size a table settled on for a tick",
+    unit: "{row}",
+  });
 }
 
 export function recordSessionCost(m: SessionCostMetric): void {
@@ -331,6 +382,30 @@ export function recordSessionCost(m: SessionCostMetric): void {
   }
 }
 
+export function recordDbRetentionSweep(m: DbRetentionSweepMetric): void {
+  ensureInstruments();
+  // Table names are code literals from the closed descriptor list in
+  // src/be/db-retention.ts, not operator input, so no scrubbing is needed.
+  const outcomeAttrs = { table: m.table, dry_run: m.dryRun, outcome: m.outcome };
+  const tableAttrs = { table: m.table, dry_run: m.dryRun };
+  retentionSweepCounter!.add(1, outcomeAttrs);
+  retentionRowsDeletedCounter!.add(m.rowsDeleted, tableAttrs);
+  retentionBacklogGauge!.record(m.backlogRemaining, tableAttrs);
+  retentionBatchesCounter!.add(m.batches, tableAttrs);
+  retentionTableDurationHistogram!.record(m.tableDurationMs, outcomeAttrs);
+  retentionSlowestStatementGauge!.record(m.slowestStatementMs, tableAttrs);
+  retentionBatchSizeGauge!.record(m.batchSize, tableAttrs);
+}
+
+export function recordDbRetentionStatement(
+  table: string,
+  dryRun: boolean,
+  durationMs: number,
+): void {
+  ensureInstruments();
+  retentionStatementDurationHistogram!.record(durationMs, { table, dry_run: dryRun });
+}
+
 export function _injectCountersForTests(
   cost: Counter | undefined,
   token: Counter | undefined,
@@ -339,6 +414,26 @@ export function _injectCountersForTests(
   costCounter = cost;
   tokenCounter = token;
   costDriftCounter = drift;
+}
+
+export function _injectRetentionInstrumentsForTests(instruments: {
+  sweeps?: Counter;
+  rowsDeleted?: Counter;
+  backlog?: Gauge;
+  batches?: Counter;
+  tableDuration?: Histogram;
+  slowestStatement?: Gauge;
+  statementDuration?: Histogram;
+  batchSize?: Gauge;
+}): void {
+  retentionSweepCounter = instruments.sweeps;
+  retentionRowsDeletedCounter = instruments.rowsDeleted;
+  retentionBacklogGauge = instruments.backlog;
+  retentionBatchesCounter = instruments.batches;
+  retentionTableDurationHistogram = instruments.tableDuration;
+  retentionSlowestStatementGauge = instruments.slowestStatement;
+  retentionStatementDurationHistogram = instruments.statementDuration;
+  retentionBatchSizeGauge = instruments.batchSize;
 }
 
 export function _injectTracerForTests(tracer: Tracer | undefined): void {

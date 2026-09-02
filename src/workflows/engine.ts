@@ -14,6 +14,7 @@ import {
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
+import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
@@ -189,42 +190,11 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
-  const { completedNodeIds, latestSteps } = await rehydrateCompletedStepOutputs(
-    def,
-    runId,
-    ctx,
-    registry,
-  );
+  const { completedNodeIds } = await rehydrateCompletedStepOutputs(def, runId, ctx, registry);
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
-  const activeEdges = new Set<string>();
-
-  // For memoized re-walks, inject stored outputs into context and
-  // reconstruct active edges from completed steps' stored nextPort.
-  // Use the LATEST step per node to support loops (a node may have
-  // multiple completed steps from different iterations).
-  if (completedNodeIds.size > 0) {
-    for (const nodeId of completedNodeIds) {
-      // Synthetic foreach children persist their own step output for the join,
-      // but only the parent aggregate belongs in workflow context or routing.
-      if (resolveForeachParent(def, nodeId)) continue;
-
-      const step = latestSteps.get(nodeId);
-      // Invalid stored output is omitted during rehydration. Preserve the
-      // existing recovery behavior by skipping its routing edges as well.
-      if (!step) continue;
-      // Reconstruct active edges from the stored nextPort.
-      // If nextPort is set, use it for port-specific routing.
-      // If not set, get all successors (fan-out).
-      const successors = step?.nextPort
-        ? getSuccessors(def, nodeId, step.nextPort)
-        : getSuccessors(def, nodeId);
-      for (const succ of successors) {
-        activeEdges.add(`${nodeId}→${succ.id}`);
-      }
-    }
-  }
+  const { activeEdges } = await loadCompletedStepRouting(def, runId, completedNodeIds);
 
   // Circuit breaker: fail the run if total steps exceed the per-run limit.
   // This prevents runaway workflows (e.g. infinite loop-backs) from consuming

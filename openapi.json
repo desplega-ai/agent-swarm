@@ -426,6 +426,9 @@
           },
           "routingAffinity": {
             "$ref": "#/components/schemas/RoutingAffinity"
+          },
+          "routingAffinityInvalid": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -481,6 +484,9 @@
               "type": "string"
             },
             "default": []
+          },
+          "leadOnly": {
+            "type": "boolean"
           }
         }
       },
@@ -3407,6 +3413,8 @@
               "task_rejected",
               "task_claimed",
               "task_claim_rejected_affinity",
+              "task_authorization_rejected",
+              "task_recovery_authorization",
               "task_released",
               "channel_message",
               "service_registered",
@@ -36759,6 +36767,35 @@
                             },
                             "cumulativeRowsDeleted": {
                               "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -36767,7 +36804,12 @@
                             "batches",
                             "durationMs",
                             "dryRun",
-                            "cumulativeRowsDeleted"
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
                           ]
                         },
                         "agentLog": {
@@ -36790,6 +36832,35 @@
                             },
                             "cumulativeRowsDeleted": {
                               "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -36798,7 +36869,12 @@
                             "batches",
                             "durationMs",
                             "dryRun",
-                            "cumulativeRowsDeleted"
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
                           ]
                         },
                         "events": {
@@ -36821,6 +36897,35 @@
                             },
                             "cumulativeRowsDeleted": {
                               "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -36829,7 +36934,12 @@
                             "batches",
                             "durationMs",
                             "dryRun",
-                            "cumulativeRowsDeleted"
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
                           ]
                         }
                       }

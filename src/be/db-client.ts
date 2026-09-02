@@ -51,6 +51,25 @@ export interface DbClient extends DbExecutor {
    */
   transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T>;
   /**
+   * `run`, plus the wall time the driver actually spent executing the
+   * statement.
+   *
+   * Timing a `run` from the caller measures something else: the returned
+   * promise also covers waiting for the FIFO lock behind unrelated operations
+   * and the async SQLITE_BUSY backoff sleeps, which happen with the lock
+   * released and nothing executing. A caller that reads that wall time as
+   * statement cost — a stall monitor, an adaptive batch sizer — reports a
+   * responsive process as stalled and reacts to queueing instead of to work.
+   *
+   * `executionMs` sums only the driver attempts, measured with
+   * `performance.now()` (so it is fractional, and sub-millisecond statements
+   * do not floor to 0). A retried statement counts every attempt: each one
+   * really did occupy the driver and block the event loop, up to
+   * `attemptSpinMs` per BUSY attempt. It excludes all lock waiting and all
+   * backoff sleeping.
+   */
+  runTimed(sql: string, params?: DbParam[]): Promise<{ changes: number; executionMs: number }>;
+  /**
    * Schedule `fn` to run strictly after the currently-open transaction
    * COMMITs; if that transaction rolls back the hook is DROPPED (the write it
    * reacts to never happened). With no transaction open it runs on the next
@@ -194,6 +213,23 @@ class BunSqliteClient implements DbClient {
       const result = db.query(sql).run(...params);
       return { changes: result.changes };
     });
+  }
+
+  async runTimed(
+    sql: string,
+    params: DbParam[] = [],
+  ): Promise<{ changes: number; executionMs: number }> {
+    let executionMs = 0;
+    const result = await this.execute(
+      (db) => {
+        const run = db.query(sql).run(...params);
+        return { changes: run.changes };
+      },
+      (ms) => {
+        executionMs += ms;
+      },
+    );
+    return { ...result, executionMs };
   }
 
   async transaction<T>(fn: (tx: DbExecutor) => Promise<T>, opts?: TransactionOptions): Promise<T> {
@@ -351,10 +387,25 @@ class BunSqliteClient implements DbClient {
    * context, otherwise serialized through the lock. A context that leaked into
    * a post-commit continuation (e.g. queueMicrotask) is treated as absent.
    */
-  private async execute<T>(op: (db: Database) => T): Promise<T> {
+  private async execute<T>(
+    op: (db: Database) => T,
+    recordExecutionMs?: (ms: number) => void,
+  ): Promise<T> {
+    // Wraps ONLY the synchronous driver call, so lock acquisition above and
+    // backoff sleeps below are never charged to the statement. Called once per
+    // attempt; a retrying statement reports the sum. See DbClient.runTimed.
+    const timed = (attempt: () => T): T => {
+      if (!recordExecutionMs) return attempt();
+      const startedAt = performance.now();
+      try {
+        return attempt();
+      } finally {
+        recordExecutionMs(performance.now() - startedAt);
+      }
+    };
     const ctx = txContext.getStore();
     if (ctx && !ctx.closed) {
-      return op(this.getDatabase());
+      return timed(() => op(this.getDatabase()));
     }
     let sleptMs = 0;
     for (let attemptIndex = 0; ; attemptIndex++) {
@@ -367,9 +418,11 @@ class BunSqliteClient implements DbClient {
         // exact. The final attempt camps on the ambient busy_timeout so a
         // lone writer cannot stay phase-locked with a periodic holder (see
         // transaction()).
-        return canRetryAfter
-          ? this.shortSpin(this.getDatabase(), () => op(this.getDatabase()))
-          : op(this.getDatabase());
+        return timed(() =>
+          canRetryAfter
+            ? this.shortSpin(this.getDatabase(), () => op(this.getDatabase()))
+            : op(this.getDatabase()),
+        );
       } catch (err) {
         if (!isSqliteBusy(err) || !canRetryAfter || next === undefined) throw err;
         backoff = next;
