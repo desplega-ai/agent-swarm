@@ -3,6 +3,7 @@ import {
   backfillSupersedeTaskResumeTaskId,
   buildRoutingAffinityFromAgent,
   cleanupStaleSessions,
+  createLogEntry,
   createTaskExtended,
   deleteActiveSession,
   failPendingResumeIfUnclaimed,
@@ -29,6 +30,7 @@ import {
   isAgentEligibleForTask,
   isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
+  promoteAbandonedDraftTasks,
   releaseStaleMentionProcessing,
   releaseStaleOfferedTasksForOfflineAgents,
   releaseStaleProcessingInbox,
@@ -52,6 +54,7 @@ import {
   getPinCandidateAgent,
   getResumeGeneration,
   REBOOT_RETRY_PIN_TAG,
+  resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
 import type { AgentTask } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
@@ -115,6 +118,16 @@ export const STEERING_STALL_GRACE_MIN = Number(process.env.HEARTBEAT_STEERING_GR
 
 /** Stale resource cleanup threshold (minutes) */
 const STALE_CLEANUP_THRESHOLD_MINUTES = Number(process.env.HEARTBEAT_STALE_CLEANUP_MIN) || 30;
+
+/**
+ * Abandoned-draft promotion threshold (minutes, #1240). Deliberately much
+ * shorter than STALE_CLEANUP_THRESHOLD_MINUTES: a draft only exists while a
+ * UI-composer attachment batch uploads, which even against slow storage
+ * (#1226) took tens of seconds — 5 minutes is generous headroom above that
+ * worst case while still surfacing an abandoned session (tab closed
+ * mid-upload) to its owner within one coffee break, not half an hour.
+ */
+const DRAFT_TASK_TIMEOUT_MINUTES = Number(process.env.HEARTBEAT_DRAFT_TASK_TIMEOUT_MIN) || 5;
 
 /** Max pool tasks to auto-assign per sweep */
 function maxAutoAssignPerSweep(): number {
@@ -221,6 +234,7 @@ export interface HeartbeatFindings {
     workflowRuns: number;
     staleRuntimes: number;
     staleOfferedTasks: number;
+    abandonedDraftTasks: number;
   };
 }
 
@@ -296,6 +310,7 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
       workflowRuns: 0,
       staleRuntimes: 0,
       staleOfferedTasks: 0,
+      abandonedDraftTasks: 0,
     },
   };
 
@@ -660,6 +675,16 @@ export async function runRebootSweep(): Promise<void> {
       // Auto-retry: create a replacement task with parentTaskId
       let retryTaskId: string | null = null;
 
+      // A corrupt persisted affinity is never converted into an untagged
+      // retry by this independent recovery path.
+      if (task.routingAffinityInvalid) {
+        console.error(
+          `[Heartbeat] Reboot retry suppressed for ${task.id.slice(0, 8)}: invalid routing affinity`,
+        );
+        rebootAffectedTasks.push({ original: failed, retryTaskId: null });
+        continue;
+      }
+
       // Guard: only retry if parent doesn't already have a retry child
       const existingRetry = await getDbClient().get<{ id: string }>(
         `SELECT id FROM agent_tasks
@@ -680,21 +705,36 @@ export async function runRebootSweep(): Promise<void> {
           // the pool-fallback leg (agent gone/offline/at-capacity) — so that
           // leg is still role/capability-gated instead of role-blind.
           let preferredAgentId: string | undefined;
-          const candidate = await getPinCandidateAgent(task.agentId);
-          if (candidate) {
-            const activeCount = await getActiveTaskCount(candidate.id);
-            const hasCap = activeCount < (candidate.maxTasks ?? 1);
+          let sourceCandidate = await getPinCandidateAgent(task.agentId);
+          if (sourceCandidate) {
+            const activeCount = await getActiveTaskCount(sourceCandidate.id);
+            const maxTasks = sourceCandidate.maxTasks ?? 1;
+            const hasCap = activeCount < maxTasks;
             if (hasCap) {
-              preferredAgentId = candidate.id;
+              preferredAgentId = sourceCandidate.id;
             } else {
+              sourceCandidate = null;
               console.warn(
-                `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${candidate.id.slice(0, 8)} at capacity (${activeCount}/${candidate.maxTasks ?? 1}); falling back to affinity-gated pool`,
+                `[Heartbeat] Reboot retry for task ${task.id.slice(0, 8)} NOT pinned: agent ${task.agentId.slice(0, 8)} at capacity (${activeCount}/${maxTasks}); falling back to affinity-gated pool`,
               );
             }
           }
 
+          const leadOnly = task.routingAffinity?.leadOnly === true;
+          const authorization = await resolveLeadOnlyRecoveryAssignment(task, sourceCandidate);
+          if (leadOnly) preferredAgentId = authorization.agentId;
+
           const tags = ["reboot-retry", "auto-generated"];
           if (preferredAgentId !== undefined) tags.push(REBOOT_RETRY_PIN_TAG);
+          const sourceAffinity = (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined;
+          const routingAffinity = leadOnly
+            ? {
+                ...(sourceAffinity ?? task.routingAffinity),
+                capabilities:
+                  task.routingAffinity?.capabilities ?? sourceAffinity?.capabilities ?? [],
+                leadOnly: true,
+              }
+            : sourceAffinity;
 
           const retryTask = await createTaskExtended(task.task, {
             parentTaskId: task.id,
@@ -703,8 +743,21 @@ export async function runRebootSweep(): Promise<void> {
             priority: task.priority,
             source: task.source,
             taskType: task.taskType ?? undefined,
-            routingAffinity: (await buildRoutingAffinityFromAgent(task.agentId)) ?? undefined,
+            routingAffinity,
           });
+          if (authorization.decision) {
+            await createLogEntry({
+              eventType: "task_recovery_authorization",
+              taskId: retryTask.id,
+              agentId: preferredAgentId,
+              metadata: {
+                leadOnly: true,
+                parentTaskId: task.id,
+                sourceAgentId: task.agentId,
+                decision: authorization.decision,
+              },
+            });
+          }
           retryTaskId = retryTask.id;
           console.log(`[Heartbeat] Reboot retry created: ${retryTaskId} (parent: ${task.id})`);
         } catch (err) {
@@ -1026,6 +1079,9 @@ async function cleanupStaleResources(findings: HeartbeatFindings): Promise<void>
   findings.staleCleanup.inboxProcessing = await releaseStaleProcessingInbox(
     STALE_CLEANUP_THRESHOLD_MINUTES,
   );
+  findings.staleCleanup.abandonedDraftTasks = await promoteAbandonedDraftTasks(
+    DRAFT_TASK_TIMEOUT_MINUTES,
+  );
   // DES-523 Phase 3: escalate pinned crash-recovery resumes that were never
   // reclaimed within the grace window to a Lead re-delegation decision.
   await escalateUnreclaimedResumes(findings);
@@ -1331,6 +1387,7 @@ export async function runHeartbeatSweep(): Promise<void> {
           workflowRuns: 0,
           staleRuntimes: 0,
           staleOfferedTasks: 0,
+          abandonedDraftTasks: 0,
         },
       };
       // Expiry runs even on a cleanup-only tick: an idle agent whose runtime
@@ -1396,6 +1453,7 @@ function logFindings(findings: HeartbeatFindings): void {
     inboxProcessing,
     workflowRuns,
     staleOfferedTasks,
+    abandonedDraftTasks,
   } = findings.staleCleanup;
   const totalCleanup =
     sessions + reviewingTasks + mentionProcessing + inboxProcessing + workflowRuns;
@@ -1404,6 +1462,9 @@ function logFindings(findings: HeartbeatFindings): void {
   }
   if (staleOfferedTasks > 0) {
     parts.push(`stale_offers_released=${staleOfferedTasks}`);
+  }
+  if (abandonedDraftTasks > 0) {
+    parts.push(`abandoned_drafts_promoted=${abandonedDraftTasks}`);
   }
 
   if (parts.length > 0) {

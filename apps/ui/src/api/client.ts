@@ -404,6 +404,12 @@ class ApiClient {
     model?: string;
     modelTier?: string;
     effort?: string;
+    /**
+     * Create in `draft` status (#1240) — visible to the owner but not
+     * dispatch-eligible. Used while attachments are still uploading; the
+     * caller must follow up with `promoteDraftTask` once the batch settles.
+     */
+    draft?: boolean;
   }): Promise<TaskWithLogs> {
     const url = `${this.getBaseUrl()}/api/tasks`;
     const res = await fetch(url, {
@@ -414,6 +420,23 @@ class ApiClient {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ error: "Failed to create task" }));
       throw new Error(error.error || `Failed to create task: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  /**
+   * Promote a `draft` task (#1240) out of the pre-dispatch draft state.
+   * Idempotent — safe to call on a task that already left `draft`.
+   */
+  async promoteDraftTask(id: string): Promise<TaskWithLogs> {
+    const url = `${this.getBaseUrl()}/api/tasks/${id}/promote-draft`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Failed to promote draft task" }));
+      throw new Error(error.error || `Failed to promote draft task: ${res.status}`);
     }
     return res.json();
   }

@@ -375,6 +375,7 @@ export function buildBufferFlushBlocks(opts: {
 type TreeStatusIcon = TreeNode["status"] | "superseded";
 
 const STATUS_ICON: Record<TreeStatusIcon, string> = {
+  draft: "📎",
   backlog: "🗂️",
   unassigned: "📭",
   offered: "📨",

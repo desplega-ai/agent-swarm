@@ -198,6 +198,12 @@ describe("STEERING_ENABLED opt-in", () => {
     });
   });
 
+  test("reports an empty retention object on the authenticated metrics endpoint before a sweep", async () => {
+    const metrics = await api("GET", "/api/metrics");
+    expect(metrics.status).toBe(200);
+    expect(metrics.body.retention).toEqual({});
+  });
+
   test("removes steering MCP tools when disabled and restores them when enabled", async () => {
     await withSteeringDisabled(async () => {
       const serverTools = registeredTools(await createServer({ fullSurface: true }));

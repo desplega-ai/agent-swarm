@@ -179,18 +179,84 @@ export interface RequestRouteDescriptor {
    * `{METHOD} {route-template}`.
    *
    * - Matched `route()` handler: `GET /api/tasks/{id}`
-   * - Unmatched (core /health /ping /me, MCP transport, 404s): `GET /<first-segment>`
+   * - Static core path (see `CORE_ROUTE_TEMPLATES`): `GET /health`, `POST /mcp`
+   * - Otherwise unmatched (deeper MCP paths, 404s): `GET /<first-segment>`
    * - Root or empty path: bare `GET`
    */
   spanName: string;
   /**
    * Value for the `http.route` span attribute — the bounded-cardinality route
-   * template (e.g. `/api/tasks/{id}`). Set ONLY when a `route()` handler
-   * matched; left `undefined` for core/MCP/404 paths so callers omit the
-   * attribute rather than fabricating a value.
+   * template (e.g. `/api/tasks/{id}`). Set when a `route()` handler matched,
+   * or when the request matches a static core path in `CORE_ROUTE_TEMPLATES`
+   * on a method and query-string form that handler actually accepts. Left
+   * `undefined` for genuinely unmatched paths so callers omit the attribute
+   * rather than fabricating a value.
    */
   httpRoute?: string;
 }
+
+/**
+ * Static literal paths handled outside the `route()` factory (core.ts, mcp.ts)
+ * that would otherwise fall through to the low-cardinality `{METHOD}
+ * /{first-segment}` fallback below. Each of these is a single, fixed path —
+ * not a template with params — so mapping it to `http.route` is not
+ * fabricating a value, just naming a route that doesn't happen to go through
+ * `route()`. `/health` in particular is high-volume liveness-probe traffic;
+ * leaving it in the anonymous `GET` bucket makes that bucket useless to
+ * aggregate on.
+ *
+ * `methods` mirrors the method gate `handleCore` actually applies to that
+ * path — `undefined` means `handleCore` has no method check there (the
+ * handler runs for any verb). A method NOT in this list is a path
+ * `handleCore` 404s, so it must not carry `http.route` either — otherwise the
+ * attribute lies about a request that never matched a real handler.
+ *
+ * `toleratesQueryString` mirrors whether `handleCore` matches the path when
+ * the raw URL carries a `?`. Most of these entries compare the raw URL with
+ * strict equality (`req.url === "/health"` and similarly for
+ * `openapi.json`/`docs`/`internal/reload-config`/`mcp`/`mcp-user`), so
+ * `GET /health?t=123` 404s in `handleCore` even though `pathSegments` still
+ * resolves to `health`. `/me` and `/cancelled-tasks` explicitly accept the
+ * `?`-suffixed form (`req.url === "/me" || req.url?.startsWith("/me?")`), so
+ * those two tolerate a query string. Default is `false` (no tolerance) —
+ * verified against every comparison in `src/http/core.ts`, `src/http/mcp.ts`,
+ * and `src/http/mcp-user.ts`.
+ *
+ * `toleratesTrailingSlash` mirrors the same strict-equality problem for a
+ * trailing `/`: `getPathSegments("/health/")` returns `["health"]` (trailing
+ * empty segment is filtered), so without this gate a `GET /health/` request —
+ * which `handleCore` 404s on `req.url === "/health"` strict equality — would
+ * still get `http.route: "/health"` fabricated onto its span. `docs` is the
+ * one intentional exception: `handleCore` explicitly accepts
+ * `req.url === "/docs" || req.url === "/docs/"`. Default is `false`.
+ *
+ * Keyed by the joined path segments (no leading slash, no query string) so a
+ * deeper unmatched path under the same first segment — e.g.
+ * `/mcp/<session>/messages` — does NOT match and correctly falls through to
+ * the bounded first-segment fallback instead of fabricating a template.
+ */
+const CORE_ROUTE_TEMPLATES: Record<
+  string,
+  {
+    path: string;
+    methods?: string[];
+    toleratesQueryString?: boolean;
+    toleratesTrailingSlash?: boolean;
+  }
+> = {
+  health: { path: "/health" },
+  "openapi.json": { path: "/openapi.json" },
+  docs: { path: "/docs", toleratesTrailingSlash: true },
+  me: { path: "/me", methods: ["GET"], toleratesQueryString: true },
+  "cancelled-tasks": {
+    path: "/cancelled-tasks",
+    methods: ["GET"],
+    toleratesQueryString: true,
+  },
+  "internal/reload-config": { path: "/internal/reload-config", methods: ["POST"] },
+  mcp: { path: "/mcp", methods: ["GET", "POST", "DELETE"] },
+  "mcp-user": { path: "/mcp-user", methods: ["GET", "POST", "DELETE"] },
+};
 
 /**
  * Describe an inbound HTTP request for OTel: a low-cardinality span name plus
@@ -199,14 +265,37 @@ export interface RequestRouteDescriptor {
  * Never embeds raw path params or query strings — the goal is one span name and
  * one `http.route` value per endpoint so SigNoz can group/filter/aggregate by
  * them. The raw path is still preserved on the `url.path` attribute.
+ *
+ * `hasQueryString` reflects whether the raw request URL carried a `?`. A
+ * core-route entry without `toleratesQueryString` is a path `handleCore`
+ * 404s once a query string is present (see `CORE_ROUTE_TEMPLATES`), so that
+ * combination must not carry `http.route` either — same "omitted, never
+ * fabricated" contract as the method-mismatch case above it.
+ *
+ * `hasTrailingSlash` reflects whether the raw request path (query string
+ * excluded) ended in `/` for a path with more than one character — i.e. `/`
+ * itself is not "trailing slash". A core-route entry without
+ * `toleratesTrailingSlash` is a path `handleCore` 404s once a trailing slash
+ * is present, so that combination must not carry `http.route` either.
  */
 export function describeRequestRoute(
   method: string | undefined,
   pathSegments: string[],
+  hasQueryString = false,
+  hasTrailingSlash = false,
 ): RequestRouteDescriptor {
   const m = (method ?? "").toUpperCase() || "UNKNOWN";
   const matched = findRoute(method, pathSegments);
   if (matched) return { spanName: `${m} ${matched.path}`, httpRoute: matched.path };
+  const coreTemplate = CORE_ROUTE_TEMPLATES[pathSegments.join("/")];
+  if (
+    coreTemplate &&
+    (!coreTemplate.methods || coreTemplate.methods.includes(m)) &&
+    (!hasQueryString || coreTemplate.toleratesQueryString) &&
+    (!hasTrailingSlash || coreTemplate.toleratesTrailingSlash)
+  ) {
+    return { spanName: `${m} ${coreTemplate.path}`, httpRoute: coreTemplate.path };
+  }
   const first = pathSegments[0];
   return { spanName: first ? `${m} /${first}` : m };
 }

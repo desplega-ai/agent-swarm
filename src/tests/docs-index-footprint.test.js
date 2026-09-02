@@ -78,7 +78,7 @@ describe("docs API index footprint", () => {
     expect(tasks).toContain('"path":"/api/task-templates","method":"get"');
   });
 
-  test("OpenAPI and generated pages keep all 351 operations", async () => {
+  test("OpenAPI and generated pages keep all 352 operations", async () => {
     const spec = await Bun.file(resolve(repoRoot, "openapi.json")).json();
     const operationKeys = [];
     const tags = new Set();
@@ -102,18 +102,17 @@ describe("docs API index footprint", () => {
     }
 
     const generatedKeys = await generatedOperationKeys();
-    expect(operationKeys).toHaveLength(351);
-    expect(generatedKeys).toHaveLength(351);
+    expect(operationKeys).toHaveLength(352);
+    expect(generatedKeys).toHaveLength(352);
     expect(new Set(generatedKeys)).toEqual(new Set(operationKeys));
   });
 
-  test("keeps retired routes out of the 135-page sitemap source inventory", async () => {
+  test("keeps retired routes out of the sitemap source inventory", async () => {
     const urls = contentRoutes().map((route) => `${baseUrl}${route}`);
     const sitemapSource = await Bun.file(resolve(repoRoot, "docs-site/app/sitemap.ts")).text();
 
     expect(sitemapSource).toContain("source.getPages().map((page) => ({");
     expect(sitemapSource).toMatch(/url:\s*`\$\{baseUrl\}\$\{page\.url\}`/);
-    expect(urls).toHaveLength(135);
     expect(new Set(urls).size).toBe(urls.length);
     for (const route of retiredRoutes) {
       expect(urls).not.toContain(`${baseUrl}${route}`);

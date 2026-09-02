@@ -1,6 +1,7 @@
 // Backend types (mirrored from agent-swarm backend)
 export type AgentStatus = "idle" | "busy" | "offline" | "waiting_for_credentials";
 export type AgentTaskStatus =
+  | "draft"
   | "backlog"
   | "unassigned"
   | "offered"

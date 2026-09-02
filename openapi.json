@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.135.1",
+    "version": "1.136.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -142,6 +142,7 @@
           "status": {
             "type": "string",
             "enum": [
+              "draft",
               "backlog",
               "unassigned",
               "offered",
@@ -425,6 +426,9 @@
           },
           "routingAffinity": {
             "$ref": "#/components/schemas/RoutingAffinity"
+          },
+          "routingAffinityInvalid": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -480,6 +484,9 @@
               "type": "string"
             },
             "default": []
+          },
+          "leadOnly": {
+            "type": "boolean"
           }
         }
       },
@@ -3406,6 +3413,8 @@
               "task_rejected",
               "task_claimed",
               "task_claim_rejected_affinity",
+              "task_authorization_rejected",
+              "task_recovery_authorization",
               "task_released",
               "channel_message",
               "service_registered",
@@ -8085,6 +8094,7 @@
                         "status": {
                           "type": "string",
                           "enum": [
+                            "draft",
                             "backlog",
                             "unassigned",
                             "offered",
@@ -31572,6 +31582,7 @@
                     "status": {
                       "type": "string",
                       "enum": [
+                        "draft",
                         "backlog",
                         "unassigned",
                         "offered",
@@ -32696,6 +32707,7 @@
                                   "status": {
                                     "type": "string",
                                     "enum": [
+                                      "draft",
                                       "backlog",
                                       "unassigned",
                                       "offered",
@@ -32847,6 +32859,7 @@
                           "latestStatus": {
                             "type": "string",
                             "enum": [
+                              "draft",
                               "backlog",
                               "unassigned",
                               "offered",
@@ -36734,6 +36747,206 @@
                       "required": [
                         "total"
                       ]
+                    },
+                    "retention": {
+                      "type": "object",
+                      "properties": {
+                        "sessionLogs": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        },
+                        "agentLog": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        },
+                        "events": {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "string"
+                            },
+                            "rowsDeleted": {
+                              "type": "number"
+                            },
+                            "batches": {
+                              "type": "number"
+                            },
+                            "durationMs": {
+                              "type": "number"
+                            },
+                            "dryRun": {
+                              "type": "boolean"
+                            },
+                            "cumulativeRowsDeleted": {
+                              "type": "number"
+                            },
+                            "outcome": {
+                              "type": "string",
+                              "enum": [
+                                "converged",
+                                "budget_exhausted",
+                                "error"
+                              ]
+                            },
+                            "drained": {
+                              "type": "boolean"
+                            },
+                            "backlogRemaining": {
+                              "type": "number"
+                            },
+                            "batchSize": {
+                              "type": "number"
+                            },
+                            "slowestStatementMs": {
+                              "type": "number"
+                            },
+                            "lastError": {
+                              "type": "string"
+                            },
+                            "lastErrorAt": {
+                              "type": "string"
+                            },
+                            "lastSuccessAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "rowsDeleted",
+                            "batches",
+                            "durationMs",
+                            "dryRun",
+                            "cumulativeRowsDeleted",
+                            "outcome",
+                            "drained",
+                            "backlogRemaining",
+                            "batchSize",
+                            "slowestStatementMs"
+                          ]
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -36742,7 +36955,8 @@
                     "workflows",
                     "pages",
                     "sessions",
-                    "skills"
+                    "skills",
+                    "retention"
                   ]
                 }
               }
@@ -37774,6 +37988,7 @@
                               "status": {
                                 "type": "string",
                                 "enum": [
+                                  "draft",
                                   "backlog",
                                   "unassigned",
                                   "offered",
@@ -38048,6 +38263,9 @@
                       "xhigh",
                       "max"
                     ]
+                  },
+                  "draft": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -38070,6 +38288,62 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/{id}/promote-draft": {
+      "post": {
+        "summary": "Promote a draft task out of the pre-dispatch draft state",
+        "description": "Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.",
+        "tags": [
+          "Tasks"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task promoted (or already out of draft)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTask"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller does not own this task",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Task not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -39409,6 +39683,7 @@
                     "resumeTaskStatus": {
                       "type": "string",
                       "enum": [
+                        "draft",
                         "backlog",
                         "unassigned",
                         "offered",

@@ -63,6 +63,75 @@ describe("Pool Affinity", () => {
       expect(isAgentEligibleForTask(agent, task)).toBe(true);
     });
 
+    test("lead-only blocks a worker even when it is the affinity source", async () => {
+      const worker = await createAgent({
+        name: "privileged-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const task = await createTaskExtended("Merge", {
+        routingAffinity: affinity({ sourceAgentId: worker.id, leadOnly: true }),
+      });
+      expect(isAgentEligibleForTask(worker, task)).toBe(false);
+      expect(await claimTask(task.id, worker.id)).toBeNull();
+    });
+
+    test("lead-only accepts a Lead and rejects direct worker assignment", async () => {
+      const worker = await createAgent({ name: "direct-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "privileged-lead", isLead: true, status: "idle" });
+      await expect(
+        createTaskExtended("Merge", {
+          agentId: worker.id,
+          routingAffinity: affinity({ leadOnly: true }),
+        }),
+      ).rejects.toThrow("Lead-only task");
+      const task = await createTaskExtended("Merge", {
+        agentId: lead.id,
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+      expect(task.agentId).toBe(lead.id);
+    });
+
+    test("an unassigned lead-only task is claimable by a Lead but not a worker", async () => {
+      const worker = await createAgent({ name: "pool-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "pool-lead", isLead: true, status: "idle" });
+      const task = await createTaskExtended("Merge", {
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+
+      expect(await claimTask(task.id, worker.id)).toBeNull();
+      expect(await claimTask(task.id, lead.id)).not.toBeNull();
+    });
+
+    test("malformed and schema-invalid persisted affinities are quarantined", async () => {
+      const worker = await createAgent({
+        name: "quarantine-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const lead = await createAgent({ name: "quarantine-lead", isLead: true, status: "idle" });
+      const malformed = await createTaskExtended("Malformed affinity");
+      const schemaInvalid = await createTaskExtended("Invalid affinity", {
+        routingAffinity: affinity({ leadOnly: true }),
+      });
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        "{not-json",
+        malformed.id,
+      ]);
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        JSON.stringify({ leadOnly: true, capabilities: "bad" }),
+        schemaInvalid.id,
+      ]);
+
+      for (const task of [malformed, schemaInvalid]) {
+        expect((await getTaskById(task.id))?.routingAffinityInvalid).toBe(true);
+        expect(await claimTask(task.id, worker.id)).toBeNull();
+        expect(await assignUnassignedTaskPending(task.id, lead.id)).toBeNull();
+        expect(await getUnassignedTaskIdsForAgent(lead.id)).not.toContain(task.id);
+        expect((await getTaskById(task.id))?.status).toBe("unassigned");
+      }
+    });
+
     test("sourceAgentId bypass: own work is eligible even with a mismatched role", async () => {
       const owner = await createAgent({ name: "owner", isLead: false, status: "idle" });
       await updateAgentProfile(owner.id, { role: "researcher" });
@@ -222,6 +291,37 @@ describe("Pool Affinity", () => {
       const claimed = await claimTask(task.id, agent.id);
       expect(claimed).not.toBeNull();
       expect(claimed?.agentId).toBe(agent.id);
+    });
+
+    test("a child cannot downgrade a lead-only parent's affinity or capabilities", async () => {
+      const worker = await createAgent({ name: "child-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "child-lead", isLead: true, status: "idle" });
+      const underprivilegedLead = await createAgent({
+        name: "child-underprivileged-lead",
+        isLead: true,
+        status: "idle",
+      });
+      await updateAgentProfile(lead.id, { capabilities: ["merge"] });
+      await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
+      const parent = await createTaskExtended("Merge", {
+        agentId: lead.id,
+        routingAffinity: affinity({ leadOnly: true, capabilities: ["merge"] }),
+      });
+
+      await expect(
+        createTaskExtended("Child", {
+          parentTaskId: parent.id,
+          agentId: worker.id,
+          routingAffinity: affinity({ leadOnly: false, capabilities: ["typescript"] }),
+        }),
+      ).rejects.toThrow("Lead-only task");
+      const child = await createTaskExtended("Child", {
+        parentTaskId: parent.id,
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["typescript"] }),
+      });
+      expect(child.routingAffinity).toMatchObject({ leadOnly: true });
+      expect(child.routingAffinity?.capabilities).toEqual(["merge", "typescript"]);
+      expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
   });
 

@@ -30,6 +30,7 @@ process.env.SLACK_RENDER_V2 = "false";
 
 let createAssistantFn: typeof import("../slack/assistant").createAssistant;
 let registerMessageHandlerFn: typeof import("../slack/handlers").registerMessageHandler;
+let resetSlackHandlerCachesForTestingFn: typeof import("../slack/handlers").resetSlackHandlerCachesForTesting;
 
 let createTaskWithSiblingAwarenessSpy: any;
 let getAllAgentsSpy: any;
@@ -98,7 +99,11 @@ beforeAll(async () => {
   installSpyImplementations();
 
   ({ createAssistant: createAssistantFn } = await import("../slack/assistant"));
-  ({ registerMessageHandler: registerMessageHandlerFn } = await import("../slack/handlers"));
+  ({
+    registerMessageHandler: registerMessageHandlerFn,
+    resetSlackHandlerCachesForTesting: resetSlackHandlerCachesForTestingFn,
+  } = await import("../slack/handlers"));
+  resetSlackHandlerCachesForTestingFn();
 });
 
 beforeEach(() => {
@@ -120,6 +125,7 @@ afterAll(() => {
   restoreEnvValue("SLACK_ALLOWED_EMAIL_DOMAINS");
   restoreEnvValue("SLACK_ALLOWED_USER_IDS");
   mock.restore();
+  resetSlackHandlerCachesForTestingFn();
 });
 
 // ---------------------------------------------------------------------------

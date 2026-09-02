@@ -196,6 +196,13 @@ let cachedBotId: string | null = null;
 const swarmThreadRootCache = new Map<string, boolean>();
 const SWARM_THREAD_ROOT_CACHE_MAX = 1000;
 
+/** Reset Slack handler caches between tests that exercise production handlers. */
+export function resetSlackHandlerCachesForTesting(): void {
+  cachedBotUserId = null;
+  cachedBotId = null;
+  swarmThreadRootCache.clear();
+}
+
 /**
  * Pure check: does the given thread-root message belong to our own swarm bot?
  * Exported for testing.

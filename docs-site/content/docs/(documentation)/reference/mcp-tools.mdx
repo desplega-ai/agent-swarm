@@ -1111,13 +1111,15 @@ List durable script workflow runs, optionally filtered by status or agent ID.
 
 ### db-query
 
-Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results capped at 100 rows.
+Execute a read-only SQL query against the swarm database. Available to all authenticated agents — be aware results may include secrets (`oauth_tokens`, `configs`). Results are capped by the operator-configurable `DB_QUERY_MCP_MAX_ROWS` limit.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `sql` | string | Conditional | SQL query (read-only only — writes are rejected). Required unless the deprecated `query` alias is provided |
 | `query` | string | Conditional | Deprecated runtime alias for `sql` |
 | `params` | array | No | Query parameters |
+
+Responses include `total`, `truncated`, and `rowLimit` so callers can distinguish a complete result set from one capped by the configured row limit.
 
 ### get-oauth-access-token
 

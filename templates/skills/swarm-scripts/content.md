@@ -132,6 +132,10 @@ function rowsToObjects(res: any): any[] {
 }
 ```
 
+### Concurrency limit
+
+`ctx.swarm.db_query` throttles at about three concurrent calls. A wider `Promise.all` fan-out can return 429 responses with no `rows` key, so `res?.data?.rows ?? []` misreads throttling as a clean zero. Check the response status and `data.error` before reading `rows`. Serialize queries or cap concurrency at three.
+
 Common tables: `agent_tasks`, `session_logs`, `agent_memory`, `scheduled_tasks`, `agents`. `session_logs` has no `tool_name` column. Tool names sit inside the `content` JSON column. Extract them with `instr` and `substr` in SQL, or parse the JSON in the script.
 
 ## Progress from a script

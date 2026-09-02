@@ -110,11 +110,11 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
 
 ## Provider pricing caveats
 
-- **Claude Sonnet 5 introductory rate:** Anthropic's pricing page lists
-  $2/M input and $10/M output through 2026-08-31. The models.dev snapshot and
-  server pricing table carry that introductory rate. Claude Code's bundled
-  local rate table is stale-high, so treat its reported USD as advisory and
-  use the server-recomputed row for the canonical total.
+- **Claude Sonnet 5 standard rate:** Anthropic's pricing page lists $2/M input
+  and $10/M output as the standard rate. Anthropic cancelled the previously
+  scheduled increase to $3/M input and $15/M output on 2026-09-01. Claude
+  Code's bundled local rate table may be stale-high, so treat its reported USD
+  as advisory and use the server-recomputed row for the canonical total.
 - **GPT-5.6 context tier:** above 272k context, the GPT-5.6 family bills
   2× input/cache rates and 1.5× output rates. The current recompute receives
   aggregate session token counts, not enough per-request context information

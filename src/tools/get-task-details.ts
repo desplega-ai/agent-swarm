@@ -40,6 +40,7 @@ const looseRoutingAffinitySchema = z.looseObject({
   role: z.string().optional(),
   harnessProvider: z.string().optional(),
   capabilities: z.array(z.string()).optional(),
+  leadOnly: z.boolean().optional(),
 });
 
 export const looseAgentTaskOutputSchema = z.looseObject({

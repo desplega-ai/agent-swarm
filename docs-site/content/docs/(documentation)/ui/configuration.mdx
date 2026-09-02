@@ -27,7 +27,7 @@ Each row shows a source chip when the underlying environment variable is set on 
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
 | Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `WORKER_API_READY_TIMEOUT_SECONDS` |
-| Database queries | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP` |
+| Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
 | Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
@@ -37,6 +37,10 @@ Each row shows a source chip when the underlying environment variable is set on 
 Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead.
 
 Settings with deeper behavior link out to the relevant guide (for example the [task steering](/docs/guides/task-steering) and [harness providers](/docs/guides/harness-providers) guides) directly from the row.
+
+<Callout type="warn" title="Database retention permanently deletes history">
+  Leave `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` unset to disable their individual sweeps. Each value must be between 1 and 1,000,000 whole days. We recommend at least seven days so recent task recovery and memory rating keep their context. Start with `DB_RETENTION_DRY_RUN=true`, verify the exact would-delete counts, then enable one table at a time. Retention deletes session transcripts, task history, or telemetry. Event aggregate totals become retention-window totals after an event sweep.
+</Callout>
 
 ![Editing a configuration group](/ui/configuration-group.png)
 

@@ -9,6 +9,7 @@ import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/se
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
 import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
+import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import {
   enqueueAuditRow,
   flushAuditBuffer,
@@ -107,6 +108,7 @@ import {
   parseQueryParams,
   safeRequestUrlForLog,
   setCorsHeaders,
+  wireHttpSpanLifecycle,
 } from "./utils";
 import { handleWebhooks } from "./webhooks";
 import { handleWorkflowEvents } from "./workflow-events";
@@ -213,7 +215,6 @@ const transportActivityUser: McpTransportActivity = globalState.__transportActiv
 const httpServer = createHttpServer(async (req, res) => {
   const startTime = performance.now();
   let statusCode = 200;
-  let spanEnded = false;
 
   // Wrap writeHead to capture status code
   const originalWriteHead = res.writeHead.bind(res);
@@ -245,51 +246,43 @@ const httpServer = createHttpServer(async (req, res) => {
   await withRemoteContext(req.headers as Record<string, unknown>, async () => {
     const reqPath = req.url?.split("?")[0] ?? "";
     const pathSegments = getPathSegments(req.url || "");
+    const hasQueryString = (req.url ?? "").includes("?");
+    const hasTrailingSlash = reqPath.length > 1 && reqPath.endsWith("/");
     const skipSpan = reqPath === "/api/poll" && !isPollTracingEnabled();
     // Per OTel HTTP semantic conventions: span name is `{METHOD} {route-template}`
     // and `http.route` carries the bounded-cardinality template so SigNoz can
     // group/filter/aggregate by endpoint as a first-class field. `http.route` is
     // omitted (not fabricated) for unmatched core/MCP/404 paths. Raw path stays
     // on `url.path`.
-    const { spanName, httpRoute } = describeRequestRoute(req.method, pathSegments);
+    const { spanName, httpRoute } = describeRequestRoute(
+      req.method,
+      pathSegments,
+      hasQueryString,
+      hasTrailingSlash,
+    );
     // Standard OTel HTTP server semconv attributes — host, scheme, protocol
     // version, user-agent (the method/path/route/status are set inline below).
     const semconv = httpServerSemconvAttributes(req);
     const span = skipSpan
       ? null
-      : startSpan(spanName, {
-          "http.request.method": req.method ?? "",
-          "url.path": reqPath,
-          "url.scheme": semconv["url.scheme"],
-          "http.route": httpRoute,
-          "server.address": semconv["server.address"],
-          "network.protocol.version": semconv["network.protocol.version"],
-          "user_agent.original": semconv["user_agent.original"],
-          "agent.id": req.headers["x-agent-id"] as string | undefined,
-          "agentswarm.component": "api",
-        });
+      : startSpan(
+          spanName,
+          {
+            "http.request.method": req.method ?? "",
+            "url.path": reqPath,
+            "url.scheme": semconv["url.scheme"],
+            "http.route": httpRoute,
+            "server.address": semconv["server.address"],
+            "network.protocol.version": semconv["network.protocol.version"],
+            "user_agent.original": semconv["user_agent.original"],
+            "agent.id": req.headers["x-agent-id"] as string | undefined,
+            "agentswarm.component": "api",
+          },
+          { kind: "server" },
+        );
 
     if (span) {
-      res.on("finish", () => {
-        if (spanEnded) return;
-        spanEnded = true;
-        span.setAttributes({
-          "http.response.status_code": statusCode,
-          "agentswarm.http.duration_ms": Math.round((performance.now() - startTime) * 10) / 10,
-        });
-        if (statusCode >= 500) {
-          span.setStatus({ code: 2, message: `HTTP ${statusCode}` });
-        }
-        span.end();
-      });
-
-      res.on("error", (err) => {
-        if (spanEnded) return;
-        spanEnded = true;
-        span.recordException(err);
-        span.setStatus({ code: 2, message: err.message });
-        span.end();
-      });
+      wireHttpSpanLifecycle(res, span, () => statusCode, startTime);
     }
 
     // Run request handling inside the HTTP span's active context so any spans
@@ -448,6 +441,9 @@ async function shutdown() {
 
   // Stop memory expired-row garbage collector
   stopMemoryGc();
+
+  // Stop opt-in session, agent-log, and event retention before closing SQLite.
+  await stopDbRetention();
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
@@ -692,6 +688,10 @@ httpServer
 
     // Start expired-memory garbage collector (1-hour tick, immediate first run)
     await startMemoryGc();
+
+    // Start the opt-in DB retention sweep after config hydration. Every key is
+    // read on each tick, so config reloads take effect without a restart.
+    await startDbRetention();
 
     // (RBAC audit sink is wired pre-listen — see above httpServer.listen.)
 

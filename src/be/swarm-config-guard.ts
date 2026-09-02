@@ -39,6 +39,25 @@ type ConfigValidator = (value: unknown) => string | null;
 
 const BOOLEAN_LITERALS = ["true", "false", "1", "0"];
 
+/** A conservative window that remains representable by JavaScript Date arithmetic. */
+export const MAX_DB_RETENTION_DAYS = 1_000_000;
+
+/**
+ * The one source of truth for the retention tick's tuning ranges.
+ *
+ * db-retention.ts clamps each knob to exactly these bounds and falls back to
+ * its default outside them, and VALIDATED_KEYS below rejects out-of-range
+ * writes with the same numbers. Both sides read this constant, so the config
+ * API cannot accept a value the sweep will silently ignore. It lives here
+ * because db-retention.ts already imports from this module; the reverse
+ * direction would be a cycle.
+ */
+export const DB_RETENTION_TUNING_BOUNDS = {
+  DB_RETENTION_TICK_BUDGET_MS: { min: 1_000, max: 300_000 },
+  DB_RETENTION_CATCHUP_INTERVAL_MS: { min: 5_000, max: 3_600_000 },
+  DB_RETENTION_MAX_STATEMENT_MS: { min: 25, max: 5_000 },
+} as const;
+
 /** Build `{ KEY: validator }` entries accepting only boolean literals. */
 function booleanValidators(keys: string[]): Record<string, ConfigValidator> {
   const message = (key: string) =>
@@ -74,6 +93,38 @@ function integerValidators(keys: string[], min: number): Record<string, ConfigVa
         const str = String(value).trim();
         if (!/^\d+$/.test(str) || Number(str) < min) {
           return `Invalid ${key} (must be an integer >= ${min})`;
+        }
+        return null;
+      },
+    ]),
+  );
+}
+
+/** Build `{ KEY: validator }` entries from a per-key closed range. */
+function boundedIntegerValidatorsFor(
+  bounds: Record<string, { min: number; max: number }>,
+): Record<string, ConfigValidator> {
+  const validators: Record<string, ConfigValidator> = {};
+  for (const [key, { min, max }] of Object.entries(bounds)) {
+    Object.assign(validators, boundedIntegerValidators([key], min, max));
+  }
+  return validators;
+}
+
+/** Build `{ KEY: validator }` entries accepting integers inside a closed range. */
+function boundedIntegerValidators(
+  keys: string[],
+  min: number,
+  max: number,
+): Record<string, ConfigValidator> {
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      (value: unknown) => {
+        const str = String(value).trim();
+        const parsed = Number(str);
+        if (!/^\d+$/.test(str) || !Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+          return `Invalid ${key} (must be an integer between ${min} and ${max})`;
         }
         return null;
       },
@@ -163,6 +214,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "ANONYMIZED_TELEMETRY",
     "SWARM_HIDE_CLOUD_PROMO",
     "DB_QUERY_BOUNDED_ENABLED",
+    "DB_RETENTION_DRY_RUN",
   ]),
   ...enumValidator("SLACK_THREAD_STEERING", ["lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
@@ -190,6 +242,17 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "AGENT_FS_REQUEST_TIMEOUT_MS",
     ],
     1,
+  ),
+  // The retention tick's knobs are NOT merely positive. The sweep clamps each
+  // to a distinct range and silently substitutes its default outside it, so a
+  // permissive "integer >= 1" here accepted settings that never took effect:
+  // an operator could save a 500ms tick budget, see it accepted, and have the
+  // sweep keep running for the default 30000ms.
+  ...boundedIntegerValidatorsFor(DB_RETENTION_TUNING_BOUNDS),
+  ...boundedIntegerValidators(
+    ["SESSION_LOG_RETENTION_DAYS", "AGENT_LOG_RETENTION_DAYS", "EVENTS_RETENTION_DAYS"],
+    1,
+    MAX_DB_RETENTION_DAYS,
   ),
   // 0 is meaningful here: "auto-assign nothing this sweep".
   ...integerValidators(["HEARTBEAT_MAX_AUTO_ASSIGN"], 0),

@@ -1863,7 +1863,7 @@ export interface paths {
                             ok: true;
                             taskId: string;
                             /** @enum {string} */
-                            status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                         } | {
                             ok: boolean;
                             result: {
@@ -12712,7 +12712,7 @@ export interface paths {
                                     task: string;
                                     title?: string;
                                     /** @enum {string} */
-                                    status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                    status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                                     /**
                                      * @default mcp
                                      * @enum {string}
@@ -12751,7 +12751,7 @@ export interface paths {
                                 chainTaskCount: number;
                                 lastActivityAt: string;
                                 /** @enum {string} */
-                                latestStatus: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                latestStatus: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                             }[];
                             total: number;
                             limit: number;
@@ -14489,6 +14489,59 @@ export interface paths {
                             skills: {
                                 total: number;
                             };
+                            retention: {
+                                sessionLogs?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
+                                agentLog?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
+                                events?: {
+                                    at: string;
+                                    rowsDeleted: number;
+                                    batches: number;
+                                    durationMs: number;
+                                    dryRun: boolean;
+                                    cumulativeRowsDeleted: number;
+                                    /** @enum {string} */
+                                    outcome: "converged" | "budget_exhausted" | "error";
+                                    drained: boolean;
+                                    backlogRemaining: number;
+                                    batchSize: number;
+                                    slowestStatementMs: number;
+                                    lastError?: string;
+                                    lastErrorAt?: string;
+                                    lastSuccessAt?: string;
+                                };
+                            };
                         };
                     };
                 };
@@ -14923,7 +14976,7 @@ export interface paths {
                                 task: string;
                                 title?: string;
                                 /** @enum {string} */
-                                status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                                status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                                 /**
                                  * @default mcp
                                  * @enum {string}
@@ -15009,6 +15062,7 @@ export interface paths {
                         modelTier?: "smol" | "regular" | "smart" | "ultra";
                         /** @enum {string} */
                         effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max";
+                        draft?: boolean;
                     };
                 };
             };
@@ -15024,6 +15078,65 @@ export interface paths {
                 };
                 /** @description Validation error */
                 400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{id}/promote-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a draft task out of the pre-dispatch draft state
+         * @description Transitions a `draft` task (#1240 — created with attachments still uploading) to its normal dispatch-eligible status: `offered` if it was offered to an agent, `pending` if it has an owning agent (the common case — UI-composer tasks default to Lead), otherwise `unassigned`. Called by the UI composer once its attachment upload batch settles, whether every file uploaded, some failed, or all failed — a draft must never be stranded by an upload error. Idempotent: calling it on a task that already left `draft` returns the current task unchanged rather than erroring, so a retried request is safe.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task promoted (or already out of draft) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentTask"];
+                    };
+                };
+                /** @description Caller does not own this task */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Task not found */
+                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -16024,7 +16137,7 @@ export interface paths {
                             task: components["schemas"]["AgentTask"] | null;
                             resumeTaskId: string | null;
                             /** @enum {string} */
-                            resumeTaskStatus?: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                            resumeTaskStatus?: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                         };
                     };
                 };
@@ -19613,7 +19726,7 @@ export interface components {
             task: string;
             title?: string;
             /** @enum {string} */
-            status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+            status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
             /**
              * @default mcp
              * @enum {string}
@@ -19705,6 +19818,7 @@ export interface components {
             };
             totalCostUsd?: number;
             routingAffinity?: components["schemas"]["RoutingAffinity"];
+            routingAffinityInvalid?: boolean;
         };
         FollowUpConfig: {
             disabled?: boolean;
@@ -19718,6 +19832,7 @@ export interface components {
             harnessProvider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
             /** @default [] */
             capabilities: string[];
+            leadOnly?: boolean;
         };
         AgentCredStatus: {
             ready: boolean;
@@ -20449,7 +20564,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -23041,7 +23156,7 @@ export interface operations {
                     "application/json": {
                         taskId: string;
                         /** @enum {string} */
-                        status: "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
+                        status: "draft" | "backlog" | "unassigned" | "offered" | "reviewing" | "pending" | "in_progress" | "paused" | "completed" | "failed" | "cancelled" | "superseded";
                     };
                 };
             };

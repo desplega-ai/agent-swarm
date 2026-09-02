@@ -139,6 +139,10 @@ docker run --rm -v swarm_api:/app -v $(pwd):/backup alpine \
   sh -c 'cp /app/agent-swarm-db.sqlite /backup/agent-swarm-db-backup.sqlite && if [ -f /app/.page-session-secret ]; then cp /app/.page-session-secret /backup/page-session-secret.backup; fi'
 ```
 
+### Database retention
+
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the `[db-retention]` log output and `GET /api/metrics`, then enable one table at a time. See [runbooks/db-retention.md](./runbooks/db-retention.md) before activation.
+
 ### Adding More Workers
 
 To add a worker, copy an existing worker block in `docker-compose.yml`:
@@ -189,17 +193,17 @@ bun run docker:build:worker
 # Slim variant (CI/E2E)
 bun run docker:build:worker:slim
 
-# Override the pinned Claude Code version (default: 2.1.235)
+# Override the pinned Claude Code version (default: 2.1.246)
 docker build -f Dockerfile.worker --build-arg CLAUDE_CODE_VERSION=2.2.0 -t agent-swarm-worker .
 ```
 
 Current worker-image defaults in `Dockerfile.worker`:
 
-- `CLAUDE_CODE_VERSION=2.1.235`
-- `PI_CODING_AGENT_VERSION=0.84.2`
-- `CODEX_VERSION=0.148.0`
-- `OPENCODE_VERSION=1.18.18`
-- `OPENCODE_SDK_VERSION=1.18.18`
+- `CLAUDE_CODE_VERSION=2.1.246`
+- `PI_CODING_AGENT_VERSION=0.84.3`
+- `CODEX_VERSION=0.149.1`
+- `OPENCODE_VERSION=1.18.23`
+- `OPENCODE_SDK_VERSION=1.18.23`
 
 The image also sets `DISABLE_AUTOUPDATER=1` so Claude Code stays on the pinned version instead of self-updating at runtime.
 
@@ -486,6 +490,7 @@ When a worker starts, it:
 | `MULTI_RUNTIME_ENABLED` | Track multiple worker runtime instances independently for one logical agent. Set consistently on the API server and every worker. | `false` |
 | `RUNTIME_STALE_THRESHOLD_MIN` | Minutes without runtime traffic before an active runtime stops counting and the heartbeat sweep retires it. | `5` |
 | `DATABASE_PATH` | SQLite database file path | `./agent-swarm-db.sqlite` |
+| `MIGRATIONS_DIR` | Directory for packaged `.sql` migrations in compiled-binary deployments. Bun virtual-filesystem paths select this directory explicitly; a missing or empty directory stops a fresh database from booting without its baseline schema. Docker sets it to `/app/migrations`. | - |
 | `PAGE_SESSION_SECRET` | HMAC secret for authenticated page-session cookies; never falls back to `API_KEY` | Persisted in `<data-dir>/.page-session-secret` when unset |
 | `PAGE_SESSION_SECRET_FILE` | Absolute path to a file containing the page-session secret (Docker/k8s secret mount) | - |
 | `OPENAI_API_KEY` | OpenAI key for memory embeddings (optional) | - |

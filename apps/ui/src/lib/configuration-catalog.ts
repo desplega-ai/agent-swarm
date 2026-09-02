@@ -323,11 +323,77 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
   },
   {
     id: "database",
-    title: "Database queries",
+    title: "Database",
     description:
-      "Safety controls for the shared db-query path (HTTP debug route and the MCP tool) — the bounded child-process kill switch and its per-path timeout/row budgets.",
+      "Safety controls for database queries and opt-in retention of non-critical log tables.",
     icon: Database,
     entries: [
+      {
+        key: "SESSION_LOG_RETENTION_DAYS",
+        label: "Session log retention (days)",
+        description:
+          "Delete session_logs rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes session transcripts.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "AGENT_LOG_RETENTION_DAYS",
+        label: "Agent log retention (days)",
+        description:
+          "Delete agent_log rows older than this many days. Leave unset to disable this table's sweep. Deletion permanently removes task and agent history.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "EVENTS_RETENTION_DAYS",
+        label: "Event retention (days)",
+        description:
+          "Delete events rows older than this many days. Leave unset to disable this table's sweep. Aggregate event totals become retention-window totals.",
+        kind: "number",
+        placeholder: "30",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_DRY_RUN",
+        label: "Database retention dry run",
+        description:
+          "Count rows that enabled retention policies would delete, without deleting them. Use this before the first production activation.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_TICK_BUDGET_MS",
+        label: "Retention tick budget (ms)",
+        description:
+          "Wall-clock budget for one retention sweep tick, shared evenly across enabled tables. Accepts 1000 to 300000.",
+        kind: "number",
+        defaultValue: "30000",
+        placeholder: "30000",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_CATCHUP_INTERVAL_MS",
+        label: "Retention catch-up interval (ms)",
+        description:
+          "Delay before the next retention tick when a table is still undrained. The normal cadence stays hourly once every enabled table is drained. Accepts 5000 to 3600000.",
+        kind: "number",
+        defaultValue: "60000",
+        placeholder: "60000",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
+      {
+        key: "DB_RETENTION_MAX_STATEMENT_MS",
+        label: "Retention statement target (ms)",
+        description:
+          "Target ceiling for one retention DELETE statement, measured as driver execution time. The adaptive batch sizer tunes its batch size against this. Accepts 25 to 5000.",
+        kind: "number",
+        defaultValue: "250",
+        placeholder: "250",
+        docsUrl: `${DOCS}guides/deployment#database-retention`,
+      },
       {
         key: "DB_QUERY_BOUNDED_ENABLED",
         label: "Bounded query execution",

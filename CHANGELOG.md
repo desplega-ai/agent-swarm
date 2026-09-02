@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.136.0] - 2026-09-01
+
+### Added
+- **Operators can opt into retention windows for non-critical database logs** (#1252) — independent session, agent, and event policies support dry-run counts, bounded deletion, metrics, and an operational rollout guide while remaining disabled by default.
+
+### Changed
+- **Worker harness pins track current compatible releases** (#1277) — Claude Code moves to 2.1.251, Pi to 0.84.4, Codex to 0.151.0, and OpenCode plus its SDK to 1.18.25.
+
+### Fixed
+- **Inbound API telemetry resolves to endpoint-level resources in APM backends** (#1293) — HTTP request spans now use OpenTelemetry's `SERVER` kind, preserve low-cardinality route templates, and record premature response closes without inflating error rates.
+- **Sibling task prompts distinguish creation time from recent activity** (#1281) — progress updates no longer make an older sibling look newly submitted and trigger duplicate-work assumptions.
+- **Tasks with attachments become dispatchable only after their upload batch settles** (#1273) — draft tasks remain visible and cancelable, promote idempotently after uploads, and self-promote after abandoned uploads time out.
+- **The documentation root uses a permanent redirect** (#1284), avoiding repeated temporary redirects for clients and crawlers.
+
+## [1.135.2] - 2026-08-29
+
+### Changed
+- **Worker harness pins track current compatible releases** (#1261) — Claude Code moves to 2.1.246, Pi to 0.84.3, Codex to 0.149.1, and OpenCode plus its SDK to 1.18.23.
+
+### Fixed
+- **Bundled agent-fs image pins stay synchronized at v0.13.2** (#1267) — Helm and Docker Compose defaults now point at the current image, unblocking the version-sync release gate.
+- **Agent-fs provisioning recovers when an agent registration already exists** (#1265) — a conflicted registration now creates a recovery identity and stores fresh credentials instead of leaving the agent without access.
+- **Compiled deployments reliably discover and apply the baseline schema** (#1263) — migration startup detects Bun's virtual filesystem explicitly, falls back to the configured migration directory, and fails loudly instead of booting an empty database.
+- **Database query responses expose row-limit metadata consistently** (#1260) — REST and MCP callers can distinguish complete results from capped results using `truncated` and `rowLimit`.
+- **API reference categories stay consolidated without breaking old links** (#1256) — task-template and workflow-event endpoints live under their canonical categories, with permanent redirects from the former pages.
+
 ## [1.135.1] - 2026-08-24
 
 ### Changed

@@ -249,6 +249,17 @@ describe("swarm-config reserved keys guard", () => {
 
   // ─── MCP tool: set-config ─────────────────────────────────────────────────
   describe("MCP set-config tool", () => {
+    test("rejects an invalid database retention dry-run flag", async () => {
+      const handler = mcpServer.handlers.get("set-config");
+      const result = (await handler!(
+        { scope: "global", key: "DB_RETENTION_DRY_RUN", value: "treu" },
+        makeRequestInfo(),
+      )) as { structuredContent: { success: boolean; message: string } };
+
+      expect(result.structuredContent.success).toBe(false);
+      expect(result.structuredContent.message).toContain("Invalid DB_RETENTION_DRY_RUN");
+    });
+
     test("rejects reserved key with structured error", async () => {
       const handler = mcpServer.handlers.get("set-config");
       expect(handler).toBeDefined();
@@ -385,6 +396,22 @@ describe("swarm-config reserved keys guard", () => {
 
   // ─── HTTP: PUT /api/config ────────────────────────────────────────────────
   describe("HTTP PUT /api/config", () => {
+    test("returns 400 for an invalid database retention dry-run flag", async () => {
+      const res = await fetch(`${baseUrl}/api/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          scope: "global",
+          key: "DB_RETENTION_DRY_RUN",
+          value: "treu",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("Invalid DB_RETENTION_DRY_RUN");
+    });
+
     test("returns 400 for reserved key API_KEY", async () => {
       const res = await fetch(`${baseUrl}/api/config`, {
         method: "PUT",

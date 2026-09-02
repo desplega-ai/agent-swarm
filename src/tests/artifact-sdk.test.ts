@@ -9,6 +9,11 @@ import {
 } from "../artifact-sdk/server";
 import { getBasePrompt } from "../prompts/base-prompt";
 
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
 // ─── Port allocation tests ──────────────────────────────────────────────
 
 describe("getAvailablePort", () => {
@@ -132,9 +137,9 @@ describe("createArtifactServer", () => {
   });
 
   afterAll(() => {
-    process.env.AGENT_ID = originalEnv.AGENT_ID;
-    process.env.API_KEY = originalEnv.API_KEY;
-    process.env.MCP_BASE_URL = originalEnv.MCP_BASE_URL;
+    restoreEnvValue("AGENT_ID", originalEnv.AGENT_ID);
+    restoreEnvValue("API_KEY", originalEnv.API_KEY);
+    restoreEnvValue("MCP_BASE_URL", originalEnv.MCP_BASE_URL);
   });
 
   describe("factory return shape", () => {
@@ -596,9 +601,9 @@ describe("artifact CLI command", () => {
         expect(output).toContain("https://test.lt.example.com");
       } finally {
         console.log = origLog;
-        process.env.MCP_BASE_URL = origEnv.MCP_BASE_URL;
-        process.env.API_KEY = origEnv.API_KEY;
-        process.env.AGENT_ID = origEnv.AGENT_ID;
+        restoreEnvValue("MCP_BASE_URL", origEnv.MCP_BASE_URL);
+        restoreEnvValue("API_KEY", origEnv.API_KEY);
+        restoreEnvValue("AGENT_ID", origEnv.AGENT_ID);
         mockServer.stop();
       }
     });
@@ -627,9 +632,9 @@ describe("artifact CLI command", () => {
         expect(output).toContain("No active artifacts");
       } finally {
         console.log = origLog;
-        process.env.MCP_BASE_URL = origEnv.MCP_BASE_URL;
-        process.env.API_KEY = origEnv.API_KEY;
-        process.env.AGENT_ID = origEnv.AGENT_ID;
+        restoreEnvValue("MCP_BASE_URL", origEnv.MCP_BASE_URL);
+        restoreEnvValue("API_KEY", origEnv.API_KEY);
+        restoreEnvValue("AGENT_ID", origEnv.AGENT_ID);
         mockServer.stop();
       }
     });
@@ -679,9 +684,9 @@ describe("artifact CLI command", () => {
         expect(output).toContain("No active artifacts");
       } finally {
         console.log = origLog;
-        process.env.MCP_BASE_URL = origEnv.MCP_BASE_URL;
-        process.env.API_KEY = origEnv.API_KEY;
-        process.env.AGENT_ID = origEnv.AGENT_ID;
+        restoreEnvValue("MCP_BASE_URL", origEnv.MCP_BASE_URL);
+        restoreEnvValue("API_KEY", origEnv.API_KEY);
+        restoreEnvValue("AGENT_ID", origEnv.AGENT_ID);
         mockServer.stop();
       }
     });
@@ -736,9 +741,9 @@ describe("artifact CLI command", () => {
         expect(output).toContain("stopped");
       } finally {
         console.log = origLog;
-        process.env.MCP_BASE_URL = origEnv.MCP_BASE_URL;
-        process.env.API_KEY = origEnv.API_KEY;
-        process.env.AGENT_ID = origEnv.AGENT_ID;
+        restoreEnvValue("MCP_BASE_URL", origEnv.MCP_BASE_URL);
+        restoreEnvValue("API_KEY", origEnv.API_KEY);
+        restoreEnvValue("AGENT_ID", origEnv.AGENT_ID);
         mockServer.stop();
       }
     });
