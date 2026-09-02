@@ -15,7 +15,9 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
+import { getNextTargets } from "./definition";
 import { findReadyNodes, walkGraph } from "./engine";
 import type { WorkflowEventBus } from "./event-bus";
 import { workflowEventBus } from "./event-bus";
@@ -308,6 +310,23 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const failedStep = steps.find((s) => s.status === "failed");
   if (!failedStep) throw new Error("No failed step found");
 
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const { activeEdges } = await loadCompletedStepRouting(
+    workflow.definition,
+    runId,
+    completedNodeIds,
+  );
+  const foreachParent = resolveForeachParent(workflow.definition, failedStep.nodeId);
+  const failedNode =
+    foreachParent ?? workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
+  if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+  const hasStructuralPredecessor = workflow.definition.nodes.some(
+    (node) => node.next && getNextTargets(node.next).includes(failedNode.id),
+  );
+  const hasActivePredecessor = [...activeEdges].some((edge) => edge.endsWith(`→${failedNode.id}`));
+  const shouldRetryFailedNode =
+    foreachParent != null || !hasStructuralPredecessor || hasActivePredecessor;
+
   // Reset step and run. Claimed inside a transaction: two concurrent retries
   // (HTTP route + MCP tool) both pass the guard above, and a double reset
   // walks the same failed node twice.
@@ -315,24 +334,24 @@ export async function retryFailedRun(runId: string, registry: ExecutorRegistry):
   const claimed = await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || current.status !== "failed") return false;
-    await updateWorkflowRunStep(failedStep.id, { status: "pending", error: null });
+    await updateWorkflowRunStep(failedStep.id, {
+      status: shouldRetryFailedNode ? "pending" : "cancelled",
+      error: shouldRetryFailedNode ? null : "Skipped on retry because its branch was not active",
+    });
     await updateWorkflowRun(runId, { status: "running", error: null, context: ctx });
     return true;
   });
   if (!claimed) throw new Error("Run is not in failed state");
 
-  // Resume from the failed node — use findReadyNodes for convergence safety
-  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
-  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds);
-  const failedNode =
-    resolveForeachParent(workflow.definition, failedStep.nodeId) ??
-    workflow.definition.nodes.find((n) => n.id === failedStep.nodeId);
-  if (!failedNode) throw new Error(`Node ${failedStep.nodeId} not found in workflow definition`);
+  // Resume from the failed node — use findReadyNodes for convergence safety.
+  const readyNodes = findReadyNodes(workflow.definition, completedNodeIds, activeEdges);
 
-  // Include the failed node if it's not already in ready nodes
-  const nodesToRun = readyNodes.some((n) => n.id === failedNode.id)
-    ? readyNodes
-    : [failedNode, ...readyNodes];
+  // Loop and foreach retry targets can be absent from readyNodes even when
+  // active; include them explicitly, but never revive an untaken branch.
+  const nodesToRun =
+    !shouldRetryFailedNode || readyNodes.some((n) => n.id === failedNode.id)
+      ? readyNodes
+      : [failedNode, ...readyNodes];
   const secretKeys = getSecretInputKeys(workflow.input);
   await walkGraph(workflow.definition, runId, ctx, nodesToRun, registry, workflow.id, secretKeys);
 }
