@@ -9,9 +9,11 @@ import {
 } from "node:http";
 import {
   closeDb,
+  createApprovalRequest,
   createUser,
   createWorkflowRun,
   createWorkflowRunStep,
+  getApprovalRequestById,
   getDbClient,
   getWorkflowRun,
   getWorkflowVersions,
@@ -964,11 +966,20 @@ describe("Workflow HTTP API v2", () => {
       await createWorkflowRun({ id: runId, workflowId: workflow.id });
 
       // Create a step in 'running' state
+      const stepId = crypto.randomUUID();
       await createWorkflowRunStep({
-        id: crypto.randomUUID(),
+        id: stepId,
         runId,
         nodeId: "n1",
-        nodeType: "notify",
+        nodeType: "human-in-the-loop",
+      });
+      const approval = await createApprovalRequest({
+        id: crypto.randomUUID(),
+        title: "Approve release",
+        questions: [{ id: "approve", type: "approval", label: "Approve?" }],
+        approvers: { policy: "any" },
+        workflowRunId: runId,
+        workflowRunStepId: stepId,
       });
 
       // Cancel the run
@@ -988,6 +999,10 @@ describe("Workflow HTTP API v2", () => {
       expect(run.status).toBe("cancelled");
       expect(run.error).toBe("Test cancellation");
       expect(run.finishedAt).toBeDefined();
+      expect(await getApprovalRequestById(approval.id)).toMatchObject({
+        status: "cancelled",
+        resolutionReason: "Test cancellation",
+      });
     });
 
     test("returns 400 for already completed run", async () => {

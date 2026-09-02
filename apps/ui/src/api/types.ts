@@ -1825,7 +1825,7 @@ export interface RenderResponse {
 
 // Approval Requests
 
-export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout";
+export type ApprovalRequestStatus = "pending" | "approved" | "rejected" | "timeout" | "cancelled";
 
 export interface ApprovalQuestion {
   id: string;
@@ -1854,6 +1854,7 @@ export interface ApprovalRequest {
   responses: Record<string, unknown> | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
   workflowRunId: string | null;
   workflowRunStepId: string | null;
   sourceTaskId: string | null;

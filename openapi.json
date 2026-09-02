@@ -10454,7 +10454,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -10471,6 +10472,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -10538,6 +10545,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -10768,7 +10776,8 @@
                               "pending",
                               "approved",
                               "rejected",
-                              "timeout"
+                              "timeout",
+                              "cancelled"
                             ]
                           },
                           "responses": {
@@ -10785,6 +10794,12 @@
                             ]
                           },
                           "resolvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resolutionReason": {
                             "type": [
                               "string",
                               "null"
@@ -10852,6 +10867,7 @@
                           "responses",
                           "resolvedBy",
                           "resolvedAt",
+                          "resolutionReason",
                           "timeoutSeconds",
                           "expiresAt",
                           "notificationChannels",
@@ -11055,7 +11071,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11072,6 +11089,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11139,6 +11162,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -11372,7 +11396,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11389,6 +11414,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11456,6 +11487,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",

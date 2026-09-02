@@ -83,16 +83,23 @@ export async function checkpointStepWaiting(
   runId: string,
   stepId: string,
   ctx: Record<string, unknown>,
-): Promise<void> {
-  await getDbClient().transaction(async () => {
-    await updateWorkflowRunStep(stepId, {
-      status: "waiting",
-    });
+): Promise<boolean> {
+  return getDbClient().transaction(async () => {
+    const step = await getDbClient().get<{ id: string }>(
+      `UPDATE workflow_run_steps
+         SET status = 'waiting'
+       WHERE id = ? AND runId = ? AND status = 'running'
+         AND EXISTS (
+           SELECT 1 FROM workflow_runs
+           WHERE id = ? AND status IN ('running', 'waiting')
+         )
+       RETURNING id`,
+      [stepId, runId, runId],
+    );
+    if (!step) return false;
 
-    await updateWorkflowRun(runId, {
-      status: "waiting",
-      context: ctx,
-    });
+    await updateWorkflowRun(runId, { status: "waiting", context: ctx });
+    return true;
   });
 }
 

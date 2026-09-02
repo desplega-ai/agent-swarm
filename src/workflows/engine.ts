@@ -464,6 +464,11 @@ async function executeStep(
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
   const dedup = await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || (run.status !== "running" && run.status !== "waiting")) {
+      return { halted: true as const };
+    }
+
     // Count existing steps for this node to determine the current iteration.
     const iteration = await getStepCountForNode(runId, node.id);
     const idempotencyKey = `${runId}:${node.id}:${iteration}`;
@@ -503,6 +508,8 @@ async function executeStep(
     }
     return { existingStep, stepId, deduped: false };
   });
+
+  if ("halted" in dedup) return { outcome: "completed", successors: [] };
 
   if (dedup.deduped && dedup.existingStep) {
     if (dedup.existingStep.status === "completed") {
@@ -642,8 +649,8 @@ async function executeStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    await checkpointStepWaiting(runId, stepId, ctx);
-    return { outcome: "waiting", successors: [] };
+    const waiting = await checkpointStepWaiting(runId, stepId, ctx);
+    return { outcome: waiting ? "waiting" : "completed", successors: [] };
   }
 
   // 6b. Validate output against node-level outputSchema if defined

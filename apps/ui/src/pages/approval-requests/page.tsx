@@ -26,9 +26,10 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
   { value: "timeout", label: "Timeout" },
+  { value: "cancelled", label: "Cancelled" },
 ];
 
-const STATUS_FILTERS = ["all", "pending", "approved", "rejected", "timeout"] as const;
+const STATUS_FILTERS = ["all", "pending", "approved", "rejected", "timeout", "cancelled"] as const;
 const SOURCE_FILTERS = ["all", "workflow", "agent", "manual"] as const;
 const AGE_FILTERS = ["all", "24h", "7d", "30d"] as const;
 const AGE_FILTER_MS: Record<Exclude<(typeof AGE_FILTERS)[number], "all">, number> = {

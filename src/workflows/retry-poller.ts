@@ -129,7 +129,8 @@ export function startRetryPoller(registry: ExecutorRegistry, intervalMs = 5000):
               // completed output would route successors while the re-dispatched
               // work is still running, and the eventual completion/join would
               // find the parent already advanced.
-              await checkpointStepWaiting(run.id, step.id, ctx);
+              const waiting = await checkpointStepWaiting(run.id, step.id, ctx);
+              if (!waiting) continue;
             } else {
               // Success! Re-run validation if configured before checkpointing.
               if (node.validation) {
