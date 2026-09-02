@@ -1,5 +1,5 @@
-import { createConnection } from "node:net";
-import { createCapabilityClient } from "./capability-bridge";
+import { createConnection, type Socket } from "node:net";
+import { type CapabilityClient, createCapabilityClient } from "./capability-bridge";
 import { buildGuestWorkflowCtx } from "./guest-ctx";
 
 function requiredEnv(name: string): string {
@@ -12,7 +12,10 @@ function stringifyResult(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function connectCapabilityClient(socketPath: string, token: string) {
+function connectCapabilityClient(
+  socketPath: string,
+  token: string,
+): { client: CapabilityClient; connected: Promise<void>; socket: Socket } {
   const socket = createConnection(socketPath);
   socket.setEncoding("utf8");
   const connected = new Promise<void>((resolve, reject) => {
