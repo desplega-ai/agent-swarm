@@ -270,12 +270,10 @@ describe("script workflow runtime", () => {
       expect(run.output).toMatchObject({
         observed: [],
         apiKeyEnv: null,
-        configType: "function",
+        configType: "undefined",
         errorMessage: "/api/mcp-bridge failed with 418: teapot",
-        rejectedConfig:
-          "Tool 'config' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent",
-        rejectedUnknown:
-          "Tool 'future_sensitive_property' is not exposed to scripts (lifecycle/cred tool); use the MCP surface directly if you're an agent",
+        rejectedConfig: expect.stringContaining("not a function"),
+        rejectedUnknown: expect.stringContaining("not a function"),
       });
       expect(heartbeatCount).toBeGreaterThanOrEqual(1);
       expect(JSON.stringify(run.output)).not.toContain(API_KEY);

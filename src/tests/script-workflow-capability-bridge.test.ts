@@ -3,10 +3,12 @@ import {
   createCapabilityClient,
   handleCapabilityRequest,
 } from "../script-workflows/capability-bridge";
+import { dispatchCapability } from "../script-workflows/executor";
 import { buildGuestWorkflowCtx } from "../script-workflows/guest-ctx";
+import type { BuiltWorkflowCtx } from "../script-workflows/workflow-ctx";
 
 describe("script workflow capability bridge", () => {
-  test("guest exposes only the explicit SDK capability allowlist", async () => {
+  test("guest exposes only the explicit workflow swarm capability allowlist", async () => {
     const calls: Array<{ path: string; argsJson: string }> = [];
     const ctx = buildGuestWorkflowCtx({
       runId: "run-1",
@@ -19,11 +21,34 @@ describe("script workflow capability bridge", () => {
     });
 
     await expect(ctx.swarm.agent_info()).resolves.toEqual({ ok: true });
-    await expect(ctx.swarm.config()).rejects.toThrow("Tool 'config' is not exposed to scripts");
-    await expect(ctx.swarm.future_sensitive_property()).rejects.toThrow(
-      "Tool 'future_sensitive_property' is not exposed to scripts",
-    );
+    expect(ctx.swarm.config).toBeUndefined();
+    expect(ctx.swarm.future_sensitive_property).toBeUndefined();
     expect(calls).toEqual([{ path: "swarm.agent_info", argsJson: "{}" }]);
+  });
+
+  test("host rejects sensitive and unknown swarm properties before accessing their values", async () => {
+    const accessed: string[] = [];
+    const swarm = new Proxy(
+      { agent_info: async () => ({ ok: true }) },
+      {
+        get(target, prop, receiver) {
+          accessed.push(String(prop));
+          return Reflect.get(target, prop, receiver);
+        },
+      },
+    );
+    const built = { ctx: { swarm } } as unknown as BuiltWorkflowCtx;
+
+    await expect(dispatchCapability(built, "swarm.config", "{}")).rejects.toThrow(
+      "Workflow swarm capability 'config' is not allowlisted",
+    );
+    await expect(
+      dispatchCapability(built, "swarm.future_sensitive_property", "{}"),
+    ).rejects.toThrow("Workflow swarm capability 'future_sensitive_property' is not allowlisted");
+    expect(accessed).toEqual([]);
+
+    await expect(dispatchCapability(built, "swarm.agent_info", "{}")).resolves.toBe('{"ok":true}');
+    expect(accessed).toEqual(["agent_info"]);
   });
 
   test("correlates concurrent JSON calls when responses arrive out of order", async () => {
