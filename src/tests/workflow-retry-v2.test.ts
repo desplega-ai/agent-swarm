@@ -26,6 +26,7 @@ import {
 } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { recoverIncompleteRuns } from "../workflows/recovery";
+import { retryFailedRun } from "../workflows/resume";
 import { calculateDelay, startRetryPoller, stopRetryPoller } from "../workflows/retry-poller";
 import { interpolate } from "../workflows/template";
 
@@ -91,9 +92,12 @@ class NotifyStubExecutor extends BaseExecutor<
   readonly outputSchema = NotifyStubExecutor.outSchema;
 
   protected async execute(): Promise<ExecutorResult<z.infer<typeof NotifyStubExecutor.outSchema>>> {
+    notifyCounter++;
     return { status: "success", output: { sent: true } };
   }
 }
+
+let notifyCounter = 0;
 
 // ─── Mock Dependencies ───────────────────────────────────────
 
@@ -443,6 +447,87 @@ describe("Workflow Retry v2 (Phase 4)", () => {
 
       const run = await getWorkflowRun(runId);
       expect(run!.status).toBe("completed");
+    });
+  });
+
+  describe("External retry", () => {
+    test("does not execute a node behind a gate port that was not taken", async () => {
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "gate",
+            type: "echo",
+            config: { message: "gate" },
+            next: { true: "inactive", false: "taken" },
+          },
+          {
+            id: "inactive",
+            type: "notify",
+            config: { channel: "test", template: "must not run" },
+          },
+          {
+            id: "taken",
+            type: "echo",
+            config: { message: "taken" },
+          },
+        ],
+      });
+      const runId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id, triggerData: {} });
+
+      const gateStepId = crypto.randomUUID();
+      await createWorkflowRunStep({
+        id: gateStepId,
+        runId,
+        nodeId: "gate",
+        nodeType: "echo",
+        input: {},
+      });
+      await updateWorkflowRunStep(gateStepId, {
+        status: "completed",
+        output: { echo: "gate" },
+        nextPort: "false",
+        finishedAt: new Date().toISOString(),
+      });
+
+      const takenStepId = crypto.randomUUID();
+      await createWorkflowRunStep({
+        id: takenStepId,
+        runId,
+        nodeId: "taken",
+        nodeType: "echo",
+        input: {},
+      });
+      await updateWorkflowRunStep(takenStepId, {
+        status: "completed",
+        output: { echo: "taken" },
+        finishedAt: new Date().toISOString(),
+      });
+
+      const failedStepId = crypto.randomUUID();
+      await createWorkflowRunStep({
+        id: failedStepId,
+        runId,
+        nodeId: "inactive",
+        nodeType: "notify",
+        input: {},
+      });
+      await updateWorkflowRunStep(failedStepId, {
+        status: "failed",
+        error: "retry target failed",
+        finishedAt: new Date().toISOString(),
+      });
+      await updateWorkflowRun(runId, { status: "failed", error: "retry target failed" });
+
+      notifyCounter = 0;
+      await retryFailedRun(runId, registry);
+
+      expect(notifyCounter).toBe(0);
+      expect((await getWorkflowRun(runId))?.status).toBe("completed");
+      expect(
+        (await getWorkflowRunStepsByRunId(runId)).find((step) => step.nodeId === "inactive")
+          ?.status,
+      ).toBe("cancelled");
     });
   });
 });

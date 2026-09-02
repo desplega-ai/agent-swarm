@@ -14,11 +14,12 @@ import {
 import { telemetry } from "../telemetry";
 import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
+import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
-import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
+import { FOREACH_TERMINAL_STEP_STATUSES } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
@@ -193,7 +194,11 @@ export async function walkGraph(
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
-  const activeEdges = new Set<string>();
+  const { activeEdges, stepsByNodeId } = await loadCompletedStepRouting(
+    def,
+    runId,
+    completedNodeIds,
+  );
 
   // For memoized re-walks, inject stored outputs into context and
   // reconstruct active edges from completed steps' stored nextPort.
@@ -201,11 +206,10 @@ export async function walkGraph(
   // multiple completed steps from different iterations).
   if (completedNodeIds.size > 0) {
     for (const nodeId of completedNodeIds) {
+      const step = stepsByNodeId.get(nodeId);
       // Synthetic foreach children persist their own step output for the join,
       // but only the parent aggregate belongs in workflow context or routing.
-      if (resolveForeachParent(def, nodeId)) continue;
-
-      const step = await getLatestStepForNode(runId, nodeId);
+      if (!step) continue;
       if (step?.output !== undefined) {
         // Bug 5 fix: Validate stored output against executor schema on recovery
         const node = def.nodes.find((n) => n.id === nodeId);
@@ -220,15 +224,6 @@ export async function walkGraph(
           }
         }
         ctx[nodeId] = step.output;
-      }
-      // Reconstruct active edges from the stored nextPort.
-      // If nextPort is set, use it for port-specific routing.
-      // If not set, get all successors (fan-out).
-      const successors = step?.nextPort
-        ? getSuccessors(def, nodeId, step.nextPort)
-        : getSuccessors(def, nodeId);
-      for (const succ of successors) {
-        activeEdges.add(`${nodeId}→${succ.id}`);
       }
     }
   }

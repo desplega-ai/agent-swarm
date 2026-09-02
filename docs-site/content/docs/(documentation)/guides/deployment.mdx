@@ -197,7 +197,15 @@ docker compose up -d
 
 <h3 id="database-retention">Database retention</h3>
 
-`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact `[db-retention]` would-delete count and `GET /api/metrics`, then enable one table at a time. See the [database-retention runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/db-retention.md) before activation.
+`SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, and `EVENTS_RETENTION_DAYS` are disabled until you set them. Each value permanently deletes rows older than its window. Start with `DB_RETENTION_DRY_RUN=true`, confirm the exact would-delete count via the `agentswarm.db.retention.backlog` metric and `GET /api/metrics`, then enable one table at a time. See the [database-retention runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/db-retention.md) before activation.
+
+Three settings tune the sweep itself, all read fresh on every tick with no restart required:
+
+- `DB_RETENTION_TICK_BUDGET_MS` (default `30000`, accepts `1000`–`300000`) — wall-clock budget for one sweep tick, shared evenly across enabled tables.
+- `DB_RETENTION_CATCHUP_INTERVAL_MS` (default `60000`, accepts `5000`–`3600000`) — delay before the next tick when a table is still undrained. The normal cadence stays hourly once every enabled table is drained.
+- `DB_RETENTION_MAX_STATEMENT_MS` (default `250`, accepts `25`–`5000`) — target ceiling for one DELETE statement, measured as driver execution time; the adaptive batch sizer tunes its batch size against this.
+
+Each range is enforced in both directions. A value outside it is rejected by the config API, and a value set directly in the environment falls back to the default rather than taking effect.
 
 <Callout type="warn">
 A database backup is useless without the matching [encryption key](#encryption-key). Back up both together.

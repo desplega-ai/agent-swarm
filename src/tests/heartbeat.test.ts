@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
+  claimTask,
   closeDb,
   createAgent,
   createTaskExtended,
@@ -18,6 +19,7 @@ import {
   MAX_EMPTY_POLLS,
   resetOrphanedInProgressTasksForAgent,
   startTask,
+  updateAgentProfile,
   updateAgentStatus,
   updateTaskClaudeSessionId,
 } from "../be/db";
@@ -31,6 +33,7 @@ import {
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
+import { createResumeFollowUp } from "../tasks/worker-follow-up";
 
 const TEST_DB_PATH = "./test-heartbeat.sqlite";
 
@@ -490,6 +493,80 @@ describe("Heartbeat Triage", () => {
       expect(findings.stalledTasks.length).toBe(0);
     });
 
+    test("privileged crash recovery reroutes a legacy worker parent to the Lead", async () => {
+      const worker = await createAgent({ name: "misrouted-worker", isLead: false, status: "idle" });
+      const lead = await createAgent({ name: "recovery-lead", isLead: true, status: "idle" });
+      const parent = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      // Simulate a legacy row created before the structured constraint existed.
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'superseded', routingAffinity = ? WHERE id = ?",
+        [JSON.stringify({ sourceAgentId: worker.id, capabilities: [], leadOnly: true }), parent.id],
+      );
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.routingAffinity?.leadOnly).toBe(true);
+      const audit = await getDbClient().get<{ metadata: string }>(
+        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_recovery_authorization'",
+        [result.task.id],
+      );
+      expect(audit?.metadata).toContain("rerouted_to_lead");
+    });
+
+    test("privileged crash recovery preserves parent capabilities on an unassigned child", async () => {
+      const worker = await createAgent({
+        name: "capability-source-worker",
+        isLead: false,
+        status: "idle",
+      });
+      const underprivilegedLead = await createAgent({
+        name: "capability-underprivileged-lead",
+        isLead: true,
+        status: "idle",
+      });
+      await updateAgentProfile(worker.id, { capabilities: ["typescript"] });
+      await updateAgentProfile(underprivilegedLead.id, { capabilities: ["typescript"] });
+      const parent = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      // Simulate legacy privileged work whose source snapshot has capabilities
+      // unrelated to its authorization requirement.
+      await getDbClient().run(
+        "UPDATE agent_tasks SET status = 'superseded', routingAffinity = ? WHERE id = ?",
+        [
+          JSON.stringify({ sourceAgentId: worker.id, capabilities: ["merge"], leadOnly: true }),
+          parent.id,
+        ],
+      );
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.status).toBe("unassigned");
+      expect(result.task.routingAffinity).toMatchObject({
+        leadOnly: true,
+        capabilities: ["merge"],
+      });
+      expect(await claimTask(result.task.id, underprivilegedLead.id)).toBeNull();
+    });
+
+    test("privileged recovery retains a safe Lead source pin", async () => {
+      const lead = await createAgent({ name: "source-lead", isLead: true, status: "idle" });
+      const parent = await createTaskExtended("Merge this PR", {
+        agentId: lead.id,
+        routingAffinity: { capabilities: [], leadOnly: true },
+      });
+      await getDbClient().run("UPDATE agent_tasks SET status = 'superseded' WHERE id = ?", [
+        parent.id,
+      ]);
+
+      const result = await createResumeFollowUp({ parentId: parent.id, reason: "crash_recovery" });
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") return;
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.tags).toContain("crash-recovery-pin");
+    });
+
     test("sets agent to idle after auto-superseding its only task", async () => {
       const agent = await createAgent({ name: "dead-worker", isLead: false, status: "busy" });
       const task = await createTaskExtended("Stalled task", { agentId: agent.id });
@@ -639,6 +716,69 @@ describe("Heartbeat Triage", () => {
       expect(tags).toContain("reboot-retry");
       expect(tags).toContain("auto-generated");
       expect(tags).toContain("reboot-retry-pin");
+    });
+
+    test("reboot recovery reroutes a legacy worker-owned lead-only task to a Lead", async () => {
+      const worker = await createAgent({
+        name: "reboot-misrouted-worker",
+        isLead: false,
+        status: "busy",
+      });
+      const lead = await createAgent({
+        name: "reboot-recovery-lead",
+        isLead: true,
+        status: "idle",
+      });
+      const task = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      await startTask(task.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET routingAffinity = ?, lastUpdatedAt = ? WHERE id = ?",
+        [
+          JSON.stringify({ sourceAgentId: worker.id, capabilities: [], leadOnly: true }),
+          new Date(Date.now() - 1000).toISOString(),
+          task.id,
+        ],
+      );
+
+      await runRebootSweep();
+
+      const retryId = getRebootAffectedTasks()[0]?.retryTaskId;
+      const retry = retryId ? await getTaskById(retryId) : null;
+      expect(retry?.agentId).toBe(lead.id);
+      expect(retry?.routingAffinity?.leadOnly).toBe(true);
+      const audit = await getDbClient().get<{ metadata: string }>(
+        "SELECT metadata FROM agent_log WHERE taskId = ? AND eventType = 'task_recovery_authorization'",
+        [retryId],
+      );
+      expect(audit?.metadata).toContain("rerouted_to_lead");
+    });
+
+    test("no-Lead reboot fallback remains claimable after an eligible Lead arrives", async () => {
+      const worker = await createAgent({ name: "no-lead-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Merge this PR", { agentId: worker.id });
+      await startTask(task.id);
+      await getDbClient().run(
+        "UPDATE agent_tasks SET routingAffinity = ?, lastUpdatedAt = ? WHERE id = ?",
+        [
+          JSON.stringify({
+            sourceAgentId: worker.id,
+            role: "worker",
+            capabilities: [],
+            leadOnly: true,
+          }),
+          new Date(Date.now() - 1000).toISOString(),
+          task.id,
+        ],
+      );
+
+      await runRebootSweep();
+      const retryId = getRebootAffectedTasks()[0]?.retryTaskId;
+      const retry = retryId ? await getTaskById(retryId) : null;
+      expect(retry?.status).toBe("unassigned");
+      expect(retry?.routingAffinity?.leadOnly).toBe(true);
+
+      const lead = await createAgent({ name: "arriving-lead", isLead: true, status: "idle" });
+      expect(await claimTask(retryId!, lead.id)).not.toBeNull();
     });
 
     test("falls back to an affinity-stamped pool retry when the agent is at capacity", async () => {
