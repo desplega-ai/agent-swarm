@@ -2,12 +2,14 @@ import pkg from "../../package.json";
 import {
   type Client,
   ClientSideConnection,
+  type McpServer,
   ndJsonStream,
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { translateAcpSessionNotification } from "./acp-swarm-events";
 import { resolveAcpTarget } from "./acp-targets";
@@ -220,6 +222,18 @@ export class ACPAdapter implements ProviderAdapter {
         clientInfo: { name: "agent-swarm", version: pkg.version },
         clientCapabilities: {},
       });
+      const installedServers = await fetchInstalledMcpServers(
+        config.apiUrl,
+        config.apiKey,
+        config.agentId,
+        "claude",
+      );
+      // The v2 draft (@agentclientprotocol/sdk/experimental/v2) adds a fourth
+      // `{ type: "acp", name, serverId }` variant where the client hosts the MCP
+      // server itself and the agent tunnels MCP over the existing ACP connection
+      // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop — the
+      // shape for an ACP agent with no network route to the swarm API. Gated on
+      // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
       const newSession = await connection.newSession({
         cwd: config.cwd,
         mcpServers: [
@@ -233,6 +247,7 @@ export class ACPAdapter implements ProviderAdapter {
               { name: "X-Source-Task-Id", value: config.taskId },
             ],
           },
+          ...toAcpMcpServers(installedServers),
         ],
       });
       session = new ACPSession(connection, proc, config, newSession.sessionId);
@@ -250,6 +265,44 @@ export class ACPAdapter implements ProviderAdapter {
   formatCommand(commandName: string): string {
     return `/${commandName}`;
   }
+}
+
+/**
+ * Convert `fetchInstalledMcpServers`'s "claude"-format map (`{ command, args, env }`
+ * for stdio, `{ type, url, headers }` for http/sse) into ACP's `McpServer` array
+ * shape, which is a tagged union with header/env pairs as arrays instead of maps.
+ */
+export function toAcpMcpServers(
+  installed: Record<string, Record<string, unknown>> | null,
+): McpServer[] {
+  if (!installed) return [];
+  const servers: McpServer[] = [];
+  for (const [name, entry] of Object.entries(installed)) {
+    if (typeof entry.command === "string") {
+      const env = (entry.env ?? {}) as Record<string, string>;
+      servers.push({
+        name,
+        command: entry.command,
+        args: Array.isArray(entry.args) ? (entry.args as string[]) : [],
+        env: Object.entries(env).map(([key, value]) => ({ name: key, value })),
+      });
+      continue;
+    }
+    if (typeof entry.url === "string") {
+      const headers = (entry.headers ?? {}) as Record<string, string>;
+      servers.push({
+        type: entry.type === "sse" ? "sse" : "http",
+        name,
+        url: entry.url,
+        headers: Object.entries(headers).map(([key, value]) => ({ name: key, value })),
+      });
+      continue;
+    }
+    console.warn(
+      `\x1b[33m[acp]\x1b[0m Skipping installed MCP server "${name}": no command or url in resolved config`,
+    );
+  }
+  return servers;
 }
 
 function formatError(err: unknown): string {

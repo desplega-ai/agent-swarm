@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProviderAdapter } from "../providers";
-import { ACPAdapter } from "../providers/acp-adapter";
+import { ACPAdapter, toAcpMcpServers } from "../providers/acp-adapter";
 import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
@@ -154,5 +154,39 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+  });
+
+  test("toAcpMcpServers converts installed stdio and http/sse servers to ACP's array shape", () => {
+    const servers = toAcpMcpServers({
+      "installed-stdio": { command: "/usr/bin/foo", args: ["--flag"], env: { FOO: "bar" } },
+      "installed-http": { type: "http", url: "https://example.com/mcp", headers: { X: "1" } },
+      "installed-sse": { type: "sse", url: "https://example.com/sse", headers: {} },
+    });
+
+    expect(servers).toEqual([
+      {
+        name: "installed-stdio",
+        command: "/usr/bin/foo",
+        args: ["--flag"],
+        env: [{ name: "FOO", value: "bar" }],
+      },
+      {
+        type: "http",
+        name: "installed-http",
+        url: "https://example.com/mcp",
+        headers: [{ name: "X", value: "1" }],
+      },
+      {
+        type: "sse",
+        name: "installed-sse",
+        url: "https://example.com/sse",
+        headers: [],
+      },
+    ]);
+  });
+
+  test("toAcpMcpServers skips entries with neither command nor url", () => {
+    expect(toAcpMcpServers({ broken: { foo: "bar" } })).toEqual([]);
+    expect(toAcpMcpServers(null)).toEqual([]);
   });
 });
