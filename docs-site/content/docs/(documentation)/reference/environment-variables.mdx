@@ -79,6 +79,9 @@ Complete reference for all environment variables used by Agent Swarm.
 | `HEARTBEAT_STALL_THRESHOLD_MIN` | `30` | Minutes before an in-progress task is considered stalled |
 | `HEARTBEAT_STALL_NO_SESSION_MIN` | `5` | Minutes before an in-progress task with no active worker session is considered stalled |
 | `HEARTBEAT_STALL_STALE_HB_MIN` | `15` | Minutes before an in-progress task with a stale worker heartbeat is considered stalled |
+| `HEARTBEAT_UNCLAIMED_STALL_MIN` | `15` | Minutes before an unclaimed task records a visible stall reason |
+| `HEARTBEAT_UNCLAIMED_FAIL_MIN` | `60` | Total minutes before an unclaimed task fails after receiving its warning window |
+| `HEARTBEAT_IN_PROGRESS_HARD_STOP_MIN` | `120` | Minutes without task progress before a live-session stall is failed |
 | `HEARTBEAT_STALE_CLEANUP_MIN` | `30` | Minutes before stale resources (sessions, reviewing tasks) are cleaned up |
 | `HEARTBEAT_MAX_AUTO_ASSIGN` | `5` | Max pool tasks to auto-assign per sweep |
 | `HEARTBEAT_MAX_RESUME_GENERATIONS` | `3` | Max crash-recovery resume generations for a task before it is failed for Lead triage instead of resumed again |

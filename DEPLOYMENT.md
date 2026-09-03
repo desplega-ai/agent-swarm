@@ -105,6 +105,10 @@ curl http://localhost:3013/health
 curl -s -H "Authorization: Bearer YOUR_API_KEY" http://localhost:3013/api/agents | jq '.agents[] | {name, status, isLead}'
 ```
 
+Open the [dashboard with the local API URL prefilled](https://app.agent-swarm.dev?apiUrl=http%3A%2F%2Flocalhost%3A3013), then enter the API key in the connection form. The link intentionally does not include the key. For a remote deployment, prefill a browser-reachable HTTPS API URL instead.
+
+The hosted HTTPS dashboard cannot connect to a non-localhost plain-HTTP API because browsers block it as mixed content. If a LAN deployment does not have TLS, run the UI locally with `cd apps/ui && bun install && bun run dev`, or put the API behind HTTPS.
+
 ### ARM Compatibility (Apple Silicon)
 
 All services in the docker-compose files include `platform: linux/amd64` to avoid `no matching manifest for linux/arm64/v8` errors on Apple Silicon Macs. The Docker images are built for `linux/amd64` and run via Rosetta emulation.

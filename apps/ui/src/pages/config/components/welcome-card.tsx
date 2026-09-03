@@ -24,12 +24,12 @@ function resolvePostConnectRedirect(from: unknown): string {
 }
 
 export function WelcomeCard() {
-  const { addConnection, switchConnection } = useConfig();
+  const { addConnection, pendingApiUrl, switchConnection } = useConfig();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [name, setName] = useState("");
-  const [apiUrl, setApiUrl] = useState("http://localhost:3013");
+  const [apiUrl, setApiUrl] = useState(pendingApiUrl ?? "http://localhost:3013");
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);

@@ -10,7 +10,7 @@
  * `../tools/templates` side-effect import so `task.reroute.decision` resolves.
  */
 
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -41,6 +41,7 @@ import {
   GRACEFUL_SHUTDOWN_PIN_TAG,
   RESUME_GENERATION_TAG_PREFIX,
 } from "../tasks/worker-follow-up";
+import { telemetry } from "../telemetry";
 import { registerSendTaskTool } from "../tools/send-task";
 // Side-effect import: registers task lifecycle templates (incl. task.reroute.decision).
 import "../tools/templates";
@@ -476,6 +477,44 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     const result = await failPendingResumeIfUnclaimed(reclaimed.id, "cancelled", "test_reason");
     expect(result).toBeNull();
     expect((await getTaskById(reclaimed.id))!.status).toBe("in_progress");
+  });
+
+  test("failPendingResumeIfUnclaimed keeps pending-only guard for failed transitions", async () => {
+    const agent = await createAgent({ name: "guarded-fail-agent", isLead: false, status: "idle" });
+    const pending = await createTaskExtended("pending guarded failure", {
+      agentId: agent.id,
+      taskType: "resume",
+    });
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    const taskEvents: Array<{ event: string; props: Record<string, unknown> }> = [];
+    const telemetrySpy = spyOn(telemetry, "taskEvent").mockImplementation((event, props) => {
+      taskEvents.push({ event, props });
+    });
+    const failed = await failPendingResumeIfUnclaimed(
+      pending.id,
+      "failed",
+      "resume_budget_exhausted",
+    );
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    telemetrySpy.mockRestore();
+    expect(failed?.status).toBe("failed");
+    expect(failed?.failureReason).toBe("resume_budget_exhausted");
+    expect(taskEvents.filter((item) => item.props.taskId === pending.id)).toEqual([
+      expect.objectContaining({
+        event: "failed",
+        props: expect.objectContaining({ failure_class: "session_crash" }),
+      }),
+    ]);
+
+    const reclaimed = await createTaskExtended("reclaimed guarded failure", {
+      agentId: agent.id,
+      taskType: "resume",
+    });
+    await startTask(reclaimed.id);
+    expect(
+      await failPendingResumeIfUnclaimed(reclaimed.id, "failed", "resume_budget_exhausted"),
+    ).toBeNull();
+    expect((await getTaskById(reclaimed.id))?.status).toBe("in_progress");
   });
 
   test("a pooled (untagged) resume auto-assigned in the same sweep is NOT reaped", async () => {

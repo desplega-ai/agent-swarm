@@ -76,8 +76,9 @@ import { jsonError, parseBody } from "./utils";
 /**
  * `/api/tasks` + `/api/sessions` list item shape — mirrors the `AgentTaskSummary`
  * TS type in ../types (a strict field subset of `AgentTask`): the `task` text
- * truncated to a bounded preview and completion/integration/context blobs
- * dropped. Kept in lock-step with that type's `Pick<...>` field list.
+ * truncated to a bounded preview, the failure reason retained for inboxes, and
+ * other completion/integration/context blobs dropped. Kept in lock-step with
+ * that type's `Pick<...>` field list.
  */
 const AgentTaskSummarySchema = AgentTaskSchema.pick({
   id: true,
@@ -102,6 +103,7 @@ const AgentTaskSummarySchema = AgentTaskSchema.pick({
   provider: true,
   requestedByUserId: true,
   progress: true,
+  failureReason: true,
   createdAt: true,
   lastUpdatedAt: true,
   finishedAt: true,
@@ -168,7 +170,7 @@ const listTasks = route({
   pattern: ["api", "tasks"],
   summary: "List tasks with filters",
   description:
-    "Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
+    "Returns tasks with the full `task` text replaced by a bounded `taskPreview`; `failureReason` stays available for broken-task inboxes while other completion/integration blobs are dropped by default. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.",
   tags: ["Tasks"],
   query: z.object({
     /** Single status, or comma-separated list (e.g. "failed,cancelled"). */

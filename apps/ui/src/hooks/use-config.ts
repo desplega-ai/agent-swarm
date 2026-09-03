@@ -52,6 +52,8 @@ interface ConfigContextValue {
   connectionLocked: boolean;
   /** Pending connection from URL params (not yet saved) */
   pendingConnection: PendingConnection | null;
+  /** API URL hint from an apiUrl-only deep link; never opens the naming modal. */
+  pendingApiUrl: string | null;
   /** Clear the pending connection state */
   clearPendingConnection: () => void;
   /** Pending identity hint from URL params (?email=, ?name=) */
@@ -64,14 +66,20 @@ export const ConfigContext = createContext<ConfigContextValue | null>(null);
 
 /**
  * Extract ?apiUrl=, ?apiKey=, ?email=, ?name= from the URL, strip them, and
- * return the pending connection + identity hints. If a connection with the
- * given apiUrl+apiKey already exists, activate it and return a null
- * pendingConnection (the identity hint is still returned separately).
+ * return the pending connection, API URL, and identity hints. An apiUrl-only
+ * link pre-fills the welcome form without becoming a pending connection. If a
+ * connection with the given apiUrl+apiKey already exists, activate it and
+ * return a null pendingConnection (the identity hint is still returned
+ * separately).
  */
-function extractUrlParams(
+export function extractUrlParams(
   connections: Connection[],
   activateFn: (id: string) => void,
-): { pendingConnection: PendingConnection | null; pendingIdentity: PendingIdentity | null } {
+): {
+  pendingConnection: PendingConnection | null;
+  pendingApiUrl: string | null;
+  pendingIdentity: PendingIdentity | null;
+} {
   const params = new URLSearchParams(window.location.search);
   const apiUrl = params.get("apiUrl");
   const apiKey = params.get("apiKey");
@@ -100,22 +108,27 @@ function extractUrlParams(
   if (uiDeploymentConfig.apiUrl) {
     return {
       pendingConnection: null,
+      pendingApiUrl: null,
       pendingIdentity: uiDeploymentConfig.userId ? null : pendingIdentity,
     };
   }
 
-  if (!apiUrl || !apiKey) {
-    return { pendingConnection: null, pendingIdentity };
+  if (!apiUrl) {
+    return { pendingConnection: null, pendingApiUrl: null, pendingIdentity };
   }
 
   const normalizedUrl = apiUrl.replace(/\/+$/, "");
+
+  if (!apiKey) {
+    return { pendingConnection: null, pendingApiUrl: normalizedUrl, pendingIdentity };
+  }
 
   const existing = connections.find(
     (c) => c.apiUrl.replace(/\/+$/, "") === normalizedUrl && c.apiKey === apiKey,
   );
   if (existing) {
     activateFn(existing.id);
-    return { pendingConnection: null, pendingIdentity };
+    return { pendingConnection: null, pendingApiUrl: null, pendingIdentity };
   }
 
   // DES-771: a user-bound `aswt_` token arriving via URL params is the embed
@@ -133,10 +146,14 @@ function extractUrlParams(
       // Keep the raw URL as the label if it doesn't parse.
     }
     setEmbedConnection({ name: `embed:${host}`, apiUrl: normalizedUrl, apiKey });
-    return { pendingConnection: null, pendingIdentity };
+    return { pendingConnection: null, pendingApiUrl: null, pendingIdentity };
   }
 
-  return { pendingConnection: { apiUrl: normalizedUrl, apiKey }, pendingIdentity };
+  return {
+    pendingConnection: { apiUrl: normalizedUrl, apiKey },
+    pendingApiUrl: null,
+    pendingIdentity,
+  };
 }
 
 function loadState(): { connections: Connection[]; activeConnection: Connection | null } {
@@ -166,6 +183,7 @@ export function useConfigProvider() {
   const [pendingConnection, setPendingConnection] = useState<PendingConnection | null>(
     initialUrlParams.pendingConnection,
   );
+  const [pendingApiUrl, setPendingApiUrl] = useState<string | null>(initialUrlParams.pendingApiUrl);
   const [pendingIdentity, setPendingIdentity] = useState<PendingIdentity | null>(
     initialUrlParams.pendingIdentity,
   );
@@ -240,6 +258,7 @@ export function useConfigProvider() {
     resetStoredConfig();
     refreshState();
     setPendingConnection(null);
+    setPendingApiUrl(null);
     setPendingIdentity(null);
   }, [refreshState]);
 
@@ -259,6 +278,7 @@ export function useConfigProvider() {
     isConfigured,
     connectionLocked,
     pendingConnection,
+    pendingApiUrl,
     clearPendingConnection,
     pendingIdentity,
     clearPendingIdentity,

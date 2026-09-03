@@ -138,6 +138,7 @@ import {
 } from "../utils/identity-field-budget";
 import { getCurrentRequestUserId } from "../utils/request-auth-context";
 import { registerVolatileSecret, scrubSecrets } from "../utils/secret-scrubber";
+import { classifyTaskFailureReason, type TaskFailureClass } from "../utils/task-failure-class";
 import { auditAssetKeys, enforceAssetKeyStartupAudit } from "./asset-key-audit";
 import { migrateLegacyCredentialBindingBlob } from "./connection-bindings-blob-migration";
 import { decryptSecret, encryptSecret, getEncryptionKey, resolveEncryptionKey } from "./crypto";
@@ -1441,7 +1442,7 @@ function rowToAgentTask(row: AgentTaskRow): AgentTask {
 
 /**
  * Slim list-row mapper — truncates the `task` text to a bounded preview and
- * drops completion/integration/context blobs (`output`, `failureReason`,
+ * drops completion/integration/context blobs (`output`,
  * `providerMeta`, all `vcs*`/`slack*`/`agentmail*`/`credential*`/`mention*` and
  * context-window fields). The preview is long enough for pool-triage; the full
  * brief is on `get-task-details` / `GET /api/tasks/{id}`.
@@ -1470,6 +1471,7 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     effort: t.effort,
     provider: t.provider,
     requestedByUserId: t.requestedByUserId,
+    failureReason: t.failureReason ? previewText(t.failureReason, TASK_PREVIEW_LENGTH) : undefined,
     progress: t.progress,
     createdAt: t.createdAt,
     lastUpdatedAt: t.lastUpdatedAt,
@@ -2181,6 +2183,28 @@ export async function getTasksByStatus(status: AgentTaskStatus): Promise<AgentTa
   const rows = await getDbClient().query<AgentTaskRow>(
     "SELECT * FROM agent_tasks WHERE status = ? ORDER BY createdAt DESC",
     [status],
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/** Bounded heartbeat scan for not-yet-started tasks whose timeout is due. */
+export async function getUnclaimedTasksForHeartbeat(
+  lastUpdatedBefore: string,
+  limit = 100,
+): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT task.* FROM agent_tasks task
+       WHERE task.status IN ('unassigned', 'pending', 'offered')
+       AND task.lastUpdatedAt <= ?
+       AND NOT EXISTS (
+         SELECT 1
+         FROM json_each(COALESCE(task.dependsOn, '[]')) dependency_id
+         LEFT JOIN agent_tasks dependency ON dependency.id = dependency_id.value
+         WHERE dependency.id IS NULL OR dependency.status <> 'completed'
+       )
+       ORDER BY task.lastUpdatedAt ASC, task.rowid ASC
+       LIMIT ?`,
+    [lastUpdatedBefore, limit],
   );
   return rows.map(rowToAgentTask);
 }
@@ -3013,7 +3037,22 @@ export async function completeTask(id: string, output?: string): Promise<AgentTa
   return row ? rowToAgentTask(row) : null;
 }
 
-export async function failTask(id: string, reason: string): Promise<AgentTask | null> {
+export type TaskSessionGuard = { mode: "absent" } | { mode: "stale"; heartbeatBefore: string };
+
+export interface FailTaskOptions {
+  expectedStatuses?: AgentTaskStatus[];
+  expectedLastUpdatedAt?: string;
+  expectedProgress?: string | null;
+  sessionGuard?: TaskSessionGuard;
+  failureClass?: TaskFailureClass;
+  terminalStatus?: "failed" | "cancelled";
+}
+
+export async function failTask(
+  id: string,
+  reason: string,
+  opts: FailTaskOptions = {},
+): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
 
@@ -3023,27 +3062,59 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
   if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
+  if (opts.expectedStatuses && !opts.expectedStatuses.includes(oldTask.status)) return null;
 
   const finishedAt = new Date().toISOString();
   const scrubbedReason = scrubSecrets(reason);
+  const terminalStatus = opts.terminalStatus ?? "failed";
+  const expectedStatuses = opts.expectedStatuses?.filter((status) => !isTerminalTaskStatus(status));
+  if (opts.expectedStatuses && expectedStatuses?.length === 0) return null;
+  const guardPredicates: string[] = [];
+  const guardValues: Array<string | null> = [];
+  if (expectedStatuses?.length) {
+    guardPredicates.push(`status IN (${expectedStatuses.map(() => "?").join(", ")})`);
+    guardValues.push(...expectedStatuses);
+  }
+  if (opts.expectedLastUpdatedAt) {
+    guardPredicates.push("lastUpdatedAt = ?");
+    guardValues.push(opts.expectedLastUpdatedAt);
+  }
+  if (opts.expectedProgress !== undefined) {
+    guardPredicates.push("COALESCE(progress, '') = COALESCE(?, '')");
+    guardValues.push(opts.expectedProgress);
+  }
+  if (opts.sessionGuard?.mode === "absent") {
+    guardPredicates.push(
+      "NOT EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id)",
+    );
+  } else if (opts.sessionGuard?.mode === "stale") {
+    guardPredicates.push(
+      "EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id AND lastHeartbeatAt <= ?)",
+    );
+    guardValues.push(opts.sessionGuard.heartbeatBefore);
+  }
+  const expectedPredicate = guardPredicates.length ? ` AND ${guardPredicates.join(" AND ")}` : "";
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = 'failed', failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded') RETURNING *`,
-    [scrubbedReason, finishedAt, id],
+    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')${expectedPredicate} RETURNING *`,
+    [terminalStatus, scrubbedReason, finishedAt, id, ...guardValues],
   );
   if (row && oldTask) {
     emitTaskLifecycleTelemetryAfterCommit(
-      "failed",
+      terminalStatus,
       {
         taskId: id,
         source: oldTask.source,
         ...taskContextForTelemetry(oldTask),
         agentId: row.agentId ?? undefined,
+        ...(terminalStatus === "failed"
+          ? { failure_class: opts.failureClass ?? classifyTaskFailureReason(scrubbedReason) }
+          : { previousStatus: oldTask.status }),
         durationMs: row.createdAt ? Date.now() - new Date(row.createdAt).getTime() : undefined,
       },
-      (task) => task?.status === "failed",
+      (task) => task?.status === terminalStatus,
     );
 
     try {
@@ -3052,30 +3123,44 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
         taskId: id,
         agentId: row.agentId ?? undefined,
         oldValue: oldTask.status,
-        newValue: "failed",
+        newValue: terminalStatus,
         metadata: { reason: scrubbedReason },
       });
     } catch {}
     getDbClient().afterCommit(() => {
       import("../workflows/event-bus")
         .then(({ workflowEventBus }) => {
-          workflowEventBus.emit("task.failed", {
-            taskId: id,
-            failureReason: reason,
-            agentId: row.agentId,
-            workflowRunId: row.workflowRunId,
-            workflowRunStepId: row.workflowRunStepId,
-          });
+          if (terminalStatus === "failed") {
+            workflowEventBus.emit("task.failed", {
+              taskId: id,
+              failureReason: scrubbedReason,
+              agentId: row.agentId,
+              workflowRunId: row.workflowRunId,
+              workflowRunStepId: row.workflowRunStepId,
+            });
+          } else {
+            workflowEventBus.emit("task.cancelled", {
+              taskId: id,
+              agentId: row.agentId,
+              workflowRunId: row.workflowRunId,
+              workflowRunStepId: row.workflowRunStepId,
+            });
+          }
         })
         .catch((err) =>
           console.error(
-            "[db] task.failed event not emitted:",
+            `[db] task.${terminalStatus} event not emitted:`,
             scrubSecrets(err instanceof Error ? err.message : String(err)),
           ),
         );
     });
     try {
-      await promotePendingSteeringForTask(id, "Task failed before steering was delivered");
+      await promotePendingSteeringForTask(
+        id,
+        terminalStatus === "failed"
+          ? "Task failed before steering was delivered"
+          : "Task was cancelled before steering was delivered",
+      );
     } catch (error) {
       console.error(
         "[failTask] pending steering promotion error:",
@@ -3086,7 +3171,7 @@ export async function failTask(id: string, reason: string): Promise<AgentTask | 
     // Cascade-fail any non-terminal tasks that depend on this one.
     // The cascade is recursive (transitive closure) and cycle-safe.
     try {
-      await cascadeFailDependents(id, "failed");
+      await cascadeFailDependents(id, terminalStatus);
     } catch (err) {
       console.error("[failTask] cascade-fail dependents error:", err);
     }
@@ -3225,6 +3310,12 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
 export async function supersedeTask(
   id: string,
   args: { reason: string; resumeTaskId: string | null },
+  opts: {
+    expectedStatuses?: AgentTaskStatus[];
+    expectedLastUpdatedAt?: string;
+    expectedProgress?: string | null;
+    sessionGuard?: TaskSessionGuard;
+  } = {},
 ): Promise<AgentTask | null> {
   const oldTask = await getTaskById(id);
   if (!oldTask) return null;
@@ -3233,16 +3324,42 @@ export async function supersedeTask(
   if (isTerminalTaskStatus(oldTask.status)) {
     return null;
   }
+  if (opts.expectedStatuses && !opts.expectedStatuses.includes(oldTask.status)) return null;
 
   const finishedAt = new Date().toISOString();
+  const guardPredicates: string[] = [];
+  const guardValues: Array<string | null> = [];
+  if (opts.expectedStatuses?.length) {
+    guardPredicates.push(`status IN (${opts.expectedStatuses.map(() => "?").join(", ")})`);
+    guardValues.push(...opts.expectedStatuses);
+  }
+  if (opts.expectedLastUpdatedAt) {
+    guardPredicates.push("lastUpdatedAt = ?");
+    guardValues.push(opts.expectedLastUpdatedAt);
+  }
+  if (opts.expectedProgress !== undefined) {
+    guardPredicates.push("COALESCE(progress, '') = COALESCE(?, '')");
+    guardValues.push(opts.expectedProgress);
+  }
+  if (opts.sessionGuard?.mode === "absent") {
+    guardPredicates.push(
+      "NOT EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id)",
+    );
+  } else if (opts.sessionGuard?.mode === "stale") {
+    guardPredicates.push(
+      "EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id AND lastHeartbeatAt <= ?)",
+    );
+    guardValues.push(opts.sessionGuard.heartbeatBefore);
+  }
+  const expectedPredicate = guardPredicates.length ? ` AND ${guardPredicates.join(" AND ")}` : "";
   const row = await getDbClient().get<AgentTaskRow>(
     `UPDATE agent_tasks
        SET status = 'superseded',
            finishedAt = ?,
            lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')
+       WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled', 'superseded')${expectedPredicate}
        RETURNING *`,
-    [finishedAt, id],
+    [finishedAt, id, ...guardValues],
   );
 
   if (row && oldTask) {
@@ -3539,6 +3656,97 @@ export async function updateTaskProgress(id: string, progress: string): Promise<
     });
   }
   return row ? rowToAgentTask(row) : null;
+}
+
+/**
+ * Persist a generated stall explanation without accidentally changing task
+ * status. The conditional update makes repeated heartbeat sweeps idempotent;
+ * telemetry receives only the bounded class, never the human-readable text.
+ */
+export async function markTaskStalled(
+  id: string,
+  progress: string,
+  failureClass: TaskFailureClass,
+  opts: {
+    expectedStatuses: AgentTaskStatus[];
+    expectedLastUpdatedAt?: string;
+    expectedProgress?: string | null;
+    sessionGuard?: TaskSessionGuard;
+    touchLastUpdatedAt?: boolean;
+  },
+): Promise<AgentTask | null> {
+  const { expectedStatuses, touchLastUpdatedAt = false } = opts;
+  if (expectedStatuses.length === 0) return null;
+  const scrubbedProgress = scrubSecrets(progress);
+  const placeholders = expectedStatuses.map(() => "?").join(", ");
+  const timestampUpdate = touchLastUpdatedAt
+    ? ", lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+    : "";
+  const freshnessPredicate = opts.expectedLastUpdatedAt ? " AND lastUpdatedAt = ?" : "";
+  const progressPredicate =
+    opts.expectedProgress !== undefined ? " AND COALESCE(progress, '') = COALESCE(?, '')" : "";
+  const sessionPredicate =
+    opts.sessionGuard?.mode === "absent"
+      ? " AND NOT EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id)"
+      : opts.sessionGuard?.mode === "stale"
+        ? " AND EXISTS (SELECT 1 FROM active_sessions WHERE taskId = agent_tasks.id AND lastHeartbeatAt <= ?)"
+        : "";
+  const row = await getDbClient().get<AgentTaskRow>(
+    `UPDATE agent_tasks SET progress = ?${timestampUpdate}
+       WHERE id = ? AND status IN (${placeholders})
+         ${freshnessPredicate}${progressPredicate}${sessionPredicate}
+         AND COALESCE(progress, '') <> ? RETURNING *`,
+    [
+      scrubbedProgress,
+      id,
+      ...expectedStatuses,
+      ...(opts.expectedLastUpdatedAt ? [opts.expectedLastUpdatedAt] : []),
+      ...(opts.expectedProgress !== undefined ? [opts.expectedProgress] : []),
+      ...(opts.sessionGuard?.mode === "stale" ? [opts.sessionGuard.heartbeatBefore] : []),
+      scrubbedProgress,
+    ],
+  );
+  if (!row) return null;
+
+  try {
+    await createLogEntry({
+      eventType: "task_progress",
+      taskId: id,
+      agentId: row.agentId ?? undefined,
+      newValue: scrubbedProgress,
+      metadata: { stalled: true, reason: failureClass },
+    });
+  } catch {}
+
+  emitTaskLifecycleTelemetryAfterCommit(
+    "stalled",
+    {
+      taskId: id,
+      source: row.source,
+      ...taskContextForTelemetry(rowToAgentTask(row)),
+      agentId: row.agentId ?? undefined,
+      reason: failureClass,
+    },
+    (task) => task?.progress === scrubbedProgress && expectedStatuses.includes(task.status),
+  );
+  getDbClient().afterCommit(() => {
+    import("../workflows/event-bus")
+      .then(({ workflowEventBus }) => {
+        workflowEventBus.emit("task.progress", {
+          taskId: id,
+          progress: scrubbedProgress,
+          agentId: row.agentId,
+        });
+      })
+      .catch((err) =>
+        console.error(
+          "[db] stalled task.progress event not emitted:",
+          scrubSecrets(err instanceof Error ? err.message : String(err)),
+        ),
+      );
+  });
+
+  return rowToAgentTask(row);
 }
 
 // ============================================================================
@@ -9272,37 +9480,19 @@ export async function getStalePinnedResumes(graceMin: number): Promise<AgentTask
  * when this returns a row, closing the TOCTOU window between reading the resume
  * as `pending` and writing.
  *
- * Deliberately NOT `failTask`: `failTask`'s backing SQL is keyed on `id` with no
- * status precondition, so it would terminalize an `in_progress` resume the
- * worker just started. The `AND status = 'pending'` here is the guard.
+ * Uses `failTask`'s expected-status guard so terminal lifecycle telemetry and
+ * workflow events are emitted without reopening the TOCTOU race.
  */
 export async function failPendingResumeIfUnclaimed(
   taskId: string,
   status: "cancelled" | "failed",
   failureReason: string,
 ): Promise<AgentTask | null> {
-  const now = new Date().toISOString();
-  const scrubbedReason = scrubSecrets(failureReason);
-  const row = await getDbClient().get<AgentTaskRow>(
-    `UPDATE agent_tasks SET status = ?, failureReason = ?, finishedAt = ?, lastUpdatedAt = ?
-       WHERE id = ? AND status = 'pending' RETURNING *`,
-    [status, scrubbedReason, now, now, taskId],
-  );
-
-  if (row) {
-    try {
-      await createLogEntry({
-        eventType: "task_status_change",
-        taskId,
-        agentId: row.agentId ?? undefined,
-        oldValue: "pending",
-        newValue: status,
-        metadata: { reason: scrubbedReason, reaper: "pin_unreclaimed" },
-      });
-    } catch {}
-  }
-
-  return row ? rowToAgentTask(row) : null;
+  return failTask(taskId, failureReason, {
+    expectedStatuses: ["pending"],
+    failureClass: status === "cancelled" ? "cancelled" : undefined,
+    terminalStatus: status,
+  });
 }
 
 /**

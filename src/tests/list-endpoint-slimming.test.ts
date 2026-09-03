@@ -8,6 +8,7 @@ import {
   createSessionCost,
   createTaskExtended,
   createWorkflow,
+  failTask,
   getAgentById,
   getAllAgents,
   getAllTasks,
@@ -191,7 +192,9 @@ describe("list-endpoint slimming", () => {
 
   test("getAllTasks — slim truncates task text and drops heavy blobs", async () => {
     const longText = "Z".repeat(2000);
+    const longFailureReason = `No agents are online to claim this task. ${"stderr ".repeat(100)}`;
     const task = await createTaskExtended(longText, { agentId: "slim-agent-1" });
+    await failTask(task.id, longFailureReason);
     await createSessionCost({
       sessionId: "slim-cost-session-1",
       taskId: task.id,
@@ -215,15 +218,16 @@ describe("list-endpoint slimming", () => {
     const slimTask = slim.find((t) => t.task.startsWith("Z"));
     expect(slimTask).toBeDefined();
     expect(slimTask?.task.length).toBeLessThan(longText.length);
-    // Heavy blobs are dropped from the slim row.
+    // Heavy blobs are dropped, but broken-task inboxes keep the failure reason.
     expect("output" in slimTask!).toBe(false);
-    expect("failureReason" in slimTask!).toBe(false);
+    expect(slimTask?.failureReason).toBe(`${longFailureReason.slice(0, 300)}…`);
     expect("providerMeta" in slimTask!).toBe(false);
     expect(slimTask?.totalCostUsd).toBeCloseTo(0.0168, 6);
 
     const full = (await getAllTasks({})).find((t) => t.task === longText);
     expect(full).toBeDefined();
     expect(full?.task).toBe(longText);
+    expect(full?.failureReason).toBe(longFailureReason);
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
   });
 

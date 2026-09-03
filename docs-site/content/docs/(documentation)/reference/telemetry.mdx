@@ -16,8 +16,9 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `task.started` | A task is assigned to an agent | source, agentId |
 | `task.claimed` | An agent auto-claims a task from the pool | source, agentId |
 | `task.completed` | A task finishes successfully | agentId, durationMs |
-| `task.failed` | A task fails | agentId, durationMs |
+| `task.failed` | A task fails | agentId, durationMs, failure_class |
 | `task.cancelled` | A task is cancelled | source, agentId, previousStatus, durationMs |
+| `task.stalled` | A task receives a generated stall explanation | agentId, reason |
 | `task.session_completed` | A provider session exits for a task | agentId, provider, model, harnessVariant, harnessVersion, exitCode, isError, durationMs |
 | `session.started` | A worker session begins | agentId, taskId |
 | `session.ended` | A worker session ends | agentId, taskId, durationMs, tasksProcessed |
