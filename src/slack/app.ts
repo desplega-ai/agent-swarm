@@ -41,11 +41,14 @@ export async function initSlackApp(): Promise<App | null> {
     return null;
   }
 
+  // SLACK_API_URL points Bolt (Web API and apps.connections.open) at a mock Slack server for e2e tests.
+  const slackApiUrl = process.env.SLACK_API_URL;
   app = new App({
     token: botToken,
     appToken: appToken,
     socketMode: true,
     logLevel: process.env.NODE_ENV === "development" ? LogLevel.DEBUG : LogLevel.INFO,
+    ...(slackApiUrl ? { clientOptions: { slackApiUrl } } : {}),
   });
 
   // Register handlers
