@@ -111,6 +111,7 @@ describe("vendored OpenAPI", () => {
       "linear",
       "jira",
       "gmail",
+      "microsoft-graph",
     ]);
     for (const entry of manifest.integrations) {
       const specText = readFileSync(path.join(directory, entry.specFile), "utf-8");
@@ -139,6 +140,17 @@ describe("vendored OpenAPI", () => {
     const refreshed = await refreshScriptConnection(connection.id);
     expect(refreshed?.generationError).toBeNull();
     expect(refreshed?.version).toBe(connection.version + 1);
+
+    const microsoftGraph = await upsertScriptConnection({
+      slug: "microsoftGraph",
+      kind: "openapi",
+      openapiSpecSourceKind: "vendored",
+      openapiSpecSource: "microsoft-graph",
+    });
+    expect(microsoftGraph.baseUrl).toBe("https://graph.microsoft.com/v1.0");
+    expect(microsoftGraph.generationError).toBeNull();
+    expect(microsoftGraph.generatedTypes).toContain("sendChannelMessage");
+    expect(microsoftGraph.generatedTypes).toContain('"team-id"');
   });
 
   test("resolves vendored specs from the module location when cwd is unrelated (npm-package install)", () => {
@@ -187,7 +199,7 @@ describe("vendored OpenAPI", () => {
       partial: boolean;
     };
     expect(down.partial).toBe(true);
-    expect(down.entries).toHaveLength(5);
+    expect(down.entries).toHaveLength(6);
     expect(down.entries.every((entry) => entry.feeds.includes("blessed"))).toBe(true);
 
     globalThis.fetch = (async () =>
@@ -209,13 +221,14 @@ describe("vendored OpenAPI", () => {
       partial: boolean;
     };
     expect(merged.partial).toBe(false);
-    expect(merged.entries.slice(0, 5).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
+    expect(merged.entries.slice(0, 6).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
     expect(merged.entries.map((entry) => entry.slug)).toEqual([
       "github",
       "slack",
       "linear",
       "jira",
       "gmail",
+      "microsoft-graph",
       "stripe",
     ]);
   });

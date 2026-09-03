@@ -18,5 +18,7 @@ Provenance: GitHub and Slack are pinned to upstream Git commits. Jira is pinned 
 of Atlassian's Cloud v3 document because its published URL is mutable. Gmail is an
 operator-reviewed OpenAPI façade based on Google's v1 Discovery model. Linear publishes a GraphQL
 endpoint rather than an OpenAPI document, so `linear.json` is an operator-reviewed façade for the
-documented `POST /graphql` issue query/mutation shapes. Both façades must remain narrow and be
-reviewed when their reference APIs change.
+documented `POST /graphql` issue query/mutation shapes. Microsoft Graph publishes its v1.0 OpenAPI
+description as a large YAML document, so `microsoft-graph.json` is an operator-reviewed façade
+pinned to the source repository commit. These façades must remain narrow and be reviewed when
+their reference APIs change.
