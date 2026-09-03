@@ -54,9 +54,8 @@ export function UserSwitcher() {
   // Older API servers (no /api/users) — hide entirely.
   if (!gate.supported) return null;
 
-  // Token-bound identity (DES-771): attribution is fixed server-side, so the
-  // chip still shows who you are but offers no switching — no dropdown, no
-  // create, nothing clickable.
+  // A deployment user or user-bound token fixes attribution. Show the
+  // identity without a dropdown or create action.
   if (locked) {
     if (!user) return null;
     return (

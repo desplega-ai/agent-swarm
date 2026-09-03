@@ -14,7 +14,7 @@ import { useConnections } from "@/hooks/use-connections";
 import { ConnectionCard } from "./connection-card";
 import { ConnectionFormDialog } from "./connection-form-dialog";
 
-export function ConnectionsSection() {
+export function ConnectionsSection({ readOnly = false }: { readOnly?: boolean }) {
   const {
     connections,
     activeConnection,
@@ -34,9 +34,11 @@ export function ConnectionsSection() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Connections</h2>
-        <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
-          <Plus className="h-3.5 w-3.5" /> Add Connection
-        </Button>
+        {!readOnly ? (
+          <Button onClick={handleAdd} size="sm" className="gap-1 bg-primary hover:bg-primary/90">
+            <Plus className="h-3.5 w-3.5" /> Add Connection
+          </Button>
+        ) : null}
       </div>
 
       <div className="space-y-3">
@@ -45,6 +47,7 @@ export function ConnectionsSection() {
             key={conn.id}
             connection={conn}
             isActive={activeConnection?.id === conn.id}
+            readOnly={readOnly}
             onActivate={() => handleActivate(conn.id)}
             onEdit={() => handleEdit(conn)}
             onDelete={() => setDeleteTarget(conn)}
@@ -52,15 +55,20 @@ export function ConnectionsSection() {
         ))}
       </div>
 
-      <ConnectionFormDialog
-        key={editTarget?.id ?? "new"}
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        editConnection={editTarget}
-        onSubmit={handleSubmit}
-      />
+      {!readOnly ? (
+        <ConnectionFormDialog
+          key={editTarget?.id ?? "new"}
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          editConnection={editTarget}
+          onSubmit={handleSubmit}
+        />
+      ) : null}
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+      <AlertDialog
+        open={!readOnly && !!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Connection</AlertDialogTitle>

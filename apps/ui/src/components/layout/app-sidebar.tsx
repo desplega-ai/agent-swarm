@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCost } from "@/lib/cost-format";
+import { isDemoMode } from "@/lib/deployment-config";
 import { cn, formatCompactNumber } from "@/lib/utils";
 import { SwarmSwitcher } from "./swarm-switcher";
 
@@ -400,7 +401,10 @@ export function AppSidebar() {
       <SidebarHeader className="border-b border-sidebar-border">
         <NavLink
           to="/"
-          className="flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center"
+          className={cn(
+            "flex h-10 items-center gap-2 group-data-[collapsible=icon]:justify-center",
+            isDemoMode && "pl-20 group-data-[collapsible=icon]:pl-0",
+          )}
         >
           <img
             src={identityLogo}

@@ -151,7 +151,8 @@ Required headers on every call:
 
 ## Dashboard UI
 
-Defaults: UI on `APP_URL` (port 5274), API on `http://localhost:3013` (overridable via `VITE_API_URL`).
+Defaults: UI on `APP_URL` (port 5274), API proxy on `http://localhost:3013`. Set
+`VITE_PROXY_TARGET` to use another development API. See `apps/ui/README.md` for fixed deployments.
 
 ```bash
 cd apps/ui && bun run dev   # port 5274
@@ -175,7 +176,8 @@ lsof -i :5274          # what's on the UI port
 lsof -i :3013          # what's on the API port
 ```
 
-If another worktree holds the port, either stop it or pick alternates and update `APP_URL` / `VITE_API_URL` accordingly.
+If another worktree holds the port, stop it or pick alternates. Update `APP_URL` and
+`VITE_PROXY_TARGET` accordingly.
 
 ## Port-conflict resolution
 

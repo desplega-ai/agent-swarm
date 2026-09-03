@@ -8,12 +8,14 @@ import type { Connection } from "@/lib/config";
 export function ConnectionCard({
   connection,
   isActive,
+  readOnly = false,
   onActivate,
   onEdit,
   onDelete,
 }: {
   connection: Connection;
   isActive: boolean;
+  readOnly?: boolean;
   onActivate: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -72,18 +74,27 @@ export function ConnectionCard({
             {isActive ? "Test" : "Connect"}
           </Button>
 
-          <Button
-            size="icon"
-            variant="outline"
-            className="h-8 w-8 border-border/60"
-            onClick={onEdit}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
+          {!readOnly ? (
+            <>
+              <Button
+                size="icon"
+                variant="outline"
+                className="h-8 w-8 border-border/60"
+                onClick={onEdit}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
 
-          <Button size="icon" variant="destructive-outline" className="h-8 w-8" onClick={onDelete}>
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+              <Button
+                size="icon"
+                variant="destructive-outline"
+                className="h-8 w-8"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
+          ) : null}
         </div>
       </CardContent>
     </Card>

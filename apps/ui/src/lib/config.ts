@@ -1,3 +1,4 @@
+import { isDemoMode, uiDeploymentConfig } from "./deployment-config";
 import { generateSlug } from "./slugs";
 
 const STORAGE_KEY = "agent-swarm-config";
@@ -24,6 +25,32 @@ const DEFAULT_CONFIG: Config = {
   apiUrl: "http://localhost:3013",
   apiKey: "",
 };
+
+export const DEPLOYMENT_CONNECTION_ID = "deployment";
+
+function getDeploymentConnection(): Connection | null {
+  if (!uiDeploymentConfig.apiUrl || !uiDeploymentConfig.apiKey) return null;
+
+  let name = uiDeploymentConfig.apiUrl;
+  try {
+    name = new URL(uiDeploymentConfig.apiUrl).host;
+  } catch {
+    // Keep the configured URL as the label when it is not absolute.
+  }
+
+  return {
+    id: DEPLOYMENT_CONNECTION_ID,
+    name: isDemoMode ? "Demo swarm" : name,
+    apiUrl: uiDeploymentConfig.apiUrl,
+    apiKey: uiDeploymentConfig.apiKey,
+  };
+}
+
+function assertConnectionsMutable(): void {
+  if (getDeploymentConnection()) {
+    throw new Error("Connections are managed by this UI deployment.");
+  }
+}
 
 function generateConnectionId(): string {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -97,11 +124,10 @@ function resolveActiveId(multi: MultiConfig): MultiConfig {
 /**
  * Tab-local connection for embedded dashboards (user-bound `aswt_` tokens
  * arriving via URL params). Lives in **sessionStorage** — not the shared
- * localStorage connection list — so two embeds on the same UI origin holding
- * different user tokens can never clobber each other's credentials, and the
- * token does not outlive the tab. When present it takes precedence over the
- * localStorage `activeId` everywhere (`getActiveConnection`, and therefore
- * `getConfig()`/ApiClient).
+ * localStorage connection list, so two embeds on the same UI origin holding
+ * different user tokens can never clobber each other's credentials. The token
+ * does not outlive the tab. When no deployment connection exists, it takes
+ * precedence over the localStorage `activeId` everywhere.
  */
 export const EMBED_CONNECTION_ID = "embed";
 const EMBED_KEY = "agent-swarm-embed-connection";
@@ -143,12 +169,15 @@ export function clearEmbedConnection(): void {
 }
 
 export function getConnections(): Connection[] {
+  const deployment = getDeploymentConnection();
+  if (deployment) return [deployment];
   const multi = resolveActiveId(loadMultiConfig());
   const embed = getEmbedConnection();
   return embed ? [embed, ...multi.connections] : multi.connections;
 }
 
 export function addConnection(conn: Omit<Connection, "id"> & { id?: string }): Connection {
+  assertConnectionsMutable();
   const multi = resolveActiveId(loadMultiConfig());
   const connection: Connection = {
     id: conn.id || generateConnectionId(),
@@ -169,6 +198,7 @@ export function updateConnection(
   id: string,
   updates: Partial<Omit<Connection, "id">>,
 ): Connection | null {
+  assertConnectionsMutable();
   if (id === EMBED_CONNECTION_ID) {
     const embed = getEmbedConnection();
     if (!embed) return null;
@@ -183,6 +213,7 @@ export function updateConnection(
 }
 
 export function removeConnection(id: string): boolean {
+  assertConnectionsMutable();
   if (id === EMBED_CONNECTION_ID) {
     const existed = getEmbedConnection() !== null;
     clearEmbedConnection();
@@ -201,6 +232,8 @@ export function removeConnection(id: string): boolean {
 }
 
 export function getActiveConnection(): Connection | null {
+  const deployment = getDeploymentConnection();
+  if (deployment) return deployment;
   const embed = getEmbedConnection();
   if (embed) return embed;
   const multi = resolveActiveId(loadMultiConfig());
@@ -209,6 +242,8 @@ export function getActiveConnection(): Connection | null {
 }
 
 export function setActiveConnection(id: string): boolean {
+  const deployment = getDeploymentConnection();
+  if (deployment) return id === deployment.id;
   if (id === EMBED_CONNECTION_ID) {
     return getEmbedConnection() !== null;
   }
@@ -236,6 +271,7 @@ export function getConfig(): Config {
 }
 
 export function saveConfig(config: Config): void {
+  assertConnectionsMutable();
   const active = getActiveConnection();
   if (active) {
     updateConnection(active.id, { apiUrl: config.apiUrl, apiKey: config.apiKey });
@@ -250,12 +286,15 @@ export function saveConfig(config: Config): void {
 }
 
 export function resetConfig(): void {
+  assertConnectionsMutable();
   localStorage.removeItem(STORAGE_KEY);
   localStorage.removeItem(CONNECTIONS_KEY);
   clearEmbedConnection();
 }
 
 export function getDefaultConfig(): Config {
+  const deployment = getDeploymentConnection();
+  if (deployment) return { apiUrl: deployment.apiUrl, apiKey: deployment.apiKey };
   return { ...DEFAULT_CONFIG };
 }
 

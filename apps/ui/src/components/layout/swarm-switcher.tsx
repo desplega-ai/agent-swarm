@@ -28,7 +28,7 @@ const CLOUD_SUPPORT_URL = "mailto:t@desplega.sh";
 const CLOUD_BILLING_URL = "https://cloud.agent-swarm.dev/dashboard/settings/billing";
 
 export function SwarmSwitcher() {
-  const { connections, activeConnection, switchConnection } = useConfig();
+  const { connections, activeConnection, connectionLocked, switchConnection } = useConfig();
   const { data: health, isError } = useHealth();
   const { data: status } = useStatusContext();
   const navigate = useNavigate();
@@ -36,6 +36,24 @@ export function SwarmSwitcher() {
 
   const isHealthy = !!health && !isError;
   const displayName = activeConnection?.name ?? "No connection";
+
+  if (connectionLocked) {
+    return (
+      <SidebarMenu>
+        <SidebarMenuItem>
+          <div className="flex h-8 w-full items-center gap-2 overflow-hidden rounded-md px-2 text-xs">
+            <div
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                isHealthy ? "bg-status-success" : "bg-status-error",
+              )}
+            />
+            <span className="truncate font-medium">{displayName}</span>
+          </div>
+        </SidebarMenuItem>
+      </SidebarMenu>
+    );
+  }
 
   return (
     <SidebarMenu>

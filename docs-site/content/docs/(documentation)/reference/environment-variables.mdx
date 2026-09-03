@@ -392,8 +392,15 @@ Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VITE_PROXY_TARGET` | `http://localhost:3013` | Overrides the API origin the `ui/` Vite dev server (`pnpm dev`, port 5274) proxies `/api`, `/health`, and `/status` requests to. Set when the API is running on a non-default port/host during local dashboard development. |
+| `VITE_PROXY_TARGET` | `http://localhost:3013` | Overrides the API origin the `ui/` Vite dev server (`bun run dev`, port 5274) proxies `/api`, `/health`, and `/status` requests to. Set when the API is running on a non-default port or host during local dashboard development. |
+| `VITE_API_URL` | unset | Fixes a dedicated dashboard build to one API origin. Requires `VITE_API_KEY`. The connection switcher becomes a static label. |
+| `VITE_API_KEY` | unset | Fixes the API credential for `VITE_API_URL`. Connection settings become read-only. |
+| `VITE_USER_ID` | unset | Fixes the dashboard identity to an existing user. Requires `VITE_API_URL` and `VITE_API_KEY`. |
+| `VITE_DEMO_MODE` | `false` | Shows a diagonal live demo ribbon when set to `true` or `1`. |
 | `VITE_PLAUSIBLE_ANALYTICS` | unset | Build-time flag. Set to `1` to inject the Plausible analytics snippet into the dashboard's `index.html` during `bun run build`. Only our hosted dashboard sets it; self-hosted and local builds ship with no analytics script. |
+
+Vite includes every `VITE_*` value in public browser assets. Use a restricted credential and a
+demo-safe API deployment for fixed public dashboards.
 
 ## Cloud Personalization & Adaptive Home
 
