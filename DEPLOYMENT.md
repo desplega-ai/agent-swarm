@@ -115,7 +115,7 @@ The example `docker-compose.yml` sets up:
 
 - **API service** (port 3013) — MCP HTTP server with SQLite database
 - **1 Lead agent** — Coordinator that delegates tasks to workers
-- **2 Worker agents** — Claude-powered agents that execute tasks
+- **2 Worker agents** — Provider-powered agents that execute tasks
 - **3 Content agents** (optional) — Specialized workers for content writing, reviewing, and strategy, each bootstrapped from a template via `TEMPLATE_ID`
 
 ### Volumes & Persistence

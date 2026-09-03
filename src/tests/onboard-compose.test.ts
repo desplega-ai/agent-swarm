@@ -24,6 +24,31 @@ describe("generateCompose", () => {
     claudeOAuthToken: "test-oauth",
   });
 
+  test("static example passes every supported provider variable to all agents", async () => {
+    const yaml = await Bun.file(
+      new URL("../../docker-compose.example.yml", import.meta.url),
+    ).text();
+    const agentServices = `  lead:${yaml.split("\n  lead:")[1]}`;
+
+    for (const variable of [
+      "HARNESS_PROVIDER",
+      "MODEL_OVERRIDE",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "OPENROUTER_BASE_URL",
+      "BEDROCK_AUTH_MODE",
+      "AWS_REGION",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AWS_PROFILE",
+    ]) {
+      expect(agentServices.match(new RegExp(`^ {6}- ${variable}=`, "gm"))).toHaveLength(8);
+    }
+  });
+
   test("uses the always pull policy by default for every service", () => {
     const yaml = generateCompose(devState);
 
