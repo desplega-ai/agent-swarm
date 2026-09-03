@@ -44,7 +44,8 @@ export type Options = {
 export const helpText = `Usage: bun run e2e [options]
 
 Options:
-  --harness claude,codex,pi     Run real harness legs after contract scenarios
+  --harness p1,p2               Run real harness legs after the contract scenarios
+                                (claude, codex, pi, opencode)
   --only name,name              Run only named contract scenarios
   --skip name,name              Skip named contract scenarios
   --list                        Print contract scenario names and exit
@@ -108,7 +109,7 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
     if (!names.has(name)) throw new Error(`Unknown scenario: ${name}`);
   }
   for (const provider of options.harness) {
-    if (!["claude", "codex", "pi"].includes(provider)) {
+    if (!["claude", "codex", "pi", "opencode"].includes(provider)) {
       throw new Error(`Unknown harness provider: ${provider}`);
     }
   }

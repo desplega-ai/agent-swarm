@@ -68,10 +68,14 @@ bun run e2e --min-route-coverage 4 --min-tool-coverage 3
 bun run e2e --keep
 ```
 
-Use `--harness claude,codex,pi` to add real worker legs after the contract layer.
-Claude needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
-Codex needs `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
-Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, or `E2E_MODEL_PI`.
+Use `--harness claude,codex,pi,opencode` to add real worker legs after the contract layer.
+Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
+Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, or `E2E_MODEL_OPENCODE`.
+Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
+Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
+The blob goes stale after its first refresh, about ten days after issue.
 Set `E2E_HARNESS_TIMEOUT_MS` to change the five-minute harness timeout.
 
 The same command runs locally, in GitHub Actions, and inside a swarm worker container.

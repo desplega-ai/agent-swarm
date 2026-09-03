@@ -1,4 +1,9 @@
-# ANTHROPIC_API_KEY, OPENAI_API_KEY, and OPENROUTER_API_KEY must exist for all legs to pass.
+# Seed E2E_CLAUDE_CODE_OAUTH_TOKEN with `claude setup-token`.
+# Seed E2E_CODEX_OAUTH from a dedicated login: `env HOME=/tmp/e2e-codex codex login`, then
+# `bun scripts/e2e/codex-oauth-blob.ts /tmp/e2e-codex/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
+# Never use a developer's main login. CI refresh rotates its refresh token and breaks that login.
+# The Codex blob goes stale after its first refresh, about ten days after issue.
+# E2E_OPENROUTER_API_KEY is a plain OpenRouter key.
 name: Nightly E2E
 
 on:
@@ -12,21 +17,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [claude, codex, pi]
+        provider: [claude, codex, pi, opencode]
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/desplega-ai/agent-swarm-worker:slim
     timeout-minutes: 30
     permissions:
       contents: read
-    # Each leg receives only its own provider key. The :slim tag is built and
+    # Each leg receives only its provider credential. The :slim tag is built and
     # published by this repo's docker-and-deploy workflow from main, so the trust
     # boundary is write access to main; scoping keeps a single leg from seeing
-    # the other two credentials.
+    # the other provider credentials.
     env:
-      ANTHROPIC_API_KEY: ${{ matrix.provider == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}
-      OPENAI_API_KEY: ${{ matrix.provider == 'codex' && secrets.OPENAI_API_KEY || '' }}
-      OPENROUTER_API_KEY: ${{ matrix.provider == 'pi' && secrets.OPENROUTER_API_KEY || '' }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
+      CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
+      OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode') && secrets.E2E_OPENROUTER_API_KEY || '' }}
 
     steps:
       - name: Checkout repository
