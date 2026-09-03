@@ -52,6 +52,7 @@ export function useUpdateWorkflow() {
         name: string;
         description: string;
         enabled: boolean;
+        params: Record<string, unknown>;
         // null = clear the schema, object = set/replace, undefined/omitted = unchanged.
         // Mirrors the backend semantics shared by PUT and PATCH.
         triggerSchema: Record<string, unknown> | null;

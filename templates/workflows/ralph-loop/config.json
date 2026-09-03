@@ -8,6 +8,7 @@
   "version": "1.0.0",
   "category": "workflows",
   "placeholders": ["REPO_URL"],
+  "requires": ["github"],
   "runAllSeedersCandidate": false,
   "tags": ["workflow", "review", "iteration"]
 }

@@ -1,5 +1,7 @@
 # LLM-Safe Release Context
 
+Template parameters: {{ORG_ID}}, {{REPO_URL}}
+
 Use this pattern for release-note, changelog, and report workflows where one node gathers a large source artifact and later LLM nodes plan or write from it.
 
 The key rule: keep the full artifact for audit/debugging, but pass a compact projection to every LLM prompt.

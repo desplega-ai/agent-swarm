@@ -253,6 +253,31 @@ export async function logOpenWebhookTriggers(): Promise<void> {
 }
 
 /**
+ * Start every enabled workflow subscribed to a named in-process event.
+ * Returns the workflow run IDs in workflow-list order.
+ */
+export async function handleEventTrigger(
+  eventName: string,
+  payload: unknown,
+  registry: ExecutorRegistry,
+): Promise<string[]> {
+  const workflows = (await listWorkflows({ enabled: true })).filter((workflow) =>
+    workflow.triggers.some(
+      (trigger) => trigger.type === "event" && trigger.eventName === eventName,
+    ),
+  );
+
+  const runIds: string[] = [];
+  for (const workflow of workflows) {
+    const runId = await startWorkflowExecution(workflow, payload, registry, {
+      triggerType: "event",
+    });
+    runIds.push(runId);
+  }
+  return runIds;
+}
+
+/**
  * Handle a schedule trigger: find workflows linked to this schedule and execute them.
  * Returns an array of workflow run IDs. Empty array means no workflows matched
  * (caller should fall through to standalone task creation).

@@ -19,6 +19,8 @@ import { join } from "node:path";
 import {
   closeDb,
   createAgent,
+  createScheduledTask,
+  createWorkflow,
   getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
@@ -97,6 +99,16 @@ const ENV_KEYS_TO_RESET = [
   "GITHUB_APP_ID",
   "GITHUB_APP_PRIVATE_KEY",
   "AGENT_FS_API_URL",
+  "API_AGENT_FS_API_KEY",
+  "AGENT_FS_API_KEY",
+  "AGENT_FS_DEFAULT_ORG_ID",
+  "AGENT_FS_SHARED_ORG_ID",
+  "AGENT_FS_DEFAULT_DRIVE_ID",
+  "GSC_SERVICE_ACCOUNT_BASE64",
+  "GSC_SERVICE_ACCOUNT_JSON",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "AGENTMAIL_API_KEY",
+  "AGENTMAIL_DISABLE",
   "SWARM_VERIFY_TTL_MS",
 ];
 
@@ -122,6 +134,10 @@ function restoreEnv() {
 
 async function clearTables() {
   const client = getDbClient();
+  await client.run("DELETE FROM workflow_run_steps");
+  await client.run("DELETE FROM workflow_runs");
+  await client.run("DELETE FROM workflows");
+  await client.run("DELETE FROM scheduled_tasks");
   await client.run("DELETE FROM agent_tasks");
   await client.run("DELETE FROM agents");
   await client.run("DELETE FROM oauth_authorizations");
@@ -205,7 +221,7 @@ function getMilestone(payload: Awaited<ReturnType<typeof buildStatusPayload>>, i
 describe("setup milestones", () => {
   test("all unverified on a clean swarm", async () => {
     const payload = await buildStatusPayload();
-    expect(payload.setup).toHaveLength(7);
+    expect(payload.setup).toHaveLength(10);
     for (const m of payload.setup) {
       expect(m.state).toBe("unverified");
     }
@@ -385,6 +401,28 @@ describe("setup milestones", () => {
     expect(getMilestone(b, "github").state).toBe("verified");
   });
 
+  test("gsc, agentmail, and agentfs reflect their required configuration", async () => {
+    const empty = await buildStatusPayload();
+    expect(getMilestone(empty, "gsc").state).toBe("unverified");
+    expect(getMilestone(empty, "agentmail").state).toBe("unverified");
+    expect(getMilestone(empty, "agentfs").state).toBe("unverified");
+    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/secrets");
+    expect(getMilestone(empty, "agentmail").action_url).toBe("/settings/integrations/agentmail");
+    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/secrets");
+
+    process.env.GSC_SERVICE_ACCOUNT_BASE64 = "encoded-service-account";
+    process.env.AGENTMAIL_API_KEY = "am_test";
+    process.env.AGENT_FS_API_URL = "https://agent-fs.example.test";
+    process.env.API_AGENT_FS_API_KEY = "af_test";
+    process.env.AGENT_FS_DEFAULT_ORG_ID = "org-1";
+    process.env.AGENT_FS_DEFAULT_DRIVE_ID = "drive-1";
+
+    const configured = await buildStatusPayload();
+    expect(getMilestone(configured, "gsc").state).toBe("verified");
+    expect(getMilestone(configured, "agentmail").state).toBe("verified");
+    expect(getMilestone(configured, "agentfs").state).toBe("verified");
+  });
+
   test("linear: authorization row flips to verified", async () => {
     expect(getMilestone(await buildStatusPayload(), "linear").state).toBe("unverified");
 
@@ -472,6 +510,47 @@ describe("setup milestones", () => {
       ["task-completed-1", "first task"],
     );
     expect(getMilestone(await buildStatusPayload(), "first_task").state).toBe("verified");
+  });
+});
+
+describe("automation setup status", () => {
+  test("uses runtime preflight for deterministic missing items and fix URLs", async () => {
+    const schedule = await createScheduledTask({
+      name: "Weekly Dependency Triage",
+      intervalMs: 86_400_000,
+      taskTemplate: "Inspect {{REPO_URL}}",
+      params: {},
+      requiredParams: ["REPO_URL"],
+      requires: ["github"],
+    });
+    const workflow = await createWorkflow({
+      name: "Daily Workflow Health",
+      definition: { nodes: [{ id: "start", type: "echo", config: {} }] },
+    });
+    await getDbClient().run("UPDATE workflows SET definition = ? WHERE id = ?", [
+      "malformed-definition-that-status-must-not-load",
+      workflow.id,
+    ]);
+
+    const payload = await buildStatusPayload();
+    expect(payload.automations).toEqual([
+      {
+        id: workflow.id,
+        name: "Daily Workflow Health",
+        kind: "workflow",
+        state: "running",
+        missing: { params: [], integrations: [] },
+        fixUrl: `/workflows/${workflow.id}`,
+      },
+      {
+        id: schedule.id,
+        name: "Weekly Dependency Triage",
+        kind: "schedule",
+        state: "needs_setup",
+        missing: { params: ["REPO_URL"], integrations: ["github"] },
+        fixUrl: `/schedules/${schedule.id}?param=REPO_URL`,
+      },
+    ]);
   });
 });
 

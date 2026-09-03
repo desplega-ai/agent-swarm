@@ -134,16 +134,12 @@ export function Onboard({ dryRun = false, yes = false, preset, pullPolicy }: Onb
 
     addLog("Non-interactive mode (--yes)");
 
-    if (!preset) {
+    const selectedPresetId = preset || "full";
+    const selectedPreset = getPresetById(selectedPresetId);
+    if (!selectedPreset || selectedPresetId === "custom") {
       goToError(
-        "--preset is required in non-interactive mode (--yes). Options: dev, content, research, solo",
+        `Invalid preset "${selectedPresetId}". Options: full, dev, content, research, solo`,
       );
-      return;
-    }
-
-    const selectedPreset = getPresetById(preset);
-    if (!selectedPreset || preset === "custom") {
-      goToError(`Invalid preset "${preset}". Options: dev, content, research, solo`);
       return;
     }
 

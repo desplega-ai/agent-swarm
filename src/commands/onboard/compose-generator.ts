@@ -182,9 +182,7 @@ export function generateCompose(state: OnboardState): string {
     lines.push("      - YOLO=true");
     lines.push("      - SWARM_URL=http://swarm-api:3013");
 
-    if (svc.entry.isLead) {
-      lines.push("      - MAX_CONCURRENT_TASKS=1");
-    }
+    lines.push(`      - MAX_CONCURRENT_TASKS=${svc.entry.isLead ? 30 : 10}`);
 
     if (state.integrations.github) {
       lines.push(ENV_GITHUB_TOKEN);

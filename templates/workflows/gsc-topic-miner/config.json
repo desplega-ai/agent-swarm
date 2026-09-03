@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "gsc-topic-miner",
+  "displayName": "Search Topic Miner",
+  "slug": "gsc-topic-miner",
+  "title": "Search Topic Miner",
+  "description": "Collect, classify, rank, validate, and persist search-topic opportunities.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["GSC_PROPERTY"],
+  "requires": ["gsc", "agentfs"],
+  "runAllSeedersCandidate": true,
+  "tags": ["gsc", "research", "content"]
+}

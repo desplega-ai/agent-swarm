@@ -149,13 +149,14 @@ const COMMAND_HELP: Record<
     options: [
       "  --dry-run              Preview what would be generated without writing",
       "  -y, --yes              Non-interactive mode (reads from env vars)",
-      "  --preset <name>        Preset: dev, content, research, solo",
+      "  --preset <name>        Preset: full, dev, content, research, solo (default: full)",
       "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [
       `  ${binName} onboard`,
       `  ${binName} onboard --dry-run`,
+      `  ${binName} onboard --yes`,
       `  ${binName} onboard --yes --preset=dev`,
       `  ANTHROPIC_API_KEY=sk-... ${binName} onboard --yes --preset=solo`,
     ].join("\n"),

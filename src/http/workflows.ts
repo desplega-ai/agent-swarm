@@ -18,6 +18,7 @@ import {
 } from "../be/db";
 import {
   AssetKeySchema,
+  AutomationIntegrationIdSchema,
   CooldownConfigSchema,
   InputValueSchema,
   TriggerConfigSchema,
@@ -126,6 +127,9 @@ const createWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
   }),
@@ -173,6 +177,9 @@ const updateWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional().nullable(),
     input: z.record(z.string(), InputValueSchema).optional().nullable(),
     triggerSchema: z.record(z.string(), z.unknown()).optional().nullable(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional().nullable(),
     vcsRepo: z.string().min(1).optional().nullable(),
     enabled: z.boolean().optional(),
@@ -562,6 +569,9 @@ export async function handleWorkflows(
         cooldown: parsed.body.cooldown,
         input: parsed.body.input,
         triggerSchema: parsed.body.triggerSchema,
+        params: parsed.body.params,
+        requiredParams: parsed.body.requiredParams,
+        requires: parsed.body.requires,
         dir: parsed.body.dir,
         vcsRepo: parsed.body.vcsRepo,
         createdByAgentId: myAgentId ?? undefined,
@@ -649,6 +659,11 @@ export async function handleWorkflows(
     if (parsed.body.triggerSchema !== undefined) {
       updateArgs.triggerSchema = parsed.body.triggerSchema;
     }
+    if (parsed.body.params !== undefined) updateArgs.params = parsed.body.params;
+    if (parsed.body.requiredParams !== undefined) {
+      updateArgs.requiredParams = parsed.body.requiredParams;
+    }
+    if (parsed.body.requires !== undefined) updateArgs.requires = parsed.body.requires;
     if (updatedBy1 !== null) {
       updateArgs.updatedBy = updatedBy1;
     }
@@ -732,6 +747,9 @@ export async function handleWorkflows(
         cooldown: body.cooldown === null ? null : body.cooldown,
         input: body.input === null ? null : body.input,
         triggerSchema: body.triggerSchema === null ? null : body.triggerSchema,
+        params: body.params,
+        requiredParams: body.requiredParams,
+        requires: body.requires,
         dir: body.dir === null ? null : body.dir,
         vcsRepo: body.vcsRepo === null ? null : body.vcsRepo,
         enabled: body.enabled,

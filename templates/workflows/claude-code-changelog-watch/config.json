@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "claude-code-changelog-watch",
+  "displayName": "Claude Code Changelog Watch",
+  "slug": "claude-code-changelog-watch",
+  "title": "Claude Code Changelog Watch",
+  "description": "Detect a new CLI release, announce it once, and record the delivered version.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": [],
+  "requires": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["release-notes", "harness"]
+}

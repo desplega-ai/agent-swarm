@@ -1,13 +1,19 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowUpCircle, Building2, ExternalLink, X } from "lucide-react";
+import { ArrowUpCircle, Building2, ExternalLink, Wrench, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
+import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
+import {
+  automationDisplayName,
+  automationFixText,
+  automationPurpose,
+} from "@/lib/automation-setup";
 import { cn } from "@/lib/utils";
 
 const CURRENT_VERSION = __APP_VERSION__;
@@ -15,6 +21,7 @@ const ORG_NAME_KEY = "SWARM_ORG_NAME";
 
 export function DashboardNudges() {
   const { user } = useCurrentUser();
+  const { data: status } = useStatusContext();
   const upgradeGate = useFeatureGate(CURRENT_VERSION);
   const { data: configs } = useConfigs({ scope: "global" });
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
@@ -26,11 +33,21 @@ export function DashboardNudges() {
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
   const showOrgName = configs !== undefined && !orgName && !orgNameCard.dismissed;
+  const waitingAutomations = status?.automations.filter(
+    (automation) => automation.state === "needs_setup",
+  );
+  const showAutomations = (waitingAutomations?.length ?? 0) > 0;
 
-  if (!showUpgrade && !showOrgName) return null;
+  if (!showUpgrade && !showOrgName && !showAutomations) return null;
 
   return (
-    <div className={cn("grid gap-3", showUpgrade && showOrgName && "md:grid-cols-2")}>
+    <div
+      className={cn(
+        "grid gap-3",
+        Number(showUpgrade) + Number(showOrgName) + Number(showAutomations) > 1 &&
+          "md:grid-cols-2 xl:grid-cols-3",
+      )}
+    >
       {showUpgrade && upgradeGate.currentVersion && (
         <NudgeCard
           icon={ArrowUpCircle}
@@ -72,6 +89,33 @@ export function DashboardNudges() {
           onDismiss={orgNameCard.dismiss}
         />
       )}
+
+      {waitingAutomations && waitingAutomations.length > 0 && (
+        <NudgeCard
+          icon={Wrench}
+          title={`${waitingAutomations.length} automations waiting on setup`}
+          description={
+            <details>
+              <summary>Review the values or integrations each automation still needs.</summary>
+              <ul className="mt-2 space-y-1">
+                {waitingAutomations.map((automation) => {
+                  return (
+                    <li key={`${automation.kind}:${automation.id}`} className="space-y-0.5">
+                      <p className="font-medium text-foreground">
+                        {automationDisplayName(automation)}
+                      </p>
+                      <p>{automationPurpose(automation)}</p>
+                      <Link to={automation.fixUrl} className="text-primary hover:underline">
+                        {automationFixText(automation)}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          }
+        />
+      )}
     </div>
   );
 }
@@ -86,8 +130,8 @@ function NudgeCard({
   icon: LucideIcon;
   title: string;
   description: ReactNode;
-  action: ReactNode;
-  onDismiss: () => void;
+  action?: ReactNode;
+  onDismiss?: () => void;
 }) {
   return (
     <Card className="gap-4 border-primary/20 bg-primary/[0.025] py-4 shadow-none">
@@ -99,19 +143,23 @@ function NudgeCard({
           <CardTitle className="text-sm">{title}</CardTitle>
           <CardDescription className="max-w-2xl leading-relaxed">{description}</CardDescription>
         </div>
-        <div className="flex items-start gap-1">
-          {action}
-          <Button
-            type="button"
-            size="icon-sm"
-            variant="ghost"
-            onClick={onDismiss}
-            aria-label={`Dismiss ${title}`}
-            title="Dismiss"
-          >
-            <X aria-hidden="true" />
-          </Button>
-        </div>
+        {(action || onDismiss) && (
+          <div className="flex items-start gap-1">
+            {action}
+            {onDismiss && (
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                onClick={onDismiss}
+                aria-label={`Dismiss ${title}`}
+                title="Dismiss"
+              >
+                <X aria-hidden="true" />
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

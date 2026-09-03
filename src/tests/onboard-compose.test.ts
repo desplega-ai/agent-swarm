@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { generateCompose } from "../commands/onboard/compose-generator.ts";
+import { getPresetById, PRESETS } from "../commands/onboard/presets.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
 
 function makeState(overrides: Partial<OnboardState>): OnboardState {
@@ -7,6 +8,26 @@ function makeState(overrides: Partial<OnboardState>): OnboardState {
 }
 
 describe("generateCompose", () => {
+  test("uses the full preset by default and includes every official template once", () => {
+    const full = getPresetById("full");
+
+    expect(PRESETS[0]).toBe(full);
+    expect(full?.services).toHaveLength(11);
+    expect(full?.services.map((service) => service.template)).toEqual([
+      "official/lead",
+      "official/coder",
+      "official/content-reviewer",
+      "official/content-strategist",
+      "official/content-writer",
+      "official/discoverability-optimizer",
+      "official/forward-deployed-engineer",
+      "official/researcher",
+      "official/reviewer",
+      "official/tester",
+      "official/ux-principles",
+    ]);
+  });
+
   // ── Dev preset: 1 lead + 2 coders ──
 
   const devState = makeState({
@@ -134,6 +155,13 @@ describe("generateCompose", () => {
     const yaml = generateCompose({ ...devState, provider, harness });
     const apiService = yaml.split("\n  lead:")[0];
     expect(apiService).toContain(variable);
+  });
+
+  test("sets the install-safe concurrency for each agent role", () => {
+    const yaml = generateCompose(devState);
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=30/g)).toHaveLength(1);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=10/g)).toHaveLength(2);
   });
 
   // ── Solo preset: 1 coder, no lead ──
