@@ -1,4 +1,3 @@
-import pkg from "../../package.json";
 import {
   type Client,
   ClientSideConnection,
@@ -9,6 +8,7 @@ import {
   type RequestPermissionResponse,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
+import pkg from "../../package.json";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { translateAcpSessionNotification } from "./acp-swarm-events";
