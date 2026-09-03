@@ -49,7 +49,6 @@
  */
 
 import { existsSync as nodeExistsSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
 import {
   type AgentMessageItem,
@@ -82,6 +81,7 @@ import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
 import { credentialsToAuthJson } from "./codex-oauth/auth-json.js";
+import { codexUserHome } from "./codex-oauth/home.js";
 import { CodexOAuthRefreshError, getValidCodexOAuth } from "./codex-oauth/storage.js";
 import { resolveCodexPrompt } from "./codex-skill-resolver";
 import { createCodexSwarmEventHandler } from "./codex-swarm-events";
@@ -204,7 +204,7 @@ export async function resolveCodexAuthMode(
   } = {},
 ): Promise<string | null> {
   const fsModule = await import("node:fs/promises");
-  const homedir = deps.homedir ?? os.homedir.bind(os);
+  const homedir = deps.homedir ?? codexUserHome;
   const fs = deps.fs ?? {
     readFile: (path: string, encoding: "utf-8") => fsModule.readFile(path, encoding),
     mkdir: (path: string, opts: { recursive: boolean; mode: number }) => fsModule.mkdir(path, opts),
@@ -586,7 +586,7 @@ export class CodexSession implements ProviderSession {
     // tree without polluting `~/.codex/skills` on the host. Fall back to the
     // runtime default of `${HOME}/.codex/skills`.
     this.skillsDir =
-      skillsDir ?? process.env.CODEX_SKILLS_DIR ?? join(os.homedir(), ".codex", "skills");
+      skillsDir ?? process.env.CODEX_SKILLS_DIR ?? join(codexUserHome(), ".codex", "skills");
     this.summarizeDeps = summarizeDeps;
     this.logFileHandle = Bun.file(config.logFile).writer();
     // Mirrors the resolution `buildCodexConfig` already applied when

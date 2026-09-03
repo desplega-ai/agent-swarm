@@ -31,6 +31,8 @@ describe("generateManifest", () => {
     expect(manifest).toHaveProperty("createdAt");
     expect(manifest).toHaveProperty("deployType");
     expect(manifest).toHaveProperty("preset");
+    expect(manifest).toHaveProperty("provider");
+    expect(manifest).toHaveProperty("providerLabel");
     expect(manifest).toHaveProperty("harness");
     expect(manifest).toHaveProperty("services");
     expect(manifest).toHaveProperty("integrations");
@@ -80,11 +82,25 @@ describe("generateManifest", () => {
 
   // ── State values propagate ──
 
-  test("deployType, preset, and harness match state", () => {
+  test("deployType, preset, provider, and harness match state", () => {
     const manifest = generateManifest(devState) as Record<string, unknown>;
     expect(manifest.deployType).toBe("local");
     expect(manifest.preset).toBe("dev");
+    expect(manifest.provider).toBe("claude");
+    expect(manifest.providerLabel).toBe("Claude Code");
     expect(manifest.harness).toBe("claude");
+  });
+
+  test("labels Bedrock as alpha and includes the capability warning", () => {
+    const manifest = generateManifest({
+      ...devState,
+      provider: "bedrock",
+      harness: "pi",
+    }) as Record<string, unknown>;
+    expect(manifest.providerLabel).toBe("AWS Bedrock (alpha)");
+    expect(manifest.providerNotice).toBe(
+      "Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.",
+    );
   });
 
   // ── Integration flags match state ──

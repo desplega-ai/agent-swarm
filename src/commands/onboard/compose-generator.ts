@@ -20,6 +20,28 @@ const ENV_CLAUDE_OAUTH = "      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TO
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_ANTHROPIC_KEY = "      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_HARNESS_PROVIDER = "      - HARNESS_PROVIDER=${HARNESS_PROVIDER}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_OPENAI_KEY = "      - OPENAI_API_KEY=${OPENAI_API_KEY}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_OPENROUTER_KEY = "      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_MODEL_OVERRIDE = "      - MODEL_OVERRIDE=${MODEL_OVERRIDE}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_AWS_REGION = "      - AWS_REGION=${AWS_REGION}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_AWS_ACCESS_KEY_ID = "      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_AWS_SECRET_ACCESS_KEY = "      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_AWS_SESSION_TOKEN = "      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_AWS_PROFILE = "      - AWS_PROFILE=${AWS_PROFILE}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const ENV_BEDROCK_AUTH_MODE = "      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE}";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
+const AWS_PROFILE_VOLUME = "      - ${HOME}/.aws:/home/worker/.aws:ro";
+// biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_GITHUB_TOKEN = "      - GITHUB_TOKEN=${GITHUB_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_GITHUB_EMAIL = "      - GITHUB_EMAIL=${GITHUB_EMAIL}";
@@ -33,6 +55,40 @@ const ENV_GITLAB_EMAIL = "      - GITLAB_EMAIL=${GITLAB_EMAIL}";
 const ENV_SENTRY_AUTH_TOKEN = "      - SENTRY_AUTH_TOKEN=${SENTRY_AUTH_TOKEN}";
 // biome-ignore lint/suspicious/noTemplateCurlyInString: Docker Compose env var syntax
 const ENV_SENTRY_ORG = "      - SENTRY_ORG=${SENTRY_ORG}";
+
+function appendProviderEnvironment(lines: string[], state: OnboardState, includeHarness: boolean) {
+  if (includeHarness) lines.push(ENV_HARNESS_PROVIDER);
+  switch (state.provider) {
+    case "claude":
+      lines.push(state.credentialType === "api_key" ? ENV_ANTHROPIC_KEY : ENV_CLAUDE_OAUTH);
+      break;
+    case "openai":
+      lines.push(ENV_OPENAI_KEY);
+      break;
+    case "openrouter":
+      lines.push(ENV_OPENROUTER_KEY);
+      lines.push(ENV_MODEL_OVERRIDE);
+      break;
+    case "bedrock":
+      // Workflow LLM nodes do not support Bedrock yet, so the API does not need AWS credentials.
+      if (!includeHarness) break;
+      lines.push("      # AWS Bedrock (alpha)");
+      lines.push(
+        "      # Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.",
+      );
+      lines.push(ENV_BEDROCK_AUTH_MODE);
+      lines.push(ENV_AWS_REGION);
+      lines.push(ENV_MODEL_OVERRIDE);
+      if (state.awsProfile) {
+        lines.push(ENV_AWS_PROFILE);
+      } else {
+        lines.push(ENV_AWS_ACCESS_KEY_ID);
+        lines.push(ENV_AWS_SECRET_ACCESS_KEY);
+        if (state.awsSessionToken) lines.push(ENV_AWS_SESSION_TOKEN);
+      }
+      break;
+  }
+}
 
 /**
  * Generate a docker-compose.yml string from onboard wizard state.
@@ -65,6 +121,7 @@ export function generateCompose(state: OnboardState): string {
   lines.push(ENV_API_KEY);
   lines.push(ENV_INSTALL_METHOD);
   lines.push(ENV_INSTALL_PRESET);
+  appendProviderEnvironment(lines, state, false);
   lines.push(`      - MCP_BASE_URL=http://localhost:${port}`);
   lines.push("      - APP_URL=https://app.agent-swarm.dev");
 
@@ -115,11 +172,7 @@ export function generateCompose(state: OnboardState): string {
     lines.push("        condition: service_healthy");
     lines.push("");
     lines.push("    environment:");
-    if (state.credentialType === "api_key") {
-      lines.push(ENV_ANTHROPIC_KEY);
-    } else {
-      lines.push(ENV_CLAUDE_OAUTH);
-    }
+    appendProviderEnvironment(lines, state, true);
     lines.push(ENV_API_KEY);
     lines.push(`      - AGENT_ID=${svc.agentId}`);
     lines.push(`      - AGENT_NAME=${agentName}`);
@@ -157,6 +210,9 @@ export function generateCompose(state: OnboardState): string {
     lines.push("      - swarm_logs:/app/logs");
     lines.push("      - swarm_shared:/app/shared");
     lines.push(`      - swarm_${svc.sanitizedName}:/app/agent`);
+    if (state.provider === "bedrock" && state.awsProfile) {
+      lines.push(AWS_PROFILE_VOLUME);
+    }
     lines.push("");
     lines.push("    restart: unless-stopped");
   }

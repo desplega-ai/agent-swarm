@@ -65,6 +65,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { TaskAttachmentsSection } from "@/components/shared/task-attachments-section";
 import { CollapsibleComposerDock } from "@/components/steering/collapsible-composer-dock";
 import { SteerComposer } from "@/components/steering/steer-composer";
+import { TaskFailureHelpDialog } from "@/components/support/task-failure-help-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1122,6 +1123,7 @@ export default function TaskDetailPage() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      <TaskFailureHelpDialog task={task} />
       {/* Breadcrumb — fixed at top across all breakpoints */}
       <div className="px-1 pb-2 shrink-0">
         <button

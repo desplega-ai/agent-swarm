@@ -1,6 +1,7 @@
 import { Select, TextInput } from "@inkjs/ui";
 import { Box, Text } from "ink";
 import { useEffect, useState } from "react";
+import { normalizeBedrockModel } from "../non-interactive.ts";
 import type { StepProps } from "../types.ts";
 
 type SubStep =
@@ -12,7 +13,7 @@ type SubStep =
 
 const TOKEN_REGEX = /sk-ant-oat[^\s]+/;
 
-export function HarnessCredentialsStep({ goToNext, addLog }: StepProps) {
+export function HarnessCredentialsStep({ state, goToNext, addLog }: StepProps) {
   const [subStep, setSubStep] = useState<SubStep>("choose_method");
   const [cliOutput, setCliOutput] = useState("");
   const [parsedToken, setParsedToken] = useState("");
@@ -61,6 +62,10 @@ export function HarnessCredentialsStep({ goToNext, addLog }: StepProps) {
       cancelled = true;
     };
   }, [subStep, addLog]);
+
+  if (state.provider !== "claude") {
+    return <ProviderCredentialFields state={state} goToNext={goToNext} addLog={addLog} />;
+  }
 
   if (subStep === "choose_method") {
     return (
@@ -192,4 +197,179 @@ export function HarnessCredentialsStep({ goToNext, addLog }: StepProps) {
   }
 
   return null;
+}
+
+type ProviderCredentialProps = Pick<StepProps, "state" | "goToNext" | "addLog">;
+
+function ProviderCredentialFields({ state, goToNext, addLog }: ProviderCredentialProps) {
+  const [field, setField] = useState("key");
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  const collect = (name: string, value: string, next: string) => {
+    const trimmed = value.trim();
+    if (!trimmed && name !== "awsSessionToken") {
+      addLog("Credential value cannot be empty.");
+      return;
+    }
+    setValues((current) => ({ ...current, [name]: trimmed }));
+    setField(next);
+  };
+
+  if (state.provider === "openai") {
+    return (
+      <CredentialInput
+        label="Paste your OPENAI_API_KEY:"
+        placeholder="sk-..."
+        onSubmit={(value) => {
+          const trimmed = value.trim();
+          if (!trimmed) return addLog("API key cannot be empty.");
+          addLog("OpenAI API key collected");
+          goToNext({ openaiApiKey: trimmed });
+        }}
+      />
+    );
+  }
+
+  if (state.provider === "openrouter") {
+    if (field === "key") {
+      return (
+        <CredentialInput
+          label="Paste your OPENROUTER_API_KEY:"
+          placeholder="sk-or-v1-..."
+          onSubmit={(value) => collect("openrouterApiKey", value, "model")}
+        />
+      );
+    }
+    return (
+      <CredentialInput
+        label="OpenRouter model:"
+        placeholder="openrouter/qwen/qwen3-coder-flash"
+        hint="Press Enter to use openrouter/qwen/qwen3-coder-flash."
+        allowEmpty
+        onSubmit={(value) => {
+          addLog("OpenRouter credentials collected");
+          goToNext({
+            openrouterApiKey: values.openrouterApiKey ?? "",
+            modelOverride: value.trim() || "openrouter/qwen/qwen3-coder-flash",
+          });
+        }}
+      />
+    );
+  }
+
+  if (field === "key") {
+    return (
+      <Box flexDirection="column" padding={1}>
+        <Text bold>How should AWS credentials be loaded?</Text>
+        <Box marginTop={1}>
+          <Select
+            options={[
+              { label: "AWS profile (~/.aws)", value: "profile" },
+              { label: "Access key and secret", value: "access_key" },
+            ]}
+            onChange={(value) => setField(value === "profile" ? "awsProfile" : "awsAccessKeyId")}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  if (field === "awsProfile") {
+    return (
+      <CredentialInput
+        label="AWS profile name:"
+        placeholder="default"
+        onSubmit={(value) => collect("awsProfile", value, "awsRegion")}
+      />
+    );
+  }
+
+  if (field === "awsAccessKeyId") {
+    return (
+      <CredentialInput
+        label="AWS_ACCESS_KEY_ID:"
+        placeholder="AKIA..."
+        onSubmit={(value) => collect("awsAccessKeyId", value, "awsSecretAccessKey")}
+      />
+    );
+  }
+
+  if (field === "awsSecretAccessKey") {
+    return (
+      <CredentialInput
+        label="AWS_SECRET_ACCESS_KEY:"
+        onSubmit={(value) => collect("awsSecretAccessKey", value, "awsSessionToken")}
+      />
+    );
+  }
+
+  if (field === "awsSessionToken") {
+    return (
+      <CredentialInput
+        label="AWS_SESSION_TOKEN (optional):"
+        hint="Press Enter to skip for long-lived credentials."
+        allowEmpty
+        onSubmit={(value) => collect("awsSessionToken", value, "awsRegion")}
+      />
+    );
+  }
+
+  if (field === "awsRegion") {
+    return (
+      <CredentialInput
+        label="AWS_REGION:"
+        placeholder="us-east-1"
+        onSubmit={(value) => collect("awsRegion", value, "model")}
+      />
+    );
+  }
+
+  return (
+    <CredentialInput
+      label="Bedrock model id:"
+      placeholder="anthropic.claude-sonnet-4-20250514-v1:0"
+      hint="The amazon-bedrock/ prefix is added automatically."
+      onSubmit={(value) => {
+        const trimmed = value.trim();
+        if (!trimmed) return addLog("Bedrock model id cannot be empty.");
+        addLog("AWS Bedrock credentials collected (alpha)");
+        goToNext({
+          awsProfile: values.awsProfile ?? "",
+          awsAccessKeyId: values.awsAccessKeyId ?? "",
+          awsSecretAccessKey: values.awsSecretAccessKey ?? "",
+          awsSessionToken: values.awsSessionToken ?? "",
+          awsRegion: values.awsRegion ?? "",
+          modelOverride: normalizeBedrockModel(trimmed),
+        });
+      }}
+    />
+  );
+}
+
+function CredentialInput({
+  label,
+  placeholder,
+  hint,
+  allowEmpty = false,
+  onSubmit,
+}: {
+  label: string;
+  placeholder?: string;
+  hint?: string;
+  allowEmpty?: boolean;
+  onSubmit: (value: string) => void;
+}) {
+  return (
+    <Box flexDirection="column" padding={1}>
+      <Text bold>{label}</Text>
+      {hint ? <Text dimColor>{hint}</Text> : null}
+      <TextInput
+        placeholder={placeholder}
+        onSubmit={(value) => {
+          if (!allowEmpty && !value.trim()) return;
+          onSubmit(value);
+        }}
+      />
+    </Box>
+  );
 }

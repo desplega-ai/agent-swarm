@@ -36,7 +36,7 @@ The easiest way to deploy a full swarm with API, workers, and lead agent.
 ### Prerequisites
 
 - Docker & Docker Compose installed
-- A Claude Code OAuth token (run `claude setup-token` to get one)
+- One supported harness credential from the table below
 - An API key (any secret string you choose — all services share this key)
 
 ### Quick Start
@@ -52,7 +52,8 @@ cp docker-compose.example.yml docker-compose.yml
 ```bash
 # ---- Required ----
 API_KEY=your-secret-api-key
-CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Run `claude setup-token` to get this
+HARNESS_PROVIDER=claude
+CLAUDE_CODE_OAUTH_TOKEN=your-oauth-token   # Or configure another provider below
 
 # ---- Optional ----
 GITHUB_TOKEN=your-github-token             # For git operations inside agents
@@ -61,7 +62,18 @@ GITHUB_NAME=Your Name
 SWARM_URL=localhost                         # Base domain for service discovery
 ```
 
-> **Tip:** You can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`
+Choose one provider for the whole example fleet:
+
+| Provider | `HARNESS_PROVIDER` | Credential/configuration |
+| --- | --- | --- |
+| Claude Code | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` (run `claude setup-token`) or `ANTHROPIC_API_KEY` |
+| OpenAI | `codex` | `OPENAI_API_KEY` |
+| OpenRouter | `pi` | `OPENROUTER_API_KEY` and a `MODEL_OVERRIDE` such as `openrouter/anthropic/claude-sonnet-4-5` |
+| AWS Bedrock (alpha) | `pi` | `AWS_REGION`, `MODEL_OVERRIDE=amazon-bedrock/<model-id>`, and AWS access keys or `AWS_PROFILE` |
+
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix).
+
+> **Tip:** Claude users can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`.
 
 **Step 3:** Generate stable UUIDs for each agent. The example compose file has placeholder UUIDs — replace them with your own so that agent identity persists across restarts.
 
@@ -103,7 +115,7 @@ The example `docker-compose.yml` sets up:
 
 - **API service** (port 3013) — MCP HTTP server with SQLite database
 - **1 Lead agent** — Coordinator that delegates tasks to workers
-- **2 Worker agents** — Claude-powered agents that execute tasks
+- **2 Worker agents** — Provider-powered agents that execute tasks
 - **3 Content agents** (optional) — Specialized workers for content writing, reviewing, and strategy, each bootstrapped from a template via `TEMPLATE_ID`
 
 ### Volumes & Persistence
@@ -451,7 +463,12 @@ When a worker starts, it:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | OAuth token for Claude CLI (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). |
+| `HARNESS_PROVIDER` | No | Fleet harness: `claude` (default), `codex` for OpenAI, or `pi` for OpenRouter and AWS Bedrock (alpha). |
+| `CLAUDE_CODE_OAUTH_TOKEN` | One of four | Claude Code OAuth token (run `claude setup-token`). Supports comma-separated values for [multi-credential load balancing](./docs/ENVS.md#multi-credential-support). `ANTHROPIC_API_KEY` is also accepted for Claude. |
+| `OPENAI_API_KEY` | One of four | OpenAI credential for the `codex` harness. Also enables workflow LLM nodes and optional memory embeddings. |
+| `OPENROUTER_API_KEY` | One of four | OpenRouter credential for the `pi` harness and workflow LLM nodes. Use `OPENROUTER_BASE_URL` for a compatible gateway. |
+| `AWS_REGION` | One of four | Region for AWS Bedrock (alpha). Also set `MODEL_OVERRIDE=amazon-bedrock/<model-id>` and provide the standard AWS credential chain. Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. |
+| `MODEL_OVERRIDE` | Provider-specific | OpenRouter model slug or `amazon-bedrock/<model-id>` for Bedrock. Leave empty for provider defaults. |
 | `API_KEY` | Yes | API key for MCP server |
 | `AGENT_ID` | No | Agent UUID (assigned on join if not set). **Keep stable for task resume.** |
 | `AGENT_ROLE` | No | Role: `worker` (default) or `lead` |

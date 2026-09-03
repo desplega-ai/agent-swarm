@@ -15,6 +15,10 @@
 #  setup, especially if you add more workers.
 #  In isolated environments where each container has its own network namespace,
 #  you may map all services to the same port (e.g. 3000:3000).
+#
+# Provider mapping: claude -> claude, openai -> codex, openrouter -> pi,
+# bedrock -> pi (AWS Bedrock (alpha)).
+# Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.
 
 services:
   minio:
@@ -119,6 +123,13 @@ services:
 
       - MCP_BASE_URL=${MCP_BASE_URL}
       - APP_URL=${APP_URL}
+      # Provider credentials are also needed by workflow LLM nodes in the API service.
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
 
       # Optional: Business-Use instrumentation
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
@@ -162,7 +173,19 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set LEAD_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${LEAD_AGENT_ID:?Set LEAD_AGENT_ID in .env (generate one with uuidgen)}"
@@ -193,6 +216,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_lead:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -207,7 +232,19 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set WORKER_1_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${WORKER_1_AGENT_ID:?Set WORKER_1_AGENT_ID in .env (generate one with uuidgen)}"
@@ -236,6 +273,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_worker_1:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -250,7 +289,19 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set WORKER_2_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${WORKER_2_AGENT_ID:?Set WORKER_2_AGENT_ID in .env (generate one with uuidgen)}"
@@ -279,6 +330,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_worker_2:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -293,14 +346,25 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_WRITER_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_WRITER_AGENT_ID:?Set CONTENT_WRITER_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-writer
-      - MODEL_OVERRIDE=opus
       # On workers, CAPABILITIES is the agent's declared skill tags for join-swarm /
       # task routing (free-form strings allowed). This is distinct from the API
       # server's CAPABILITIES env, which gates which MCP tool groups the server
@@ -327,6 +391,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_content_writer:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -341,6 +407,19 @@ services:
         condition: service_healthy
 
     environment:
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_REVIEWER_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_REVIEWER_AGENT_ID:?Set CONTENT_REVIEWER_AGENT_ID in .env (generate one with uuidgen)}"
@@ -348,13 +427,6 @@ services:
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-reviewer
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-review
-      # Content reviewer uses pi-mono via OpenRouter
-      - HARNESS_PROVIDER=pi
-      - MODEL_OVERRIDE=moonshotai/kimi-k2.5
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      # In the pi case we MUST NOT pass the claude creds as these will
-      # be used instead and the harness won't be correctly configure
-      # - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
 
       # If in the same Docker network, use the service name
       - MCP_BASE_URL=http://api:3013
@@ -376,6 +448,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_content_reviewer:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -390,14 +464,25 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_STRATEGIST_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_STRATEGIST_AGENT_ID:?Set CONTENT_STRATEGIST_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/content-strategist
-      - MODEL_OVERRIDE=sonnet
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,epics,memory,content-strategy
 
       # If in the same Docker network, use the service name
@@ -420,6 +505,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_content_strategist:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -434,14 +521,25 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set UX_PRINCIPLES_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${UX_PRINCIPLES_AGENT_ID:?Set UX_PRINCIPLES_AGENT_ID in .env (generate one with uuidgen)}"
       - AGENT_ROLE=worker
       # Template for initial profile (fetched on first boot)
       - TEMPLATE_ID=official/ux-principles
-      - MODEL_OVERRIDE=sonnet
       - CAPABILITIES=core,task-pool,messaging,profiles,services,scheduling,memory,ux-analysis
 
       # If in the same Docker network, use the service name
@@ -464,6 +562,8 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_ux_principles:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
 
@@ -478,7 +578,19 @@ services:
         condition: service_healthy
 
     environment:
-      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+      - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
+      - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
+      - AWS_REGION=${AWS_REGION:-}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set DISCOVERABILITY_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${DISCOVERABILITY_AGENT_ID:?Set DISCOVERABILITY_AGENT_ID in .env (generate one with uuidgen)}"
@@ -507,161 +619,10 @@ services:
       - swarm_logs:/logs
       - swarm_shared:/workspace/shared
       - swarm_discoverability_optimizer:/workspace/personal
+      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
+      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     restart: unless-stopped
-
-  # Example: Pi-mono worker (uses HARNESS_PROVIDER=pi instead of Claude)
-  # Uncomment to add a pi-mono powered worker to the swarm.
-  # Requires ANTHROPIC_API_KEY or OPENROUTER_API_KEY for authentication.
-  #
-  # pi-worker:
-  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
-  #   platform: linux/amd64
-  #   pull_policy: always
-  #   stop_grace_period: 60s
-  #
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #
-  #   environment:
-  #     - HARNESS_PROVIDER=pi
-  #     # Set the model as defined in Anthropic API
-  #     # https://platform.claude.com/docs/en/about-claude/models/overview
-  #     - MODEL_OVERRIDE=claude-sonnet-4-6
-  #     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-  #     # Or use OpenRouter instead:
-  #     # - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-  #     # Set the model as defined in Openrouter UI
-  #     # https://openrouter.ai/models
-  #     # - MODEL_OVERRIDE=moonshotai/kimi-k2.5
-  #     - API_KEY=${API_KEY}
-  #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-  #     - AGENT_ID=b2a3c4d5-6789-01ef-abcd-234567890abc
-  #     - AGENT_ROLE=worker
-  #
-  #     - MCP_BASE_URL=http://api:3013
-  #
-  #     - YOLO=true
-  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
-  #     - GITHUB_NAME=${GITHUB_NAME:-}
-  #     - SWARM_URL=${SWARM_URL:-localhost}
-  #
-  #   ports:
-  #     - "${PI_WORKER_PORT:-3023}:3000"
-  #
-  #   volumes:
-  #     - swarm_logs:/logs
-  #     - swarm_shared:/workspace/shared
-  #     - swarm_pi_worker:/workspace/personal
-  #     # Persist pi-mono session files across restarts
-  #     - swarm_pi_agent:/home/worker/.pi/agent
-  #
-  #   restart: unless-stopped
-
-  # Example: Codex worker (uses HARNESS_PROVIDER=codex instead of Claude)
-  # Uncomment to add a Codex powered worker to the swarm.
-  # Requires OPENAI_API_KEY, a pre-seeded ~/.codex/auth.json volume mount,
-  # or ChatGPT OAuth credentials stored via `agent-swarm codex-login`.
-  # For OAuth, run `agent-swarm codex-login` from your laptop against the same
-  # swarm API that this worker uses. The entrypoint restores `codex_oauth`
-  # from the config store into /home/worker/.codex/auth.json at boot, so
-  # OPENAI_API_KEY is not needed for that path.
-  #
-  # codex-worker:
-  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
-  #   platform: linux/amd64
-  #   pull_policy: always
-  #   stop_grace_period: 60s
-  #
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #
-  #   environment:
-  #     - HARNESS_PROVIDER=codex
-  #     # Codex model — see src/providers/codex-models.ts for the full catalogue.
-  #     # Default baked into the image: gpt-5.4
-  #     # - MODEL_OVERRIDE=gpt-5.4
-  #     # Optional when using standard OpenAI API billing.
-  #     # Omit when using ChatGPT OAuth via `agent-swarm codex-login`.
-  #     - OPENAI_API_KEY=${OPENAI_API_KEY}
-  #     - API_KEY=${API_KEY}
-  #     # Replace by a valid UUID - IMPORTANT: Keep stable for task resume after restarts
-  #     - AGENT_ID=c3b4d5e6-7890-12fa-bcde-345678901bcd
-  #     - AGENT_ROLE=worker
-  #
-  #     # Worker-side API URL. Your laptop can use a different public URL when
-  #     # running `agent-swarm codex-login`, as long as both hit the same API.
-  #     - MCP_BASE_URL=http://api:3013
-  #
-  #     - YOLO=true
-  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
-  #     - GITHUB_NAME=${GITHUB_NAME:-}
-  #     - SWARM_URL=${SWARM_URL:-localhost}
-  #
-  #   ports:
-  #     - "${CODEX_WORKER_PORT:-3024}:3000"
-  #
-  #   volumes:
-  #     - swarm_logs:/logs
-  #     - swarm_shared:/workspace/shared
-  #     - swarm_codex_worker:/workspace/personal
-  #     # Persist codex auth/session files across restarts
-  #     - swarm_codex_agent:/home/worker/.codex
-  #
-  #   restart: unless-stopped
-
-  # Example: opencode worker (uses HARNESS_PROVIDER=opencode instead of Claude)
-  # Uncomment to add an opencode-powered worker to the swarm.
-  # Requires at least one of: OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY.
-  # The opencode CLI is bundled in the worker image; set OPENCODE_VERSION ARG at
-  # build time to pin a specific release.
-  #
-  # worker-opencode:
-  #   image: "ghcr.io/desplega-ai/agent-swarm-worker:latest"
-  #   platform: linux/amd64
-  #   pull_policy: always
-  #   stop_grace_period: 60s
-  #
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #
-  #   environment:
-  #     - HARNESS_PROVIDER=opencode
-  #     # Model passed to opencode — use any model supported by your provider.
-  #     # - MODEL_OVERRIDE=anthropic/claude-sonnet-4-5
-  #     # At least one credential is required:
-  #     - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-  #     # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-  #     # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-  #     - API_KEY=${API_KEY}
-  #     # Replace with a valid UUID — IMPORTANT: keep stable across restarts for task resume
-  #     - AGENT_ID=e4c5d6f7-8901-23gb-cdef-456789012cde
-  #     - AGENT_ROLE=worker
-  #
-  #     - MCP_BASE_URL=http://api:3013
-  #
-  #     - YOLO=true
-  #     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
-  #     - GITHUB_EMAIL=${GITHUB_EMAIL:-}
-  #     - GITHUB_NAME=${GITHUB_NAME:-}
-  #     - SWARM_URL=${SWARM_URL:-localhost}
-  #
-  #   ports:
-  #     - "${OPENCODE_WORKER_PORT:-3025}:3000"
-  #
-  #   volumes:
-  #     - swarm_logs:/logs
-  #     - swarm_shared:/workspace/shared
-  #     - swarm_opencode_worker:/workspace/personal
-  #     # Persist opencode session/auth files across restarts
-  #     - swarm_opencode_agent:/home/worker/.local/share/opencode
-  #
-  #   restart: unless-stopped
 
 secrets:
   # Base64-encoded 32-byte AES-256-GCM key for swarm_config at-rest encryption.

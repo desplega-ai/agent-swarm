@@ -22,6 +22,9 @@ import "../prompts/session-templates";
 
 const TEST_DB_PATH = "./test-scripts-mcp-e2e.sqlite";
 const API_KEY = "test-scripts-mcp-key-1234567890";
+// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
+// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
+const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
 
 function fakeEmbedding(text: string): Float32Array {
   const lower = text.toLowerCase();
@@ -244,7 +247,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(upsert.structuredContent.data?.name).toBe("canonical-authoring-contract");
   });
 
-  test("exercise script-upsert -> script-search -> script-run -> script-delete", async () => {
+  spawnTest("exercise script-upsert -> script-search -> script-run -> script-delete", async () => {
     const tools = buildToolServer();
     const source = `export default async (args: { value: number }) => ({ result: args.value * 7 });`;
 
@@ -288,64 +291,67 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(del.structuredContent.data?.deleted).toBe(true);
   });
 
-  test("oversized script result spills byte-completely and stays below the wire ceiling", async () => {
-    const tools = buildToolServer();
-    const blob = "x".repeat(11_800);
-    const source = `export default async () => ({ blob: "${blob}" });`;
+  spawnTest(
+    "oversized script result spills byte-completely and stays below the wire ceiling",
+    async () => {
+      const tools = buildToolServer();
+      const blob = "x".repeat(11_800);
+      const source = `export default async () => ({ blob: "${blob}" });`;
 
-    const run = (await tools.run.handler(
-      { source, intent: "oversized payload regression" },
-      meta(workerId),
-    )) as StructuredResult<{ result: { blob: string } }>;
+      const run = (await tools.run.handler(
+        { source, intent: "oversized payload regression" },
+        meta(workerId),
+      )) as StructuredResult<{ result: { blob: string } }>;
 
-    const text = run.content[0]?.text ?? "";
-    expect(run.isError).toBeFalsy();
-    expect(run.structuredContent.success).toBe(true);
-    expect(run.structuredContent.data).toBeUndefined();
-    const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
-    const overflowNamespace = mcpOverflowNamespace(workerId);
-    expect(fullValueAt.startsWith(`kv://${overflowNamespace}/v1/script-run/`)).toBe(true);
-    expect(run.structuredContent.truncation).toMatchObject({
-      truncated: true,
-      limitBytes: 10_000,
-      retrieval: expect.stringContaining("ctx.swarm.kv_get"),
-    });
-    expect(run.structuredContent.truncation?.originalBytes).toBeGreaterThan(blob.length);
-    const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
-    expect(afterBytes).toBeLessThanOrEqual(10_000);
-    expect(text).toContain('result:\n{\n  "blob": "');
-    expect(text).toContain("[truncated");
-    expect(text).toContain(`kv://${overflowNamespace}/`);
+      const text = run.content[0]?.text ?? "";
+      expect(run.isError).toBeFalsy();
+      expect(run.structuredContent.success).toBe(true);
+      expect(run.structuredContent.data).toBeUndefined();
+      const fullValueAt = run.structuredContent.truncation?.fullValueAt ?? "";
+      const overflowNamespace = mcpOverflowNamespace(workerId);
+      expect(fullValueAt.startsWith(`kv://${overflowNamespace}/v1/script-run/`)).toBe(true);
+      expect(run.structuredContent.truncation).toMatchObject({
+        truncated: true,
+        limitBytes: 10_000,
+        retrieval: expect.stringContaining("ctx.swarm.kv_get"),
+      });
+      expect(run.structuredContent.truncation?.originalBytes).toBeGreaterThan(blob.length);
+      const afterBytes = Buffer.byteLength(JSON.stringify(run), "utf8");
+      expect(afterBytes).toBeLessThanOrEqual(10_000);
+      expect(text).toContain('result:\n{\n  "blob": "');
+      expect(text).toContain("[truncated");
+      expect(text).toContain(`kv://${overflowNamespace}/`);
 
-    const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
-    const stored = await getKv(overflowNamespace, key);
-    const canonical = JSON.parse(String(stored?.value)) as {
-      outcome: {
-        ok: boolean;
-        message: string;
-        details?: string;
-        data: { status: number; data: { result: { blob: string } } };
+      const key = fullValueAt.replace(`kv://${overflowNamespace}/`, "");
+      const stored = await getKv(overflowNamespace, key);
+      const canonical = JSON.parse(String(stored?.value)) as {
+        outcome: {
+          ok: boolean;
+          message: string;
+          details?: string;
+          data: { status: number; data: { result: { blob: string } } };
+        };
       };
-    };
-    expect(canonical.outcome.data.data.result.blob).toBe(blob);
+      expect(canonical.outcome.data.data.result.blob).toBe(blob);
 
-    const fallback = JSON.stringify(canonical.outcome.data, null, 2);
-    const rendered = canonical.outcome.details ?? fallback;
-    const beforeWire = {
-      content: [{ type: "text", text: `${canonical.outcome.message}\n\n${rendered}` }],
-      structuredContent: {
-        ...canonical.outcome.data,
-        success: canonical.outcome.ok,
-        message: canonical.outcome.message,
-        ...(canonical.outcome.details ? { details: canonical.outcome.details } : {}),
-      },
-      isError: !canonical.outcome.ok,
-    };
-    const beforeBytes = Buffer.byteLength(JSON.stringify(beforeWire), "utf8");
-    expect(beforeBytes).toBeGreaterThan(10_000);
-  });
+      const fallback = JSON.stringify(canonical.outcome.data, null, 2);
+      const rendered = canonical.outcome.details ?? fallback;
+      const beforeWire = {
+        content: [{ type: "text", text: `${canonical.outcome.message}\n\n${rendered}` }],
+        structuredContent: {
+          ...canonical.outcome.data,
+          success: canonical.outcome.ok,
+          message: canonical.outcome.message,
+          ...(canonical.outcome.details ? { details: canonical.outcome.details } : {}),
+        },
+        isError: !canonical.outcome.ok,
+      };
+      const beforeBytes = Buffer.byteLength(JSON.stringify(beforeWire), "utf8");
+      expect(beforeBytes).toBeGreaterThan(10_000);
+    },
+  );
 
-  test("oversized script-return arrays keep a shortened non-empty prefix", async () => {
+  spawnTest("oversized script-return arrays keep a shortened non-empty prefix", async () => {
     const tools = buildToolServer();
     const source = `
       export default async () =>
@@ -384,7 +390,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(canonical.outcome.data.data.result).toHaveLength(20);
   });
 
-  test("persists a successful inline run with kind 'inline' and no journal", async () => {
+  spawnTest("persists a successful inline run with kind 'inline' and no journal", async () => {
     const tools = buildToolServer();
     const source = `export default async (args: { value: number }) => ({ doubled: args.value * 2 });`;
 
@@ -416,7 +422,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(detail.structuredContent.data?.journal).toEqual([]);
   });
 
-  test("persists a failed inline run with kind 'inline' and an error", async () => {
+  spawnTest("persists a failed inline run with kind 'inline' and an error", async () => {
     const tools = buildToolServer();
     const source = `export default async () => { throw new Error("boom"); };`;
 
@@ -583,7 +589,7 @@ describe("script_ MCP HTTP proxy tools", () => {
     expect(detail.content[0]?.text).toContain("step exploded");
   });
 
-  test("typed SDK fixture passes upsert typecheck and wrong arg type fails", async () => {
+  spawnTest("typed SDK fixture passes upsert typecheck and wrong arg type fails", async () => {
     const tools = buildToolServer();
     const source = `
       import type { ScriptContext, SwarmSdk } from "swarm-sdk";
