@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ExecutorMeta } from "../../types";
-import { getOpenRouterBaseUrl } from "../../utils/openrouter-base-url";
 import { BaseExecutor, type ExecutorResult } from "./base";
+import { resolveWorkflowLlmConfig } from "./workflow-llm";
 
 // ─── Schemas ────────────────────────────────────────────────
 
@@ -23,15 +23,17 @@ export async function executeRawLlm(
   | { status: "success"; output: z.infer<typeof RawLlmOutputSchema>; error?: string }
   | { status: "failed"; error: string }
 > {
-  const modelName = config.model ?? "google/gemini-3-flash-preview";
+  let modelName = config.model ?? "google/gemini-3-flash-preview";
 
   try {
     const { createOpenAI } = await import("@ai-sdk/openai");
-    const openrouter = createOpenAI({
-      baseURL: getOpenRouterBaseUrl(),
-      apiKey: process.env.OPENROUTER_API_KEY,
+    const llmConfig = await resolveWorkflowLlmConfig(config.model);
+    modelName = llmConfig.model;
+    const provider = createOpenAI({
+      baseURL: llmConfig.baseURL,
+      apiKey: llmConfig.apiKey,
     });
-    const model = openrouter(modelName);
+    const model = provider(llmConfig.model);
 
     if (config.schema) {
       const { generateObject, jsonSchema } = await import("ai");

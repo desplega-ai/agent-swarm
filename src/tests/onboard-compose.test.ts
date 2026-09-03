@@ -53,6 +53,63 @@ describe("generateCompose", () => {
     expect(yaml).toContain("  worker-coder-2:");
   });
 
+  test.each([
+    {
+      provider: "claude" as const,
+      harness: "claude" as const,
+      expected: ["HARNESS_PROVIDER=", "CLAUDE_CODE_OAUTH_TOKEN"],
+    },
+    {
+      provider: "openai" as const,
+      harness: "codex" as const,
+      expected: ["HARNESS_PROVIDER=", "OPENAI_API_KEY"],
+    },
+    {
+      provider: "openrouter" as const,
+      harness: "pi" as const,
+      expected: ["HARNESS_PROVIDER=", "OPENROUTER_API_KEY", "MODEL_OVERRIDE"],
+    },
+  ])("passes $provider runtime variables to every agent service", ({
+    provider,
+    harness,
+    expected,
+  }) => {
+    const yaml = generateCompose({ ...devState, provider, harness });
+    const agentServices = `  lead:${yaml.split("\n  lead:")[1]}`;
+    for (const variable of expected) {
+      expect(agentServices.split("\n").filter((line) => line.includes(variable))).toHaveLength(3);
+    }
+  });
+
+  test("passes AWS profile configuration and mount to the API and every Bedrock agent", () => {
+    const yaml = generateCompose({
+      ...devState,
+      provider: "bedrock",
+      harness: "pi",
+      awsProfile: "swarm",
+      awsRegion: "us-east-1",
+      modelOverride: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+    });
+    expect(yaml.match(/HARNESS_PROVIDER=\$\{HARNESS_PROVIDER\}/g)).toHaveLength(3);
+    expect(yaml.match(/AWS_PROFILE=\$\{AWS_PROFILE\}/g)).toHaveLength(4);
+    expect(yaml.match(/BEDROCK_AUTH_MODE=\$\{BEDROCK_AUTH_MODE\}/g)).toHaveLength(4);
+    expect(yaml.match(/\$\{HOME\}\/\.aws:\/home\/worker\/\.aws:ro/g)).toHaveLength(4);
+    expect(yaml.match(/Alpha: session summaries/g)).toHaveLength(4);
+  });
+
+  test.each([
+    { provider: "openai" as const, harness: "codex" as const, variable: "OPENAI_API_KEY" },
+    { provider: "openrouter" as const, harness: "pi" as const, variable: "OPENROUTER_API_KEY" },
+  ])("passes $provider credentials to the API for workflow LLM nodes", ({
+    provider,
+    harness,
+    variable,
+  }) => {
+    const yaml = generateCompose({ ...devState, provider, harness });
+    const apiService = yaml.split("\n  lead:")[0];
+    expect(apiService).toContain(variable);
+  });
+
   // ── Solo preset: 1 coder, no lead ──
 
   const soloState = makeState({

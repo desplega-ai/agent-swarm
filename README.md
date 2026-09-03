@@ -153,7 +153,16 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 
 Need help? Contact us at [contact@desplega.sh](mailto:contact@desplega.sh).
 
-**Prerequisites:** [Docker](https://docker.com) and at least one supported harness credential. The default quick start assumes a [Claude Code](https://docs.anthropic.com/en/docs/claude-code) OAuth token (`claude setup-token`), but pi-mono / Bedrock, Codex, Devin, and other provider setups are also supported.
+**Prerequisites:** [Docker](https://docker.com) and one supported harness credential. Claude remains the default, or choose one of these install-time mappings:
+
+| Provider | `HARNESS_PROVIDER` | Credential/configuration |
+| --- | --- | --- |
+| Claude Code | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
+| OpenAI | `codex` | `OPENAI_API_KEY` |
+| OpenRouter | `pi` | `OPENROUTER_API_KEY` and a `MODEL_OVERRIDE` |
+| AWS Bedrock (alpha) | `pi` | `AWS_REGION`, a Bedrock `MODEL_OVERRIDE`, and AWS credentials or profile |
+
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix).
 
 The fastest way is the onboarding wizard — it collects credentials, picks presets, and generates a working `docker-compose.yml`:
 
@@ -168,7 +177,7 @@ Prefer manual setup? Clone and run with Docker Compose:
 git clone https://github.com/desplega-ai/agent-swarm.git
 cd agent-swarm
 cp .env.docker.example .env
-# edit .env — set API_KEY plus the credential for your chosen harness (for example CLAUDE_CODE_OAUTH_TOKEN)
+# edit .env — set API_KEY, HARNESS_PROVIDER, and one credential set from the table above
 docker compose -f docker-compose.example.yml --env-file .env up -d
 ```
 

@@ -18,7 +18,50 @@ describe("generateEnv", () => {
       agentIds: { "worker-coder": "coder-uuid" },
     });
     const env = generateEnv(state);
+    expect(env).toContain("HARNESS_PROVIDER=claude");
     expect(env).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth-tok-abc123");
+  });
+
+  test("OpenAI emits the codex harness and OpenAI credential", () => {
+    const env = generateEnv(
+      makeState({ provider: "openai", harness: "codex", openaiApiKey: "sk-openai" }),
+    );
+    expect(env).toContain("HARNESS_PROVIDER=codex");
+    expect(env).toContain("OPENAI_API_KEY=sk-openai");
+    expect(env).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  test("OpenRouter emits the pi harness, credential, and suggested model", () => {
+    const env = generateEnv(
+      makeState({
+        provider: "openrouter",
+        harness: "pi",
+        openrouterApiKey: "sk-or-test",
+        modelOverride: "openrouter/qwen/qwen3-coder-flash",
+      }),
+    );
+    expect(env).toContain("HARNESS_PROVIDER=pi");
+    expect(env).toContain("OPENROUTER_API_KEY=sk-or-test");
+    expect(env).toContain("MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash");
+  });
+
+  test("AWS Bedrock emits the pi harness, profile, region, model, and alpha warning", () => {
+    const env = generateEnv(
+      makeState({
+        provider: "bedrock",
+        harness: "pi",
+        awsProfile: "swarm",
+        awsRegion: "us-east-1",
+        modelOverride: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+      }),
+    );
+    expect(env).toContain("HARNESS_PROVIDER=pi");
+    expect(env).toContain("BEDROCK_AUTH_MODE=sdk");
+    expect(env).toContain("AWS_PROFILE=swarm");
+    expect(env).toContain("AWS_REGION=us-east-1");
+    expect(env).toContain(
+      "Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.",
+    );
   });
 
   // ── GitHub integration enabled ──
