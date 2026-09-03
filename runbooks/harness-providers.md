@@ -12,7 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
-| ACP (generic) | `acp` | `ACPAdapter` | Spawns any [Agent Client Protocol](https://agentclientprotocol.com) agent named by `ACP_TARGET_COMMAND`; stdio ndjson via `@agentclientprotocol/sdk`. No swarm-side credentials — the target owns its auth |
+| ACP (generic) | `acp` | `ACPAdapter` | Spawns any [Agent Client Protocol](https://agentclientprotocol.com) agent named by `ACP_TARGET_COMMAND`; stdio ndjson via `@agentclientprotocol/sdk`. No swarm-side *model-provider* credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness; `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker, so point it only at a binary you trust |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 

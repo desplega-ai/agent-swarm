@@ -15,7 +15,7 @@ Agent Swarm uses a **harness** abstraction to decouple task execution from the u
 | **pi-mono** | `pi` | Open-source coding agent by [@badlogic](https://github.com/badlogic/pi-mono). Supports multiple model backends |
 | **Devin** | `devin` | Cognition's Devin via the `/sessions` API — session executes in Devin's managed cloud, ACU-based cost tracking |
 | **Claude Managed Agents** | `claude-managed` | Anthropic's managed cloud sandbox — sessions execute outside the worker. Requires one-time setup CLI to create the Anthropic-side Agent + Environment |
-| **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side credentials — the target process owns its own auth |
+| **ACP (Agent Client Protocol)** | `acp` | Any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned as a subprocess and driven over stdio. No swarm-side model-provider credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness |
 
 ## How It Works
 
@@ -419,6 +419,7 @@ An ACP agent's *own* tools (file edit, shell, etc.) are whatever the target proc
 
 ### ACP Specifics
 
+- **The target receives the worker's swarm API key.** `newSession`'s swarm MCP server entry carries the worker's bearer as an `Authorization` header (see [How it works](#how-it-works) above) — the same credential every other spawned harness process receives (`claude`, `codex`, and the rest all pass their swarm bearer to the spawned CLI/subprocess the same way). `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker; point it only at a binary you trust with that credential.
 - **No swarm-side credential gate.** The `acp` adapter has no `readyCheck` — the worker reports `ready: true` immediately. If `ACP_TARGET_COMMAND` is unset or unresolvable, the failure surfaces at session-spawn time (task fails with `ACP target failed during startup: ...`), not at boot.
 - **No live steering.** `deliverSteering` is not implemented; mid-run messages promote to follow-up tasks the same way an unsupported provider always handles them.
 - **No skill filesystem sync.** The generic worker image still seeds `~/.claude/skills`, `~/.opencode/skills`, etc. at boot, so a target that reads one of those directories natively (like opencode) still sees skills; a fully custom target sees whatever `ACP_SYSTEM_PROMPT_PATH` writes and nothing more.
