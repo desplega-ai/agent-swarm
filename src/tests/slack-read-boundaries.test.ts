@@ -12,6 +12,9 @@ const API_KEY = "test-slack-read-boundaries-key-1234567890";
 const AGENT_ID = "aaaaaaaa-0000-4000-8000-000000000001";
 const CHANNEL_ID = "C_BUSY_BOUNDARY";
 const FULL_MESSAGE_COUNT = 20;
+// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
+// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs this test.
+const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
 
 const busyMessages = Array.from({ length: FULL_MESSAGE_COUNT }, (_, index) => ({
   bot_id: "B_TEST",
@@ -157,7 +160,7 @@ describe("slack-read response boundaries", () => {
     expect(body).not.toHaveProperty("truncation");
   });
 
-  test("ctx.swarm.slack_read receives all messages inside a real script sandbox", async () => {
+  spawnTest("ctx.swarm.slack_read receives all messages inside a real script sandbox", async () => {
     const server = Bun.serve({
       port: 0,
       async fetch(webRequest) {

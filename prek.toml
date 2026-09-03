@@ -54,8 +54,9 @@ language = "system"
 # scripts/pre-push-tests.sh runs `--changed=<merge-base with origin/main>` and
 # falls back to the full suite when migrations, templates/, bunfig.toml,
 # bun.lock, or package.json beyond its version field changed (those reach every
-# test outside the import graph), or when origin/main is missing. Blocking; CI
-# stays authoritative.
+# test outside the import graph), or when origin/main is missing. A file-backed
+# Bun probe detects host-load RLIMIT_NPROC failures and skips only sandbox-spawn
+# tests when it exits 134; CI leaves the env gate unset. Blocking; CI stays authoritative.
 entry = "bash scripts/pre-push-tests.sh"
 # CI "test" domain: src/ + scripts tests import + lockfile/tsconfig/bunfig + templates.
 files = '^(src/|scripts/|templates/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'

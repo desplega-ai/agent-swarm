@@ -11,6 +11,9 @@ import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
+// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
+// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
+const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
 
 beforeEach(() => {
   process.env.AGENT_SWARM_API_KEY = "runtime-test-secret-1234567890";
@@ -61,7 +64,7 @@ describe("runScript", () => {
     );
   });
 
-  test("runs a trivial transform", async () => {
+  spawnTest("runs a trivial transform", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: { x: 1 },
@@ -74,7 +77,7 @@ describe("runScript", () => {
     expect(output.exitCode).toBe(0);
   });
 
-  test("ctx.stdlib.fetch returns a Response and fetchJson returns parsed JSON", async () => {
+  spawnTest("ctx.stdlib.fetch returns a Response and fetchJson returns parsed JSON", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: { url: 'data:application/json,{"ok":true}' },
@@ -92,7 +95,7 @@ describe("runScript", () => {
     expect(output.result).toEqual({ status: 200, parsed: { ok: true } });
   });
 
-  test("ctx.swarm bridge round-trips kv_set then kv_get", async () => {
+  spawnTest("ctx.swarm bridge round-trips kv_set then kv_get", async () => {
     const entries = new Map<string, unknown>();
     const server = Bun.serve({
       port: 0,
@@ -139,7 +142,7 @@ describe("runScript", () => {
     }
   });
 
-  test("ctx.swarm exposes nullable KV reads and both hard-delete names", async () => {
+  spawnTest("ctx.swarm exposes nullable KV reads and both hard-delete names", async () => {
     const deleted: string[] = [];
     const server = Bun.serve({
       port: 0,
@@ -221,7 +224,7 @@ describe("runScript", () => {
     }
   });
 
-  test("bare stdlib imports resolve through runtime shims", async () => {
+  spawnTest("bare stdlib imports resolve through runtime shims", async () => {
     const output = await runScript({
       agentId: "agent-1",
       resources,
@@ -236,7 +239,7 @@ describe("runScript", () => {
     expect(output.result).toContain("1");
   });
 
-  test("timeout kills a running script", async () => {
+  spawnTest("timeout kills a running script", async () => {
     const started = Date.now();
     const output = await runScript({
       agentId: "agent-1",
@@ -249,7 +252,7 @@ describe("runScript", () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
-  test("stdout is capped and marked truncated", async () => {
+  spawnTest("stdout is capped and marked truncated", async () => {
     const output = await runScript({
       agentId: "agent-1",
       resources: { ...resources, maxStdoutBytes: 128 },
@@ -261,7 +264,7 @@ describe("runScript", () => {
     expect(output.stdout.length).toBeLessThanOrEqual(128);
   });
 
-  test("AbortSignal aborts a running script", async () => {
+  spawnTest("AbortSignal aborts a running script", async () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
     const started = Date.now();
@@ -277,7 +280,7 @@ describe("runScript", () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
-  test("subprocess env is stripped to the explicit allowlist", async () => {
+  spawnTest("subprocess env is stripped to the explicit allowlist", async () => {
     process.env.API_KEY = "legacy-secret-that-must-not-leak";
     process.env.AGENT_SWARM_API_KEY = "preferred-secret-that-must-not-leak";
     refreshSecretScrubberCache();
@@ -326,7 +329,7 @@ describe("runScript", () => {
     expect(output.stderr).toContain("workspace-rw");
   });
 
-  test("SCRIPT_RUNTIME_DIR bundle path works (compiled binary mode regression)", async () => {
+  spawnTest("SCRIPT_RUNTIME_DIR bundle path works (compiled binary mode regression)", async () => {
     // Simulate compiled binary mode: pre-build bundles to a temp dir and set
     // SCRIPT_RUNTIME_DIR so the executor uses them instead of import.meta.url paths.
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
@@ -355,7 +358,7 @@ describe("runScript", () => {
     }
   });
 
-  test("args arrives as a parsed object, not a JSON string", async () => {
+  spawnTest("args arrives as a parsed object, not a JSON string", async () => {
     // Regression: eval-harness must deliver a parsed object to user code even
     // when the caller serializes args as a JSON string (double-serialization).
     // Before the fix, property access like args.foo would always be undefined.
@@ -377,7 +380,7 @@ describe("runScript", () => {
     expect(output.exitCode).toBe(0);
   });
 
-  test("args parsed correctly in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
+  spawnTest("args parsed correctly in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
     // Same regression exercised through the compiled-binary (SCRIPT_RUNTIME_DIR) code path.
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
@@ -411,7 +414,7 @@ describe("runScript", () => {
     }
   });
 
-  test("zod import works in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
+  spawnTest("zod import works in compiled binary mode (SCRIPT_RUNTIME_DIR)", async () => {
     const tmpdir = `${process.env.TMPDIR ?? "/tmp"}/script-runtime-test-${crypto.randomUUID()}`;
     await Bun.$`mkdir -p ${tmpdir}`;
     try {
@@ -444,7 +447,7 @@ describe("runScript", () => {
     }
   });
 
-  test("argsSchema rejects invalid args with a formatted Zod error", async () => {
+  spawnTest("argsSchema rejects invalid args with a formatted Zod error", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: {},
@@ -464,7 +467,7 @@ describe("runScript", () => {
     expect(output.stderr).toContain("repo");
   });
 
-  test("argsSchema applies .default() values when fields are omitted", async () => {
+  spawnTest("argsSchema applies .default() values when fields are omitted", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: { repo: "owner/name" },
@@ -484,7 +487,7 @@ describe("runScript", () => {
     expect(output.exitCode).toBe(0);
   });
 
-  test("script without argsSchema still works (backward-compat)", async () => {
+  spawnTest("script without argsSchema still works (backward-compat)", async () => {
     const output = await runScript({
       agentId: "agent-1",
       args: { value: 42 },
