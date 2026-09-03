@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 
 const packageJson = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8"),
@@ -10,13 +10,42 @@ const packageJson = JSON.parse(
   version?: string;
 };
 
+/**
+ * Plausible analytics, injected into index.html at build time only when
+ * `VITE_PLAUSIBLE_ANALYTICS=1` (or `true`) is set. Our Vercel production
+ * project sets it; self-hosted and local builds ship with no analytics script.
+ */
+function plausibleAnalytics(): Plugin {
+  const flag = (process.env.VITE_PLAUSIBLE_ANALYTICS ?? "").trim().toLowerCase();
+  const enabled = flag === "1" || flag === "true";
+  return {
+    name: "plausible-analytics",
+    transformIndexHtml() {
+      if (!enabled) return [];
+      return [
+        {
+          tag: "script",
+          attrs: { async: true, src: "https://plausible.io/js/pa-aDF5FACknjhykIUMd6n_a.js" },
+          injectTo: "head",
+        },
+        {
+          tag: "script",
+          children:
+            "window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()",
+          injectTo: "head",
+        },
+      ];
+    },
+  };
+}
+
 const allowedHosts =
   process.env.VITE_ALLOWED_HOSTS === "*"
     ? true
     : process.env.VITE_ALLOWED_HOSTS?.split(",").map((host) => host.trim());
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), plausibleAnalytics()],
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version ?? "0.0.0"),
   },
