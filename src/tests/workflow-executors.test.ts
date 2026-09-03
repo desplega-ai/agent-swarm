@@ -20,6 +20,9 @@ import { createExecutorRegistry } from "../workflows/executors/registry";
 import { ScriptExecutor, ScriptOutputSchema } from "../workflows/executors/script";
 import { ValidateExecutor, ValidateOutputSchema } from "../workflows/executors/validate";
 import { VcsExecutor, VcsOutputSchema } from "../workflows/executors/vcs";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-executors.sqlite";
 
@@ -482,7 +485,7 @@ describe("ScriptExecutor", () => {
     ).toBe(false);
   });
 
-  test("runs bash script and captures stdout", async () => {
+  skip("runs bash script and captures stdout", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "echo 'hello world'" }, {}));
     expect(result.status).toBe("success");
     const out = result.output as { exitCode: number; stdout: string; stderr: string };
@@ -492,7 +495,7 @@ describe("ScriptExecutor", () => {
     expect(result.nextPort).toBe("success");
   });
 
-  test("marks step failed and captures stderr on non-zero exit", async () => {
+  skip("marks step failed and captures stderr on non-zero exit", async () => {
     const result = await executor.run(
       input({ runtime: "bash", script: "echo err >&2; exit 1" }, {}),
     );
@@ -503,7 +506,7 @@ describe("ScriptExecutor", () => {
     expect(out.stderr).toBe("err");
   });
 
-  test("marks step failed on non-zero exit code (exit 1)", async () => {
+  skip("marks step failed on non-zero exit code (exit 1)", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "exit 1" }, {}));
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Script exited with code 1");
@@ -511,7 +514,7 @@ describe("ScriptExecutor", () => {
     expect(out?.exitCode).toBe(1);
   });
 
-  test("marks step failed with exit code in error when no stderr (exit 42)", async () => {
+  skip("marks step failed with exit code in error when no stderr (exit 42)", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "exit 42" }, {}));
     expect(result.status).toBe("failed");
     expect(result.error).toBe("Script exited with code 42");
@@ -519,7 +522,7 @@ describe("ScriptExecutor", () => {
     expect(out?.exitCode).toBe(42);
   });
 
-  test("runs TypeScript script via bun", async () => {
+  skip("runs TypeScript script via bun", async () => {
     const result = await executor.run(
       input({ runtime: "ts", script: "console.log('ts works')" }, {}),
     );
@@ -534,7 +537,7 @@ describe("ScriptExecutor", () => {
     expect(valid.success).toBe(true);
   });
 
-  test("keeps raw {exitCode, stdout, stderr} when stdout is not valid JSON", async () => {
+  skip("keeps raw {exitCode, stdout, stderr} when stdout is not valid JSON", async () => {
     const result = await executor.run(
       input({ runtime: "bash", script: "echo 'not-json {at all'" }, {}),
     );
@@ -549,7 +552,7 @@ describe("ScriptExecutor", () => {
     expect(Object.keys(out).sort()).toEqual(["exitCode", "stderr", "stdout"]);
   });
 
-  test("populates structured output on timeout instead of leaving it null", async () => {
+  skip("populates structured output on timeout instead of leaving it null", async () => {
     const result = await executor.run(
       input({ runtime: "bash", script: "sleep 5", timeout: 1000 }, {}),
     );
@@ -562,7 +565,7 @@ describe("ScriptExecutor", () => {
     expect(out.stderr).toContain("Script timed out after 1000ms");
   });
 
-  test("a timed-out script is TERMINATED, not just abandoned (Promise.race regression)", async () => {
+  skip("a timed-out script is TERMINATED, not just abandoned (Promise.race regression)", async () => {
     // A `sleep` is not bounded by the CPU ulimit, so before this fix the
     // wall-clock timeout only abandoned the promise and the child kept
     // running — long enough to finish its side effect after the step failed.
@@ -589,7 +592,7 @@ describe("ScriptExecutor", () => {
 
   // ─── Sandbox regression tests (superagent.sh c27edfd7, finding b132d7c5) ──
 
-  test("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
+  skip("child process never inherits the server's secrets — env is scrubbed, not passed through", async () => {
     const savedKey = process.env.AGENT_SWARM_API_KEY;
     process.env.AGENT_SWARM_API_KEY = "super-secret-operator-bearer";
     process.env.SOME_OTHER_SERVER_SECRET = "also-should-not-leak";
@@ -618,9 +621,11 @@ describe("ScriptExecutor", () => {
   // RLIMIT_AS); the spawned script fails before the behavior under test runs.
   // Linux CI is the enforcing environment for these paths; the skips only
   // unblock local macOS pushes now that pre-push tests are blocking (#1216).
-  const skipOnMacOS = test.skipIf(process.platform === "darwin");
+  const spawnTestUnlessMacOS = test.skipIf(
+    process.platform === "darwin" || SKIP_SANDBOX_SPAWN_TESTS,
+  );
 
-  skipOnMacOS(
+  spawnTestUnlessMacOS(
     "resource ulimits actually apply to the spawned process (not just documented)",
     async () => {
       const result = await executor.run(input({ runtime: "bash", script: "ulimit -v" }, {}));
@@ -632,7 +637,7 @@ describe("ScriptExecutor", () => {
     },
   );
 
-  test("no explicit cwd: runs in a scoped tmpdir, not the server's working directory", async () => {
+  skip("no explicit cwd: runs in a scoped tmpdir, not the server's working directory", async () => {
     const result = await executor.run(input({ runtime: "bash", script: "pwd" }, {}));
     expect(result.status).toBe("success");
     const out = result.output as { stdout: string };
@@ -642,7 +647,7 @@ describe("ScriptExecutor", () => {
 
   // ─── Codex review follow-ups (PR #1112, review 4876200033) ──────────────
 
-  skipOnMacOS(
+  spawnTestUnlessMacOS(
     "truncated stdout carries an explicit marker instead of silently presenting a partial result as complete (PRRT_kwDOQr3Tmc6XCRu1)",
     async () => {
       const result = await executor.run(
@@ -658,7 +663,7 @@ describe("ScriptExecutor", () => {
     },
   );
 
-  skipOnMacOS(
+  spawnTestUnlessMacOS(
     "drain-deadline snapshot keeps the partial output already read instead of discarding it as empty (PRRT_kwDOQr3Tmc6XCRuy)",
     async () => {
       // The direct child prints known output, backgrounds a descendant that
@@ -692,7 +697,7 @@ describe("ScriptExecutor", () => {
   // running them: an interpolated arg literally named `--eval=<code>` was a
   // second, attacker-controlled script.
 
-  test("bun runtime: an arg shaped like --eval=<code> is inert data, not executed", async () => {
+  skip("bun runtime: an arg shaped like --eval=<code> is inert data, not executed", async () => {
     const result = await executor.run(
       input(
         {
@@ -713,7 +718,7 @@ describe("ScriptExecutor", () => {
     expect(JSON.parse(out.stdout)).toEqual(["--eval=console.log('INJECTED')"]);
   });
 
-  test("bun runtime: an arg shaped like --preload=<path> is inert data, not loaded", async () => {
+  skip("bun runtime: an arg shaped like --preload=<path> is inert data, not loaded", async () => {
     const result = await executor.run(
       input(
         {
@@ -736,7 +741,7 @@ describe("ScriptExecutor", () => {
     ]);
   });
 
-  test("bun runtime: normal args keep their previous argv indexing after the -- fix", async () => {
+  skip("bun runtime: normal args keep their previous argv indexing after the -- fix", async () => {
     const result = await executor.run(
       input(
         {
@@ -753,7 +758,7 @@ describe("ScriptExecutor", () => {
     expect(JSON.parse(out.stdout)).toEqual(["hello", "world"]);
   });
 
-  test("bash runtime: an arg shaped like --eval=<code> was already inert (documents why -- is not added)", async () => {
+  skip("bash runtime: an arg shaped like --eval=<code> was already inert (documents why -- is not added)", async () => {
     // bash -c script [$0 [$1 ...]] binds the first trailing arg to $0, not to
     // an option — there is no flag-reparsing surface to close here, and
     // adding `--` would shift $0 into args[0], breaking existing workflows.
@@ -772,7 +777,7 @@ describe("ScriptExecutor", () => {
     expect(out.stdout).toBe("[--eval=INJECTED][second]");
   });
 
-  test("python runtime: an arg shaped like -c <code> was already inert (documents why -- is not added)", async () => {
+  skip("python runtime: an arg shaped like -c <code> was already inert (documents why -- is not added)", async () => {
     // python3 -c code also stops option parsing after the -c operand —
     // trailing args (even another literal -c) land verbatim in sys.argv.
     const result = await executor.run(

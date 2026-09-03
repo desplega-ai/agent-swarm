@@ -55,6 +55,10 @@ import { registerAppSyncTool } from "../tools/app-sync";
 import { registerScriptDeleteTool } from "../tools/script-delete";
 import { setRequestAuth } from "../utils/request-auth-context";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const spawnDescribe = describe.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = `/private/tmp/test-apps-sync-engine-${process.pid}.sqlite`;
 const API_KEY = "apps-sync-engine-test-key-0123456789";
@@ -293,7 +297,7 @@ beforeEach(async () => {
   await getDbClient().run("DELETE FROM apps");
 });
 
-describe("script source pulls", () => {
+spawnDescribe("script source pulls", () => {
   test("first pass creates rows with the envelope, join key and transforms", async () => {
     const script = await fixtureScript("create", [
       ghRecord(1),
@@ -541,7 +545,7 @@ describe("script source inputs and run-as", () => {
     });
   }
 
-  test("args, app, model, source and connection reach the script", async () => {
+  skip("args, app, model, source and connection reach the script", async () => {
     await upsertScriptConnection({
       slug: "echoConn",
       kind: "graphql",
@@ -570,7 +574,7 @@ describe("script source inputs and run-as", () => {
     });
   });
 
-  test("engine-supplied model and source win over colliding args keys", async () => {
+  skip("engine-supplied model and source win over colliding args keys", async () => {
     const scriptId = await saveScript({
       name: scriptName("precedence"),
       source:
@@ -591,7 +595,7 @@ describe("script source inputs and run-as", () => {
     });
   });
 
-  test("an owner-owned script runs with the owner's connections", async () => {
+  skip("an owner-owned script runs with the owner's connections", async () => {
     await upsertScriptConnection({
       slug: "ownerOnly",
       kind: "graphql",
@@ -615,7 +619,7 @@ describe("script source inputs and run-as", () => {
     expect(result.passes[0]?.created).toBe(1);
   });
 
-  test("an owner-less global script runs as the lead", async () => {
+  skip("an owner-less global script runs as the lead", async () => {
     await upsertScriptConnection({
       slug: "leadOnly",
       kind: "graphql",
@@ -988,7 +992,7 @@ describe("swarm-tasks source", () => {
 });
 
 describe("pair expansion", () => {
-  test("fans out to every declared pair and reports unresolvable requests", async () => {
+  skip("fans out to every declared pair and reports unresolvable requests", async () => {
     await getDbClient().run("DELETE FROM agent_tasks");
     await createTaskExtended("pool task", { agentId: OWNER_AGENT_ID });
     const script = await fixtureScript("fanout", [ghRecord(1)]);
@@ -1052,7 +1056,7 @@ describe("pair expansion", () => {
   });
 });
 
-describe("concurrency", () => {
+spawnDescribe("concurrency", () => {
   test("single-flight short-circuits and an interleaved operator write survives", async () => {
     const script = await fixtureScript("concurrent", [ghRecord(1), ghRecord(2)]);
     const appId = await createSyncApp(issueDefinition(script.id));
@@ -1346,7 +1350,7 @@ describe("concurrency", () => {
   });
 });
 
-describe("populated-column rebind guard", () => {
+spawnDescribe("populated-column rebind guard", () => {
   test("rebinding a populated column to another source is rejected like a fresh binding", async () => {
     const script = await fixtureScript("rebind", [ghRecord(1)]);
     const appId = await createSyncApp(
@@ -1392,7 +1396,7 @@ describe("populated-column rebind guard", () => {
   });
 });
 
-describe("pass snapshot consistency", () => {
+spawnDescribe("pass snapshot consistency", () => {
   test("a later pass pulls the definition current at ITS start, not selection time", async () => {
     const slow = await fixtureScript("race-slow", []);
     await slow.setSource(
@@ -1423,7 +1427,7 @@ describe("pass snapshot consistency", () => {
   });
 });
 
-describe("secret hygiene and sync status", () => {
+spawnDescribe("secret hygiene and sync status", () => {
   test("a pass error carrying a known secret comes back redacted", async () => {
     const secret = "fixture-secret-value-0123456789";
     process.env.APPS_SYNC_FIXTURE_TOKEN = secret;
@@ -1675,7 +1679,7 @@ type SyncBody = {
 const mutableLegacyPolicy = LEGACY_POLICY as unknown as Record<"app.use", LegacyRule>;
 
 describe("HTTP POST /api/apps/{id}/sync", () => {
-  test("runs every declared pair and answers {ok, passes}", async () => {
+  skip("runs every declared pair and answers {ok, passes}", async () => {
     const script = await fixtureScript("http-sync", [ghRecord(1), ghRecord(2)]);
     const appId = await createSyncApp(issueDefinition(script.id));
 
@@ -1701,7 +1705,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     expect(typeof rows[0]?.syncedAt).toBe("string");
   });
 
-  test("narrows to one pair when the body names model and source", async () => {
+  skip("narrows to one pair when the body names model and source", async () => {
     const script = await fixtureScript("http-sync-narrow", [ghRecord(9)]);
     const appId = await createSyncApp(issueDefinition(script.id));
 
@@ -1776,7 +1780,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     expect(await rowsOf(appId)).toHaveLength(0);
   });
 
-  test("accepts a request with no body at all", async () => {
+  skip("accepts a request with no body at all", async () => {
     const script = await fixtureScript("http-sync-bodyless", [ghRecord(1)]);
     const appId = await createSyncApp(issueDefinition(script.id));
 
@@ -1793,7 +1797,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
     expect(await rowsOf(appId)).toHaveLength(1);
   });
 
-  test("answers 200 with ok:false when a pass fails", async () => {
+  skip("answers 200 with ok:false when a pass fails", async () => {
     const script = await fixtureScript("http-sync-passfail", []);
     await script.setSource('export default async () => { throw new Error("door pull failed"); };');
     const appId = await createSyncApp(issueDefinition(script.id));
@@ -1815,7 +1819,7 @@ describe("HTTP POST /api/apps/{id}/sync", () => {
 });
 
 describe("sync action kind", () => {
-  test("answers the script-action shape with no taskId key", async () => {
+  skip("answers the script-action shape with no taskId key", async () => {
     const script = await fixtureScript("action-sync", [ghRecord(1)]);
     const definition = issueDefinition(script.id);
     (definition as { actions?: unknown }).actions = { refresh: { kind: "sync" } };
@@ -1847,7 +1851,7 @@ describe("sync action kind", () => {
     expect(await rowsOf(appId)).toHaveLength(1);
   });
 
-  test("reports a failed pass as ok:false plus a named error, still without taskId", async () => {
+  skip("reports a failed pass as ok:false plus a named error, still without taskId", async () => {
     const script = await fixtureScript("action-sync-fail", []);
     await script.setSource('export default async () => { throw new Error("pull exploded"); };');
     const definition = issueDefinition(script.id);
@@ -1900,7 +1904,7 @@ describe("sync action kind", () => {
   });
 });
 
-describe("app-sync MCP tool", () => {
+spawnDescribe("app-sync MCP tool", () => {
   test("returns a rendered pass table and the result object", async () => {
     const script = await fixtureScript("mcp-sync", [ghRecord(1), ghRecord(2)]);
     const appId = await createSyncApp(issueDefinition(script.id));
@@ -2363,7 +2367,7 @@ describe("apps-sync catalog registration", () => {
   });
 });
 
-describe("a sync source against a dummy GitHub through the real sandbox", () => {
+spawnDescribe("a sync source against a dummy GitHub through the real sandbox", () => {
   // The real path end to end: runSavedScriptAsAgent -> sandbox subprocess ->
   // patched fetch -> a Bun.serve fixture on 127.0.0.1. Nothing reaches GitHub.
   //

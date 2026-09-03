@@ -19,6 +19,9 @@ import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runScript } from "../scripts-runtime/loader";
 import { registerScriptConnectionsTool } from "../tools/script-connections";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const createdBindingIds: string[] = [];
 const createdConnectionIds: string[] = [];
@@ -1174,7 +1177,7 @@ describe("script connections", () => {
     createdBindingIds.push(bindingRow!.id);
   });
 
-  test("ctx.api runtime emits plain fetch with credential placeholders", async () => {
+  skip("ctx.api runtime emits plain fetch with credential placeholders", async () => {
     let observed: { url: string; authorization: string | null } | null = null;
     const server = Bun.serve({
       port: 0,

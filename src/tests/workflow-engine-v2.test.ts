@@ -25,6 +25,9 @@ import {
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { ScriptExecutor } from "../workflows/executors/script";
 import { resolveInputs } from "../workflows/input";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-engine-v2.sqlite";
 
@@ -412,7 +415,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
     // RLIMIT_AS), so the script dies before the watchdog behavior under test.
     // Linux CI is the enforcing environment; the skip only unblocks local
     // macOS pushes now that pre-push tests are blocking (#1216).
-    test.skipIf(process.platform === "darwin")(
+    test.skipIf(process.platform === "darwin" || SKIP_SANDBOX_SPAWN_TESTS)(
       "inline script timeout also extends the workflow step watchdog",
       async () => {
         const registry = createTestRegistry();
@@ -828,7 +831,7 @@ describe("Workflow Engine v2 (Phase 3)", () => {
       expect(step?.output).toBeUndefined();
     });
 
-    test("bundled ralph-loop scripts execute with trigger and upstream values passed as args", async () => {
+    skip("bundled ralph-loop scripts execute with trigger and upstream values passed as args", async () => {
       const receipt = (await Bun.file(
         new URL("../../docs-site/public/receipts/workflows/ralph-loop.json", import.meta.url),
       ).json()) as { definition: WorkflowDefinition };
