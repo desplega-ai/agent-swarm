@@ -205,7 +205,7 @@ const OAUTH_PRESETS: readonly OAuthPreset[] = [
       "ChannelMessage.Read.All",
       "ChannelMessage.Send",
       "Chat.ReadWrite",
-      "Mail.ReadWrite",
+      "Mail.Read",
       "Mail.Send",
       "Files.Read",
     ],
