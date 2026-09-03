@@ -92,9 +92,10 @@ The Claude adapter passes the model string directly to the `claude` CLI via `--m
 | `opus` | Claude Opus 5 (highest capability; 1M context) |
 | `sonnet` | Claude Sonnet (balanced) |
 | `haiku` | Claude Haiku (fastest) |
-| `fable` | Claude Fable 5 (1M-context premium shortname) |
+| `fable` | Claude Fable 5.1 (1M-context premium shortname) |
+| `mythos` | Claude Mythos 5.1 (invite-only premium shortname) |
 
-Models can be set per-task via the API or per-agent via the agent profile. The `opus` shortname resolves to `claude-opus-5`; `fable` and the other shortnames also propagate through MCP task-creation surfaces (`send-task`, `task-action`, and schedules). See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
+Models can be set per-task via the API or per-agent via the agent profile. The `opus` shortname resolves to `claude-opus-5`; `fable` and `mythos` resolve to their 5.1 model IDs. These shortnames also propagate through MCP task-creation surfaces (`send-task`, `task-action`, and schedules). See the [Anthropic models overview](https://platform.claude.com/docs/en/about-claude/models/overview) for all available model IDs.
 
 If you want provider-agnostic intent instead of a concrete model string, use `modelTier` on tasks, schedules, or workflow `agent-task` nodes. The tier values are `smol`, `regular`, `smart`, and `ultra`; the claiming worker resolves them to concrete models for its own harness/provider, and local env overrides (`MODEL_TIER_MAP`, `MODEL_TIER_<TIER>`) can adjust the mapping without changing the task payload.
 
