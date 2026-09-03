@@ -209,7 +209,6 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     return { state: "ready", user: match };
   }, [
     tokenLocked,
-    deploymentUserId,
     whoamiQuery.isPending,
     whoamiQuery.data,
     usersQuery.isLoading,
