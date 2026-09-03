@@ -1,11 +1,19 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { closeDb, createAgent, getDbClient, initDb, listScriptRunJournalSteps } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getDbClient,
+  getScriptRun,
+  initDb,
+  listScriptRunJournalSteps,
+} from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { pauseScriptRunProcess } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
 
@@ -22,6 +30,10 @@ let server: Server;
 let baseUrl: string;
 let savedEnv: NodeJS.ProcessEnv;
 let heartbeatCount = 0;
+let holdAgentTaskResponses = false;
+let agentTaskRequestCount = 0;
+let agentTaskClosedCount = 0;
+const heldAgentTaskResponses = new Set<ServerResponse>();
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -63,12 +75,41 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     res.end(JSON.stringify({ brokered: true }));
     return;
   }
+  if (holdAgentTaskResponses && req.method === "POST" && req.url?.endsWith("/agent-task")) {
+    for await (const _chunk of req) {
+      // Consume the request body before holding the long-poll response open.
+    }
+    agentTaskRequestCount += 1;
+    heldAgentTaskResponses.add(res);
+    res.once("close", () => {
+      agentTaskClosedCount += 1;
+      heldAgentTaskResponses.delete(res);
+    });
+    return;
+  }
   const pathSegments = getPathSegments(req.url || "");
   const queryParams = parseQueryParams(req.url || "");
   if (await handleScriptRuns(req, res, pathSegments, queryParams, agentId)) return;
   if (await handleScripts(req, res, pathSegments, queryParams, agentId)) return;
   res.writeHead(404);
   res.end("Not Found");
+}
+
+async function waitUntil(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(message);
+}
+
+function completeHeldAgentTasks(): void {
+  for (const res of [...heldAgentTaskResponses]) {
+    if (res.writableEnded || res.destroyed) continue;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ taskId: crypto.randomUUID(), taskOutput: { ok: true } }));
+  }
 }
 
 async function api(path: string, init: RequestInit = {}): Promise<Response> {
@@ -148,8 +189,19 @@ afterAll(async () => {
 
 beforeEach(async () => {
   heartbeatCount = 0;
+  holdAgentTaskResponses = false;
+  agentTaskRequestCount = 0;
+  agentTaskClosedCount = 0;
+  completeHeldAgentTasks();
+  heldAgentTaskResponses.clear();
   await getDbClient().run("DELETE FROM script_run_journal");
   await getDbClient().run("DELETE FROM script_runs");
+});
+
+afterEach(() => {
+  holdAgentTaskResponses = false;
+  completeHeldAgentTasks();
+  heldAgentTaskResponses.clear();
 });
 
 describe("script workflow runtime", () => {
@@ -296,6 +348,70 @@ describe("script workflow runtime", () => {
     expect(run.status).toBe("failed");
     expect(run.error).toBe("guest boom");
   });
+
+  spawnTest(
+    "dispatches more than four durable capability calls before any child finishes",
+    async () => {
+      holdAgentTaskResponses = true;
+      const source = `
+      export default async function main(_args, ctx) {
+        return await Promise.all([
+          ctx.step.agentTask("fanout-1", { task: "one" }),
+          ctx.step.agentTask("fanout-2", { task: "two" }),
+          ctx.step.agentTask("fanout-3", { task: "three" }),
+          ctx.step.agentTask("fanout-4", { task: "four" }),
+          ctx.step.agentTask("fanout-5", { task: "five" }),
+        ]);
+      }
+    `;
+
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      const { id } = (await created.json()) as { id: string };
+
+      await waitUntil(
+        () => agentTaskRequestCount === 5,
+        `Expected all five agent tasks to dispatch, observed ${agentTaskRequestCount}`,
+      );
+      completeHeldAgentTasks();
+
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      expect(await listScriptRunJournalSteps(id)).toHaveLength(5);
+    },
+  );
+
+  spawnTest(
+    "pausing aborts host polling without journaling or overwriting paused status",
+    async () => {
+      holdAgentTaskResponses = true;
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({
+          source: `
+          export default async function main(_args, ctx) {
+            return await ctx.step.agentTask("paused-step", { task: "stay pending" });
+          }
+        `,
+          background: true,
+        }),
+      });
+      const { id } = (await created.json()) as { id: string };
+      await waitUntil(() => agentTaskRequestCount === 1, "Agent task poll did not start");
+
+      await pauseScriptRunProcess(id);
+      await waitUntil(
+        () => agentTaskClosedCount === 1,
+        "Host-side agent task poll was not aborted",
+      );
+      await Bun.sleep(250);
+
+      expect((await getScriptRun(id))?.status).toBe("paused");
+      expect(await listScriptRunJournalSteps(id)).toHaveLength(0);
+    },
+  );
 
   // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);
   // Linux CI is the enforcing environment. Skip only unblocks local macOS

@@ -18,7 +18,7 @@ import { type BuiltWorkflowCtx, buildWorkflowCtx } from "./workflow-ctx";
 
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_STDERR_BYTES = 1_048_576;
-const MAX_IN_FLIGHT_CAPABILITIES = 4;
+const MAX_CAPABILITY_REQUESTS_PER_TURN = 4;
 
 export type ScriptExecutionResult = {
   exitCode: number | null;
@@ -197,8 +197,8 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       socket.setEncoding("utf8");
       let buffered = "";
       let authenticated = false;
-      let inFlight = 0;
       let queuedResponseBytes = 0;
+      let processingScheduled = false;
       const handshakeTimeout = setTimeout(() => {
         if (!authenticated) socket.destroy();
       }, 2_000);
@@ -208,6 +208,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       const failProtocol = (error: unknown) => {
         protocolFailure =
           error instanceof Error ? error : new Error(`Capability protocol failed: ${error}`);
+        built.abortInFlightSteps(protocolFailure);
         socket.destroy();
         proc?.kill();
       };
@@ -232,7 +233,8 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
 
       const processBuffered = () => {
         if (socket.destroyed) return;
-        while (inFlight < MAX_IN_FLIGHT_CAPABILITIES) {
+        let processed = 0;
+        while (processed < MAX_CAPABILITY_REQUESTS_PER_TURN) {
           const newline = buffered.indexOf("\n");
           if (newline < 0) break;
           const message = buffered.slice(0, newline);
@@ -264,19 +266,20 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
             clearTimeout(handshakeTimeout);
             continue;
           }
-          inFlight += 1;
+          processed += 1;
           void handleCapabilityRequest(message, (path, argsJson) =>
             dispatchCapability(built, path, argsJson),
           )
             .then(writeResponse)
-            .catch(failProtocol)
-            .finally(() => {
-              inFlight -= 1;
-              processBuffered();
-            });
+            .catch(failProtocol);
         }
-        if (inFlight >= MAX_IN_FLIGHT_CAPABILITIES) socket.pause();
-        else socket.resume();
+        if (buffered.includes("\n") && !processingScheduled) {
+          processingScheduled = true;
+          queueMicrotask(() => {
+            processingScheduled = false;
+            processBuffered();
+          });
+        }
       };
 
       socket.on("data", (chunk) => {
@@ -367,6 +370,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
         return { exitCode: 0, stderr };
       } catch (error) {
         await built.drainInFlightSteps().catch(() => {});
+        built.abortInFlightSteps();
         stderr = appendError(stderr, error);
         try {
           await postStatus(run, baseUrl, apiKey, {
@@ -386,10 +390,12 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       startedAtMs: Date.now(),
       exited,
       terminate: (signal = "SIGTERM") => {
+        built.abortInFlightSteps();
         spawned.kill(signal);
       },
       cleanup: async () => {
         clearInterval(heartbeat);
+        built.abortInFlightSteps();
         for (const socket of sockets) socket.destroy();
         await closeServer(server);
         await rm(tmpdir, { recursive: true, force: true });

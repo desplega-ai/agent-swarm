@@ -18,6 +18,7 @@ import {
   listScriptRuns,
   updateScriptRun,
   updateScriptRunIfNotTerminal,
+  updateScriptRunIfRunning,
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
@@ -571,15 +572,14 @@ export async function handleScriptRuns(
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    if (TERMINAL_SCRIPT_RUN_STATUSES.some((status) => status === run.status)) {
+    if (run.status !== "running") {
       res.writeHead(204);
       res.end();
       return true;
     }
-    // Terminal-guarded write: the guard above ran before this handler's own
-    // awaits, so an operator DELETE cancelling the run in that window would
-    // otherwise be overwritten by this status.
-    await updateScriptRunIfNotTerminal(parsed.params.runId, {
+    // Running-guarded write: a pause is resumable rather than terminal, but it
+    // must still win over a delayed subprocess callback after SIGTERM.
+    await updateScriptRunIfRunning(parsed.params.runId, {
       status: parsed.body.status,
       pid: null,
       finishedAt: parsed.body.status === "paused" ? null : new Date().toISOString(),
