@@ -53,7 +53,7 @@ export async function tailLog(path: string, lines: number): Promise<string> {
   return text.split("\n").slice(-lines).join("\n");
 }
 
-export async function startSut(keep = false): Promise<Sut> {
+export async function startSut(keep: boolean, slackEnv: Record<string, string>): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
   const apiKey = randomBytes(16).toString("hex");
@@ -71,11 +71,13 @@ export async function startSut(keep = false): Promise<Sut> {
     API_KEY: apiKey,
     AGENT_SWARM_API_KEY: apiKey,
     DATABASE_PATH: dbPath,
-    NODE_ENV: "development",
+    // test, not development: the Slack socket-mode guard refuses to connect
+    // under development, and every run drives Slack through the mock.
+    NODE_ENV: "test",
     AGENT_FS_LOCAL_DIR: fsDir,
     SECRETS_ENCRYPTION_KEY_FILE: secretsPath,
-    SLACK_DISABLE: "true",
-    SLACK_BOT_TOKEN: "",
+    ...slackEnv,
+    OAUTH_KEEPALIVE_DISABLE: "true",
     GITHUB_DISABLE: "true",
     GITHUB_WEBHOOK_SECRET: "",
     LINEAR_DISABLE: "true",

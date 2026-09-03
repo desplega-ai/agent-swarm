@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
+import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type Coverage, computeCoverage } from "./coverage";
+import { openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
 import { type ApiClient, createApiClient, recordedHttpCalls } from "./http";
 import { calledMcpTools, createMcpConnector, listedMcpTools } from "./mcp";
@@ -17,8 +19,10 @@ import { auth } from "./scenarios/auth";
 import { configRoundtrip } from "./scenarios/config-roundtrip";
 import { health } from "./scenarios/health";
 import { mcpSurface } from "./scenarios/mcp-surface";
+import { slackMention } from "./scenarios/slack-mention";
 import { taskLifecycle } from "./scenarios/task-lifecycle";
 import { workflowScriptNode } from "./scenarios/workflow-script-node";
+import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import { type Sut, startSut, stopSut, tailLog } from "./sut";
 
 export type ScenarioContext = {
@@ -26,6 +30,8 @@ export type ScenarioContext = {
   connectMcp: ReturnType<typeof createMcpConnector>;
   baseUrl: string;
   apiKey: string;
+  db: ReadOnlyDb;
+  slack: SlackMock;
   log: (message: string) => void;
   nonce: string;
 };
@@ -38,6 +44,7 @@ const scenarios: Scenario[] = [
   mcpSurface,
   workflowScriptNode,
   configRoundtrip,
+  slackMention,
 ];
 
 function errorMessage(error: unknown): string {
@@ -67,13 +74,18 @@ function emptyCoverage(): Coverage {
 }
 
 let activeSut: Sut | undefined;
+let activeSlack: SlackHarness | undefined;
+let activeDb: ReadOnlyDb | undefined;
 let cleaning = false;
 
 async function cleanup(keep: boolean): Promise<void> {
   if (cleaning) return;
   cleaning = true;
   await stopHarnessChildren();
+  // Close the read-only handle before stopSut deletes the database files.
+  activeDb?.close();
   if (activeSut) await stopSut(activeSut, keep);
+  if (activeSlack) await stopSlackMock(activeSlack, keep);
 }
 
 async function main(): Promise<number> {
@@ -92,13 +104,25 @@ async function main(): Promise<number> {
 
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
-  activeSut = await startSut(options.keep);
+  activeSlack = await startSlackMock(options.keep);
+  activeSut = await startSut(options.keep, activeSlack.mock.env);
+  try {
+    await activeSlack.mock.waitForConnection(60_000);
+  } catch (error) {
+    activeSut.flushLog();
+    throw new Error(
+      `Slack socket mode never connected: ${errorMessage(error)}\nLast 40 lines of ${activeSut.logPath}:\n${await tailLog(activeSut.logPath, 40)}`,
+    );
+  }
+  activeDb = openReadOnlyDb(activeSut.dbPath);
   const api = createApiClient(activeSut.baseUrl, activeSut.apiKey);
   const ctx: ScenarioContext = {
     api,
     connectMcp: createMcpConnector(activeSut.baseUrl, activeSut.apiKey),
     baseUrl: activeSut.baseUrl,
     apiKey: activeSut.apiKey,
+    db: activeDb,
+    slack: activeSlack.mock,
     log: console.log,
     nonce: randomBytes(6).toString("hex"),
   };
