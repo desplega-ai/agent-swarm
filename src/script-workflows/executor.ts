@@ -11,7 +11,7 @@ import {
   readStreamCapped,
   sandboxSpawnEnv,
 } from "../utils/sandboxed-process";
-import { handleCapabilityRequest } from "./capability-bridge";
+import { handleCapabilityRequest, MAX_PENDING_CAPABILITY_CALLS } from "./capability-bridge";
 import { scriptRunMaxWallMs } from "./limits";
 import { isWorkflowSwarmCapabilityAllowed } from "./swarm-capabilities";
 import { type BuiltWorkflowCtx, buildWorkflowCtx } from "./workflow-ctx";
@@ -19,6 +19,8 @@ import { type BuiltWorkflowCtx, buildWorkflowCtx } from "./workflow-ctx";
 /** Matches the inline scripts-runtime cap (src/scripts-runtime/executors/types.ts). */
 const MAX_STDERR_BYTES = 1_048_576;
 const MAX_CAPABILITY_REQUESTS_PER_TURN = 4;
+// Keeps broker HTTP concurrency finite without throttling long-lived durable steps.
+export const MAX_ACTIVE_CAPABILITY_DISPATCHES = 8;
 
 export type ScriptExecutionResult = {
   exitCode: number | null;
@@ -199,6 +201,9 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       let authenticated = false;
       let queuedResponseBytes = 0;
       let processingScheduled = false;
+      let outstandingRequests = 0;
+      let activeDispatches = 0;
+      const dispatchWaiters: Array<() => void> = [];
       const handshakeTimeout = setTimeout(() => {
         if (!authenticated) socket.destroy();
       }, 2_000);
@@ -229,6 +234,43 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
             else resolveWrite();
           });
         });
+      };
+
+      const dispatchWithActiveLimit = async (path: string, argsJson: string): Promise<string> => {
+        if (!path.startsWith("swarm.")) return dispatchCapability(built, path, argsJson);
+
+        if (activeDispatches >= MAX_ACTIVE_CAPABILITY_DISPATCHES) {
+          await new Promise<void>((resolve) => dispatchWaiters.push(resolve));
+        } else {
+          activeDispatches += 1;
+        }
+        try {
+          return await dispatchCapability(built, path, argsJson);
+        } finally {
+          const next = dispatchWaiters.shift();
+          if (next) next();
+          else activeDispatches -= 1;
+        }
+      };
+
+      const respondToRequest = async (message: string): Promise<void> => {
+        if (outstandingRequests >= MAX_PENDING_CAPABILITY_CALLS) {
+          const response = await handleCapabilityRequest(message, async () => {
+            throw new Error(
+              `Capability pending call limit of ${MAX_PENDING_CAPABILITY_CALLS} exceeded`,
+            );
+          });
+          await writeResponse(response);
+          return;
+        }
+
+        outstandingRequests += 1;
+        try {
+          const response = await handleCapabilityRequest(message, dispatchWithActiveLimit);
+          await writeResponse(response);
+        } finally {
+          outstandingRequests -= 1;
+        }
       };
 
       const processBuffered = () => {
@@ -267,11 +309,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
             continue;
           }
           processed += 1;
-          void handleCapabilityRequest(message, (path, argsJson) =>
-            dispatchCapability(built, path, argsJson),
-          )
-            .then(writeResponse)
-            .catch(failProtocol);
+          void respondToRequest(message).catch(failProtocol);
         }
         if (buffered.includes("\n") && !processingScheduled) {
           processingScheduled = true;

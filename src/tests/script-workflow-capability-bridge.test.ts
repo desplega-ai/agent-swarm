@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createCapabilityClient,
   handleCapabilityRequest,
+  MAX_PENDING_CAPABILITY_CALLS,
 } from "../script-workflows/capability-bridge";
 import { dispatchCapability } from "../script-workflows/executor";
 import { buildGuestWorkflowCtx } from "../script-workflows/guest-ctx";
@@ -65,6 +66,40 @@ describe("script workflow capability bridge", () => {
 
     expect(JSON.parse(await first)).toEqual({ taskId: "first" });
     expect(JSON.parse(await second)).toEqual({ taskId: "second" });
+  });
+
+  test("rejects a guest flood once the pending call limit is reached", async () => {
+    const requests: string[] = [];
+    const client = createCapabilityClient((message) => requests.push(message));
+    const pending = Array.from({ length: MAX_PENDING_CAPABILITY_CALLS }, (_, index) =>
+      client.invokeTool("swarm.task_get", JSON.stringify({ taskId: String(index) })),
+    );
+
+    expect(requests).toHaveLength(MAX_PENDING_CAPABILITY_CALLS);
+    expect(client.pendingCount()).toBe(MAX_PENDING_CAPABILITY_CALLS);
+    await expect(client.invokeTool("swarm.task_get", '{"taskId":"excess"}')).rejects.toThrow(
+      `Capability pending call limit of ${MAX_PENDING_CAPABILITY_CALLS} exceeded`,
+    );
+    expect(requests).toHaveLength(MAX_PENDING_CAPABILITY_CALLS);
+    expect(client.pendingCount()).toBe(MAX_PENDING_CAPABILITY_CALLS);
+
+    client.handleMessage(
+      await handleCapabilityRequest(requests[0]!, async (_path, argsJson) => argsJson),
+    );
+    expect(client.pendingCount()).toBe(MAX_PENDING_CAPABILITY_CALLS - 1);
+
+    const positiveControl = client.invokeTool("swarm.task_get", '{"taskId":"replacement"}');
+    expect(requests).toHaveLength(MAX_PENDING_CAPABILITY_CALLS + 1);
+    expect(client.pendingCount()).toBe(MAX_PENDING_CAPABILITY_CALLS);
+
+    const dispatch = async (_path: string, argsJson: string) => argsJson;
+    for (const request of requests.slice(1)) {
+      client.handleMessage(await handleCapabilityRequest(request, dispatch));
+    }
+    await expect(Promise.all([...pending.slice(1), positiveControl])).resolves.toHaveLength(
+      MAX_PENDING_CAPABILITY_CALLS,
+    );
+    expect(client.pendingCount()).toBe(0);
   });
 
   test("round-trips values and serialized errors", async () => {

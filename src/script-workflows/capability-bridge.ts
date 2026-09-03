@@ -19,10 +19,14 @@ type CapabilityResponse =
 export type CapabilityDispatch = (path: string, argsJson: string) => Promise<string>;
 export type CapabilitySend = (message: string) => void | Promise<void>;
 
+// Generous enough for workflow fan-out while bounding guest-retained promises and host work.
+export const MAX_PENDING_CAPABILITY_CALLS = 64;
+
 export type CapabilityClient = {
   invokeTool(path: string, argsJson: string): Promise<string>;
   handleMessage(message: unknown): void;
   disconnect(error?: Error): void;
+  pendingCount(): number;
 };
 
 function protocolError(kind: "request" | "response", detail: string): Error {
@@ -186,6 +190,11 @@ export function createCapabilityClient(send: CapabilitySend): CapabilityClient {
     invokeTool(path, argsJson) {
       if (disconnected) return Promise.reject(disconnected);
       if (!path) return Promise.reject(new Error("Capability path must not be empty"));
+      if (pending.size >= MAX_PENDING_CAPABILITY_CALLS) {
+        return Promise.reject(
+          new Error(`Capability pending call limit of ${MAX_PENDING_CAPABILITY_CALLS} exceeded`),
+        );
+      }
       try {
         assertJsonString(argsJson, "request", "argsJson");
       } catch (error) {
@@ -227,6 +236,10 @@ export function createCapabilityClient(send: CapabilitySend): CapabilityClient {
       disconnected = error;
       for (const call of pending.values()) call.reject(error);
       pending.clear();
+    },
+
+    pendingCount() {
+      return pending.size;
     },
   };
 }

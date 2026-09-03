@@ -13,6 +13,7 @@ import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { MAX_ACTIVE_CAPABILITY_DISPATCHES } from "../script-workflows/executor";
 import { pauseScriptRunProcess } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { listenOnFreePort } from "./test-net";
@@ -34,6 +35,11 @@ let holdAgentTaskResponses = false;
 let agentTaskRequestCount = 0;
 let agentTaskClosedCount = 0;
 const heldAgentTaskResponses = new Set<ServerResponse>();
+let holdMcpBridgeResponses = false;
+let mcpBridgeRequestCount = 0;
+let activeMcpBridgeRequests = 0;
+let maxActiveMcpBridgeRequests = 0;
+const heldMcpBridgeResponses = new Set<ServerResponse>();
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -69,6 +75,17 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (requestBody.args?.forceError === true) {
       res.writeHead(418, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "teapot" }));
+      return;
+    }
+    if (holdMcpBridgeResponses) {
+      mcpBridgeRequestCount += 1;
+      activeMcpBridgeRequests += 1;
+      maxActiveMcpBridgeRequests = Math.max(maxActiveMcpBridgeRequests, activeMcpBridgeRequests);
+      heldMcpBridgeResponses.add(res);
+      res.once("close", () => {
+        activeMcpBridgeRequests -= 1;
+        heldMcpBridgeResponses.delete(res);
+      });
       return;
     }
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -109,6 +126,14 @@ function completeHeldAgentTasks(): void {
     if (res.writableEnded || res.destroyed) continue;
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ taskId: crypto.randomUUID(), taskOutput: { ok: true } }));
+  }
+}
+
+function completeHeldMcpBridgeRequests(): void {
+  for (const res of [...heldMcpBridgeResponses]) {
+    if (res.writableEnded || res.destroyed) continue;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ brokered: true }));
   }
 }
 
@@ -188,12 +213,18 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  completeHeldAgentTasks();
+  completeHeldMcpBridgeRequests();
   heartbeatCount = 0;
   holdAgentTaskResponses = false;
   agentTaskRequestCount = 0;
   agentTaskClosedCount = 0;
-  completeHeldAgentTasks();
   heldAgentTaskResponses.clear();
+  holdMcpBridgeResponses = false;
+  mcpBridgeRequestCount = 0;
+  activeMcpBridgeRequests = 0;
+  maxActiveMcpBridgeRequests = 0;
+  heldMcpBridgeResponses.clear();
   await getDbClient().run("DELETE FROM script_run_journal");
   await getDbClient().run("DELETE FROM script_runs");
 });
@@ -202,6 +233,9 @@ afterEach(() => {
   holdAgentTaskResponses = false;
   completeHeldAgentTasks();
   heldAgentTaskResponses.clear();
+  holdMcpBridgeResponses = false;
+  completeHeldMcpBridgeRequests();
+  heldMcpBridgeResponses.clear();
 });
 
 describe("script workflow runtime", () => {
@@ -347,6 +381,44 @@ describe("script workflow runtime", () => {
     const run = await waitForRun(id);
     expect(run.status).toBe("failed");
     expect(run.error).toBe("guest boom");
+  });
+
+  spawnTest("bounds active host broker work under a guest flood", async () => {
+    holdMcpBridgeResponses = true;
+    const callCount = MAX_ACTIVE_CAPABILITY_DISPATCHES + 4;
+    const source = `
+      export default async function main(_args, ctx) {
+        return await Promise.all(
+          Array.from({ length: ${callCount} }, () => ctx.swarm.agent_info()),
+        );
+      }
+    `;
+
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({ source, background: true }),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    await waitUntil(
+      () => mcpBridgeRequestCount === MAX_ACTIVE_CAPABILITY_DISPATCHES,
+      `Expected ${MAX_ACTIVE_CAPABILITY_DISPATCHES} active broker calls, observed ${mcpBridgeRequestCount}`,
+    );
+    await Bun.sleep(100);
+    expect(mcpBridgeRequestCount).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+    expect(maxActiveMcpBridgeRequests).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+
+    completeHeldMcpBridgeRequests();
+    await waitUntil(
+      () => mcpBridgeRequestCount === callCount,
+      `Expected all ${callCount} broker calls to dispatch, observed ${mcpBridgeRequestCount}`,
+    );
+    expect(maxActiveMcpBridgeRequests).toBeLessThanOrEqual(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+    completeHeldMcpBridgeRequests();
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("completed");
+    expect(run.output).toHaveLength(callCount);
   });
 
   spawnTest(
