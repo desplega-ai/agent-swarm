@@ -10,7 +10,14 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import { closeDb, createAgent, createTaskExtended, createUser, initDb } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  createTaskExtended,
+  createUser,
+  initDb,
+  updateAgentProfile,
+} from "../be/db";
 import { findUserById } from "../be/users";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
@@ -83,6 +90,30 @@ afterAll(async () => {
 });
 
 describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
+  test("a UI follow-up replaces inherited worker affinity with Lead-only routing", async () => {
+    const worker = await createAgent({
+      name: "session-parent-worker",
+      isLead: false,
+      status: "idle",
+    });
+    await updateAgentProfile(worker.id, { role: "coder" });
+    const parent = await createTaskExtended("worker-owned session", {
+      agentId: worker.id,
+      routingAffinity: { role: "coder" },
+    });
+
+    const created = await api("POST", "/api/tasks", {
+      task: "continue this session",
+      parentTaskId: parent.id,
+      source: "ui",
+    });
+
+    expect(created.status).toBe(201);
+    expect(created.body.agentId).toBe(leadAgentId);
+    expect(created.body.parentTaskId).toBe(parent.id);
+    expect(created.body.routingAffinity).toMatchObject({ leadOnly: true });
+  });
+
   test("draft:true creates a task in draft status, invisible to the assigned agent's dispatch queue", async () => {
     const created = await api("POST", "/api/tasks", {
       task: "session with attachments uploading",

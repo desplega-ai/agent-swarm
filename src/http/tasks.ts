@@ -802,6 +802,15 @@ export async function handleTasks(
       if (lead) defaultAgentId = lead.id;
     }
 
+    // Session UI follow-ups always continue with the Lead. They may inherit a
+    // worker-specific affinity from their parent, which would reject the Lead
+    // during direct-assignment validation. Mark the UI route explicitly
+    // Lead-only so the continuation replaces that ordinary worker affinity.
+    const uiLeadRouting =
+      parsed.body.source === "ui" && !parsed.body.agentId && parsed.body.parentTaskId
+        ? { capabilities: [], leadOnly: true }
+        : undefined;
+
     let assetKey: string | undefined;
     try {
       const inheritedKey = parsed.body.parentTaskId
@@ -832,6 +841,7 @@ export async function handleTasks(
         dir: parsed.body.dir || undefined,
         parentTaskId: parsed.body.parentTaskId || undefined,
         source: parsed.body.source || "api",
+        routingAffinity: uiLeadRouting,
         outputSchema: parsed.body.outputSchema || undefined,
         contextKey: parsed.body.contextKey || undefined,
         requestedByUserId,

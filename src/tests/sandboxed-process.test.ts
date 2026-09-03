@@ -10,13 +10,10 @@ import {
   sandboxSpawnEnv,
   snapshotCapped,
 } from "../utils/sandboxed-process";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { CHILD_PROCESS_TEST_BUDGET_MS, expectChildOk, runChild } from "./test-proc";
 
 const TEST_ENV = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: "/tmp" };
-// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
-// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs this test.
-const SKIP_SANDBOX_SPAWN_TESTS = process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1";
-
 function sandboxPrelude(command: readonly string[]): string {
   return buildSandboxedCommand(command, TEST_ENV)[2] ?? "";
 }

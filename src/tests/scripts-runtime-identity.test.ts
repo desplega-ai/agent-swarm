@@ -25,14 +25,13 @@ import { runScript } from "../scripts-runtime/loader";
 import { SwarmConfig } from "../scripts-runtime/swarm-config";
 import { createSwarmSdk } from "../scripts-runtime/swarm-sdk";
 import { proxyScriptsApi } from "../tools/script-common";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-scripts-runtime-identity.sqlite";
 let baseUrl = "";
 const API_KEY = "scripts-runtime-identity-key-1234567890";
-// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
-// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
-const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
+const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;

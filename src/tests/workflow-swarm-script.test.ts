@@ -30,6 +30,9 @@ import {
   SwarmScriptExecutor,
 } from "../workflows/executors/swarm-script";
 import { interpolate } from "../workflows/template";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-swarm-script.sqlite";
 const API_KEY = "test-workflow-swarm-script-key-1234567890";
@@ -185,7 +188,7 @@ describe("SwarmScriptExecutor", () => {
     ).toBe(SWARM_SCRIPT_MAX_TIMEOUT_MS);
   });
 
-  test("A workflow with one swarm-script node resolves by name + runs + returns result", async () => {
+  skip("A workflow with one swarm-script node resolves by name + runs + returns result", async () => {
     await saveScript(
       "scratch-add-one-a1b2c3d4",
       `export default async (args: { value: number }) => ({ value: args.value + 1 });`,
@@ -248,7 +251,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output).toBeUndefined();
   });
 
-  test("named script source may contain literal mustache template data", async () => {
+  skip("named script source may contain literal mustache template data", async () => {
     await saveScript(
       "literal-mustache-source",
       `export default async () => ({ template: "Hello {{customer_name}}" });`,
@@ -272,7 +275,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ template: "Hello {{customer_name}}" });
   });
 
-  test("unrelated upstream node names do not turn literal source templates into workflow tokens", async () => {
+  skip("unrelated upstream node names do not turn literal source templates into workflow tokens", async () => {
     await saveScript(
       "literal-upstream-name",
       `export default async () => ({ template: "Hello {{customer.name}}" });`,
@@ -325,7 +328,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.error).toContain("{{customer.name}}");
   });
 
-  test("swarm-script executor includes API connection descriptors in ctx.api", async () => {
+  skip("swarm-script executor includes API connection descriptors in ctx.api", async () => {
     await upsertScriptConnection({
       slug: "workflowVendor",
       kind: "openapi",
@@ -367,7 +370,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ apiKeys: ["workflowVendor"] });
   });
 
-  test("pinHash correctly resolves to a historic script_versions row", async () => {
+  skip("pinHash correctly resolves to a historic script_versions row", async () => {
     const first = await saveScript("versioned", `export default async () => ({ version: "old" });`);
     await saveScript("versioned", `export default async () => ({ version: "new" });`);
 
@@ -391,7 +394,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.version).toBe(1);
   });
 
-  test("inputs mapping from a predecessor node correctly populates args", async () => {
+  skip("inputs mapping from a predecessor node correctly populates args", async () => {
     await saveScript(
       "from-input",
       `export default async (args: { value: string }) => ({ seen: args.value });`,
@@ -439,7 +442,7 @@ describe("SwarmScriptExecutor", () => {
     expect(echoStep?.output).toEqual({ value: '{"a":1}' });
   });
 
-  test("{{path}} args: object arg is injected as raw object, not JSON string", async () => {
+  skip("{{path}} args: object arg is injected as raw object, not JSON string", async () => {
     await saveScript(
       "echo-obj",
       `export default async (args: { data: Record<string, unknown> }) => ({ isObject: typeof args.data === "object" && !Array.isArray(args.data), keys: Object.keys(args.data ?? {}) });`,
@@ -467,7 +470,7 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { isObject: true, keys: ["a", "b"] } });
   });
 
-  test("{{path}} args: array arg is injected as raw array, not JSON string", async () => {
+  skip("{{path}} args: array arg is injected as raw array, not JSON string", async () => {
     await saveScript(
       "echo-arr",
       `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
@@ -495,7 +498,7 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { isArray: true, length: 3 } });
   });
 
-  test("{{path}} args: empty array is injected as raw empty array with length 0, not '[]' string", async () => {
+  skip("{{path}} args: empty array is injected as raw empty array with length 0, not '[]' string", async () => {
     await saveScript(
       "echo-empty-arr",
       `export default async (args: { items: string[] }) => ({ isArray: Array.isArray(args.items), length: args.items.length });`,
@@ -523,7 +526,7 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { isArray: true, length: 0 } });
   });
 
-  test("{{path}} args: string scalar arg is injected as the string value", async () => {
+  skip("{{path}} args: string scalar arg is injected as the string value", async () => {
     await saveScript(
       "echo-str",
       `export default async (args: { name: string }) => ({ isString: typeof args.name === "string", value: args.name });`,
@@ -557,7 +560,7 @@ describe("SwarmScriptExecutor", () => {
     });
   });
 
-  test("{{path}} args: number scalar arg is injected as a number, not a string", async () => {
+  skip("{{path}} args: number scalar arg is injected as a number, not a string", async () => {
     await saveScript(
       "echo-num",
       `export default async (args: { count: number }) => ({ isNumber: typeof args.count === "number", value: args.count });`,
@@ -585,7 +588,7 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { isNumber: true, value: 3 } });
   });
 
-  test("{{path}} args: boolean scalar arg is injected as a boolean, not a string", async () => {
+  skip("{{path}} args: boolean scalar arg is injected as a boolean, not a string", async () => {
     await saveScript(
       "echo-bool",
       `export default async (args: { enabled: boolean }) => ({ isBoolean: typeof args.enabled === "boolean", value: args.enabled });`,
@@ -613,7 +616,7 @@ describe("SwarmScriptExecutor", () => {
     expect(scriptStep?.output).toMatchObject({ result: { isBoolean: true, value: false } });
   });
 
-  test("{{path}} args: mixed string template still produces a string via interpolation", async () => {
+  skip("{{path}} args: mixed string template still produces a string via interpolation", async () => {
     await saveScript(
       "echo-mixed",
       `export default async (args: { label: string }) => ({ isString: typeof args.label === "string", value: args.label });`,
@@ -643,7 +646,7 @@ describe("SwarmScriptExecutor", () => {
     });
   });
 
-  test("fsMode workspace-rw is rejected at config validation with a clear error message", async () => {
+  skip("fsMode workspace-rw is rejected at config validation with a clear error message", async () => {
     await saveScript("noop", `export default async () => ({ ok: true });`);
     const executor = new SwarmScriptExecutor(deps);
     const wf = await makeWorkflow({ nodes: [] });
@@ -676,7 +679,7 @@ describe("SwarmScriptExecutor", () => {
     expect(success.status).toBe("success");
   });
 
-  test("timeoutMs not set — script completes with the default 30s window", async () => {
+  skip("timeoutMs not set — script completes with the default 30s window", async () => {
     await saveScript("quick", `export default async () => ({ done: true });`);
     const executor = new SwarmScriptExecutor(deps);
     const wf = await makeWorkflow({ nodes: [] });
@@ -696,7 +699,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.result).toEqual({ done: true });
   });
 
-  test("timeoutMs set — a long-running script is killed before it finishes", async () => {
+  skip("timeoutMs set — a long-running script is killed before it finishes", async () => {
     await saveScript(
       "sleeper",
       `export default async () => { await new Promise(r => setTimeout(r, 3000)); return { done: true }; };`,
@@ -719,7 +722,7 @@ describe("SwarmScriptExecutor", () => {
     expect(result.output?.exitCode).not.toBe(0);
   });
 
-  test("Failure in the script surfaces as a workflow-node failure", async () => {
+  skip("Failure in the script surfaces as a workflow-node failure", async () => {
     await saveScript("throws", `export default async () => { throw new Error("boom"); };`);
     const executor = new SwarmScriptExecutor(deps);
     const wf = await makeWorkflow({ nodes: [] });

@@ -28,7 +28,26 @@ trap - EXIT
 
 if [[ "$probe_status" -eq 134 ]]; then
   export SWARM_SKIP_SANDBOX_SPAWN_TESTS=1
-  echo "[pre-push-tests] sandbox spawn probe exited 134; skipping spawn-dependent tests in src/tests/scripts-runtime.test.ts, src/tests/script-workflows-runtime-e2e.test.ts, src/tests/scripts-mcp-e2e.test.ts, src/tests/sandboxed-process.test.ts, src/tests/scripts-runtime-identity.test.ts, and src/tests/slack-read-boundaries.test.ts"
+  echo "[pre-push-tests] sandbox spawn probe exited 134; skipping spawn-dependent tests in:"
+  printf '  %s\n' \
+    src/tests/apps-spike2.test.ts \
+    src/tests/apps-sync-engine.test.ts \
+    src/tests/connection-embedded-auth.test.ts \
+    src/tests/sandboxed-process.test.ts \
+    src/tests/schedule-target-type.test.ts \
+    src/tests/script-connections.test.ts \
+    src/tests/script-workflows-runtime-e2e.test.ts \
+    src/tests/scripts-external-api.test.ts \
+    src/tests/scripts-http.test.ts \
+    src/tests/scripts-mcp-e2e.test.ts \
+    src/tests/scripts-retention.test.ts \
+    src/tests/scripts-runtime-identity.test.ts \
+    src/tests/scripts-runtime.test.ts \
+    src/tests/slack-read-boundaries.test.ts \
+    src/tests/workflow-e2e.test.ts \
+    src/tests/workflow-engine-v2.test.ts \
+    src/tests/workflow-executors.test.ts \
+    src/tests/workflow-swarm-script.test.ts
 elif [[ "$probe_status" -ne 0 ]]; then
   echo "[pre-push-tests] sandbox spawn probe failed unexpectedly with exit $probe_status" >&2
   exit "$probe_status"

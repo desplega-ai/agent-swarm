@@ -28,6 +28,9 @@ import {
   registerKvListTool,
   registerKvSetTool,
 } from "../tools/kv";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-apps-spike2.sqlite";
 const AGENT_ID = crypto.randomUUID();
@@ -937,7 +940,7 @@ describe("reserved apps KV namespace", () => {
 });
 
 describe("custom app actions", () => {
-  test("runs a saved script with merged args and app context", async () => {
+  skip("runs a saved script with merged args and app context", async () => {
     const saved = await upsertScriptByName({
       name: `app_action_${crypto.randomUUID().replaceAll("-", "")}`,
       scope: "agent",

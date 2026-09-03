@@ -7,15 +7,13 @@ import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
 const API_KEY = "test-script-workflows-runtime-key-1234567890";
-// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
-// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
-const SKIP_SANDBOX_TESTS = process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1";
-const spawnTest = test.skipIf(SKIP_SANDBOX_TESTS);
+const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 let agentId: string;
 let server: Server;
@@ -198,7 +196,7 @@ describe("script workflow runtime", () => {
   // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);
   // Linux CI is the enforcing environment. Skip only unblocks local macOS
   // pushes now that pre-push tests are blocking (#1216).
-  test.skipIf(process.platform === "darwin" || SKIP_SANDBOX_TESTS)(
+  test.skipIf(process.platform === "darwin" || SKIP_SANDBOX_SPAWN_TESTS)(
     "resource ulimits actually apply to the durable run's process tree",
     async () => {
       // Async Bun.spawn on purpose: scripts/check-test-spawn-sync.sh greps
