@@ -1,6 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod";
-import { createMcpServer, getAgentById, installMcpServer } from "@/be/db";
+import {
+  createMcpServer,
+  emitMcpServerConnectedTelemetry,
+  getAgentById,
+  installMcpServer,
+} from "@/be/db";
 import { can } from "@/rbac";
 import { createToolRegistrar, swarmToolOutputSchema, toolErr, toolOk } from "@/tools/utils";
 
@@ -102,6 +107,7 @@ export const registerMcpServerCreateTool = (server: McpServer) => {
           headerConfigKeys: args.headerConfigKeys,
           extraAuthorizeParams: args.extraAuthorizeParams,
         });
+        await emitMcpServerConnectedTelemetry();
 
         // Auto-install for the creating agent
         await installMcpServer(requestInfo.agentId, created.id);

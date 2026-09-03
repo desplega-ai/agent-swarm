@@ -26,9 +26,12 @@ import {
   type ConnectionAuthSummary,
   connectionAuthInputFromFlat,
   connectionAuthSummary,
+  findCredentialBindingByIdentity,
+  getCredentialBindingById,
   getScriptConnectionById,
   listRelationalCredentialBindings,
   listScriptConnections,
+  listScriptConnectionsAsync,
   refreshScriptConnection,
   ScriptConnectionConflictError,
   type ScriptConnectionKind,
@@ -54,6 +57,13 @@ import {
   CredentialBindingSchema,
   placeholderForConfigKey,
 } from "@/scripts-runtime/credential-broker";
+import {
+  _resolveIntegrationProvider,
+  _resolveIntegrationType,
+  emitIntegrationConnected,
+  type IntegrationProvider,
+  type IntegrationType,
+} from "@/telemetry";
 import type { OAuthApp } from "@/tracker/types";
 import { getRequestAuth } from "@/utils/request-auth-context";
 import { resolveScopedResourceId, scopedResourceScopeIdSchema } from "@/utils/scoped-resource";
@@ -180,6 +190,40 @@ const oauthBindingTokenStatusSchema = z.enum([
 const oauthAuthorizationStatusSchema = z.enum(["active", "refresh-failed", "expired", "revoked"]);
 
 const credentialAuthKindSchema = z.enum(["config", "oauth"]);
+
+function knownIntegrationProvider(
+  ...candidates: Array<string | null | undefined>
+): IntegrationProvider | undefined {
+  for (const candidate of candidates) {
+    const provider = _resolveIntegrationProvider(candidate);
+    if (provider) return provider;
+  }
+  return undefined;
+}
+
+function connectionIntegrationProvider(
+  connection: ScriptConnectionRecord,
+): IntegrationProvider | undefined {
+  return knownIntegrationProvider(connection.slug, connection.baseUrl, ...connection.allowedHosts);
+}
+
+function bindingIntegrationProvider(
+  binding: ScriptCredentialBindingRecord,
+): IntegrationProvider | undefined {
+  return knownIntegrationProvider(...binding.allowedHosts);
+}
+
+async function countConnectionType(type: IntegrationType): Promise<number> {
+  return (await listScriptConnectionsAsync({ includeDisabled: true, allScopes: true })).filter(
+    (connection) => _resolveIntegrationType(connectionIntegrationProvider(connection)) === type,
+  ).length;
+}
+
+async function countBindingType(type: IntegrationType): Promise<number> {
+  return (await listRelationalCredentialBindings({ includeInactive: true })).filter(
+    (binding) => _resolveIntegrationType(bindingIntegrationProvider(binding)) === type,
+  ).length;
+}
 
 const connectionAuthTypeResponseSchema = z.enum(["none", "bearer", "header", "query", "oauth"]);
 
@@ -1993,6 +2037,18 @@ export async function handleScriptConnections(
         userId,
       });
 
+      try {
+        const provider = connectionIntegrationProvider(connection);
+        const type = _resolveIntegrationType(provider);
+        emitIntegrationConnected(
+          type,
+          provider,
+          connection.version === 1 && (await countConnectionType(type)) === 1,
+        );
+      } catch {
+        // Telemetry must never break a saved connection.
+      }
+
       upsertConnectionRoute.respond(res, 200, {
         connection: (await decorateConnections([connection]))[0]!,
       });
@@ -2095,6 +2151,16 @@ export async function handleScriptConnections(
         authKind: parsed.body.authKind ?? "config",
         oauthAuthorizationId: parsed.body.oauthAuthorizationId,
       });
+      const existingBinding =
+        (parsed.body.id ? await getCredentialBindingById(parsed.body.id) : null) ??
+        (await findCredentialBindingByIdentity({
+          configKey: nextBinding.configKey,
+          scope: nextBinding.scope,
+          scopeId: nextBinding.scopeId ?? null,
+          headerTemplate: nextBinding.headerTemplate,
+          queryTemplate: nextBinding.queryTemplate,
+          managedByConnectionId: null,
+        }));
       const binding = await upsertCredentialBinding({
         id: parsed.body.id,
         configKey: nextBinding.configKey,
@@ -2108,6 +2174,17 @@ export async function handleScriptConnections(
         oauthAuthorizationId: nextBinding.oauthAuthorizationId ?? null,
         userId: await resolveHttpAuditUserId(req, agentId),
       });
+      try {
+        const provider = bindingIntegrationProvider(binding);
+        const type = _resolveIntegrationType(provider);
+        emitIntegrationConnected(
+          type,
+          provider,
+          existingBinding === null && (await countBindingType(type)) === 1,
+        );
+      } catch {
+        // Telemetry must never break a saved credential binding.
+      }
       upsertCredentialBindingRoute.respond(res, 200, { binding: await decorateBinding(binding) });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : String(err), 400);

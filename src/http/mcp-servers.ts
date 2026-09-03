@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createMcpServer,
   deleteMcpServer,
+  emitMcpServerConnectedTelemetry,
   getAgentById,
   getAgentMcpServers,
   getMcpServerById,
@@ -498,6 +499,7 @@ export async function handleMcpServers(
         envConfigKeys: parsed.body.envConfigKeys,
         headerConfigKeys: parsed.body.headerConfigKeys,
       });
+      await emitMcpServerConnectedTelemetry();
       createMcpServerRoute.respond(res, 201, { server });
     } catch (err) {
       jsonError(res, err instanceof Error ? err.message : "Create failed", 400);

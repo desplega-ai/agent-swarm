@@ -4,7 +4,7 @@ import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { configureDbResolver } from "../prompts/resolver";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
-import { telemetry } from "../telemetry";
+import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -5201,6 +5201,7 @@ export async function createTaskExtended(
       source: row.source,
       ...taskContextForTelemetry(rowToAgentTask(row)),
       hasParent: !!row.parentTaskId,
+      has_repo: !!row.vcsRepo,
       priority: row.priority,
     },
     (task) => task !== null,
@@ -8733,6 +8734,20 @@ export async function upsertSwarmConfig(data: {
   }
 
   return config;
+}
+
+/** Emit a built-in integration only once for this persisted installation. */
+export async function emitBuiltInIntegrationConnectedOnce(
+  provider: "github" | "slack",
+): Promise<void> {
+  try {
+    const key = `telemetry.integration.${provider}.emitted`;
+    if ((await getSwarmConfigs({ scope: "global", key })).length > 0) return;
+    if (!emitIntegrationConnected(_resolveIntegrationType(provider), provider, true)) return;
+    await upsertSwarmConfig({ scope: "global", key, value: "true" });
+  } catch {
+    // Telemetry must never break integration startup.
+  }
 }
 
 /**
@@ -12931,6 +12946,18 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
 
   if (!row) throw new Error("Failed to create MCP server");
   return rowToMcpServer(row);
+}
+
+/** Shared by HTTP and MCP-tool creation paths so each new server emits once. */
+export async function emitMcpServerConnectedTelemetry(): Promise<void> {
+  try {
+    const row = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM mcp_servers",
+    );
+    emitIntegrationConnected("other", undefined, row?.count === 1);
+  } catch {
+    // Telemetry must never break MCP server creation.
+  }
 }
 
 export async function updateMcpServer(

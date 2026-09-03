@@ -7,6 +7,7 @@ import {
   getSwarmRepos,
   updateSwarmRepo,
 } from "../be/db";
+import { emitIntegrationConnected } from "../telemetry";
 import { RepoGuidelinesSchema, RepoHooksSchema, SwarmRepoSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -146,6 +147,11 @@ export async function handleRepos(
         hooks: parsed.body.hooks,
         guidelines: parsed.body.guidelines,
       });
+      try {
+        emitIntegrationConnected("code_repo", repo.url, (await getSwarmRepos()).length === 1);
+      } catch {
+        // Telemetry must never break repo creation.
+      }
       json(res, repo, 201);
     } catch (error) {
       const msg = (error as Error).message;

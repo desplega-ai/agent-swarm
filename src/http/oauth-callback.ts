@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
+import { getDbClient } from "@/be/db";
 import { gcMcpOAuthPending } from "@/be/db-queries/mcp-oauth";
 import {
   consumeOAuthPending,
@@ -13,6 +14,7 @@ import { captureLinearAppUserId } from "@/linear/oauth";
 import { oauthAppRowToProviderConfig } from "@/oauth/ensure-token";
 import { captureIdentity } from "@/oauth/identity-capture";
 import { exchangeAuthorizationCode } from "@/oauth/wrapper";
+import { _resolveIntegrationType, emitIntegrationConnected } from "@/telemetry";
 import { getPublicMcpBaseUrl } from "@/utils/constants";
 import { registerVolatileSecret, scrubSecrets } from "@/utils/secret-scrubber";
 import { completeMcpOAuthCallback } from "./mcp-oauth";
@@ -220,6 +222,18 @@ export async function completeGenericOAuthCallback(
       ? new Date(Date.now() + tokens.expiresIn * 1000).toISOString()
       : null;
 
+    let authorizationAlreadyExisted: boolean | undefined;
+    try {
+      authorizationAlreadyExisted = Boolean(
+        await getDbClient().get<{ id: string }>(
+          "SELECT id FROM oauth_authorizations WHERE appId = ? AND label = ?",
+          [pending.appId, pending.label],
+        ),
+      );
+    } catch {
+      // Leave first_of_type false if the telemetry-only preflight cannot run.
+    }
+
     const authorization = await upsertAuthorization({
       appId: pending.appId,
       label: pending.label,
@@ -231,6 +245,25 @@ export async function completeGenericOAuthCallback(
       ...(pending.userId ? { userId: pending.userId, connectedByUserId: pending.userId } : {}),
       status: "active",
     });
+
+    try {
+      const integrationType = _resolveIntegrationType(app.provider);
+      const providers = await getDbClient().query<{ provider: string }>(
+        `SELECT a.provider
+           FROM oauth_authorizations z
+           JOIN oauth_apps a ON a.id = z.appId`,
+      );
+      const typeCount = providers.filter(
+        (row) => _resolveIntegrationType(row.provider) === integrationType,
+      ).length;
+      emitIntegrationConnected(
+        integrationType,
+        app.provider,
+        authorizationAlreadyExisted === false && typeCount === 1,
+      );
+    } catch {
+      // Telemetry must never break a completed OAuth callback.
+    }
 
     const identity = await captureIdentity({
       userinfoUrl: app.userinfoUrl,

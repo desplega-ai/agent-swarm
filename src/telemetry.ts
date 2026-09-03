@@ -116,6 +116,119 @@ export function _resolveInstallMethod(raw: string | undefined | null, isE2b: boo
  */
 const KNOWN_INSTALL_PRESETS = new Set(["dev", "content", "research", "solo", "custom"]);
 
+export type IntegrationType =
+  | "code_repo"
+  | "comms"
+  | "task_manager"
+  | "information_management"
+  | "other";
+
+export type IntegrationProvider =
+  | "github"
+  | "gitlab"
+  | "bitbucket"
+  | "slack"
+  | "email"
+  | "kapso"
+  | "discord"
+  | "telegram"
+  | "whatsapp"
+  | "linear"
+  | "jira"
+  | "asana"
+  | "trello"
+  | "google_drive"
+  | "notion"
+  | "dropbox"
+  | "confluence";
+
+const KNOWN_INTEGRATION_TYPES = new Set<IntegrationType>([
+  "code_repo",
+  "comms",
+  "task_manager",
+  "information_management",
+  "other",
+]);
+
+const INTEGRATION_PROVIDERS = new Map<
+  string,
+  { provider: IntegrationProvider; type: IntegrationType }
+>([
+  ["github", { provider: "github", type: "code_repo" }],
+  ["github.com", { provider: "github", type: "code_repo" }],
+  ["api.github.com", { provider: "github", type: "code_repo" }],
+  ["gitlab", { provider: "gitlab", type: "code_repo" }],
+  ["gitlab.com", { provider: "gitlab", type: "code_repo" }],
+  ["bitbucket", { provider: "bitbucket", type: "code_repo" }],
+  ["bitbucket.org", { provider: "bitbucket", type: "code_repo" }],
+  ["api.bitbucket.org", { provider: "bitbucket", type: "code_repo" }],
+  ["slack", { provider: "slack", type: "comms" }],
+  ["slack.com", { provider: "slack", type: "comms" }],
+  ["api.slack.com", { provider: "slack", type: "comms" }],
+  ["email", { provider: "email", type: "comms" }],
+  ["kapso", { provider: "kapso", type: "comms" }],
+  ["kapso.ai", { provider: "kapso", type: "comms" }],
+  ["api.kapso.ai", { provider: "kapso", type: "comms" }],
+  ["discord", { provider: "discord", type: "comms" }],
+  ["discord.com", { provider: "discord", type: "comms" }],
+  ["telegram", { provider: "telegram", type: "comms" }],
+  ["telegram.org", { provider: "telegram", type: "comms" }],
+  ["api.telegram.org", { provider: "telegram", type: "comms" }],
+  ["whatsapp", { provider: "whatsapp", type: "comms" }],
+  ["whatsapp.com", { provider: "whatsapp", type: "comms" }],
+  ["linear", { provider: "linear", type: "task_manager" }],
+  ["linear.app", { provider: "linear", type: "task_manager" }],
+  ["api.linear.app", { provider: "linear", type: "task_manager" }],
+  ["jira", { provider: "jira", type: "task_manager" }],
+  ["asana", { provider: "asana", type: "task_manager" }],
+  ["asana.com", { provider: "asana", type: "task_manager" }],
+  ["app.asana.com", { provider: "asana", type: "task_manager" }],
+  ["trello", { provider: "trello", type: "task_manager" }],
+  ["trello.com", { provider: "trello", type: "task_manager" }],
+  ["api.trello.com", { provider: "trello", type: "task_manager" }],
+  ["google_drive", { provider: "google_drive", type: "information_management" }],
+  ["gdrive", { provider: "google_drive", type: "information_management" }],
+  ["drive.google.com", { provider: "google_drive", type: "information_management" }],
+  ["notion", { provider: "notion", type: "information_management" }],
+  ["notion.so", { provider: "notion", type: "information_management" }],
+  ["api.notion.com", { provider: "notion", type: "information_management" }],
+  ["dropbox", { provider: "dropbox", type: "information_management" }],
+  ["dropbox.com", { provider: "dropbox", type: "information_management" }],
+  ["api.dropboxapi.com", { provider: "dropbox", type: "information_management" }],
+  ["confluence", { provider: "confluence", type: "information_management" }],
+]);
+
+function integrationProviderEntry(
+  providerSlug: string | null | undefined,
+): { provider: IntegrationProvider; type: IntegrationType } | undefined {
+  const raw = providerSlug?.trim().toLowerCase();
+  if (!raw) return undefined;
+
+  let candidate = raw;
+  try {
+    candidate = new URL(raw).hostname.toLowerCase();
+  } catch {
+    // A provider slug or bare hostname is already in lookup-ready form. Also
+    // accept the common git@host:owner/repo SSH shorthand used for repo URLs.
+    const sshHost = raw.match(/^[^@]+@([^:]+):/)?.[1];
+    if (sshHost) candidate = sshHost;
+  }
+  if (candidate.startsWith("www.")) candidate = candidate.slice(4);
+  return INTEGRATION_PROVIDERS.get(candidate);
+}
+
+/** Resolve free-form provider/host input to the closed telemetry category set. */
+export function _resolveIntegrationType(providerSlug: string | null | undefined): IntegrationType {
+  return integrationProviderEntry(providerSlug)?.type ?? "other";
+}
+
+/** Return a provider only when the raw value matched the closed allowlist. */
+export function _resolveIntegrationProvider(
+  providerSlug: string | null | undefined,
+): IntegrationProvider | undefined {
+  return integrationProviderEntry(providerSlug)?.provider;
+}
+
 /**
  * Validate `INSTALL_PRESET` against the wizard's known preset IDs.
  *
@@ -447,7 +560,45 @@ export const telemetry = {
     track({ event: `agent.${event}`, properties: props });
   },
 
+  integration(
+    event: string,
+    props: { type: IntegrationType; provider?: IntegrationProvider; first_of_type: boolean },
+  ): void {
+    const type = KNOWN_INTEGRATION_TYPES.has(props.type) ? props.type : "other";
+    const provider = props.provider
+      ? integrationProviderEntry(props.provider)?.provider
+      : undefined;
+    track({
+      event: `integration.${event}`,
+      properties: {
+        type,
+        ...(provider ? { provider } : {}),
+        first_of_type: props.first_of_type,
+      },
+    });
+  },
+
   compaction(event: string, props: Record<string, unknown>): void {
     track({ event: `compaction.${event}`, properties: props });
   },
 };
+
+/**
+ * Emit the connected event while ensuring free-form provider/host input can
+ * never flow into telemetry. Returns false when telemetry is not initialized,
+ * which lets once-per-install callers avoid persisting a marker for a no-op.
+ */
+export function emitIntegrationConnected(
+  type: IntegrationType,
+  providerSlug: string | null | undefined,
+  firstOfType: boolean,
+): boolean {
+  if (!isEnabled() || !installationId) return false;
+  const provider = _resolveIntegrationProvider(providerSlug);
+  telemetry.integration("connected", {
+    type,
+    ...(provider ? { provider } : {}),
+    first_of_type: firstOfType,
+  });
+  return true;
+}
