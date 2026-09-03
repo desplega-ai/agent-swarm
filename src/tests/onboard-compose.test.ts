@@ -24,6 +24,28 @@ describe("generateCompose", () => {
     claudeOAuthToken: "test-oauth",
   });
 
+  test("static example exposes only the selected provider credentials to agents", async () => {
+    const yaml = await Bun.file(
+      new URL("../../docker-compose.example.yml", import.meta.url),
+    ).text();
+    const agentServices = `  lead:${yaml.split("\n  lead:")[1]}`;
+
+    expect(agentServices.match(/^ {6}- CLAUDE_CODE_OAUTH_TOKEN=/gm)).toHaveLength(8);
+    for (const unusedCredential of [
+      "ANTHROPIC_API_KEY",
+      "OPENAI_API_KEY",
+      "OPENROUTER_API_KEY",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "AWS_PROFILE",
+    ]) {
+      expect(agentServices).not.toContain(unusedCredential);
+    }
+    expect(yaml.split("\n  lead:")[0]).toContain("OPENAI_API_KEY");
+    expect(yaml.split("\n  lead:")[0]).toContain("OPENROUTER_API_KEY");
+  });
+
   test("uses the always pull policy by default for every service", () => {
     const yaml = generateCompose(devState);
 

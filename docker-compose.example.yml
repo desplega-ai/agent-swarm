@@ -175,17 +175,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set LEAD_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${LEAD_AGENT_ID:?Set LEAD_AGENT_ID in .env (generate one with uuidgen)}"
@@ -234,17 +226,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set WORKER_1_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${WORKER_1_AGENT_ID:?Set WORKER_1_AGENT_ID in .env (generate one with uuidgen)}"
@@ -291,17 +275,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set WORKER_2_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${WORKER_2_AGENT_ID:?Set WORKER_2_AGENT_ID in .env (generate one with uuidgen)}"
@@ -348,17 +324,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_WRITER_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_WRITER_AGENT_ID:?Set CONTENT_WRITER_AGENT_ID in .env (generate one with uuidgen)}"
@@ -409,17 +377,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_REVIEWER_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_REVIEWER_AGENT_ID:?Set CONTENT_REVIEWER_AGENT_ID in .env (generate one with uuidgen)}"
@@ -466,17 +426,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set CONTENT_STRATEGIST_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${CONTENT_STRATEGIST_AGENT_ID:?Set CONTENT_STRATEGIST_AGENT_ID in .env (generate one with uuidgen)}"
@@ -523,17 +475,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set UX_PRINCIPLES_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${UX_PRINCIPLES_AGENT_ID:?Set UX_PRINCIPLES_AGENT_ID in .env (generate one with uuidgen)}"
@@ -580,17 +524,9 @@ services:
     environment:
       - HARNESS_PROVIDER=${HARNESS_PROVIDER:-claude}
       - MODEL_OVERRIDE=${MODEL_OVERRIDE:-}
+      # Expose only the selected provider credentials. Claude is the example default;
+      # replace this line with the matching provider variables when changing HARNESS_PROVIDER.
       - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
       - API_KEY=${API_KEY}
       # Generate once with `uuidgen`, set DISCOVERABILITY_AGENT_ID in .env, and keep it stable across restarts.
       - "AGENT_ID=${DISCOVERABILITY_AGENT_ID:?Set DISCOVERABILITY_AGENT_ID in .env (generate one with uuidgen)}"
