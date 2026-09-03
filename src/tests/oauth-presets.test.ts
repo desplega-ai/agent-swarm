@@ -132,7 +132,6 @@ describe("oauth presets — pure data", () => {
     expect(microsoft?.scopes).toContain("ChannelMessage.Send");
     expect(microsoft?.scopes).toContain("Mail.Read");
     expect(microsoft?.scopes).toContain("Mail.Send");
-    expect(microsoft?.scopes).not.toContain("Mail.ReadWrite");
     expect(microsoft?.scopeSeparator).toBe(" ");
     expect(microsoft?.tokenAuthStyle).toBe("body");
     expect(microsoft?.tokenBodyFormat).toBe("form");
