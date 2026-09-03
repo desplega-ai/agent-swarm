@@ -130,12 +130,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
-      - BEDROCK_AUTH_MODE=${BEDROCK_AUTH_MODE:-}
-      - AWS_REGION=${AWS_REGION:-}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
 
       # Optional: Business-Use instrumentation
       - BUSINESS_USE_API_KEY=${BUSINESS_USE_API_KEY:-}
@@ -151,8 +145,6 @@ services:
 
     volumes:
       - swarm_api:/app
-      # AWS profile auth only: uncomment this mount. Do not expose host AWS credentials otherwise.
-      # - ${HOME}/.aws:/home/worker/.aws:ro
 
     secrets:
       - encryption_key

@@ -70,6 +70,8 @@ function appendProviderEnvironment(lines: string[], state: OnboardState, include
       lines.push(ENV_MODEL_OVERRIDE);
       break;
     case "bedrock":
+      // Workflow LLM nodes do not support Bedrock yet, so the API does not need AWS credentials.
+      if (!includeHarness) break;
       lines.push("      # AWS Bedrock (alpha)");
       lines.push(
         "      # Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.",
@@ -139,9 +141,6 @@ export function generateCompose(state: OnboardState): string {
   lines.push("");
   lines.push("    volumes:");
   lines.push("      - swarm_data:/app/data");
-  if (state.provider === "bedrock" && state.awsProfile) {
-    lines.push(AWS_PROFILE_VOLUME);
-  }
   lines.push("");
   lines.push("    healthcheck:");
   lines.push('      test: ["CMD-SHELL", "curl -f http://localhost:3013/health || exit 1"]');

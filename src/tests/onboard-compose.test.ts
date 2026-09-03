@@ -81,7 +81,7 @@ describe("generateCompose", () => {
     }
   });
 
-  test("passes AWS profile configuration and mount to the API and every Bedrock agent", () => {
+  test("passes AWS profile configuration and mount only to Bedrock agents", () => {
     const yaml = generateCompose({
       ...devState,
       provider: "bedrock",
@@ -91,10 +91,11 @@ describe("generateCompose", () => {
       modelOverride: "amazon-bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
     });
     expect(yaml.match(/HARNESS_PROVIDER=\$\{HARNESS_PROVIDER\}/g)).toHaveLength(3);
-    expect(yaml.match(/AWS_PROFILE=\$\{AWS_PROFILE\}/g)).toHaveLength(4);
-    expect(yaml.match(/BEDROCK_AUTH_MODE=\$\{BEDROCK_AUTH_MODE\}/g)).toHaveLength(4);
-    expect(yaml.match(/\$\{HOME\}\/\.aws:\/home\/worker\/\.aws:ro/g)).toHaveLength(4);
-    expect(yaml.match(/Alpha: session summaries/g)).toHaveLength(4);
+    expect(yaml.match(/AWS_PROFILE=\$\{AWS_PROFILE\}/g)).toHaveLength(3);
+    expect(yaml.match(/BEDROCK_AUTH_MODE=\$\{BEDROCK_AUTH_MODE\}/g)).toHaveLength(3);
+    expect(yaml.match(/\$\{HOME\}\/\.aws:\/home\/worker\/\.aws:ro/g)).toHaveLength(3);
+    expect(yaml.match(/Alpha: session summaries/g)).toHaveLength(3);
+    expect(yaml.split("\n  lead:")[0]).not.toContain("AWS_PROFILE");
   });
 
   test.each([
