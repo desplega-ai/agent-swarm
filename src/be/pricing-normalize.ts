@@ -52,6 +52,9 @@ const ROUTING_PREFIXES_BY_PROVIDER: Record<PricingProvider, readonly string[]> =
   "claude-managed": [],
   devin: [],
   gemini: [],
+  // A generic ACP target reports whatever model id it likes and has no seeded
+  // rate rows, so there is no canonical key to collapse onto — no-op.
+  acp: [],
 };
 
 /**

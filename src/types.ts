@@ -152,6 +152,16 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "devin",
     ultra: "devin",
   },
+  // A generic ACP target owns its own model selection — the swarm never sends
+  // one over the wire. Empty strings resolve to `{ source: "none" }`, while
+  // `MODEL_TIER_*` / `MODEL_TIER_MAP` env overrides still apply for targets
+  // that do accept a model.
+  acp: {
+    smol: "",
+    regular: "",
+    smart: "",
+    ultra: "",
+  },
 };
 
 export function parseModelTier(value: string | null | undefined): ModelTier | undefined {
@@ -344,6 +354,7 @@ export const ProviderNameSchema = z.enum([
   "devin",
   "claude-managed",
   "opencode",
+  "acp",
 ]);
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
@@ -433,6 +444,10 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // hook `additionalContext`, so the runner must leave codex rows `pending`
   // (`ProviderSession.steeringDeliveredExternally`).
   codex: ["queue"],
+  // The ACP adapter implements no steering primitive: `session/prompt` is a
+  // single in-flight turn and the only interrupt is `session/cancel` (abort).
+  // Advertise nothing rather than promise semantics we can't honor.
+  acp: [],
 };
 
 export type DevinProviderMeta = {
@@ -451,6 +466,7 @@ export type ProviderMetaMap = {
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
   opencode: NoProviderMeta;
+  acp: NoProviderMeta;
 };
 
 export const FollowUpConfigSchema = z
@@ -2906,6 +2922,10 @@ export const PricingProviderSchema = z.enum([
   "opencode",
   "devin",
   "gemini",
+  // No seeded rate rows: a generic ACP target owns its own billing and the
+  // adapter reports `totalCostUsd: 0`, so these rows settle at
+  // `costSource: 'unpriced'`. Accepted here so the row is recorded at all.
+  "acp",
 ]);
 export type PricingProvider = z.infer<typeof PricingProviderSchema>;
 

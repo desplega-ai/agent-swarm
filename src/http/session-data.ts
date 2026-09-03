@@ -179,8 +179,12 @@ const createSessionCostRoute = route({
      * Phase 6 (extended migration 063): drives the API recompute path. After
      * Phase 2 every provider with seeded pricing rows participates.
      */
+    // `acp` has no seeded pricing rows by design — a generic ACP target owns
+    // its own billing and the adapter reports `totalCostUsd: 0`, so the row
+    // lands as `costSource: 'unpriced'`. It still has to be accepted here or
+    // every ACP session's cost POST 400s and the row is silently dropped.
     provider: z
-      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini"])
+      .enum(["claude", "claude-managed", "codex", "pi", "opencode", "devin", "gemini", "acp"])
       .optional(),
     /**
      * Phase 6: epoch-ms timestamp used as the "active price at time T" lookup

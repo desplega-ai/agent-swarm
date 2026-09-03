@@ -406,7 +406,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "providerMeta": {
@@ -475,7 +476,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "capabilities": {
@@ -618,6 +620,7 @@
               "devin",
               "claude-managed",
               "opencode",
+              "acp",
               null
             ],
             "default": null
@@ -771,7 +774,8 @@
               "pi",
               "devin",
               "claude-managed",
-              "opencode"
+              "opencode",
+              "acp"
             ]
           },
           "harnessProvider": {
@@ -786,6 +790,7 @@
               "devin",
               "claude-managed",
               "opencode",
+              "acp",
               null
             ]
           },
@@ -2433,7 +2438,8 @@
               "pi",
               "opencode",
               "devin",
-              "gemini"
+              "gemini",
+              "acp"
             ]
           },
           "model": {
@@ -8626,7 +8632,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "harness_provider": {
@@ -8637,7 +8644,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "runtimeInstanceId": {
@@ -8904,7 +8912,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -9922,6 +9931,7 @@
                         "devin",
                         "claude-managed",
                         "opencode",
+                        "acp",
                         null
                       ]
                     },
@@ -9937,6 +9947,7 @@
                         "devin",
                         "claude-managed",
                         "opencode",
+                        "acp",
                         null
                       ]
                     },
@@ -10054,6 +10065,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "acp",
                               null
                             ]
                           },
@@ -10069,6 +10081,7 @@
                               "devin",
                               "claude-managed",
                               "opencode",
+                              "acp",
                               null
                             ]
                           },
@@ -23182,7 +23195,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23262,7 +23276,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23375,7 +23390,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -23456,7 +23472,8 @@
                 "pi",
                 "opencode",
                 "devin",
-                "gemini"
+                "gemini",
+                "acp"
               ]
             },
             "required": true,
@@ -32113,7 +32130,8 @@
                       "pi",
                       "opencode",
                       "devin",
-                      "gemini"
+                      "gemini",
+                      "acp"
                     ]
                   },
                   "createdAt": {
@@ -32839,7 +32857,8 @@
                                       "pi",
                                       "devin",
                                       "claude-managed",
-                                      "opencode"
+                                      "opencode",
+                                      "acp"
                                     ]
                                   },
                                   "requestedByUserId": {
@@ -37591,7 +37610,8 @@
                               "pi",
                               "devin",
                               "claude-managed",
-                              "opencode"
+                              "opencode",
+                              "acp"
                             ]
                           },
                           "providers": {
@@ -37607,7 +37627,8 @@
                                     "pi",
                                     "devin",
                                     "claude-managed",
-                                    "opencode"
+                                    "opencode",
+                                    "acp"
                                   ]
                                 },
                                 "state": {
@@ -37746,7 +37767,8 @@
                       "pi",
                       "devin",
                       "claude-managed",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   }
                 },
@@ -38120,7 +38142,8 @@
                                   "pi",
                                   "devin",
                                   "claude-managed",
-                                  "opencode"
+                                  "opencode",
+                                  "acp"
                                 ]
                               },
                               "requestedByUserId": {
@@ -38467,7 +38490,8 @@
                           "codex",
                           "pi",
                           "claude-managed",
-                          "opencode"
+                          "opencode",
+                          "acp"
                         ]
                       },
                       "model": {
