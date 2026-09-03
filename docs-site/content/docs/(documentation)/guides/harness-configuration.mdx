@@ -3,6 +3,8 @@ title: Harness Configuration
 description: Configure the AI provider (Claude Code, Codex, opencode, pi-mono, Devin, or Claude Managed Agents) that powers your agents
 ---
 
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+
 Agent Swarm uses a **harness** abstraction to decouple task execution from the underlying AI provider. Each worker runs one harness — the harness spawns sessions, manages credentials, and normalizes events so the rest of the system doesn't care which provider is underneath.
 
 ## Supported Providers
