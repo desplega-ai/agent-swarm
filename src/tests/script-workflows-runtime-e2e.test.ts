@@ -12,6 +12,10 @@ import { listenOnFreePort } from "./test-net";
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
 const API_KEY = "test-script-workflows-runtime-key-1234567890";
+// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
+// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
+const SKIP_SANDBOX_TESTS = process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1";
+const spawnTest = test.skipIf(SKIP_SANDBOX_TESTS);
 
 let agentId: string;
 let server: Server;
@@ -126,7 +130,7 @@ beforeEach(async () => {
 });
 
 describe("script workflow runtime", () => {
-  test("runs a durable one-off script and replays a completed step", async () => {
+  spawnTest("runs a durable one-off script and replays a completed step", async () => {
     const source = `
       export default async function main(args, ctx) {
         const first = await ctx.step.swarmScript("double", {
@@ -165,8 +169,10 @@ describe("script workflow runtime", () => {
 
   // ─── Sandbox regressions (superagent.sh c27edfd7, finding fd866ffe) ──────
 
-  test("the durable run's user code cannot read the operator bearer from process.env", async () => {
-    const source = `
+  spawnTest(
+    "the durable run's user code cannot read the operator bearer from process.env",
+    async () => {
+      const source = `
       export default async function main() {
         return {
           apiKeyEnv: typeof process !== "undefined" ? (process.env.AGENT_SWARM_API_KEY ?? null) : "no-process",
@@ -174,24 +180,25 @@ describe("script workflow runtime", () => {
       }
     `;
 
-    const created = await api("/api/script-runs", {
-      method: "POST",
-      body: JSON.stringify({ source, background: true }),
-    });
-    expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
 
-    const run = await waitForRun(id);
-    expect(run.status).toBe("completed");
-    // Not the real key, not any truthy value — the env var simply isn't set
-    // in the harness's process anymore (bearer travels over stdin instead).
-    expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
-  });
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      // Not the real key, not any truthy value — the env var simply isn't set
+      // in the harness's process anymore (bearer travels over stdin instead).
+      expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
+    },
+  );
 
   // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);
   // Linux CI is the enforcing environment. Skip only unblocks local macOS
   // pushes now that pre-push tests are blocking (#1216).
-  test.skipIf(process.platform === "darwin")(
+  test.skipIf(process.platform === "darwin" || SKIP_SANDBOX_TESTS)(
     "resource ulimits actually apply to the durable run's process tree",
     async () => {
       // Async Bun.spawn on purpose: scripts/check-test-spawn-sync.sh greps
@@ -225,16 +232,19 @@ describe("script workflow runtime", () => {
     },
   );
 
-  test("POST /api/script-runs requires no bearer beyond normal auth — matches POST /api/scripts/run (any authenticated agent)", async () => {
-    const created = await api("/api/script-runs", {
-      method: "POST",
-      body: JSON.stringify({
-        source: "export default async () => ({ ok: true });",
-        background: true,
-      }),
-    });
-    // Not a 401/403 for an ordinary (non-lead) agent — RBAC posture is
-    // explicitly `ungated`, not silently missing.
-    expect(created.status).toBe(201);
-  });
+  spawnTest(
+    "POST /api/script-runs requires no bearer beyond normal auth — matches POST /api/scripts/run (any authenticated agent)",
+    async () => {
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({
+          source: "export default async () => ({ ok: true });",
+          background: true,
+        }),
+      });
+      // Not a 401/403 for an ordinary (non-lead) agent — RBAC posture is
+      // explicitly `ungated`, not silently missing.
+      expect(created.status).toBe(201);
+    },
+  );
 });

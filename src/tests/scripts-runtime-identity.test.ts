@@ -30,6 +30,9 @@ import { listenOnFreePort } from "./test-net";
 const TEST_DB_PATH = "./test-scripts-runtime-identity.sqlite";
 let baseUrl = "";
 const API_KEY = "scripts-runtime-identity-key-1234567890";
+// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
+// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
+const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
 
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
@@ -253,7 +256,7 @@ describe("swarm SDK emits the runtime header", () => {
 describe("script subprocess carries the invoking worker's identity", () => {
   const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
 
-  test("ctx.swarm.task_poll() presents X-Runtime-Instance-ID from system config", async () => {
+  spawnTest("ctx.swarm.task_poll() presents X-Runtime-Instance-ID from system config", async () => {
     const seen: Array<string | null> = [];
     const stub = Bun.serve({
       port: 0,
@@ -284,7 +287,7 @@ describe("script subprocess carries the invoking worker's identity", () => {
     }
   });
 
-  test("without a runtime identity the subprocess sends none", async () => {
+  spawnTest("without a runtime identity the subprocess sends none", async () => {
     const seen: Array<string | null> = [];
     const stub = Bun.serve({
       port: 0,
