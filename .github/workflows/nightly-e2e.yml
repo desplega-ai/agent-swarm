@@ -19,10 +19,14 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    # Each leg receives only its own provider key. The :slim tag is built and
+    # published by this repo's docker-and-deploy workflow from main, so the trust
+    # boundary is write access to main; scoping keeps a single leg from seeing
+    # the other two credentials.
     env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ matrix.provider == 'claude' && secrets.ANTHROPIC_API_KEY || '' }}
+      OPENAI_API_KEY: ${{ matrix.provider == 'codex' && secrets.OPENAI_API_KEY || '' }}
+      OPENROUTER_API_KEY: ${{ matrix.provider == 'pi' && secrets.OPENROUTER_API_KEY || '' }}
 
     steps:
       - name: Checkout repository
