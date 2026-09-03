@@ -1,5 +1,3 @@
-
-
 # Agent Swarm
 
 Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Bun + TypeScript, `bun:sqlite` (WAL), Biome, Ink CLI.
