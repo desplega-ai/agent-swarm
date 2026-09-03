@@ -2977,6 +2977,7 @@ async function fetchRelevantMemories(
     // Plan: thoughts/taras/plans/2026-05-05-memory-rater-v1.5/step-2.md §2
     if (taskId) headers["X-Source-Task-ID"] = taskId;
     if (contextKey) headers["X-Context-Key"] = contextKey;
+    headers["X-Memory-Consumption"] = "prompt";
 
     const response = await fetch(`${apiUrl}/api/memory/search`, {
       method: "POST",

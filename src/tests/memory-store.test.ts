@@ -3,6 +3,7 @@ import { unlink } from "node:fs/promises";
 import { closeDb, createAgent, getDbClient, initDb, isSqliteVecAvailable } from "../be/db";
 import { serializeEmbedding } from "../be/embedding";
 import { SqliteMemoryStore } from "../be/memory/providers/sqlite-store";
+import { dedupeMemoryDocumentIds, recordMemoryAccesses } from "../be/memory/raters/retrieval";
 
 const TEST_DB_PATH = "./test-memory-store.sqlite";
 
@@ -159,6 +160,46 @@ describe("SqliteMemoryStore", () => {
 
       const peeked = await store.peek(created.id);
       expect(peeked!.accessCount).toBe(0);
+    });
+
+    test("search access counts one row per scoped logical document", async () => {
+      const firstChunk = await store.store({
+        agentId: agentA,
+        scope: "agent",
+        key: "shared-document-key",
+        name: "search document chunk 1",
+        content: "first chunk",
+        source: "manual",
+        chunkIndex: 0,
+        totalChunks: 2,
+      });
+      const secondChunk = await store.store({
+        agentId: agentA,
+        scope: "agent",
+        key: "shared-document-key",
+        name: "search document chunk 2",
+        content: "second chunk",
+        source: "manual",
+        chunkIndex: 1,
+        totalChunks: 2,
+      });
+      const otherOwner = await store.store({
+        agentId: agentB,
+        scope: "agent",
+        key: "shared-document-key",
+        name: "other owner's document",
+        content: "separate document",
+        source: "manual",
+      });
+
+      const ids = dedupeMemoryDocumentIds([secondChunk, firstChunk, otherOwner]);
+      expect(ids).toEqual([secondChunk.id, otherOwner.id]);
+
+      await recordMemoryAccesses([...ids, ...ids]);
+
+      expect((await store.peek(firstChunk.id))!.accessCount).toBe(0);
+      expect((await store.peek(secondChunk.id))!.accessCount).toBe(1);
+      expect((await store.peek(otherOwner.id))!.accessCount).toBe(1);
     });
 
     test("get returns null for non-existent ID", async () => {

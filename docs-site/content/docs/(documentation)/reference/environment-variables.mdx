@@ -393,6 +393,7 @@ Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VITE_PROXY_TARGET` | `http://localhost:3013` | Overrides the API origin the `ui/` Vite dev server (`pnpm dev`, port 5274) proxies `/api`, `/health`, and `/status` requests to. Set when the API is running on a non-default port/host during local dashboard development. |
+| `VITE_PLAUSIBLE_ANALYTICS` | unset | Build-time flag. Set to `1` to inject the Plausible analytics snippet into the dashboard's `index.html` during `bun run build`. Only our hosted dashboard sets it; self-hosted and local builds ship with no analytics script. |
 
 ## Cloud Personalization & Adaptive Home
 

@@ -5,6 +5,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { closeDb, createAgent, getDbClient, initDb } from "../be/db";
 import * as realMemoryModule from "../be/memory";
+import { sourceQuality } from "../be/memory/reranker";
+import { SIMILARITY_THRESHOLD } from "../prompts/memories";
 import type { AgentMemory } from "../types";
 
 // Capture the real exports BEFORE mock.module patches the registry entry —
@@ -15,6 +17,8 @@ const realMemoryExports = {
 };
 
 const memoryId = randomUUID();
+const memoryChunkId = randomUUID();
+const thresholdMemoryId = randomUUID();
 const agentId = randomUUID();
 const sourceTaskId = randomUUID();
 const TEST_DB_PATH = "./test-memory-http-recall-gating.sqlite";
@@ -22,6 +26,7 @@ const TEST_DB_PATH = "./test-memory-http-recall-gating.sqlite";
 const memory: AgentMemory = {
   id: memoryId,
   agentId,
+  key: "ui-memory-fixture",
   content: "UI browse/search memory fixture",
   name: "ui-memory-fixture",
   scope: "agent",
@@ -37,6 +42,36 @@ const memory: AgentMemory = {
   updatedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
   accessedAt: new Date("2026-06-14T00:00:00.000Z").toISOString(),
 };
+
+const memoryChunk: AgentMemory = {
+  ...memory,
+  id: memoryChunkId,
+  content: "UI browse/search memory fixture second chunk",
+  chunkIndex: 1,
+  totalChunks: 2,
+};
+
+const thresholdMemory: AgentMemory = {
+  ...memory,
+  id: thresholdMemoryId,
+  key: "threshold-memory-fixture",
+  name: "threshold-memory-fixture",
+  content: "Prompt threshold control",
+};
+
+function candidate(memoryFixture: AgentMemory, similarity: number) {
+  return {
+    ...memoryFixture,
+    similarity,
+    rawSimilarity: similarity,
+    compositeScore: similarity,
+    accessCount: 0,
+    expiresAt: null,
+    embeddingModel: "test-embedding",
+    alpha: 1,
+    beta: 1,
+  };
+}
 
 mock.module("../be/memory", () => ({
   getEmbeddingProvider: () => ({
@@ -65,19 +100,22 @@ mock.module("../be/memory", () => ({
         require("../be/memory/providers/sqlite-store") as typeof import("../be/memory/providers/sqlite-store");
       return new SqliteMemoryStore().peek(id);
     },
-    search: async () => [
-      {
-        ...memory,
-        similarity: 0.95,
-        rawSimilarity: 0.95,
-        compositeScore: 0.95,
-        accessCount: 0,
-        expiresAt: null,
-        embeddingModel: "test-embedding",
-        alpha: 1,
-        beta: 1,
-      },
-    ],
+    search: async (
+      _embedding: Float32Array,
+      _agentId: string,
+      options: import("../be/memory/types").MemorySearchOptions,
+    ) => {
+      if (options.queryText === "document recall") {
+        return [candidate(memory, 0.95), candidate(memoryChunk, 0.9)];
+      }
+      if (options.queryText === "prompt recall") {
+        return [
+          candidate(memory, 0.95),
+          candidate(thresholdMemory, SIMILARITY_THRESHOLD / sourceQuality(thresholdMemory.source)),
+        ];
+      }
+      return [candidate(memory, 0.95)];
+    },
   }),
 }));
 
@@ -157,10 +195,33 @@ beforeAll(async () => {
        VALUES (?, ?, ?, 'in_progress', 'mcp', ?, ?)`,
     [sourceTaskId, agentId, "HTTP memory recall gating task", nowIso, nowIso],
   );
+  for (const memoryFixture of [memory, memoryChunk, thresholdMemory]) {
+    await getDbClient().run(
+      `INSERT INTO agent_memory
+       (id, agentId, scope, key, name, content, source, chunkIndex, totalChunks, createdAt, accessedAt)
+       VALUES (?, ?, 'agent', ?, ?, ?, 'manual', ?, ?, ?, ?)`,
+      [
+        memoryFixture.id,
+        agentId,
+        memoryFixture.key ?? null,
+        memoryFixture.name,
+        memoryFixture.content,
+        memoryFixture.chunkIndex,
+        memoryFixture.totalChunks,
+        nowIso,
+        nowIso,
+      ],
+    );
+  }
 });
 
 beforeEach(async () => {
   await getDbClient().run("DELETE FROM memory_retrieval");
+  await getDbClient().run("UPDATE agent_memory SET accessCount = 0 WHERE id IN (?, ?, ?)", [
+    memoryId,
+    memoryChunkId,
+    thresholdMemoryId,
+  ]);
 });
 
 afterAll(async () => {
@@ -191,6 +252,52 @@ describe("memory HTTP recall capture gating", () => {
     expect(response.body.results).toHaveLength(1);
     expect(response.body.results[0].id).toBe(memoryId);
     expect(await countRetrievals()).toBe(0);
+    expect(
+      await getDbClient().get<{ accessCount: number }>(
+        "SELECT accessCount FROM agent_memory WHERE id = ?",
+        [memoryId],
+      ),
+    ).toEqual({ accessCount: 0 });
+  });
+
+  test("POST /api/memory/search counts each logical document once", async () => {
+    const response = await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: "document recall", intent: "explicit agent recall", limit: 5 },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.results.map((result: any) => result.accessCount)).toEqual([1, 0]);
+    expect(
+      await getDbClient().query<{ id: string; accessCount: number }>(
+        "SELECT id, accessCount FROM agent_memory WHERE id IN (?, ?) ORDER BY chunkIndex",
+        [memoryId, memoryChunkId],
+      ),
+    ).toEqual([
+      { id: memoryId, accessCount: 1 },
+      { id: memoryChunkId, accessCount: 0 },
+    ]);
+  });
+
+  test("prompt recall excludes memories at the injection threshold", async () => {
+    const response = await callMemoryRoute(
+      "POST",
+      "/api/memory/search",
+      ["api", "memory", "search"],
+      { query: "prompt recall", intent: "pre-task memory recall", limit: 5 },
+      { "x-memory-consumption": "prompt" },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body.results.map((result: any) => result.accessCount)).toEqual([1, 0]);
+    expect(
+      await getDbClient().get<{ accessCount: number }>(
+        "SELECT accessCount FROM agent_memory WHERE id = ?",
+        [thresholdMemoryId],
+      ),
+    ).toEqual({ accessCount: 0 });
   });
 
   test("GET /api/memory/:id accepts UI calls without intent and does not record retrievals", async () => {

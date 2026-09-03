@@ -17290,6 +17290,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "accessCount": {
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -17299,7 +17302,8 @@
                           "similarity",
                           "source",
                           "scope",
-                          "tags"
+                          "tags",
+                          "accessCount"
                         ]
                       }
                     }
