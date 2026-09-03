@@ -14,6 +14,8 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
   For **configuring** an existing provider, see [Harness Configuration](/docs/guides/harness-configuration). This guide is for **implementing a new one**.
 </Callout>
 
+For an operator-facing comparison of the install choices, see the [Provider Capability Matrix](/docs/guides/provider-capability-matrix).
+
 **Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299), `acp` (any [Agent Client Protocol](https://agentclientprotocol.com) agent, spawned from `ACP_TARGET_COMMAND`).
 
 ---
@@ -155,7 +157,9 @@ Codex has no in-process input channel: `@openai/codex-sdk` runs `codex exec` wit
 
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 
-### pi-mono + Amazon Bedrock auth
+### pi-mono + Amazon Bedrock auth (alpha)
+
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.
 
 #### Mode selection
 
@@ -1029,6 +1033,7 @@ The Anthropic Beta SDK has a few non-obvious surface differences from the conven
 
 ## 13. Further reading
 
+- [Provider Capability Matrix](/docs/guides/provider-capability-matrix) — what each install-time provider keeps, loses, or can unlock with another key.
 - [Harness Configuration](/docs/guides/harness-configuration) — how to **use** the existing providers.
 - [Codex OAuth setup](/docs/guides/provider-auth/codex-oauth) — end-user OAuth flow.
 - [`CLAUDE.md`](https://github.com/desplega-ai/agent-swarm/blob/main/CLAUDE.md) — project-wide rules, especially "Architecture invariants" (DB boundary) and "Secret scrubbing".
