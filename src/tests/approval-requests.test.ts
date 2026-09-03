@@ -1,12 +1,18 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, mock, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import {
+  cancelPendingApprovalRequestsForRun,
+  claimApprovalCancellationNotification,
   closeDb,
+  completeApprovalCancellationNotificationClaim,
   createAgent,
   createApprovalRequest,
   createTaskExtended,
   createUser,
+  createWorkflow,
+  createWorkflowRun,
+  createWorkflowRunStep,
   getAgentCurrentTask,
   getApprovalRequestById,
   getApprovalRequestByStepId,
@@ -14,14 +20,25 @@ import {
   getExpiredPendingApprovals,
   initDb,
   listApprovalRequests,
+  releaseApprovalCancellationNotificationClaim,
   resolveApprovalRequest,
   startTask,
   updateApprovalRequestNotifications,
+  updateWorkflowRun,
+  updateWorkflowRunStep,
 } from "../be/db";
-import { type ApprovalQuestion, missingRequiredResponseIds } from "../http/approval-requests";
+import {
+  type ApprovalQuestion,
+  getWorkflowApprovalUnavailableReason,
+  handleApprovalRequests,
+  missingRequiredResponseIds,
+} from "../http/approval-requests";
 import type { ExecutorMeta } from "../types";
+import { postApprovalCancellationUpdates } from "../workflows/approval-notifications";
+import { checkpointStepWaiting } from "../workflows/checkpoint";
 import type { ExecutorDependencies, ExecutorInput } from "../workflows/executors/base";
 import { HumanInTheLoopExecutor } from "../workflows/executors/human-in-the-loop";
+import { cancelWorkflowRunStep } from "../workflows/resume";
 import { listenOnFreePort } from "./test-net";
 
 const TEST_DB_PATH = "./test-approval-requests.sqlite";
@@ -168,6 +185,22 @@ function createTestServer(): Server {
     const result = await handleRequest({ method: req.method || "GET", url: req.url || "/" }, body);
     res.writeHead(result.status);
     res.end(JSON.stringify(result.body));
+  });
+}
+
+function createProductionApprovalServer(): Server {
+  return createHttpServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const handled = await handleApprovalRequests(
+      req,
+      res,
+      url.pathname.split("/").filter(Boolean),
+      url.searchParams,
+    );
+    if (!handled) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found" }));
+    }
   });
 }
 
@@ -360,6 +393,317 @@ describe("Approval Requests", () => {
       const result = await resolveApprovalRequest(crypto.randomUUID(), { status: "approved" });
       expect(result).toBeNull();
     });
+
+    test("does not resolve a workflow approval after its run and HITL step are cancelled", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-cancel-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      await updateWorkflowRun(runId, { status: "cancelled" });
+      await updateWorkflowRunStep(stepId, { status: "cancelled" });
+      const approval = await createApprovalRequest(
+        makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId }),
+      );
+
+      const result = await resolveApprovalRequest(
+        approval.id,
+        { status: "approved", responses: { q1: { approved: true } } },
+        { requireActionableWorkflow: true },
+      );
+
+      expect(result).toBeNull();
+      expect(await getWorkflowApprovalUnavailableReason(approval)).toBe(
+        "The workflow run is cancelled and this approval is no longer actionable",
+      );
+      expect((await getApprovalRequestById(approval.id))?.status).toBe("pending");
+    });
+
+    test("does not resolve an approval linked to a step from another run", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-mismatched-run-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const firstRunId = crypto.randomUUID();
+      const secondRunId = crypto.randomUUID();
+      const secondStepId = crypto.randomUUID();
+      await createWorkflowRun({ id: firstRunId, workflowId: workflow.id });
+      await createWorkflowRun({ id: secondRunId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: secondStepId,
+        runId: secondRunId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      await updateWorkflowRunStep(secondStepId, { status: "waiting" });
+      const approval = await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: firstRunId,
+          workflowRunStepId: secondStepId,
+        }),
+      );
+
+      expect(
+        await resolveApprovalRequest(
+          approval.id,
+          { status: "approved", responses: { q1: { approved: true } } },
+          { requireActionableWorkflow: true },
+        ),
+      ).toBeNull();
+      expect(await getWorkflowApprovalUnavailableReason(approval)).toBe(
+        "The human-in-the-loop step belongs to a different workflow run",
+      );
+    });
+  });
+
+  describe("DB: cancelPendingApprovalRequestsForRun", () => {
+    test("records cancellation and posts one line to the stored Slack thread", async () => {
+      const runId = crypto.randomUUID();
+      const approval = await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: crypto.randomUUID(),
+          notificationChannels: [
+            { channel: "slack", target: "C123", messageTs: "1234567890.123456" },
+          ],
+        }),
+      );
+
+      const cancelled = await cancelPendingApprovalRequestsForRun(runId, "Superseded by v2");
+      expect(cancelled).toHaveLength(1);
+      expect(cancelled[0]?.status).toBe("cancelled");
+      expect(cancelled[0]?.resolutionReason).toBe("Superseded by v2");
+      expect(cancelled[0]?.resolvedAt).toBeTruthy();
+
+      const postMessage = mock(async () => ({}));
+      await postApprovalCancellationUpdates(cancelled, "Superseded by v2", {
+        chat: { postMessage },
+      });
+      expect(postMessage).toHaveBeenCalledTimes(1);
+      expect(postMessage.mock.calls[0]?.[0]).toEqual({
+        channel: "C123",
+        thread_ts: "1234567890.123456",
+        text: "This approval is no longer actionable: Superseded by v2",
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+      await postApprovalCancellationUpdates(cancelled, "Superseded by v2", {
+        chat: { postMessage },
+      });
+      expect(postMessage).toHaveBeenCalledTimes(1);
+
+      expect(await cancelPendingApprovalRequestsForRun(runId, "again")).toEqual([]);
+      expect((await getApprovalRequestById(approval.id))?.resolutionReason).toBe(
+        "Superseded by v2",
+      );
+    });
+
+    test("posts after a late Slack timestamp is stored", async () => {
+      const runId = crypto.randomUUID();
+      const approval = await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: crypto.randomUUID(),
+          notificationChannels: [{ channel: "slack", target: "C123" }],
+        }),
+      );
+      const cancelled = await cancelPendingApprovalRequestsForRun(runId, "Superseded");
+      const postMessage = mock(async () => ({}));
+
+      await postApprovalCancellationUpdates(cancelled, "Superseded", {
+        chat: { postMessage },
+      });
+      expect(postMessage).not.toHaveBeenCalled();
+
+      await updateApprovalRequestNotifications(approval.id, [
+        { channel: "slack", target: "C123", messageTs: "123.456" },
+      ]);
+      const latest = await getApprovalRequestById(approval.id);
+      await postApprovalCancellationUpdates([latest!], "Superseded", {
+        chat: { postMessage },
+      });
+      expect(postMessage).toHaveBeenCalledTimes(1);
+    });
+
+    test("retries only the Slack thread whose delivery failed", async () => {
+      const runId = crypto.randomUUID();
+      const approval = await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: crypto.randomUUID(),
+          notificationChannels: [
+            { channel: "slack", target: "C_OK", messageTs: "123.456" },
+            { channel: "slack", target: "C_RETRY", messageTs: "789.012" },
+          ],
+        }),
+      );
+      const cancelled = await cancelPendingApprovalRequestsForRun(runId, "Superseded");
+      let retryFailures = 0;
+      const postMessage = mock(async ({ channel }: { channel: string }) => {
+        if (channel === "C_RETRY" && retryFailures++ === 0) {
+          throw new Error("temporary Slack outage");
+        }
+        return {};
+      });
+
+      await postApprovalCancellationUpdates(cancelled, "Superseded", {
+        chat: { postMessage },
+      });
+      const latest = await getApprovalRequestById(approval.id);
+      await postApprovalCancellationUpdates([latest!], "Superseded", {
+        chat: { postMessage },
+      });
+      expect(postMessage.mock.calls.map(([input]) => input.channel)).toEqual([
+        "C_OK",
+        "C_RETRY",
+        "C_RETRY",
+      ]);
+    });
+
+    test("a stale lease owner cannot finalize or release a reclaimed notification", async () => {
+      const runId = crypto.randomUUID();
+      const approval = await createApprovalRequest(
+        makeApprovalData({ workflowRunId: runId, workflowRunStepId: crypto.randomUUID() }),
+      );
+      await cancelPendingApprovalRequestsForRun(runId, "Superseded");
+      const key = "C123:123.456";
+      const first = await claimApprovalCancellationNotification(approval.id, key);
+      expect(first).not.toBeNull();
+
+      const staleAt = new Date(Date.now() - 61_000).toISOString();
+      await getDbClient().run(
+        "UPDATE approval_requests SET cancellationNotificationClaims = ? WHERE id = ?",
+        [
+          JSON.stringify({
+            [key]: { claimedAt: staleAt, leaseToken: first!.leaseToken },
+          }),
+          approval.id,
+        ],
+      );
+      const second = await claimApprovalCancellationNotification(approval.id, key);
+      expect(second).not.toBeNull();
+      expect(second!.leaseToken).not.toBe(first!.leaseToken);
+
+      await releaseApprovalCancellationNotificationClaim(approval.id, key, first!.leaseToken);
+      expect(await claimApprovalCancellationNotification(approval.id, key)).toBeNull();
+      await completeApprovalCancellationNotificationClaim(approval.id, key, first!.leaseToken);
+      expect(await claimApprovalCancellationNotification(approval.id, key)).toBeNull();
+
+      await completeApprovalCancellationNotificationClaim(approval.id, key, second!.leaseToken);
+      expect(await claimApprovalCancellationNotification(approval.id, key)).toBeNull();
+    });
+
+    test("a late waiting checkpoint cannot revive a cancelled run and step", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-checkpoint-race-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      await updateWorkflowRun(runId, { status: "cancelled", error: "Superseded" });
+      await updateWorkflowRunStep(stepId, { status: "cancelled", error: "Superseded" });
+
+      expect(await checkpointStepWaiting(runId, stepId, {})).toBe(false);
+      const approval = await createApprovalRequest(
+        makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId }),
+      );
+      expect(await getWorkflowApprovalUnavailableReason(approval)).toContain(
+        "workflow run is cancelled",
+      );
+    });
+
+    test("direct HITL step cancellation terminalizes its pending approval", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-step-cancel-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      const approval = await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: stepId,
+          notificationChannels: [{ channel: "slack", target: "C123", messageTs: "123.456" }],
+        }),
+      );
+
+      const postMessage = mock(async () => ({}));
+      await cancelWorkflowRunStep(stepId, "Step superseded", {
+        chat: { postMessage },
+      });
+
+      expect(await getApprovalRequestById(approval.id)).toMatchObject({
+        status: "cancelled",
+        resolutionReason: "Step superseded",
+      });
+      expect(postMessage).toHaveBeenCalledWith({
+        channel: "C123",
+        thread_ts: "123.456",
+        text: "This approval is no longer actionable: Step superseded",
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+    });
+
+    test("retrying a cancelled HITL step reuses its persisted reason", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-step-retry-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      await createApprovalRequest(
+        makeApprovalData({
+          workflowRunId: runId,
+          workflowRunStepId: stepId,
+          notificationChannels: [{ channel: "slack", target: "C123", messageTs: "123.456" }],
+        }),
+      );
+
+      const failedPost = mock(async () => {
+        throw new Error("temporary Slack outage");
+      });
+      await cancelWorkflowRunStep(stepId, "Original reason", {
+        chat: { postMessage: failedPost },
+      });
+
+      const retryPost = mock(async () => ({}));
+      await cancelWorkflowRunStep(stepId, "Different retry reason", {
+        chat: { postMessage: retryPost },
+      });
+      expect(retryPost.mock.calls[0]?.[0].text).toBe(
+        "This approval is no longer actionable: Original reason",
+      );
+    });
   });
 
   describe("DB: listApprovalRequests", () => {
@@ -517,6 +861,49 @@ describe("Approval Requests", () => {
   });
 
   describe("HTTP: POST /api/approval-requests/:id/respond", () => {
+    test("production route rejects a late response after workflow cancellation", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-http-cancel-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      const approval = await createApprovalRequest(
+        makeApprovalData({ workflowRunId: runId, workflowRunStepId: stepId }),
+      );
+      await updateWorkflowRun(runId, { status: "cancelled", error: "Superseded" });
+      await updateWorkflowRunStep(stepId, { status: "cancelled", error: "Superseded" });
+
+      const productionServer = createProductionApprovalServer();
+      const port = await listenOnFreePort(productionServer);
+      try {
+        const response = await fetch(
+          `http://127.0.0.1:${port}/api/approval-requests/${approval.id}/respond`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ responses: { q1: { approved: true } } }),
+          },
+        );
+        expect(response.status).toBe(409);
+        expect(await response.json()).toEqual({
+          error: "Approval request already resolved with status: cancelled: Superseded",
+        });
+        expect((await getApprovalRequestById(approval.id))?.status).toBe("cancelled");
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          productionServer.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+
     test("approves a pending request", async () => {
       const created = await createApprovalRequest(makeApprovalData());
 
@@ -689,6 +1076,43 @@ describe("Approval Requests", () => {
       expect(created!.workflowRunStepId).toBe(stepId);
     });
 
+    test("creates a terminal approval when cancellation wins the creation race", async () => {
+      const workflow = await createWorkflow({
+        name: `approval-create-race-${crypto.randomUUID()}`,
+        definition: { nodes: [] },
+      });
+      const runId = crypto.randomUUID();
+      const stepId = crypto.randomUUID();
+      await createWorkflowRun({ id: runId, workflowId: workflow.id });
+      await createWorkflowRunStep({
+        id: stepId,
+        runId,
+        nodeId: "approval",
+        nodeType: "human-in-the-loop",
+      });
+      await updateWorkflowRun(runId, { status: "cancelled", error: "Superseded" });
+      await updateWorkflowRunStep(stepId, { status: "cancelled", error: "Superseded" });
+
+      const executor = new HumanInTheLoopExecutor({
+        ...mockDeps,
+        db: (await import("../be/db")) as typeof import("../be/db"),
+      });
+      const result = await executor.run({
+        config: {
+          title: "Stale approval",
+          questions: [{ id: "q1", type: "approval", label: "Approve?" }],
+          approvers: { policy: "any" },
+        },
+        context: {},
+        meta: { ...mockMeta, runId, stepId },
+      });
+
+      expect(result.status).toBe("success");
+      expect((result as { async?: boolean }).async).toBe(true);
+      expect((await getApprovalRequestByStepId(stepId))?.status).toBe("cancelled");
+      expect((await getApprovalRequestByStepId(stepId))?.resolutionReason).toBe("Superseded");
+    });
+
     test("stamps createdBy from meta.requestedByUserId (workflow-run provenance)", async () => {
       const requester = await createUser({
         name: "HITL Requester",
@@ -793,6 +1217,36 @@ describe("Approval Requests", () => {
       expect(result.output!.requestId).toBe(existingId);
       expect(result.output!.status).toBe("approved");
       expect(result.nextPort).toBe("approved");
+    });
+
+    test("idempotency: fails instead of routing a cancelled request as approved", async () => {
+      const stepId = crypto.randomUUID();
+      const existingId = crypto.randomUUID();
+      await createApprovalRequest({
+        id: existingId,
+        title: "Cancelled request",
+        questions: [{ id: "q1", type: "approval", label: "Approve?" }],
+        approvers: { policy: "any" },
+        workflowRunId: mockMeta.runId,
+        workflowRunStepId: stepId,
+      });
+      await cancelPendingApprovalRequestsForRun(mockMeta.runId, "Run superseded");
+
+      const executor = new HumanInTheLoopExecutor(mockDeps);
+      const result = await executor.run({
+        config: {
+          title: "Deploy approval",
+          questions: [{ id: "q1", type: "approval", label: "Approve?" }],
+          approvers: { policy: "any" },
+        },
+        context: {},
+        meta: { ...mockMeta, stepId },
+      });
+
+      expect(result).toEqual({
+        status: "failed",
+        error: "Approval request was cancelled: Run superseded",
+      });
     });
 
     test("idempotency: returns rejected result with correct nextPort", async () => {

@@ -26,6 +26,7 @@ import { StartStep } from "./onboard/steps/start.tsx";
 import {
   getStepProgress,
   INITIAL_STATE,
+  isPullPolicy,
   type LogLine,
   nextStep,
   type OnboardProps,
@@ -41,12 +42,20 @@ const BANNER = `   _                    _     ____
 /_/   \\_\\__, |\\___|_| |_|\\__| |____/ \\_/\\_/ \\__,_|_|  |_| |_| |_|
        |___/`;
 
-export function Onboard({ dryRun = false, yes = false, preset }: OnboardProps) {
+export function Onboard({ dryRun = false, yes = false, preset, pullPolicy }: OnboardProps) {
   const { exit } = useApp();
   const [state, setState] = useState<OnboardState>(() => {
     const initial = { ...INITIAL_STATE };
     if (preset) {
       initial.presetId = preset;
+    }
+    if (pullPolicy !== undefined) {
+      if (!isPullPolicy(pullPolicy)) {
+        initial.step = "error";
+        initial.error = `Invalid pull policy "${pullPolicy}". Options: always, missing, never`;
+        return initial;
+      }
+      initial.pullPolicy = pullPolicy;
     }
     return initial;
   });

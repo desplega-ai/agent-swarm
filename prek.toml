@@ -53,8 +53,9 @@ name = "Unit tests (bun test --parallel=4, scoped with --changed)"
 language = "system"
 # scripts/pre-push-tests.sh runs `--changed=<merge-base with origin/main>` and
 # falls back to the full suite when migrations, templates/, bunfig.toml,
-# package.json, or bun.lock changed (those reach every test outside the import
-# graph) or when origin/main is missing. Blocking; CI stays authoritative.
+# bun.lock, or package.json beyond its version field changed (those reach every
+# test outside the import graph), or when origin/main is missing. Blocking; CI
+# stays authoritative.
 entry = "bash scripts/pre-push-tests.sh"
 # CI "test" domain: src/ + scripts tests import + lockfile/tsconfig/bunfig + templates.
 files = '^(src/|scripts/|templates/|package\.json$|bun\.lock|bunfig\.toml$|tsconfig\.json$)'

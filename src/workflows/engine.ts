@@ -12,14 +12,14 @@ import {
   updateWorkflowRunStep,
 } from "../be/db";
 import { telemetry } from "../telemetry";
-import type { Workflow, WorkflowDefinition, WorkflowNode } from "../types";
+import type { Workflow, WorkflowDefinition, WorkflowNode, WorkflowRunStep } from "../types";
 import { checkpointStep, checkpointStepFailure, checkpointStepWaiting } from "./checkpoint";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { shouldSkipCooldown } from "./cooldown";
 import { findEntryNodes, getNextTargets, getSuccessors } from "./definition";
 import type { AsyncExecutorResult } from "./executors/base";
 import type { ExecutorRegistry } from "./executors/registry";
-import { FOREACH_TERMINAL_STEP_STATUSES } from "./foreach-join";
+import { FOREACH_TERMINAL_STEP_STATUSES, resolveForeachParent } from "./foreach-join";
 import { getSecretInputKeys, redactSecretsForStorage, resolveInputs } from "./input";
 import { validateJsonSchema } from "./json-schema-validator";
 import { getMaxWorkflowStepsPerRun } from "./limits";
@@ -190,43 +190,11 @@ export async function walkGraph(
   if (!("run" in ctx)) {
     ctx.run = { id: runId };
   }
-  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const { completedNodeIds } = await rehydrateCompletedStepOutputs(def, runId, ctx, registry);
 
   // Track active edges: "sourceId→targetId" — only edges on actually-taken
   // execution paths, not all structural edges in the definition.
-  const { activeEdges, stepsByNodeId } = await loadCompletedStepRouting(
-    def,
-    runId,
-    completedNodeIds,
-  );
-
-  // For memoized re-walks, inject stored outputs into context and
-  // reconstruct active edges from completed steps' stored nextPort.
-  // Use the LATEST step per node to support loops (a node may have
-  // multiple completed steps from different iterations).
-  if (completedNodeIds.size > 0) {
-    for (const nodeId of completedNodeIds) {
-      const step = stepsByNodeId.get(nodeId);
-      // Synthetic foreach children persist their own step output for the join,
-      // but only the parent aggregate belongs in workflow context or routing.
-      if (!step) continue;
-      if (step?.output !== undefined) {
-        // Bug 5 fix: Validate stored output against executor schema on recovery
-        const node = def.nodes.find((n) => n.id === nodeId);
-        if (node && registry.has(node.type)) {
-          const executor = registry.get(node.type);
-          const parseResult = executor.outputSchema.safeParse(step.output);
-          if (!parseResult.success) {
-            console.warn(
-              `[workflow] Recovery: step ${nodeId} output failed validation: ${parseResult.error.message}`,
-            );
-            continue; // Skip corrupted output
-          }
-        }
-        ctx[nodeId] = step.output;
-      }
-    }
-  }
+  const { activeEdges } = await loadCompletedStepRouting(def, runId, completedNodeIds);
 
   // Circuit breaker: fail the run if total steps exceed the per-run limit.
   // This prevents runaway workflows (e.g. infinite loop-backs) from consuming
@@ -417,6 +385,52 @@ export async function walkGraph(
 }
 
 /**
+ * Restore completed node outputs from their step checkpoints into workflow context.
+ * Every recovery path must do this before resolving a node's declared inputs.
+ */
+export async function rehydrateCompletedStepOutputs(
+  def: WorkflowDefinition,
+  runId: string,
+  ctx: Record<string, unknown>,
+  registry: ExecutorRegistry,
+): Promise<{
+  completedNodeIds: Set<string>;
+  latestSteps: Map<string, WorkflowRunStep>;
+}> {
+  const completedNodeIds = new Set(await getCompletedStepNodeIds(runId));
+  const latestSteps = new Map<string, WorkflowRunStep>();
+
+  for (const nodeId of completedNodeIds) {
+    // Synthetic foreach children persist their own step output for the join,
+    // but only the parent aggregate belongs in workflow context or routing.
+    if (resolveForeachParent(def, nodeId)) continue;
+
+    const step = await getLatestStepForNode(runId, nodeId);
+    if (!step) continue;
+
+    if (step.output !== undefined) {
+      // Validate stored output against the executor schema before recovery.
+      const node = def.nodes.find((candidate) => candidate.id === nodeId);
+      if (node && registry.has(node.type)) {
+        const executor = registry.get(node.type);
+        const parseResult = executor.outputSchema.safeParse(step.output);
+        if (!parseResult.success) {
+          console.warn(
+            `[workflow] Recovery: step ${nodeId} output failed validation: ${parseResult.error.message}`,
+          );
+          continue;
+        }
+      }
+      ctx[nodeId] = step.output;
+    }
+
+    latestSteps.set(nodeId, step);
+  }
+
+  return { completedNodeIds, latestSteps };
+}
+
+/**
  * Get all predecessor node IDs for a given node.
  * A predecessor is any node that references this node via its `next` field.
  */
@@ -459,6 +473,11 @@ async function executeStep(
   // concurrent executions of the same node instead of an orphan step row
   // committing before a follow-up key UPDATE throws.
   const dedup = await getDbClient().transaction(async () => {
+    const run = await getWorkflowRun(runId);
+    if (!run || (run.status !== "running" && run.status !== "waiting")) {
+      return { halted: true as const };
+    }
+
     // Count existing steps for this node to determine the current iteration.
     const iteration = await getStepCountForNode(runId, node.id);
     const idempotencyKey = `${runId}:${node.id}:${iteration}`;
@@ -498,6 +517,8 @@ async function executeStep(
     }
     return { existingStep, stepId, deduped: false };
   });
+
+  if ("halted" in dedup) return { outcome: "completed", successors: [] };
 
   if (dedup.deduped && dedup.existingStep) {
     if (dedup.existingStep.status === "completed") {
@@ -637,8 +658,8 @@ async function executeStep(
 
   // Check for async result
   if ("async" in result && (result as AsyncExecutorResult).async) {
-    await checkpointStepWaiting(runId, stepId, ctx);
-    return { outcome: "waiting", successors: [] };
+    const waiting = await checkpointStepWaiting(runId, stepId, ctx);
+    return { outcome: waiting ? "waiting" : "completed", successors: [] };
   }
 
   // 6b. Validate output against node-level outputSchema if defined

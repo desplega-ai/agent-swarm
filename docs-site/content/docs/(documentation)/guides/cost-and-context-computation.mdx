@@ -137,7 +137,7 @@ After boot, the API server runs an in-process models.dev refresher once immediat
 The same refresh also feeds the runtime model catalog at `GET /api/models-catalog` (`src/be/models-catalog.ts`) — a slim projection of the picker-reachable providers. The UI model picker prefers that live catalog, so newly released models appear without redeploying; the committed snapshot (still symlinked at `ui/src/lib/modelsdev-cache.json`) remains the build-time fallback for names, labels, and context windows while the request is in flight or the server predates the endpoint.
 
 - **Projection rules** live in `src/be/seed-pricing.ts`:
-  - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`) also land under the current default full id.
+  - Anthropic models → rows under both `provider='claude'` AND `provider='claude-managed'`. Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`) also land under the current default full id; Fable 5.1 and Mythos 5.1 use verified fallback rates until the vendored models.dev snapshot includes them.
   - OpenAI models → `provider='codex'`.
   - OpenRouter models → `provider='opencode'`; `google/*` models also land under `provider='gemini'`.
 - **Manual overrides** (claude-managed `runtime_hour` at $0.08/hr, devin `acu` at $2.25): `MANUAL_PRICING_OVERRIDES` in the same file. Each entry carries its source URL and a `verified` date.
@@ -163,8 +163,9 @@ Pi-mono is the exception: pi-ai owns the formula and we just relay its numbers. 
 ### Per-model window resolution
 
 `getContextWindowSize(model)` resolves:
-- Shortnames (`opus`/`sonnet`/`haiku`)
+- Shortnames (`opus`/`sonnet`/`haiku`/`fable`/`mythos`)
 - Family-versioned ids (`claude-sonnet-4-6`)
+- Claude 5.1 premium ids (`claude-fable-5-1`/`claude-mythos-5-1`)
 - Dated full ids (`claude-sonnet-4-6-20251004`) — by stripping the 8-digit date suffix and retrying
 
 Fallback is 200k. Pre-Phase 4 the dated form fell to 200k unconditionally — wildly wrong for opus/sonnet 4.x.

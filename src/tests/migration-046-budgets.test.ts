@@ -161,27 +161,49 @@ describe("migration 046 — budgets and pricing", () => {
     }
   });
 
-  test("models.dev seed includes Claude Mythos 5 pricing rows", async () => {
+  test("pricing seed retains Mythos 5 and advances Fable/Mythos shortnames to 5.1 rates", async () => {
     const client = getDbClient();
     const result = seedPricingFromModelsDev({ quiet: true });
     expect(result.modelsdevFound).toBe(true);
 
-    const expectedPrices = {
+    const previousMythosPrices = {
       input: 10,
       cached_input: 1,
       cache_write: 12.5,
       output: 50,
     } as const;
-    const seededKeys = [
+    const previousMythosKeys = [
       ["claude", "claude-mythos-5"],
       ["claude-managed", "claude-mythos-5"],
+    ] as const;
+    const currentShortnamePrices = {
+      input: 10,
+      cached_input: 0.25,
+      cache_write: 12.5,
+      output: 50,
+    } as const;
+    const currentShortnameKeys = [
+      ["claude", "fable"],
+      ["claude-managed", "fable"],
+      ["pi", "fable"],
       ["claude", "mythos"],
       ["claude-managed", "mythos"],
       ["pi", "mythos"],
     ] as const;
 
-    for (const [provider, model] of seededKeys) {
-      for (const [tokenClass, price] of Object.entries(expectedPrices)) {
+    for (const [provider, model] of previousMythosKeys) {
+      for (const [tokenClass, price] of Object.entries(previousMythosPrices)) {
+        const row = await client.get<PricingRow>(
+          `SELECT * FROM pricing
+             WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,
+          [provider, model, tokenClass],
+        );
+        expect(row?.price_per_million_usd).toBe(price);
+      }
+    }
+
+    for (const [provider, model] of currentShortnameKeys) {
+      for (const [tokenClass, price] of Object.entries(currentShortnamePrices)) {
         const row = await client.get<PricingRow>(
           `SELECT * FROM pricing
              WHERE provider = ? AND model = ? AND token_class = ? AND effective_from = 0`,

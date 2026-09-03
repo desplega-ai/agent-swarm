@@ -1,4 +1,5 @@
 import {
+  cancelPendingApprovalRequestsForRun,
   cancelTask,
   getCompletedStepNodeIds,
   getDbClient,
@@ -10,11 +11,17 @@ import {
   getWorkflowRun,
   getWorkflowRunStep,
   getWorkflowRunStepsByRunId,
+  listCancelledApprovalRequestsForRun,
+  listCancelledApprovalRequestsForStep,
   resolveWaitState,
   updateWorkflowRun,
   updateWorkflowRunStep,
 } from "../be/db";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import {
+  type ApprovalSlackClient,
+  postApprovalCancellationUpdates,
+} from "./approval-notifications";
 import { loadCompletedStepRouting } from "./completed-step-routing";
 import { FAILED_TASK_OUTPUT_PREFIX } from "./constants";
 import { getNextTargets } from "./definition";
@@ -365,12 +372,13 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   if (!run) throw new Error("Workflow run not found");
 
   const terminalStatuses = ["completed", "failed", "cancelled", "skipped"];
-  if (terminalStatuses.includes(run.status)) {
+  if (terminalStatuses.includes(run.status) && run.status !== "cancelled") {
     throw new Error(`Cannot cancel run in '${run.status}' state`);
   }
 
   const now = new Date().toISOString();
   const cancelReason = reason ?? "Cancelled by user";
+  let applied = false;
 
   // Step snapshot, task cancels, and both status writes commit together so a
   // step created after the snapshot cannot survive the cancel and a
@@ -379,6 +387,7 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
   await getDbClient().transaction(async () => {
     const current = await getWorkflowRun(runId);
     if (!current || terminalStatuses.includes(current.status)) return;
+    applied = true;
 
     // Cancel non-terminal steps and their associated tasks
     const steps = await getWorkflowRunStepsByRunId(runId);
@@ -398,6 +407,8 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       });
     }
 
+    await cancelPendingApprovalRequestsForRun(runId, cancelReason);
+
     // Mark the run itself as cancelled
     await updateWorkflowRun(runId, {
       status: "cancelled",
@@ -405,6 +416,53 @@ export async function cancelWorkflowRun(runId: string, reason?: string): Promise
       finishedAt: now,
     });
   });
+
+  // The migration trigger also catches direct step cancellation. Re-read after
+  // commit so its rows are included alongside the run-wide sweep.
+  const cancelledApprovals = await listCancelledApprovalRequestsForRun(runId);
+  const latestRun = await getWorkflowRun(runId);
+  if (!applied && latestRun?.status !== "cancelled") {
+    throw new Error(`Cannot cancel run in '${latestRun?.status ?? "missing"}' state`);
+  }
+  await postApprovalCancellationUpdates(
+    cancelledApprovals,
+    applied ? cancelReason : (latestRun?.error ?? cancelReason),
+  );
+}
+
+/** Cancel one HITL step and close any approval request it gates. */
+export async function cancelWorkflowRunStep(
+  stepId: string,
+  reason = "Cancelled by user",
+  slackClient?: ApprovalSlackClient,
+): Promise<void> {
+  const now = new Date().toISOString();
+  let persistedReason = reason;
+  await getDbClient().transaction(async () => {
+    const step = await getWorkflowRunStep(stepId);
+    if (!step) throw new Error("Workflow run step not found");
+    if (step.nodeType !== "human-in-the-loop") {
+      throw new Error("Only human-in-the-loop steps have an approval cancellation lifecycle");
+    }
+    if (["completed", "failed", "skipped"].includes(step.status)) {
+      throw new Error(`Cannot cancel step in '${step.status}' state`);
+    }
+    if (step.status === "cancelled") {
+      persistedReason = step.error ?? reason;
+      return;
+    }
+
+    const task = await getTaskByWorkflowRunStepId(stepId);
+    if (task) await cancelTask(task.id, reason);
+    await updateWorkflowRunStep(stepId, {
+      status: "cancelled",
+      error: reason,
+      finishedAt: now,
+    });
+  });
+
+  const approvals = await listCancelledApprovalRequestsForStep(stepId);
+  await postApprovalCancellationUpdates(approvals, persistedReason, slackClient);
 }
 
 /**

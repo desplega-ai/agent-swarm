@@ -20,6 +20,7 @@ import { AlertTriangle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { AgentActivityTimeline } from "@/components/dashboard/agent-activity-timeline";
+import { DashboardNudges } from "@/components/dashboard/dashboard-nudges";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -35,13 +36,16 @@ export function UnifiedHome() {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 min-h-0 px-4 pb-4 pt-4 md:px-6 md:pb-6">
-        <TimelineRegion
-          versionResolved={versionResolved}
-          supported={supported}
-          isError={isError}
-          error={error}
-        />
+      <div className="flex flex-1 min-h-0 flex-col gap-4 px-4 pb-4 pt-4 md:px-6 md:pb-6">
+        <DashboardNudges />
+        <div className="flex-1 min-h-0">
+          <TimelineRegion
+            versionResolved={versionResolved}
+            supported={supported}
+            isError={isError}
+            error={error}
+          />
+        </div>
       </div>
     </div>
   );

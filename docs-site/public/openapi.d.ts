@@ -2987,12 +2987,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3103,12 +3104,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3199,12 +3201,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {
@@ -3308,12 +3311,13 @@ export interface paths {
                                     };
                                 };
                                 /** @enum {string} */
-                                status: "pending" | "approved" | "rejected" | "timeout";
+                                status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
                                 responses: {
                                     [key: string]: unknown;
                                 } | null;
                                 resolvedBy: string | null;
                                 resolvedAt: string | null;
+                                resolutionReason: string | null;
                                 timeoutSeconds: number | null;
                                 expiresAt: string | null;
                                 notificationChannels: {

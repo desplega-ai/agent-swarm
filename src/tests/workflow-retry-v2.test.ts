@@ -41,7 +41,10 @@ class FailOnceExecutor extends BaseExecutor<
   typeof FailOnceExecutor.schema,
   typeof FailOnceExecutor.outSchema
 > {
-  static readonly schema = z.object({ failUntilAttempt: z.number().default(1) });
+  static readonly schema = z.object({
+    failUntilAttempt: z.number().default(1),
+    message: z.string().min(1).optional(),
+  });
   static readonly outSchema = z.object({ attempt: z.number() });
 
   readonly type = "fail-once";
@@ -231,6 +234,59 @@ describe("Workflow Retry v2 (Phase 4)", () => {
   });
 
   describe("Retry Poller", () => {
+    test("rehydrates completed step outputs before interpolating retry inputs", async () => {
+      const workflow = await makeWorkflow({
+        nodes: [
+          {
+            id: "producer",
+            type: "echo",
+            config: { message: "release payload" },
+            next: "consumer",
+          },
+          {
+            id: "consumer",
+            type: "fail-once",
+            inputs: { payload: "producer.echo" },
+            config: { failUntilAttempt: 1, message: "{{payload}}" },
+            retry: {
+              strategy: "static",
+              maxRetries: 2,
+              baseDelayMs: 1,
+              maxDelayMs: 1,
+            },
+          },
+        ],
+      });
+
+      failCounter = 0;
+      const runId = await startWorkflowExecution(workflow, {}, registry);
+      const initialRun = (await getWorkflowRun(runId))!;
+      const consumerStep = (await getWorkflowRunStepsByRunId(runId)).find(
+        (step) => step.nodeId === "consumer",
+      )!;
+      expect(consumerStep.status).toBe("failed");
+      expect(consumerStep.input).toMatchObject({ producer: { echo: "release payload" } });
+
+      const { producer: _lostOutput, ...contextWithoutProducer } = initialRun.context as Record<
+        string,
+        unknown
+      >;
+      await updateWorkflowRun(runId, { context: contextWithoutProducer });
+
+      try {
+        startRetryPoller(registry, 5);
+        for (let i = 0; i < 100 && (await getWorkflowRun(runId))?.status !== "completed"; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      } finally {
+        stopRetryPoller();
+      }
+
+      const completedRun = await getWorkflowRun(runId);
+      expect(completedRun?.status).toBe("completed");
+      expect(completedRun?.context).toMatchObject({ producer: { echo: "release payload" } });
+    });
+
     test("rehydrates requester attribution before retrying an executor", async () => {
       const user = await createUser({ name: "Retry Requester" });
       const workflow = await makeWorkflow({

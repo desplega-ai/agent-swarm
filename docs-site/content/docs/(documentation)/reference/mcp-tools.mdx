@@ -99,6 +99,8 @@ Send a task to a specific agent, create an unassigned task, or offer a task for 
 | `tags` | array | No | Tags for filtering |
 | `taskType` | string | No | Task type classification |
 | `dependsOn` | array | No | Task IDs this depends on |
+| `requiredCapabilities` | array | No | Capabilities required for task routing |
+| `leadOnly` | boolean | No | Structured authorization constraint for privileged work. Only Lead agents may be assigned, offered, or claim the task; the platform never infers this from task text. |
 | `parentTaskId` | uuid | No | Parent task for session continuity |
 | `key` | string | No | Logical asset namespace. Child tasks inherit their parent's namespace when provided |
 | `dir` | string | No | Working directory (absolute path) for the agent to start in |
@@ -458,7 +460,8 @@ Manage tasks in the pool: create, claim, release, accept, reject, or move to/fro
 | `model` | string | No | Concrete model override for the created task (only used with `create` action) |
 | `modelTier` | string | No | Portable model tier for the created task: `smol`, `regular`, `smart`, or `ultra` (only used with `create` action) |
 | `effort` | string | No | Reasoning effort for the created task: `off`, `low`, `medium`, `high`, `xhigh`, or Codex-only `max` when supported |
-| `requiredCapabilities` | array | No | Capability requirements recorded on a newly pooled task for routing-affinity triage |
+| `requiredCapabilities` | array | No | Capabilities required for routing the newly created task |
+| `leadOnly` | boolean | No | Structured authorization constraint for a newly created privileged task. Only Lead agents may claim it. |
 
 ## Messaging Tools
 

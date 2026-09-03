@@ -44,6 +44,16 @@ describe("agents list model display", () => {
   });
 
   test("presents latest Anthropic direct model ids as readable labels", () => {
+    expect(getAgentModelPresentation("claude-fable-5-1")).toMatchObject({
+      label: "Claude Fable 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("claude-mythos-5-1")).toMatchObject({
+      label: "Claude Mythos 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
     expect(getAgentModelPresentation("claude-opus-5")).toMatchObject({
       label: "Claude Opus 5",
       provider: "Anthropic",
@@ -66,6 +76,16 @@ describe("agents list model display", () => {
     });
     expect(getAgentModelPresentation("opus")).toMatchObject({
       label: "Claude Opus 5",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("fable")).toMatchObject({
+      label: "Claude Fable 5.1",
+      provider: "Anthropic",
+      providerId: "anthropic",
+    });
+    expect(getAgentModelPresentation("mythos")).toMatchObject({
+      label: "Claude Mythos 5.1",
       provider: "Anthropic",
       providerId: "anthropic",
     });

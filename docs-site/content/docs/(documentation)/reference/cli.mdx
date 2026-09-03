@@ -28,6 +28,7 @@ bunx @desplega.ai/agent-swarm onboard
 npx @desplega.ai/agent-swarm onboard
 bunx @desplega.ai/agent-swarm onboard --dry-run
 bunx @desplega.ai/agent-swarm onboard --yes --preset=dev
+ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=dev --pull-policy=missing
 ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=solo
 ```
 
@@ -36,6 +37,7 @@ ANTHROPIC_API_KEY=sk-... bunx @desplega.ai/agent-swarm onboard --yes --preset=so
 | `--dry-run` | Preview what would be generated without writing |
 | `-y, --yes` | Non-interactive mode (reads from env vars) |
 | `--preset <name>` | Preset: `dev`, `content`, `research`, `solo` |
+| `--pull-policy <policy>` | Docker Compose image pull policy: `always`, `missing`, or `never` (default: `always`) |
 
 ### connect
 

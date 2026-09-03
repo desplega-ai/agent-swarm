@@ -11471,10 +11471,11 @@ export interface ApprovalRequest {
   workflowRunStepId: string | null;
   sourceTaskId: string | null;
   approvers: unknown;
-  status: "pending" | "approved" | "rejected" | "timeout";
+  status: "pending" | "approved" | "rejected" | "timeout" | "cancelled";
   responses: unknown | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: unknown[] | null;
@@ -11495,6 +11496,8 @@ interface ApprovalRequestRow {
   responses: string | null;
   resolvedBy: string | null;
   resolvedAt: string | null;
+  resolutionReason: string | null;
+  cancellationNotificationClaims: string | null;
   timeoutSeconds: number | null;
   expiresAt: string | null;
   notificationChannels: string | null;
@@ -11516,6 +11519,7 @@ function rowToApprovalRequest(row: ApprovalRequestRow): ApprovalRequest {
     responses: row.responses ? JSON.parse(row.responses) : null,
     resolvedBy: row.resolvedBy,
     resolvedAt: normalizeDate(row.resolvedAt),
+    resolutionReason: row.resolutionReason,
     timeoutSeconds: row.timeoutSeconds,
     expiresAt: normalizeDate(row.expiresAt),
     notificationChannels: row.notificationChannels ? JSON.parse(row.notificationChannels) : null,
@@ -11536,32 +11540,55 @@ export async function createApprovalRequest(data: {
   timeoutSeconds?: number;
   notificationChannels?: unknown[];
   createdBy?: string;
+  requireActionableWorkflow?: boolean;
 }): Promise<ApprovalRequest> {
   const now = new Date().toISOString();
   const expiresAt = data.timeoutSeconds
     ? new Date(Date.now() + data.timeoutSeconds * 1000).toISOString()
     : null;
 
-  const row = await getDbClient().get<ApprovalRequestRow>(
-    `INSERT INTO approval_requests (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId, approvers, timeoutSeconds, expiresAt, notificationChannels, created_by, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const row = await getDbClient().transaction(async () => {
+    let status: ApprovalRequest["status"] = "pending";
+    let resolutionReason: string | null = null;
+    if (data.requireActionableWorkflow && data.workflowRunId && data.workflowRunStepId) {
+      const run = await getWorkflowRun(data.workflowRunId);
+      const step = await getWorkflowRunStep(data.workflowRunStepId);
+      if (!run || (run.status !== "running" && run.status !== "waiting")) {
+        status = "cancelled";
+        resolutionReason = run?.error ?? `Workflow run is ${run?.status ?? "missing"}`;
+      } else if (!step || step.runId !== run.id || step.status !== "running") {
+        status = "cancelled";
+        resolutionReason = `Human-in-the-loop step is ${step?.status ?? "missing"}`;
+      }
+    }
+
+    return getDbClient().get<ApprovalRequestRow>(
+      `INSERT INTO approval_requests
+         (id, title, questions, workflowRunId, workflowRunStepId, sourceTaskId,
+          approvers, status, resolutionReason, resolvedAt, timeoutSeconds, expiresAt,
+          notificationChannels, created_by, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
-    [
-      data.id,
-      data.title,
-      JSON.stringify(data.questions),
-      data.workflowRunId ?? null,
-      data.workflowRunStepId ?? null,
-      data.sourceTaskId ?? null,
-      JSON.stringify(data.approvers),
-      data.timeoutSeconds ?? null,
-      expiresAt,
-      data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
-      data.createdBy ?? null,
-      now,
-      now,
-    ],
-  );
+      [
+        data.id,
+        data.title,
+        JSON.stringify(data.questions),
+        data.workflowRunId ?? null,
+        data.workflowRunStepId ?? null,
+        data.sourceTaskId ?? null,
+        JSON.stringify(data.approvers),
+        status,
+        resolutionReason,
+        status === "cancelled" ? now : null,
+        data.timeoutSeconds ?? null,
+        expiresAt,
+        data.notificationChannels ? JSON.stringify(data.notificationChannels) : null,
+        data.createdBy ?? null,
+        now,
+        now,
+      ],
+    );
+  });
 
   return rowToApprovalRequest(row!);
 }
@@ -11581,12 +11608,32 @@ export async function resolveApprovalRequest(
     responses?: unknown;
     resolvedBy?: string;
   },
+  options?: { requireActionableWorkflow?: boolean },
 ): Promise<ApprovalRequest | null> {
   const now = new Date().toISOString();
+  const actionableWorkflowClause = options?.requireActionableWorkflow
+    ? `AND (
+         workflowRunId IS NULL
+         OR (
+           EXISTS (
+             SELECT 1 FROM workflow_runs
+             WHERE id = approval_requests.workflowRunId
+               AND status IN ('running', 'waiting')
+           )
+           AND EXISTS (
+           SELECT 1 FROM workflow_run_steps
+             WHERE id = approval_requests.workflowRunStepId
+               AND runId = approval_requests.workflowRunId
+               AND status = 'waiting'
+           )
+         )
+       )`
+    : "";
   const row = await getDbClient().get<ApprovalRequestRow>(
     `UPDATE approval_requests
        SET status = ?, responses = ?, resolvedBy = ?, resolvedAt = ?, updatedAt = ?
        WHERE id = ? AND status = 'pending'
+         ${actionableWorkflowClause}
        RETURNING *`,
     [
       data.status,
@@ -11598,6 +11645,130 @@ export async function resolveApprovalRequest(
     ],
   );
   return row ? rowToApprovalRequest(row) : null;
+}
+
+export async function cancelPendingApprovalRequestsForRun(
+  workflowRunId: string,
+  reason: string,
+): Promise<ApprovalRequest[]> {
+  const now = new Date().toISOString();
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `UPDATE approval_requests
+       SET status = 'cancelled', resolutionReason = ?, resolvedAt = ?, updatedAt = ?
+       WHERE workflowRunId = ? AND status = 'pending'
+       RETURNING *`,
+    [reason, now, now, workflowRunId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function listCancelledApprovalRequestsForRun(
+  workflowRunId: string,
+): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
+       WHERE workflowRunId = ? AND status = 'cancelled'`,
+    [workflowRunId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function listCancelledApprovalRequestsForStep(
+  workflowRunStepId: string,
+): Promise<ApprovalRequest[]> {
+  const rows = await getDbClient().query<ApprovalRequestRow>(
+    `SELECT * FROM approval_requests
+       WHERE workflowRunStepId = ? AND status = 'cancelled'`,
+    [workflowRunStepId],
+  );
+  return rows.map(rowToApprovalRequest);
+}
+
+export async function claimApprovalCancellationNotification(
+  id: string,
+  notificationKey: string,
+): Promise<{ approval: ApprovalRequest; leaseToken: string } | null> {
+  return getDbClient().transaction(async () => {
+    const row = await getDbClient().get<ApprovalRequestRow>(
+      "SELECT * FROM approval_requests WHERE id = ? AND status = 'cancelled'",
+      [id],
+    );
+    if (!row) return null;
+    const claims = row.cancellationNotificationClaims
+      ? (JSON.parse(row.cancellationNotificationClaims) as Record<
+          string,
+          "delivered" | { claimedAt: string; leaseToken: string }
+        >)
+      : {};
+    const existing = claims[notificationKey];
+    if (existing === "delivered") return null;
+    if (
+      existing &&
+      typeof existing !== "string" &&
+      Date.now() - new Date(existing.claimedAt).getTime() < 60_000
+    ) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const leaseToken = crypto.randomUUID();
+    claims[notificationKey] = { claimedAt: now, leaseToken };
+    await getDbClient().run(
+      `UPDATE approval_requests
+         SET cancellationNotificationClaims = ?, updatedAt = ?
+         WHERE id = ? AND status = 'cancelled'`,
+      [JSON.stringify(claims), now, id],
+    );
+    return { approval: rowToApprovalRequest(row), leaseToken };
+  });
+}
+
+export async function completeApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+): Promise<void> {
+  await updateApprovalCancellationNotificationClaim(id, notificationKey, leaseToken, "delivered");
+}
+
+export async function releaseApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+): Promise<void> {
+  await updateApprovalCancellationNotificationClaim(id, notificationKey, leaseToken, null);
+}
+
+async function updateApprovalCancellationNotificationClaim(
+  id: string,
+  notificationKey: string,
+  leaseToken: string,
+  value: "delivered" | null,
+): Promise<void> {
+  await getDbClient().transaction(async () => {
+    const row = await getDbClient().get<{ claims: string | null }>(
+      "SELECT cancellationNotificationClaims AS claims FROM approval_requests WHERE id = ?",
+      [id],
+    );
+    const claims = row?.claims
+      ? (JSON.parse(row.claims) as Record<
+          string,
+          "delivered" | { claimedAt: string; leaseToken: string }
+        >)
+      : {};
+    const current = claims[notificationKey];
+    if (!current || typeof current === "string" || current.leaseToken !== leaseToken) {
+      return;
+    }
+    if (value === null) delete claims[notificationKey];
+    else claims[notificationKey] = value;
+    await getDbClient().run(
+      `UPDATE approval_requests
+         SET cancellationNotificationClaims = ?, updatedAt = ?
+         WHERE id = ? AND status = 'cancelled'`,
+      [JSON.stringify(claims), new Date().toISOString(), id],
+    );
+  });
 }
 
 export async function updateApprovalRequestNotifications(

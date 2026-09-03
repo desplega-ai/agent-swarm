@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.137.0] - 2026-09-03
+
+### Added
+- **Onboarding can configure Docker Compose image pull policy** (#1302) — `onboard --pull-policy` accepts `always`, `missing`, or `never` and writes the choice into generated Compose services.
+- **Claude Fable 5.1 and Mythos 5.1 are available across direct and managed Claude runtimes** (#1303), including model-picker labels, shortname resolution, context windows, and pricing fallbacks.
+
+### Changed
+- **Bundled agent-fs deployments move to v0.13.3** (#1306), with a new `bump:agent-fs` command that validates and updates the worker, Compose, Helm, and documentation pins together.
+- **Worker harness pins track current compatible releases** (#1296) — Claude Code moves to 2.1.258, Codex plus its SDK to 0.152.1, and OpenCode plus its SDK to 1.18.26.
+
+### Fixed
+- **Workflow retries restore checkpointed inputs and preserve the branch originally taken** (#1297, #1298), preventing empty interpolations and execution of inactive branches after a retry.
+- **Cancelling a workflow closes its pending approval gates** (#1300), rejects stale responses, and notifies linked Slack approval threads.
+- **Lead-only task authorization is enforced across assignment, offers, claims, and recovery** (#1276), while ordinary tasks may still target Lead agents.
+- **Database retention drains oldest rows predictably and exposes bounded catch-up telemetry** (#1299), so large backlogs converge without starving later tables.
+- **Star-history refreshes install their own renderer dependency** (#1301), removing reliance on runner-global tooling.
+
 ## [1.136.0] - 2026-09-01
 
 ### Added

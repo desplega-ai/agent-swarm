@@ -265,7 +265,7 @@ Each node can define a `retryPolicy`:
 }
 ```
 
-Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy.
+Backoff strategies: `exponential`, `linear`, `static`. The poller detects failed steps and re-executes them according to the policy. Before a retry, the engine restores completed upstream outputs from step checkpoints, so declared inputs resolve to the same values as the original execution. Retrying a failed run also reconstructs the branch selected by each completed step and never revives a branch that was not taken.
 
 ### Per-Node Timeout
 
@@ -443,7 +443,7 @@ The `human-in-the-loop` executor pauses a workflow until a human responds via th
 
 Question types supported: `approval` (yes/no), `text`, `single-select`, `multi-select`, and `boolean`.
 
-When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port.
+When the node executes, it creates an approval request accessible at `/approval-requests/{id}` in the dashboard. The workflow run pauses until a human responds. Upon resolution, a follow-up task is created for the requesting agent and the workflow resumes via the appropriate `next` port. Cancelling the run or its human-in-the-loop step marks the pending request as cancelled, rejects later responses, and updates any linked Slack approval thread so reviewers do not act on a stale gate.
 
 The dashboard validates every required response before submission. Missing or invalid approval, text, select, and boolean answers are marked inline and keep **Submit Response** disabled; if the server rejects a response, its error is shown directly so the user can correct it.
 

@@ -886,6 +886,18 @@ describe("ClaudeManagedAdapter (Phase 4) — repo provisioning + cost data", () 
   });
 
   test("CLAUDE_MANAGED_MODEL_PRICING covers sonnet, opus, haiku at minimum", () => {
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-fable-5-1"]).toEqual({
+      inputPerMillion: 10.0,
+      outputPerMillion: 50.0,
+      cacheReadPerMillion: 0.25,
+      cacheWritePerMillion: 12.5,
+    });
+    expect(CLAUDE_MANAGED_MODEL_PRICING["claude-mythos-5-1"]).toEqual({
+      inputPerMillion: 10.0,
+      outputPerMillion: 50.0,
+      cacheReadPerMillion: 0.25,
+      cacheWritePerMillion: 12.5,
+    });
     expect(CLAUDE_MANAGED_MODEL_PRICING["claude-opus-5"]).toEqual({
       inputPerMillion: 5.0,
       outputPerMillion: 25.0,

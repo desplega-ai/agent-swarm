@@ -24,6 +24,22 @@ describe("generateCompose", () => {
     claudeOAuthToken: "test-oauth",
   });
 
+  test("uses the always pull policy by default for every service", () => {
+    const yaml = generateCompose(devState);
+
+    expect(yaml.match(/pull_policy: always/g)).toHaveLength(4);
+  });
+
+  test.each([
+    "missing",
+    "never",
+  ] as const)("uses the %s pull policy for every service", (pullPolicy) => {
+    const yaml = generateCompose({ ...devState, pullPolicy });
+
+    expect(yaml.match(new RegExp(`pull_policy: ${pullPolicy}`, "g"))).toHaveLength(4);
+    expect(yaml).not.toContain("pull_policy: always");
+  });
+
   test("dev preset produces 3 agent services + 1 API service", () => {
     const yaml = generateCompose(devState);
     // Only count service definitions in the services section (before volumes:)

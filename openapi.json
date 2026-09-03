@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.136.0",
+    "version": "1.137.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -10462,7 +10462,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -10479,6 +10480,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -10546,6 +10553,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -10776,7 +10784,8 @@
                               "pending",
                               "approved",
                               "rejected",
-                              "timeout"
+                              "timeout",
+                              "cancelled"
                             ]
                           },
                           "responses": {
@@ -10793,6 +10802,12 @@
                             ]
                           },
                           "resolvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resolutionReason": {
                             "type": [
                               "string",
                               "null"
@@ -10860,6 +10875,7 @@
                           "responses",
                           "resolvedBy",
                           "resolvedAt",
+                          "resolutionReason",
                           "timeoutSeconds",
                           "expiresAt",
                           "notificationChannels",
@@ -11063,7 +11079,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11080,6 +11097,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11147,6 +11170,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",
@@ -11380,7 +11404,8 @@
                             "pending",
                             "approved",
                             "rejected",
-                            "timeout"
+                            "timeout",
+                            "cancelled"
                           ]
                         },
                         "responses": {
@@ -11397,6 +11422,12 @@
                           ]
                         },
                         "resolvedAt": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "resolutionReason": {
                           "type": [
                             "string",
                             "null"
@@ -11464,6 +11495,7 @@
                         "responses",
                         "resolvedBy",
                         "resolvedAt",
+                        "resolutionReason",
                         "timeoutSeconds",
                         "expiresAt",
                         "notificationChannels",

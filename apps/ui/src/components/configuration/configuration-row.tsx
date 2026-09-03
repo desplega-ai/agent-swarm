@@ -154,7 +154,10 @@ export function ConfigurationRow({ entry, inEnv }: ConfigurationRowProps) {
   ) : null;
 
   return (
-    <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div
+      id={`setting-${entry.key}`}
+      className="flex scroll-mt-6 flex-col gap-3 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+    >
       <div className="min-w-0 space-y-1 sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <Label htmlFor={showEnvOnly ? undefined : inputId} className="text-sm font-medium">
