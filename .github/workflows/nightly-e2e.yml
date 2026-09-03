@@ -1,0 +1,49 @@
+# ANTHROPIC_API_KEY, OPENAI_API_KEY, and OPENROUTER_API_KEY must exist for all legs to pass.
+name: Nightly E2E
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  harness:
+    if: github.repository == 'desplega-ai/agent-swarm'
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [claude, codex, pi]
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/desplega-ai/agent-swarm-worker:slim
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run harness E2E with one retry
+        run: >-
+          bun run e2e --harness "${{ matrix.provider }}" --json e2e-results.json --summary-md e2e-summary.md ||
+          bun run e2e --harness "${{ matrix.provider }}" --json e2e-results.json --summary-md e2e-summary.md
+
+      - name: Add E2E job summary
+        if: always()
+        run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-e2e-${{ matrix.provider }}
+          path: e2e-results.json
+          if-no-files-found: warn

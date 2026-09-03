@@ -504,6 +504,47 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
+  e2e-contract:
+    name: E2E Contract
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check E2E boundary
+        run: bash scripts/check-e2e-boundary.sh
+
+      - name: Type check E2E runner
+        run: bun run e2e:tsc
+
+      - name: Run E2E contract suite
+        run: bun run e2e --json e2e-results.json --summary-md e2e-summary.md
+
+      - name: Add E2E job summary
+        if: always()
+        run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-contract-results
+          path: e2e-results.json
+          if-no-files-found: warn
+
   test:
     name: Run Tests (${{ matrix.shard }}/2)
     needs: [detect-changes, restore-timings]
@@ -1038,7 +1079,7 @@ jobs:
 
   gate:
     name: Merge Gate
-    needs: [detect-changes, restore-timings, lint-and-typecheck, test, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
+    needs: [detect-changes, restore-timings, lint-and-typecheck, test, e2e-contract, pi-skills-freshness, seed-skills, script-types-freshness, openapi-freshness, vendored-openapi, docker-build, ui-lint, template-workflow-validation]
     if: always()
     runs-on: ubuntu-latest
     # No checkout, no API calls; the job only inspects `needs` results.

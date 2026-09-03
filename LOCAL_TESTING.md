@@ -5,6 +5,7 @@ Reference doc for everything Claude (or any agent) needs to test Agent Swarm loc
 Quick index:
 
 - [Unit tests](#unit-tests)
+- [Black-box E2E](#black-box-e2e-bun-run-e2e)
 - [E2E with Docker](#e2e-with-docker) — full flow lives in the `swarm-local-e2e` skill
 - [Docker entrypoint changes](#docker-entrypoint-changes)
 - [MCP tool testing over HTTP](#mcp-tool-testing-over-http)
@@ -41,6 +42,33 @@ Two RBAC suites spawn the **real** server as a subprocess (exception to the mini
 
 - `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
 - `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
+
+## Black-box E2E (bun run e2e)
+
+`bun run e2e` starts the real API on a free port with a fresh SQLite database.
+It runs deterministic HTTP and MCP scenarios with simulated agents. It does not use Docker or an LLM.
+The runner discovers route and MCP tool coverage from the running server.
+It writes `./e2e-results.json` by default.
+
+```bash
+bun run e2e
+bun run e2e --list
+bun run e2e --only health,auth
+bun run e2e --skip workflow-script-node
+bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
+bun run e2e --min-route-coverage 4 --min-tool-coverage 3
+bun run e2e --keep
+```
+
+Use `--harness claude,codex,pi` to add real worker legs after the contract layer.
+Claude needs `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
+Codex needs `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, or `E2E_MODEL_PI`.
+Set `E2E_HARNESS_TIMEOUT_MS` to change the five-minute harness timeout.
+
+The same command runs locally, in GitHub Actions, and inside a swarm worker container.
+Coverage only includes traffic sent through the runner's recording client.
+Worker traffic from harness legs does not increase the MVP coverage numbers.
 
 ## E2E with Docker
 

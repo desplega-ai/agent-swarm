@@ -1,3 +1,5 @@
+
+
 # Agent Swarm
 
 Multi-agent orchestration for Claude Code, Codex, Gemini CLI. Bun + TypeScript, `bun:sqlite` (WAL), Biome, Ink CLI.
@@ -277,6 +279,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md
 
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
+- The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`.
 - Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
@@ -303,6 +306,7 @@ bun install --frozen-lockfile
 bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
+bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
 bun run check:bun-version             # Dockerfile oven/bun tags == package.json packageManager
 bash scripts/check-db-boundary.sh
 bash scripts/check-test-spawn-sync.sh # tests must use runChild(), never Bun.spawnSync

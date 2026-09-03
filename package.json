@@ -85,6 +85,8 @@
     "mono:lint": "turbo run lint",
     "mono:dev": "turbo run dev",
     "test:root": "bash scripts/run-bun-tests.sh",
+    "e2e": "bun scripts/e2e/run.ts",
+    "e2e:tsc": "bun tsc --noEmit -p scripts/e2e/tsconfig.json",
     "prepack": "bun run build:cli",
     "tsc:check": "bun tsc --noEmit",
     "check:db-boundary": "bash scripts/check-db-boundary.sh",
