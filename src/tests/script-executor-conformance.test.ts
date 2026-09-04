@@ -146,9 +146,22 @@ describe("native-only executor behavior", () => {
   // (e.g. an API POST) and then aborts must not be replayed. `process.abort()`
   // called from inside the user function reliably raises SIGABRT independent of
   // any real RLIMIT_NPROC exhaustion, so this is deterministic.
+  //
+  // wallClockMs is raised above the file's 1s default: on a CI runner sharing
+  // 2 cores across `--parallel=4`, spawning + starting a full bun subprocess
+  // for this test can occasionally exceed 1s of wall time on its own (measured
+  // in merge-gate runs for this PR: commits ee39228e and 5c965fab both hit the
+  // internal wallClockMs timeout here and were then killed via the
+  // AbortController path, which itself took long enough under that load to
+  // trip bun test's outer 10s per-test timeout). The correctness assertion
+  // below is about classification, not timing, so a generous budget removes
+  // the flake without weakening what the test proves.
   test("SIGABRT raised by user code is not classified capacity_exceeded", async () => {
     const output = await new NativeScriptExecutor().run(
-      input({ source: "export default async () => { process.abort(); };" }),
+      input({
+        resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
+        source: "export default async () => { process.abort(); };",
+      }),
     );
     expect(output.exitCode).toBe(134);
     expect(output.error).not.toBe("capacity_exceeded");
@@ -166,9 +179,12 @@ describe("native-only executor behavior", () => {
   // before the harness ever reaches `mod.default(...)`. If this were
   // misclassified `capacity_exceeded`, `runScript` in loader.ts would
   // transparently retry and the side effect would replay.
+  // See the wallClockMs comment on the test above — same CI-contention flake,
+  // same fix.
   test("SIGABRT during top-level module evaluation (after import starts) is not classified capacity_exceeded", async () => {
     const output = await new NativeScriptExecutor().run(
       input({
+        resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
         source:
           "console.log('TOP_LEVEL_SIDE_EFFECT'); process.abort(); export default async () => {};",
       }),
