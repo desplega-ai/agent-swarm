@@ -36,12 +36,14 @@ if [[ "$probe_status" -eq 134 ]]; then
     src/tests/sandboxed-process.test.ts \
     src/tests/schedule-target-type.test.ts \
     src/tests/script-connections.test.ts \
+    src/tests/script-executor-conformance.test.ts \
     src/tests/script-workflows-runtime-e2e.test.ts \
     src/tests/scripts-external-api.test.ts \
     src/tests/scripts-http.test.ts \
     src/tests/scripts-mcp-e2e.test.ts \
     src/tests/scripts-retention.test.ts \
     src/tests/scripts-runtime-identity.test.ts \
+    src/tests/scripts-runtime-secret-egress.test.ts \
     src/tests/scripts-runtime.test.ts \
     src/tests/slack-read-boundaries.test.ts \
     src/tests/workflow-e2e.test.ts \

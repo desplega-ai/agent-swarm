@@ -34,6 +34,10 @@ export interface AutomationPreflightResult {
     params: string[];
     integrations: AutomationIntegrationId[];
   };
+  fixes: Array<
+    | { type: "param"; key: string; url: string }
+    | { type: "integration"; key: AutomationIntegrationId; url: string }
+  >;
   fixUrl: string;
   failureReason?: string;
 }
@@ -56,6 +60,67 @@ function hasValue(value: unknown): boolean {
   return true;
 }
 
+const GITHUB_REPOSITORY_SLUG =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}(?:\.git)?$/;
+const SAFE_SHELL_DATA = /^[A-Za-z0-9._~%/:@ -]+$/;
+const DNS_NAME =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const SAFE_GIT_REF = /^(?!-)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+$/;
+const SAFE_TAG_PATTERN = /^(?!-)(?!.*(?:\.\.|\/\/))[A-Za-z0-9._*?/-]+$/;
+const SAFE_RELATIVE_PATH = /^(?![-/])(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/;
+const SAFE_REPORT_NAME = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/;
+
+function isSafeRepository(value: string): boolean {
+  if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value || value.includes(" ")) return false;
+  const slug = value
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/^git@github\.com:/, "")
+    .replace(/\/$/, "");
+  return GITHUB_REPOSITORY_SLUG.test(slug);
+}
+
+function isSafeGscProperty(value: string): boolean {
+  if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value) return false;
+  return value.split(" ").every((property) => {
+    if (!property) return false;
+    if (property.startsWith("sc-domain:")) return DNS_NAME.test(property.slice(10));
+    if (DNS_NAME.test(property)) return true;
+    try {
+      const url = new URL(property);
+      return (
+        url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.port &&
+        !url.search &&
+        !url.hash &&
+        DNS_NAME.test(url.hostname)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+const PARAM_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  REPO_URL: (value) => typeof value === "string" && isSafeRepository(value),
+  GSC_PROPERTY: (value) => typeof value === "string" && isSafeGscProperty(value),
+  BRANCH: (value) => typeof value === "string" && SAFE_GIT_REF.test(value),
+  SCOPE_PATH: (value) => typeof value === "string" && SAFE_RELATIVE_PATH.test(value),
+  REPORT_NAME: (value) =>
+    typeof value === "string" && value.trim() === value && SAFE_REPORT_NAME.test(value),
+  TAG_PATTERN: (value) => typeof value === "string" && SAFE_TAG_PATTERN.test(value),
+  AGENT_FS_ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+  ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+};
+
+/** Validate every install parameter consumed by the seeded automation templates. */
+function isUsableParam(key: string, value: unknown): boolean {
+  if (!hasValue(value)) return false;
+  return PARAM_VALIDATORS[key]?.(value) ?? true;
+}
+
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
@@ -70,8 +135,8 @@ const INTEGRATION_FIX_URL: Record<AutomationIntegrationId, string> = {
   linear: "/settings/integrations/linear",
   jira: "/settings/integrations/jira",
   agentmail: "/settings/integrations/agentmail",
-  gsc: "/settings/secrets",
-  agentfs: "/settings/secrets",
+  gsc: "/settings/integrations/gsc",
+  agentfs: "/settings/integrations/agentfs",
 };
 
 // Requiring one of these bindings is the persisted signal that the v4 matrix
@@ -96,14 +161,29 @@ export function preflightAutomation(
   setup: AutomationSetupStates,
 ): AutomationPreflightResult {
   const params = input.params ?? {};
+  const guardedParams = Object.keys(params).filter((key) => key in PARAM_VALIDATORS);
   const missingParams = uniqueSorted(
-    (input.requiredParams ?? []).filter((key) => !hasValue(params[key])),
+    [...(input.requiredParams ?? []), ...guardedParams].filter(
+      (key) => !isUsableParam(key, params[key]),
+    ),
   );
   const missingIntegrations = uniqueSorted(
     (input.requires ?? []).filter((id) => setup[id] === "unverified"),
   );
   const missing = { params: missingParams, integrations: missingIntegrations };
   const baseUrl = automationUrl(input);
+  const fixes: AutomationPreflightResult["fixes"] = [
+    ...missingParams.map((key) => ({
+      type: "param" as const,
+      key,
+      url: `${baseUrl}?param=${encodeURIComponent(key)}`,
+    })),
+    ...missingIntegrations.map((key) => ({
+      type: "integration" as const,
+      key,
+      url: automationIntegrationFixUrl(key),
+    })),
+  ];
 
   if (missingParams.length === 0 && missingIntegrations.length === 0) {
     return {
@@ -112,6 +192,7 @@ export function preflightAutomation(
       kind: input.kind,
       state: "running",
       missing,
+      fixes,
       fixUrl: baseUrl,
     };
   }
@@ -137,6 +218,7 @@ export function preflightAutomation(
     kind: input.kind,
     state: "needs_setup",
     missing,
+    fixes,
     fixUrl,
     failureReason,
   };

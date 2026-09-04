@@ -53,7 +53,11 @@ export async function tailLog(path: string, lines: number): Promise<string> {
   return text.split("\n").slice(-lines).join("\n");
 }
 
-export async function startSut(keep: boolean, slackEnv: Record<string, string>): Promise<Sut> {
+export async function startSut(
+  keep: boolean,
+  slackEnv: Record<string, string>,
+  extraEnv: Record<string, string> = {},
+): Promise<Sut> {
   const stamp = `${Date.now()}-${randomBytes(4).toString("hex")}`;
   const port = await freePort();
   const apiKey = randomBytes(16).toString("hex");
@@ -85,6 +89,7 @@ export async function startSut(keep: boolean, slackEnv: Record<string, string>):
     AGENTMAIL_DISABLE: "true",
     AGENTMAIL_API_KEY: "",
     ANONYMIZED_TELEMETRY: "false",
+    ...extraEnv,
   };
   const writer = Bun.file(logPath).writer();
   const child = Bun.spawn(["bun", "run", "src/http.ts"], {

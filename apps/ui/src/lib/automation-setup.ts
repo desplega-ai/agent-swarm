@@ -87,6 +87,14 @@ export function automationFixText(automation: StatusAutomation): string {
   return actions.length > 0 ? `${joinHuman(actions)}.` : "Review this automation's setup.";
 }
 
+export function automationFixLabel(fix: StatusAutomation["fixes"][number]): string {
+  if (fix.type === "param") {
+    const label = PARAMETER_LABELS[fix.key] ?? fix.key.replaceAll("_", " ").toLowerCase();
+    return `Set ${label}`;
+  }
+  return `Connect ${INTEGRATION_LABELS[fix.key] ?? fix.key}`;
+}
+
 export function findAutomation(
   automations: StatusAutomation[] | undefined,
   kind: StatusAutomation["kind"],

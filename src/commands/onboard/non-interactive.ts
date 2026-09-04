@@ -7,6 +7,12 @@ import {
 
 type Env = Record<string, string | undefined>;
 
+export const MAX_ONBOARD_CONCURRENT_TASKS = 100;
+
+export type MaxConcurrentTasksResult =
+  | { ok: true; value: number | null }
+  | { ok: false; error: string };
+
 export type NonInteractiveProviderResult =
   | { ok: true; state: Pick<OnboardState, ProviderStateKey>; credentialLabel: string }
   | { ok: false; error: string };
@@ -31,6 +37,24 @@ const ACCEPTED_CREDENTIALS =
 
 function value(env: Env, key: string): string {
   return env[key]?.trim() ?? "";
+}
+
+export function parseMaxConcurrentTasks(raw: string | undefined): MaxConcurrentTasksResult {
+  if (raw === undefined) return { ok: true, value: null };
+  if (!/^\d+$/.test(raw)) {
+    return {
+      ok: false,
+      error: `--max-concurrent-tasks must be an integer between 1 and ${MAX_ONBOARD_CONCURRENT_TASKS}`,
+    };
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_ONBOARD_CONCURRENT_TASKS) {
+    return {
+      ok: false,
+      error: `--max-concurrent-tasks must be an integer between 1 and ${MAX_ONBOARD_CONCURRENT_TASKS}`,
+    };
+  }
+  return { ok: true, value: parsed };
 }
 
 function selectedProvider(env: Env): InstallProvider | null | "invalid" {

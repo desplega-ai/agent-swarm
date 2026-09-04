@@ -117,6 +117,12 @@ const navGroups: NavGroup[] = [
         gate: { minVersion: "1.76.0" },
       },
       {
+        title: "Pages",
+        path: "/pages",
+        icon: GlobeIcon,
+        gate: { minVersion: "1.79.0" },
+      },
+      {
         title: "Apps",
         path: "/apps",
         icon: LayoutGridIcon,
@@ -144,12 +150,6 @@ const navGroups: NavGroup[] = [
       { title: "MCP Servers", path: "/mcp-servers", icon: CableIcon },
       { title: "Connections", path: "/connections", icon: Link2Icon },
       { title: "Memory", path: "/memory", icon: BrainIcon },
-      {
-        title: "Pages",
-        path: "/pages",
-        icon: GlobeIcon,
-        gate: { minVersion: "1.79.0" },
-      },
       { title: "Templates", path: "/templates", icon: FileTextIcon },
     ],
   },

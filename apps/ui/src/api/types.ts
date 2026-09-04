@@ -2365,6 +2365,9 @@ export interface StatusAutomation {
     params: string[];
     integrations: string[];
   };
+  fixes: Array<
+    { type: "param"; key: string; url: string } | { type: "integration"; key: string; url: string }
+  >;
   fixUrl: string;
 }
 

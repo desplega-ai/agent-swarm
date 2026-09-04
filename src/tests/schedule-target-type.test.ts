@@ -542,6 +542,28 @@ describe("dispatchScheduleTarget — workflow target", () => {
 });
 
 describe("dispatchScheduleTarget — automation preflight", () => {
+  test("does not create an agent task for a shell-active repository parameter", async () => {
+    const schedule = await createScheduledTask({
+      name: `dispatch-injection-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Review {{REPO_URL}}",
+      params: { REPO_URL: "acme/widgets; touch /tmp/injected" },
+      requiredParams: ["REPO_URL"],
+    });
+    const before = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+
+    await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
+      "needs_setup: params=[REPO_URL] integrations=[]",
+    );
+
+    const after = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+    expect(after?.count).toBe(before?.count);
+  });
+
   test("renders every runtime-consumed schedule field and preserves argument value types", async () => {
     const schedule = await createScheduledTask({
       name: `schedule-render-fields-${crypto.randomUUID()}`,

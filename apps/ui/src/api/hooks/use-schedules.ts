@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
 import type { ScheduledTask } from "../types";
+import { invalidateStatusQuery } from "./status-query";
 
 export interface ScheduledTaskFilters {
   enabled?: boolean;
@@ -50,6 +51,7 @@ export function useCreateSchedule() {
     }) => api.createSchedule(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }
@@ -62,6 +64,7 @@ export function useUpdateSchedule() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
       queryClient.invalidateQueries({ queryKey: ["scheduled-task"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }
@@ -72,6 +75,7 @@ export function useDeleteSchedule() {
     mutationFn: (id: string) => api.deleteSchedule(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }

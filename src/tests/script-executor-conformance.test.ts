@@ -6,6 +6,7 @@ import type {
   ScriptExecutor,
 } from "../scripts-runtime/executors/types";
 import { DEFAULT_SCRIPT_RESOURCES } from "../scripts-runtime/executors/types";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 const payload = {
   system: {
@@ -73,9 +74,14 @@ class FakeScriptExecutor implements ScriptExecutor {
   }
 }
 
-function conformance(name: string, makeExecutor: () => ScriptExecutor) {
+// `spawns` marks whether this executor variant shells out via Bun.spawn.
+// FakeScriptExecutor is plain JS and never touches the sandbox, so it must
+// keep running even when the spawn probe has disabled the native suite.
+function conformance(name: string, makeExecutor: () => ScriptExecutor, spawns: boolean) {
+  const spawnTest = test.skipIf(spawns && SKIP_SANDBOX_SPAWN_TESTS);
+
   describe(`${name} ScriptExecutor conformance`, () => {
-    test("happy path run", async () => {
+    spawnTest("happy path run", async () => {
       const output = await makeExecutor().run(
         input({
           source: "export default async (args) => args.x + 1;",
@@ -86,7 +92,7 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor) {
       expect(output.error).toBeUndefined();
     });
 
-    test("stdout cap is honored", async () => {
+    spawnTest("stdout cap is honored", async () => {
       const output = await makeExecutor().run(
         input({
           resources: {
@@ -102,12 +108,13 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor) {
       expect(output.truncated.stdout).toBe(true);
     });
 
+    // Short-circuits before Bun.spawn for every executor — never spawn-dependent.
     test("workspace-rw returns executor_error", async () => {
       const output = await makeExecutor().run(input({ fsMode: "workspace-rw" }));
       expect(output.error).toBe("executor_error");
     });
 
-    test("config payload is delivered", async () => {
+    spawnTest("config payload is delivered", async () => {
       const output = await makeExecutor().run(
         input({
           source:
@@ -119,11 +126,11 @@ function conformance(name: string, makeExecutor: () => ScriptExecutor) {
   });
 }
 
-conformance("native", () => new NativeScriptExecutor());
-conformance("fake", () => new FakeScriptExecutor());
+conformance("native", () => new NativeScriptExecutor(), true);
+conformance("fake", () => new FakeScriptExecutor(), false);
 
 describe("native-only executor behavior", () => {
-  test("timeout maps to timeout", async () => {
+  test.skipIf(SKIP_SANDBOX_SPAWN_TESTS)("timeout maps to timeout", async () => {
     const output = await new NativeScriptExecutor().run(
       input({
         resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 100 },
@@ -133,6 +140,7 @@ describe("native-only executor behavior", () => {
     expect(output.error).toBe("timeout");
   });
 
+  // Aborts before Bun.spawn — never spawn-dependent.
   test("AbortSignal maps to killed", async () => {
     const controller = new AbortController();
     controller.abort();

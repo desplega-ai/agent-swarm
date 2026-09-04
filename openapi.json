@@ -37048,12 +37048,16 @@
                     },
                     "steeringEnabled": {
                       "type": "boolean"
+                    },
+                    "multiRuntimeEnabled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
-                    "steeringEnabled"
+                    "steeringEnabled",
+                    "multiRuntimeEnabled"
                   ]
                 }
               }
@@ -38158,6 +38162,66 @@
                               "integrations"
                             ]
                           },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "param"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "integration"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string",
+                                      "enum": [
+                                        "slack",
+                                        "github",
+                                        "linear",
+                                        "jira",
+                                        "gsc",
+                                        "agentmail",
+                                        "agentfs"
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
                           "fixUrl": {
                             "type": "string"
                           }
@@ -38168,6 +38232,7 @@
                           "kind",
                           "state",
                           "missing",
+                          "fixes",
                           "fixUrl"
                         ]
                       }

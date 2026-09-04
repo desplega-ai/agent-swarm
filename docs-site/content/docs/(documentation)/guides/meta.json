@@ -26,12 +26,6 @@
     "claude-bridge-experimental",
     "worker-credential-recovery",
     "provider-auth",
-    "slack-integration",
-    "github-integration",
-    "gitlab-integration",
-    "agentmail-integration",
-    "sentry-integration",
-    "jira-integration",
     "x402-payments",
     "multi-runtime-agents"
   ]

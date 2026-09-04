@@ -54,7 +54,9 @@ It writes `./e2e-results.json` by default.
 
 Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
 so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
-Scenarios drive that Slack workspace through `ctx.slack` (see `slack-mention`: mention, eyes reaction, task, threaded outcome).
+Scenarios drive that Slack workspace through `ctx.slack`.
+The Slack scenarios are `slack-mention`, `slack-follow-up`, and `slack-failed-task`.
+They cover a mention, a thread follow-up, and a failed task outcome.
 `ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
 
 ```bash
@@ -66,6 +68,23 @@ bun run e2e --skip workflow-script-node
 bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
 bun run e2e --min-route-coverage 4 --min-tool-coverage 3
 bun run e2e --keep
+```
+
+Use repeatable `--sut-env KEY=VALUE` flags to override environment variables for the spawned API server.
+Use `--visuals <dir>` to retain the Slack journal and write its `manifest.json` file.
+Render the journal with `bun run e2e:visuals <dir>`.
+
+Run both Slack rendering profiles locally:
+
+```bash
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --visuals /tmp/vis/legacy
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --sut-env SLACK_RENDER_V2=true --visuals /tmp/vis/v2
+```
+
+Then render both profiles:
+
+```bash
+bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
 ```
 
 Use `--harness claude,codex,pi,opencode` to add real worker legs after the contract layer.

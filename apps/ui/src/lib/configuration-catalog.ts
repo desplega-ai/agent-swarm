@@ -463,7 +463,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the Slack handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_ALLOW_DEV_SOCKET_MODE",
@@ -472,7 +472,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Explicitly allow a development API process to open a Slack Socket Mode connection. Keep this off unless the development process must consume events from the configured Slack app.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_RENDER_V2",
@@ -481,7 +481,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Opt in to preview one editable task tree per thread and immutable streamed outcome cards. Leave off to use the legacy per-task message renderer.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "GITHUB_DISABLE",
@@ -490,7 +490,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the GitHub handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/github-integration`,
+        docsUrl: `${DOCS}integrations/github`,
       },
       {
         key: "GITLAB_DISABLE",
@@ -499,7 +499,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the GitLab handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/gitlab-integration`,
+        docsUrl: `${DOCS}integrations/gitlab`,
       },
       {
         key: "LINEAR_DISABLE",
@@ -517,7 +517,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the Jira handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/jira-integration`,
+        docsUrl: `${DOCS}integrations/jira`,
       },
       {
         key: "AGENTMAIL_DISABLE",
@@ -526,7 +526,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Stop the AgentMail handler from starting. Credentials stay untouched — manage them on the Integrations page.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/agentmail-integration`,
+        docsUrl: `${DOCS}integrations/agentmail`,
       },
       {
         key: "ADDITIVE_SLACK",
@@ -535,7 +535,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Batch consecutive messages in a Slack thread into a single task update instead of one per message.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_ALERTS_CHANNEL",
@@ -544,7 +544,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Channel operational alerts are posted to. Accepts a channel ID or name; leave unset to disable alerting.",
         kind: "string",
         placeholder: "e.g. C0123456789",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "SLACK_THREAD_FOLLOWUP_REQUIRE_MENTION",
@@ -553,7 +553,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Only treat a Slack thread reply as a follow-up when the bot is @-mentioned. Off means every reply in the thread is picked up.",
         kind: "boolean",
         defaultValue: "false",
-        docsUrl: `${DOCS}guides/slack-integration`,
+        docsUrl: `${DOCS}integrations/slack`,
       },
       {
         key: "LINEAR_ALLOWED_STATES",

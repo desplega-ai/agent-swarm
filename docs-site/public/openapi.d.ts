@@ -14478,6 +14478,7 @@ export interface paths {
                                 failed: number | null;
                             };
                             steeringEnabled: boolean;
+                            multiRuntimeEnabled: boolean;
                         };
                     };
                 };
@@ -14899,6 +14900,18 @@ export interface paths {
                                     params: string[];
                                     integrations: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 };
+                                fixes: ({
+                                    /** @enum {string} */
+                                    type: "param";
+                                    key: string;
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "integration";
+                                    /** @enum {string} */
+                                    key: "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs";
+                                    url: string;
+                                })[];
                                 fixUrl: string;
                             }[];
                             /** @enum {string} */

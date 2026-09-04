@@ -4,7 +4,7 @@ import type { StepProps } from "../types.ts";
 import { type InstallProvider, PROVIDER_HARNESS } from "../types.ts";
 
 export const PROVIDER_CAPABILITY_MATRIX_URL =
-  "https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix";
+  "https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers";
 
 export function HarnessStep({ goToNext, addLog }: StepProps) {
   return (

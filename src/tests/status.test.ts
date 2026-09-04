@@ -406,9 +406,9 @@ describe("setup milestones", () => {
     expect(getMilestone(empty, "gsc").state).toBe("unverified");
     expect(getMilestone(empty, "agentmail").state).toBe("unverified");
     expect(getMilestone(empty, "agentfs").state).toBe("unverified");
-    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/secrets");
+    expect(getMilestone(empty, "gsc").action_url).toBe("/settings/integrations/gsc");
     expect(getMilestone(empty, "agentmail").action_url).toBe("/settings/integrations/agentmail");
-    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/secrets");
+    expect(getMilestone(empty, "agentfs").action_url).toBe("/settings/integrations/agentfs");
 
     process.env.GSC_SERVICE_ACCOUNT_BASE64 = "encoded-service-account";
     process.env.AGENTMAIL_API_KEY = "am_test";
@@ -540,6 +540,7 @@ describe("automation setup status", () => {
         kind: "workflow",
         state: "running",
         missing: { params: [], integrations: [] },
+        fixes: [],
         fixUrl: `/workflows/${workflow.id}`,
       },
       {
@@ -548,6 +549,10 @@ describe("automation setup status", () => {
         kind: "schedule",
         state: "needs_setup",
         missing: { params: ["REPO_URL"], integrations: ["github"] },
+        fixes: [
+          { type: "param", key: "REPO_URL", url: `/schedules/${schedule.id}?param=REPO_URL` },
+          { type: "integration", key: "github", url: "/settings/integrations/github" },
+        ],
         fixUrl: `/schedules/${schedule.id}?param=REPO_URL`,
       },
     ]);

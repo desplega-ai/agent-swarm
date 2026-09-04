@@ -37,6 +37,7 @@ interface ParsedArgs {
   systemPromptFile: string;
   additionalArgs: string[];
   preset: string;
+  maxConcurrentTasks: string | undefined;
   pullPolicy: string | undefined;
   open: boolean;
   showHelp: boolean;
@@ -57,6 +58,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let systemPromptFile = "";
   let additionalArgs: string[] = [];
   let preset = "";
+  let maxConcurrentTasks: string | undefined;
   let pullPolicy: string | undefined;
   let open = false;
   let showHelp = false;
@@ -99,6 +101,12 @@ function parseArgs(args: string[]): ParsedArgs {
       i++;
     } else if (arg?.startsWith("--preset=")) {
       preset = arg.slice("--preset=".length);
+    } else if (arg === "--max-concurrent-tasks") {
+      const value = mainArgs[i + 1];
+      maxConcurrentTasks = value && !value.startsWith("-") ? value : "";
+      if (value && !value.startsWith("-")) i++;
+    } else if (arg?.startsWith("--max-concurrent-tasks=")) {
+      maxConcurrentTasks = arg.slice("--max-concurrent-tasks=".length);
     } else if (arg === "--pull-policy") {
       const value = mainArgs[i + 1];
       pullPolicy = value && !value.startsWith("-") ? value : "";
@@ -129,6 +137,7 @@ function parseArgs(args: string[]): ParsedArgs {
     systemPromptFile,
     additionalArgs,
     preset,
+    maxConcurrentTasks,
     pullPolicy,
     open,
     showHelp,
@@ -149,14 +158,15 @@ const COMMAND_HELP: Record<
     options: [
       "  --dry-run              Preview what would be generated without writing",
       "  -y, --yes              Non-interactive mode (reads from env vars)",
-      "  --preset <name>        Preset: full, dev, content, research, solo (default: full)",
+      "  --preset <name>        Preset: full, dev, content, research, solo (required with --yes)",
+      "  --max-concurrent-tasks <n>  Tasks per agent (1-100; default: lead 2, worker 1)",
       "  --pull-policy <policy> Pull policy: always, missing, never (default: always)",
       "  -h, --help             Show this help",
     ].join("\n"),
     examples: [
       `  ${binName} onboard`,
       `  ${binName} onboard --dry-run`,
-      `  ${binName} onboard --yes`,
+      `  ${binName} onboard --yes --preset=full`,
       `  ${binName} onboard --yes --preset=dev`,
       `  ANTHROPIC_API_KEY=sk-... ${binName} onboard --yes --preset=solo`,
     ].join("\n"),
@@ -635,6 +645,7 @@ function App({ args }: { args: ParsedArgs }) {
     systemPromptFile,
     additionalArgs,
     preset,
+    maxConcurrentTasks,
     pullPolicy,
   } = args;
 
@@ -647,6 +658,7 @@ function App({ args }: { args: ParsedArgs }) {
             dryRun,
             yes,
             preset: preset || undefined,
+            maxConcurrentTasks,
             pullPolicy,
           }}
         />

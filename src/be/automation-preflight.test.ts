@@ -39,6 +39,17 @@ describe("preflightAutomation", () => {
         params: ["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"],
         integrations: ["github", "slack"],
       },
+      fixes: [
+        { type: "param", key: "REPO_URL", url: "/schedules/schedule-1?param=REPO_URL" },
+        {
+          type: "param",
+          key: "SLACK_CHANNEL_ID",
+          url: "/schedules/schedule-1?param=SLACK_CHANNEL_ID",
+        },
+        { type: "param", key: "TIMEZONE", url: "/schedules/schedule-1?param=TIMEZONE" },
+        { type: "integration", key: "github", url: "/settings/integrations/github" },
+        { type: "integration", key: "slack", url: "/settings/integrations/slack" },
+      ],
       fixUrl: "/schedules/schedule-1?param=REPO_URL",
       failureReason:
         "needs_setup: params=[REPO_URL,SLACK_CHANNEL_ID,TIMEZONE] integrations=[github,slack]",
@@ -83,7 +94,7 @@ describe("preflightAutomation", () => {
         name: "gsc-topic-miner",
         requires: ["gsc", "agentfs"],
         param: "GSC_PROPERTY",
-        fixUrl: "/settings/secrets",
+        fixUrl: "/settings/integrations/gsc",
       },
       {
         name: "linear-drain-loop",
@@ -149,8 +160,8 @@ describe("preflightAutomation", () => {
       ["linear", "/settings/integrations/linear"],
       ["jira", "/settings/integrations/jira"],
       ["agentmail", "/settings/integrations/agentmail"],
-      ["gsc", "/settings/secrets"],
-      ["agentfs", "/settings/secrets"],
+      ["gsc", "/settings/integrations/gsc"],
+      ["agentfs", "/settings/integrations/agentfs"],
     ];
     const unverifiedSetup: AutomationSetupStates = {
       slack: "unverified",
@@ -167,8 +178,11 @@ describe("preflightAutomation", () => {
         preflightAutomation(
           { id: `workflow-${id}`, name: id, kind: "workflow", requires: [id] },
           unverifiedSetup,
-        ).fixUrl,
-      ).toBe(fixUrl);
+        ),
+      ).toMatchObject({
+        fixUrl,
+        fixes: [{ type: "integration", key: id, url: fixUrl }],
+      });
     }
   });
 
@@ -188,9 +202,97 @@ describe("preflightAutomation", () => {
     expect(result).toMatchObject({
       state: "running",
       missing: { params: [], integrations: [] },
+      fixes: [],
       fixUrl: "/workflows/workflow-2",
     });
     expect(result.failureReason).toBeUndefined();
+  });
+
+  test("rejects shell metacharacters and unsafe paths in shell-consumed parameters", () => {
+    for (const [key, value] of [
+      ["REPO_URL", "acme/widgets; touch /tmp/injected"],
+      ["REPO_URL", "acme/widgets$(touch /tmp/injected)"],
+      ["GSC_PROPERTY", "example.com; touch /tmp/injected"],
+      ["GSC_PROPERTY", "example.com $(touch /tmp/injected)"],
+      ["BRANCH", "main; touch /tmp/injected"],
+      ["BRANCH", "main$(touch /tmp/injected)"],
+      ["SCOPE_PATH", "../secrets"],
+      ["SCOPE_PATH", "src/../../secrets"],
+      ["SCOPE_PATH", "src; touch /tmp/injected"],
+      ["SCOPE_PATH", "src$(touch /tmp/injected)"],
+      ["REPORT_NAME", "weekly; touch /tmp/injected"],
+      ["REPORT_NAME", "weekly$(touch /tmp/injected)"],
+      ["TAG_PATTERN", "v*; touch /tmp/injected"],
+      ["TAG_PATTERN", "v*$(touch /tmp/injected)"],
+      ["AGENT_FS_ORG_ID", "org; touch /tmp/injected"],
+      ["AGENT_FS_ORG_ID", "org$(touch /tmp/injected)"],
+      ["ORG_ID", "org; touch /tmp/injected"],
+      ["ORG_ID", "org$(touch /tmp/injected)"],
+    ] as const) {
+      const result = preflightAutomation(
+        {
+          id: "schedule-injection",
+          name: "gtm-weekly-review",
+          kind: "schedule",
+          params: { [key]: value },
+          requiredParams: [],
+        },
+        setup,
+      );
+
+      expect(result.state).toBe("needs_setup");
+      expect(result.missing.params).toEqual([key]);
+    }
+  });
+
+  test("accepts supported repository and Search Console property formats", () => {
+    for (const params of [
+      { REPO_URL: "acme/widgets", GSC_PROPERTY: "example.com docs.example.com" },
+      {
+        REPO_URL: "https://github.com/acme/widgets.git",
+        GSC_PROPERTY: "sc-domain:example.com https://docs.example.com/help/",
+      },
+      { REPO_URL: "git@github.com:acme/widgets.git", GSC_PROPERTY: "example.co.uk" },
+    ]) {
+      const result = preflightAutomation(
+        {
+          id: "schedule-safe-params",
+          name: "gtm-weekly-review",
+          kind: "schedule",
+          params,
+          requiredParams: ["REPO_URL", "GSC_PROPERTY"],
+        },
+        { ...setup, github: "verified" },
+      );
+
+      expect(result.state).toBe("running");
+    }
+  });
+
+  test("accepts supported values for every shell-consumed automation parameter", () => {
+    const params = {
+      REPO_URL: "acme/widgets",
+      GSC_PROPERTY: "sc-domain:example.com https://docs.example.com/help/",
+      BRANCH: "release/v1.2.3",
+      SCOPE_PATH: "apps/web/src",
+      REPORT_NAME: "Weekly health report",
+      TAG_PATTERN: "v*",
+      AGENT_FS_ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+      ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+    };
+    const result = preflightAutomation(
+      {
+        id: "all-safe-params",
+        name: "all-safe-params",
+        kind: "workflow",
+        params,
+        requiredParams: Object.keys(params),
+      },
+      { ...setup, github: "verified", slack: "verified" },
+    );
+
+    expect(result.state).toBe("running");
+    expect(result.missing.params).toEqual([]);
   });
 });
 

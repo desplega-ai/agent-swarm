@@ -19,6 +19,8 @@ export interface IntegrationField {
   type: IntegrationFieldType;
   required?: boolean;
   isSecret?: boolean;
+  /** The API reports presence but never returns the persisted row or value. */
+  writeOnly?: boolean;
   placeholder?: string;
   helpText?: string;
   /** Options for `type: "select"`. */
@@ -152,7 +154,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Chat with the swarm from Slack — assign tasks, get alerts, follow-up in threads.",
     category: "comm",
     iconKey: "message-square",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/slack-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/slack",
     disableKey: "SLACK_DISABLE",
     restartRequired: true,
     fields: [
@@ -299,7 +301,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced.",
     category: "issues",
     iconKey: "github",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/github-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/github",
     disableKey: "GITHUB_DISABLE",
     restartRequired: true,
     fields: [
@@ -392,7 +394,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to GitLab issues/MRs and push commits from agents. Supports self-hosted instances.",
     category: "issues",
     iconKey: "git-merge",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/gitlab-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/gitlab",
     disableKey: "GITLAB_DISABLE",
     restartRequired: true,
     fields: [
@@ -499,7 +501,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Jira Cloud issues to tasks via OAuth 3LO. Inbound on assignee→bot or @-mention; outbound lifecycle comments back to the issue.",
     category: "issues",
     iconKey: "square-check-big",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/jira-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/jira",
     disableKey: "JIRA_DISABLE",
     restartRequired: true,
     specialFlow: "jira-oauth",
@@ -589,7 +591,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Give agents access to Sentry issues and project info via the Sentry CLI.",
     category: "observability",
     iconKey: "activity",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/sentry-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/sentry",
     fields: [
       {
         key: "SENTRY_AUTH_TOKEN",
@@ -618,7 +620,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Receive email and reply from agents. Useful for customer-support-like flows.",
     category: "email",
     iconKey: "mail",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/agentmail-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
     recommendedSkills: [
@@ -1082,6 +1084,82 @@ export const INTEGRATIONS: IntegrationDef[] = [
         type: "text",
         placeholder: "claude-sonnet-5",
         helpText: "Optional override. Defaults to claude-sonnet-5.",
+      },
+    ],
+  },
+
+  // ----------------------------------------------- Google Search Console
+  {
+    id: "gsc",
+    name: "Google Search Console",
+    description: "Let reporting automations query Search Console performance data.",
+    category: "observability",
+    iconKey: "chart-line",
+    docsUrl:
+      "https://docs.agent-swarm.dev/docs/reference/environment-variables#google-search-console",
+    fields: [
+      {
+        key: "GSC_SERVICE_ACCOUNT_BASE64",
+        label: "Service account JSON (base64)",
+        type: "textarea",
+        required: true,
+        isSecret: true,
+        placeholder: "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50IiwgLi4ufQ==",
+        helpText:
+          "Base64-encoded Google service-account JSON with access to the Search Console property.",
+      },
+      {
+        key: "GSC_SERVICE_ACCOUNT_JSON",
+        label: "Service account JSON (plain)",
+        type: "textarea",
+        isSecret: true,
+        advanced: true,
+        placeholder: '{"type":"service_account", ...}',
+        helpText:
+          "Optional alternative to the base64 field. Use one service-account format, not both.",
+      },
+    ],
+  },
+
+  // -------------------------------------------------------------- AgentFS
+  {
+    id: "agentfs",
+    name: "AgentFS",
+    description: "Use shared persistent storage for agent work and task attachments.",
+    category: "other",
+    iconKey: "cloud",
+    docsUrl: "https://docs.agent-swarm.dev/docs/guides/agent-fs-co-deployment",
+    fields: [
+      {
+        key: "AGENT_FS_API_URL",
+        label: "API URL",
+        type: "text",
+        required: true,
+        placeholder: "http://agent-fs:7433",
+        helpText: "AgentFS API endpoint reachable from the Agent Swarm API server.",
+      },
+      {
+        key: "API_AGENT_FS_API_KEY",
+        label: "Service API key",
+        type: "password",
+        required: true,
+        isSecret: true,
+        writeOnly: true,
+        helpText: "API-owned bootstrap key used to provision the shared organization and agents.",
+      },
+      {
+        key: "AGENT_FS_DEFAULT_ORG_ID",
+        label: "Default organization ID",
+        type: "text",
+        required: true,
+        helpText: "Organization used for shared swarm files and attachment pointers.",
+      },
+      {
+        key: "AGENT_FS_DEFAULT_DRIVE_ID",
+        label: "Default drive ID",
+        type: "text",
+        required: true,
+        helpText: "Shared drive used when an attachment does not provide a drive explicitly.",
       },
     ],
   },

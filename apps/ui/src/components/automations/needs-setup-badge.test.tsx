@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { StatusAutomation } from "../../api/types";
 import {
   automationDisplayName,
+  automationFixLabel,
   automationFixText,
   automationMissingItems,
   automationMissingSummary,
@@ -15,6 +16,10 @@ const waitingSchedule: StatusAutomation = {
   kind: "schedule",
   state: "needs_setup",
   missing: { params: ["REPO_URL"], integrations: ["github"] },
+  fixes: [
+    { type: "param", key: "REPO_URL", url: "/schedules/schedule-1?param=REPO_URL" },
+    { type: "integration", key: "github", url: "/settings/integrations/github" },
+  ],
   fixUrl: "/schedules/schedule-1?param=REPO_URL",
 };
 
@@ -23,6 +28,10 @@ describe("automation setup helpers", () => {
     expect(automationMissingItems(waitingSchedule)).toEqual(["REPO_URL", "github"]);
     expect(automationMissingSummary(waitingSchedule)).toBe("a repository URL and GitHub");
     expect(automationFixText(waitingSchedule)).toBe("Set a repository URL and connect GitHub.");
+    expect(waitingSchedule.fixes.map(automationFixLabel)).toEqual([
+      "Set a repository URL",
+      "Connect GitHub",
+    ]);
   });
 
   test("uses readable purpose and title text instead of the raw automation ID", () => {

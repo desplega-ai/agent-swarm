@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { generateCompose as generateTemplateCompose } from "../../apps/templates-ui/src/lib/compose-generator.ts";
 import { generateCompose } from "../commands/onboard/compose-generator.ts";
 import { getPresetById, PRESETS } from "../commands/onboard/presets.ts";
 import { INITIAL_STATE, type OnboardState } from "../commands/onboard/types.ts";
@@ -160,8 +161,27 @@ describe("generateCompose", () => {
   test("sets the install-safe concurrency for each agent role", () => {
     const yaml = generateCompose(devState);
 
-    expect(yaml.match(/MAX_CONCURRENT_TASKS=30/g)).toHaveLength(1);
-    expect(yaml.match(/MAX_CONCURRENT_TASKS=10/g)).toHaveLength(2);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=2/g)).toHaveLength(1);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=1/g)).toHaveLength(2);
+  });
+
+  test("applies an explicit concurrency override to every agent", () => {
+    const yaml = generateCompose({ ...devState, maxConcurrentTasks: 4 });
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=4/g)).toHaveLength(3);
+  });
+
+  test("templates builder uses the same conservative role defaults", () => {
+    const yaml = generateTemplateCompose({
+      services: devState.services,
+      apiImage: "api",
+      workerImage: "worker",
+      startingPort: 3201,
+      integrations: devState.integrations,
+    });
+
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=2/g)).toHaveLength(1);
+    expect(yaml.match(/MAX_CONCURRENT_TASKS=1/g)).toHaveLength(2);
   });
 
   // ── Solo preset: 1 coder, no lead ──
