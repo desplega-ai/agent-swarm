@@ -9,12 +9,44 @@ export type ScenarioResult = {
   durationMs: number;
   error?: string;
 };
-export type HarnessResult = {
-  provider: string;
-  model: string;
+/** Session-cost rows the API stored for one harness attempt, summed. */
+export type HarnessCost = {
+  records: number;
+  totalUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** Distinct `costSource` values, comma-joined (harness, pricing-table, unpriced). */
+  costSource: string;
+};
+export type HarnessFailureKind = "setup" | "timeout" | "credential" | "task";
+export type HarnessAttempt = {
   status: "pass" | "fail";
   durationMs: number;
   error?: string;
+  failureKind?: HarnessFailureKind;
+  cost?: HarnessCost;
+  /** Last lines of the worker log, present on failure only. */
+  logTail?: string;
+};
+export type HarnessResult = {
+  provider: string;
+  model: string;
+  /** Status of the final attempt. */
+  status: "pass" | "fail";
+  /** Wall-clock over every attempt. */
+  durationMs: number;
+  error?: string;
+  failureKind?: HarnessFailureKind;
+  attempts: HarnessAttempt[];
+  /** Cost of the final attempt. */
+  cost?: HarnessCost;
+  /** USD summed over every attempt, retries included. */
+  totalCostUsd: number;
+  /** Access-token expiry of the seeded OAuth blob. Codex only. */
+  credentialExpiresAt?: string;
+  logTail?: string;
 };
 
 export type E2eResult = {
@@ -30,6 +62,7 @@ export type E2eResult = {
 
 export type Options = {
   harness: string[];
+  harnessAttempts: number;
   only?: Set<string>;
   skip: Set<string>;
   list: boolean;
@@ -48,6 +81,8 @@ export const helpText = `Usage: bun run e2e [options]
 Options:
   --harness p1,p2               Run real harness legs after the contract scenarios
                                 (claude, codex, pi, opencode)
+  --harness-attempts N          Run a failed harness leg again, N attempts in total
+                                (1 through 5, default: 1)
   --only name,name              Run only named contract scenarios
   --skip name,name              Skip named contract scenarios
   --list                        Print contract scenario names and exit
@@ -81,6 +116,14 @@ function coverageValue(value: string, flag: string): number {
   return number;
 }
 
+function attemptsValue(value: string): number {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1 || number > 5) {
+    throw new Error("--harness-attempts must be an integer from 1 through 5");
+  }
+  return number;
+}
+
 function sutEnvValue(value: string): [string, string] {
   const separator = value.indexOf("=");
   if (separator < 1) throw new Error("--sut-env requires KEY=VALUE");
@@ -90,6 +133,7 @@ function sutEnvValue(value: string): [string, string] {
 export function parseOptions(args: string[], scenarioNames: string[]): Options {
   const options: Options = {
     harness: [],
+    harnessAttempts: 1,
     skip: new Set(),
     list: false,
     help: false,
@@ -103,6 +147,7 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
     const arg = args[index]!;
     const value = () => optionValue(args, index++, arg);
     if (arg === "--harness") options.harness = listValue(value());
+    else if (arg === "--harness-attempts") options.harnessAttempts = attemptsValue(value());
     else if (arg === "--only") options.only = new Set(listValue(value()));
     else if (arg === "--skip") options.skip = new Set(listValue(value()));
     else if (arg === "--json") options.jsonPath = value();
@@ -146,17 +191,66 @@ export function printScenario(result: ScenarioResult): void {
   console.log(`${colors[result.status]}${label}${colors.reset} ${result.name}${duration}${detail}`);
 }
 
+export function usd(amount: number): string {
+  return `$${amount.toFixed(4)}`;
+}
+
+/** One cell for a harness cost: the USD figure, or "no record" when the API stored nothing. */
+export function costCell(cost: HarnessCost | undefined): string {
+  if (!cost) return "";
+  if (cost.records === 0) return "no record";
+  return `${usd(cost.totalUsd)} (${cost.costSource})`;
+}
+
 export function printHarness(result: HarnessResult): void {
   const color = colors[result.status];
   const detail = result.error ? `: ${result.error}` : "";
+  const attempts = result.attempts.length > 1 ? `, ${result.attempts.length} attempts` : "";
+  const cost = result.cost ? `, ${costCell(result.cost)}` : "";
   console.log(
     `${color}${result.status.toUpperCase()}${colors.reset} harness ${result.provider} ` +
-      `(${result.model}, ${seconds(result.durationMs)})${detail}`,
+      `(${result.model}, ${seconds(result.durationMs)}${attempts}${cost})${detail}`,
   );
 }
 
-function markdownCell(value: string): string {
+export function markdownCell(value: string): string {
   return value.replaceAll("|", "\\|").replaceAll("\n", "<br>");
+}
+
+export function harnessTable(legs: HarnessResult[]): string[] {
+  return [
+    "| Provider | Model | Status | Attempts | Duration | Cost | Tokens in+cache / out | Error |",
+    "| --- | --- | --- | ---: | ---: | --- | ---: | --- |",
+    ...legs.map((leg) => {
+      // Input counts cache reads and writes, the same unified formula the cost pages use.
+      const tokens = leg.cost?.records
+        ? `${leg.cost.inputTokens + leg.cost.cacheReadTokens + leg.cost.cacheWriteTokens} / ${leg.cost.outputTokens}`
+        : "";
+      return `| ${leg.provider} | ${markdownCell(leg.model)} | ${leg.status.toUpperCase()} | ${leg.attempts.length} | ${seconds(leg.durationMs)} | ${costCell(leg.cost)} | ${tokens} | ${markdownCell(leg.error ?? "")} |`;
+    }),
+  ];
+}
+
+/** Collapsed worker-log tails for every failed attempt, so the raw job log is never required. */
+export function harnessFailureDetails(legs: HarnessResult[]): string[] {
+  const lines: string[] = [];
+  for (const leg of legs) {
+    leg.attempts.forEach((attempt, index) => {
+      if (attempt.status !== "fail") return;
+      lines.push(
+        "<details>",
+        `<summary>${leg.provider} attempt ${index + 1}: ${markdownCell(attempt.error ?? "failed")}${attempt.failureKind ? ` (${attempt.failureKind})` : ""}</summary>`,
+        "",
+        "```text",
+        attempt.logTail?.replaceAll("```", "` ` `") ?? "(no worker log)",
+        "```",
+        "",
+        "</details>",
+        "",
+      );
+    });
+  }
+  return lines;
 }
 
 export function markdownSummary(result: E2eResult): string {
@@ -179,12 +273,9 @@ export function markdownSummary(result: E2eResult): string {
       "",
       "### Harness",
       "",
-      "| Provider | Model | Status | Duration | Error |",
-      "| --- | --- | --- | ---: | --- |",
-      ...result.harness.map(
-        (leg) =>
-          `| ${leg.provider} | ${leg.model} | ${leg.status.toUpperCase()} | ${seconds(leg.durationMs)} | ${markdownCell(leg.error ?? "")} |`,
-      ),
+      ...harnessTable(result.harness),
+      "",
+      ...harnessFailureDetails(result.harness),
     );
   }
   lines.push(

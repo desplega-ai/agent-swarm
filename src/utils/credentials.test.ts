@@ -99,6 +99,21 @@ describe("resolveCredentialPools", () => {
     expect(env.SOME_OTHER_VAR).toBe("value");
   });
 
+  it("keeps a CODEX_OAUTH JSON blob whole despite its commas", async () => {
+    const blob = JSON.stringify({
+      access: "access-token",
+      refresh: "refresh-token",
+      expires: 1_800_000_000_000,
+      accountId: "acct-12345",
+    });
+    const env: Record<string, string | undefined> = { CODEX_OAUTH: blob };
+    const selections = await resolveCredentialPools(env, { provider: "codex" });
+    expect(env.CODEX_OAUTH).toBe(blob);
+    expect(selections).toHaveLength(1);
+    expect(selections[0]?.total).toBe(1);
+    expect(selections[0]?.keySuffix).toBe(blob.slice(-5));
+  });
+
   it("resolves both credential vars independently", async () => {
     const env: Record<string, string | undefined> = {
       CLAUDE_CODE_OAUTH_TOKEN: "oauth1,oauth2",
