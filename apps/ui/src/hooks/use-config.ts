@@ -33,11 +33,17 @@ export interface PendingApiUrlTrust {
 }
 
 function isPrivateOrLoopbackHostname(hostname: string): boolean {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const normalizedHostname = hostname.toLowerCase();
+  const host =
+    normalizedHostname.startsWith("[") && normalizedHostname.endsWith("]")
+      ? normalizedHostname.slice(1, -1)
+      : normalizedHostname;
   if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
 
-  const octets = host.split(".").map(Number);
-  if (octets.length === 4 && octets.every((octet) => Number.isInteger(octet))) {
+  const ipv4Match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4Match) {
+    const octets = ipv4Match.slice(1).map(Number);
+    if (octets.some((octet) => octet > 255)) return false;
     return (
       octets[0] === 10 ||
       octets[0] === 127 ||
@@ -46,20 +52,37 @@ function isPrivateOrLoopbackHostname(hostname: string): boolean {
     );
   }
 
-  return /^(?:fc|fd|fe[89ab])/i.test(host);
+  if (!host.includes(":") || !/^[\da-f:.]+$/.test(host)) return false;
+  try {
+    new URL(`http://[${host}]/`);
+  } catch {
+    return false;
+  }
+
+  const firstHextet = Number.parseInt(host.split(":", 1)[0] || "0", 16);
+  return (
+    (firstHextet >= 0xfc00 && firstHextet <= 0xfdff) ||
+    (firstHextet >= 0xfe80 && firstHextet <= 0xfebf)
+  );
 }
 
 /** A deep-linked destination may receive credentials only over HTTPS or a private dev address. */
 export function inspectPendingApiUrl(apiUrl: string): PendingApiUrlTrust {
   try {
     const url = new URL(apiUrl);
+    const inputHostname =
+      /^[a-z][\w+.-]*:\/\/(?:[^@/?#]*@)?(\[[^\]]+\]|[^:/?#]+)(?::\d+)?(?:[/?#]|$)/i.exec(
+        apiUrl.trim(),
+      )?.[1];
     return {
       origin: url.origin,
       allowed:
         !url.username &&
         !url.password &&
         (url.protocol === "https:" ||
-          (url.protocol === "http:" && isPrivateOrLoopbackHostname(url.hostname))),
+          (url.protocol === "http:" &&
+            !!inputHostname &&
+            isPrivateOrLoopbackHostname(inputHostname))),
     };
   } catch {
     return { origin: apiUrl, allowed: false };

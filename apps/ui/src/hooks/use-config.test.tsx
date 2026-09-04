@@ -72,12 +72,34 @@ describe("inspectPendingApiUrl", () => {
   });
 
   test("allows HTTP only for loopback and private development addresses", () => {
-    expect(inspectPendingApiUrl("http://localhost:3013").allowed).toBe(true);
-    expect(inspectPendingApiUrl("http://127.0.0.1:3013").allowed).toBe(true);
-    expect(inspectPendingApiUrl("http://10.0.0.5:3013").allowed).toBe(true);
-    expect(inspectPendingApiUrl("http://172.31.0.5:3013").allowed).toBe(true);
-    expect(inspectPendingApiUrl("http://192.168.1.5:3013").allowed).toBe(true);
-    expect(inspectPendingApiUrl("http://8.8.8.8:3013").allowed).toBe(false);
+    const allowedHosts = [
+      "localhost",
+      "127.0.0.1",
+      "10.0.0.1",
+      "172.16.0.1",
+      "192.168.1.1",
+      "[::1]",
+      "[fd00::1]",
+      "[fe80::1]",
+    ];
+    const rejectedHosts = [
+      "8.8.8.8",
+      "172.32.0.1",
+      "192.169.1.1",
+      "999.0.0.1",
+      "0x7f.0.0.1",
+      "127.1",
+      "fd.attacker.example",
+      "fe8.attacker.example",
+      "[fd00:::1]",
+    ];
+
+    for (const host of allowedHosts) {
+      expect(inspectPendingApiUrl(`http://${host}:3013`).allowed).toBe(true);
+    }
+    for (const host of rejectedHosts) {
+      expect(inspectPendingApiUrl(`http://${host}:3013`).allowed).toBe(false);
+    }
   });
 
   test("blocks credential submission until an allowed deep-link origin is confirmed", () => {
@@ -88,5 +110,9 @@ describe("inspectPendingApiUrl", () => {
     expect(pendingApiUrlSubmissionError("http://attacker.example", true)).toBe(
       "Deep-linked API URLs must use HTTPS, except for private or loopback addresses.",
     );
+    expect(pendingApiUrlSubmissionError("http://fd.attacker.example", true)).toBe(
+      "Deep-linked API URLs must use HTTPS, except for private or loopback addresses.",
+    );
+    expect(pendingApiUrlSubmissionError("http://[fd00::1]", true)).toBeNull();
   });
 });
