@@ -365,6 +365,47 @@ describe("Pool Affinity", () => {
       expect(child.agentId).toBe(differentWorker.id);
       expect(child.routingAffinity).toMatchObject({ sourceAgentId: originalWorker.id });
     });
+
+    test("Superagent P1: a caller-declared (non-lead-only) capability requirement inherited by a continuation still gates direct assignment — it is not reclassified as provenance", async () => {
+      // Parent's routingAffinity is a CALLER-DECLARED requirement (the same
+      // shape `send-task`/`task-action` build from `requiredCapabilities`):
+      // no `sourceAgentId`, no `role` — unlike `buildRoutingAffinityFromAgent`
+      // provenance, which always stamps both. This is the exact shape the
+      // Superagent security review flagged as being silently reclassified as
+      // provenance and exempted from the direct-assignment/offer gate.
+      const parent = await createTaskExtended("Needs a rare capability", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["rare-capability"] }),
+      });
+
+      // Even an agent that DOES hold the required capability is ineligible
+      // here: a capability-only affinity (no `role`) is — by the documented
+      // "no fail-open" contract above (`isAgentEligibleForTask`) — only ever
+      // claimable by its own `sourceAgentId`, which a caller-declared
+      // requirement never has. The point of this test is that the gate stays
+      // ACTIVE on the continuation (throws), not that this specific agent is
+      // the reason it's rejected.
+      const capableWorker = await createAgent({
+        name: "capable-but-not-source-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(capableWorker.id, {
+        role: "coder",
+        capabilities: ["rare-capability"],
+      });
+
+      // The child declares no routingAffinity of its own, so it falls back to
+      // inheriting the parent's caller-declared requirement. Before the fix,
+      // `routingAffinityIsInheritedProvenance` was derived from `!leadOnly`
+      // alone, so this collapsed to "provenance" and the direct-assignment
+      // gate below was skipped entirely — silently dropping the requirement.
+      await expect(
+        createTaskExtended("Continue the rare-capability work", {
+          parentTaskId: parent.id,
+          agentId: capableWorker.id,
+        }),
+      ).rejects.toThrow("Task routing affinity does not authorize assignment or offer");
+    });
   });
 
   // ==========================================================================
