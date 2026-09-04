@@ -83,6 +83,10 @@ bun run e2e --only health --harness claude,pi --harness-attempts 2
 E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
 ```
 
+When the runner is root and `gosu` exists (the nightly container job), the worker starts as `gosu worker env HOME=<temp HOME> ...`.
+gosu resets HOME to `/home/worker`, which would hide the seeded auth.json and skills; file-based credentials such as the
+chatgpt-mode codex auth.json then fail with `401 Missing bearer or basic authentication in header`.
+
 `--harness-attempts N` runs a failed leg again, N attempts in total. Every attempt lands in the JSON
 result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
 turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
