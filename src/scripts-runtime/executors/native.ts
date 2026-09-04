@@ -34,6 +34,17 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
  * `userCodeStarted` (backed by the sentinel file `eval-harness.ts` writes
  * immediately before importing the user module) is what tells the two
  * apart — see `runScript`'s retry loop in `../loader.ts`.
+ *
+ * 134 is checked before `timedOut`/`killed` below, and wins unconditionally.
+ * Both of our own termination paths (the wall-clock watchdog and an external
+ * `input.signal` abort) kill the child via `AbortController` -> `Bun.spawn`'s
+ * default signal, which is SIGTERM (exit 143) — never SIGABRT (134, signal
+ * 6). So an observed 134 can only be the process's own abort; it did not
+ * come from us. Under CI load the watchdog can still fire in the same window
+ * as a genuine self-abort (`setTimeout` is a macrotask racing `proc.exited`'s
+ * resolution), which flips `timedOut` true even though the process had
+ * already exited on its own — trusting that flag over the exit code
+ * misclassifies a real `capacity_exceeded`/`eval_error` as `timeout`.
  */
 const SANDBOX_CAPACITY_EXIT_CODE = 134;
 
@@ -43,11 +54,13 @@ export function classifyExit(
   killed: boolean,
   userCodeStarted: boolean,
 ): ScriptExecutorError | undefined {
+  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE) {
+    return userCodeStarted ? "eval_error" : "capacity_exceeded";
+  }
   if (timedOut) return "timeout";
   if (killed) return "killed";
   if (exitCode === 0) return undefined;
   if (exitCode === 137 || exitCode === 9) return "killed";
-  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE && !userCodeStarted) return "capacity_exceeded";
   return "eval_error";
 }
 
