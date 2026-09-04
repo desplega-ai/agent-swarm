@@ -1,6 +1,9 @@
 import { expandServices } from "./service-names.ts";
 import type { OnboardState } from "./types.ts";
 
+const DEFAULT_LEAD_MAX_CONCURRENT_TASKS = 2;
+const DEFAULT_WORKER_MAX_CONCURRENT_TASKS = 1;
+
 // Docker Compose env var references use ${VAR} syntax which triggers biome's
 // noTemplateCurlyInString rule. We collect them via a helper to keep the
 // suppression comments in one place.
@@ -182,7 +185,10 @@ export function generateCompose(state: OnboardState): string {
     lines.push("      - YOLO=true");
     lines.push("      - SWARM_URL=http://swarm-api:3013");
 
-    lines.push(`      - MAX_CONCURRENT_TASKS=${svc.entry.isLead ? 30 : 10}`);
+    const maxConcurrentTasks =
+      state.maxConcurrentTasks ??
+      (svc.entry.isLead ? DEFAULT_LEAD_MAX_CONCURRENT_TASKS : DEFAULT_WORKER_MAX_CONCURRENT_TASKS);
+    lines.push(`      - MAX_CONCURRENT_TASKS=${maxConcurrentTasks}`);
 
     if (state.integrations.github) {
       lines.push(ENV_GITHUB_TOKEN);

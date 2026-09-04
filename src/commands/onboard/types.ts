@@ -84,6 +84,7 @@ export interface OnboardState {
   sentryToken: string;
   sentryOrg: string;
   apiPort: number;
+  maxConcurrentTasks: number | null;
   pullPolicy: PullPolicy;
   outputDir: string;
   nonInteractive: boolean;
@@ -103,6 +104,7 @@ export interface OnboardProps {
   dryRun?: boolean;
   yes?: boolean;
   preset?: string;
+  maxConcurrentTasks?: string;
   pullPolicy?: string;
 }
 
@@ -195,6 +197,7 @@ export const INITIAL_STATE: OnboardState = {
   sentryToken: "",
   sentryOrg: "",
   apiPort: 0,
+  maxConcurrentTasks: null,
   pullPolicy: "always",
   outputDir: process.cwd(),
   nonInteractive: false,
