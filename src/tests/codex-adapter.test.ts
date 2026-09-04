@@ -669,6 +669,55 @@ describe("CodexAdapter.canResume", () => {
   });
 });
 
+describe("CodexAdapter Agent Chat resume", () => {
+  test("uses the requested persisted Codex thread", async () => {
+    const sdk = await import("@openai/codex-sdk");
+    const prototype = sdk.Codex.prototype as unknown as {
+      startThread: (...args: unknown[]) => unknown;
+      resumeThread: (...args: unknown[]) => unknown;
+    };
+    const originalStartThread = prototype.startThread;
+    const originalResumeThread = prototype.resumeThread;
+    const resumed: string[] = [];
+    const fakeThread = makeFakeThread([
+      { type: "thread.started", thread_id: "thread-existing" },
+      { type: "turn.started" },
+      {
+        type: "turn.completed",
+        usage: { input_tokens: 1, cached_input_tokens: 0, output_tokens: 1 },
+      },
+    ]);
+    prototype.startThread = () => {
+      throw new Error("fresh thread must not be created");
+    };
+    prototype.resumeThread = (id: unknown) => {
+      resumed.push(String(id));
+      return fakeThread;
+    };
+    const previousSkipSummary = process.env.SKIP_SESSION_SUMMARY;
+    process.env.SKIP_SESSION_SUMMARY = "1";
+
+    try {
+      const adapter = new CodexAdapter({ bypassSubprocess: true });
+      const session = await adapter.createSession(
+        testConfig({
+          taskId: "",
+          apiUrl: "",
+          apiKey: "",
+          resumeSessionId: "thread-existing",
+        }),
+      );
+      await session.waitForCompletion();
+      expect(resumed).toEqual(["thread-existing"]);
+    } finally {
+      prototype.startThread = originalStartThread;
+      prototype.resumeThread = originalResumeThread;
+      if (previousSkipSummary === undefined) delete process.env.SKIP_SESSION_SUMMARY;
+      else process.env.SKIP_SESSION_SUMMARY = previousSkipSummary;
+    }
+  });
+});
+
 describe("writeCodexAgentsMd round-trip", () => {
   const tmpDir = `/tmp/codex-agents-md-test-${Date.now()}`;
 

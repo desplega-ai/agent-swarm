@@ -135,6 +135,31 @@ describe("sessions — getRootTaskChain + listRecentSessions", () => {
     expect(single?.chainTaskCount).toBe(1);
   });
 
+  test("human-facing session list excludes automatic roots without hiding normal work", async () => {
+    const agent = await createAgent({
+      id: "sessions-filter-agent",
+      name: "Sessions Filter Agent",
+      isLead: false,
+      status: "idle",
+    });
+    const interactive = await createTaskExtended("interactive chat request", {
+      agentId: agent.id,
+      source: "api",
+    });
+    const heartbeat = await createTaskExtended("Task Type: Heartbeat Checklist", {
+      agentId: agent.id,
+      source: "mcp",
+      taskType: "heartbeat-checklist",
+    });
+
+    const visible = await listRecentSessions({ limit: 100, includeAutomatic: false });
+    const visibleIds = visible.map((session) => session.root.id);
+
+    expect(visibleIds).toContain(interactive.id);
+    expect(visibleIds).not.toContain(heartbeat.id);
+    expect(await countSessions({ includeAutomatic: false })).toBe(visible.length);
+  });
+
   test("listRecentSessions ordered by lastActivityAt DESC", async () => {
     const sessions = await listRecentSessions({ limit: 50 });
     for (let i = 1; i < sessions.length; i++) {

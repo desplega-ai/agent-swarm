@@ -14342,6 +14342,8 @@ interface ListRecentSessionsOpts {
   q?: string;
   /** When set, restrict to root tasks where `requestedByUserId` equals this value. NULL rows are excluded. */
   requestedByUserId?: string;
+  /** When false, exclude scheduler/heartbeat/health-check roots from human-facing session lists. */
+  includeAutomatic?: boolean;
   /** When true, return slim `SessionListItemSummary` rows (default: full). */
   slim?: boolean;
 }
@@ -14376,6 +14378,11 @@ export async function listRecentSessions(
   if (requestedByUserId) {
     conditions.push("r.requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.includeAutomatic === false) {
+    conditions.push(
+      "(IFNULL(r.source, '') NOT IN ('schedule', 'system') AND IFNULL(r.taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage', 'health-check') AND IFNULL(r.taskType, '') NOT LIKE '%-monitor' AND IFNULL(r.taskType, '') NOT LIKE '%-digest' AND r.tags NOT LIKE '%\"heartbeat\"%' AND r.tags NOT LIKE '%\"scheduled\"%' AND r.tags NOT LIKE '%\"auto-generated\"%' AND r.tags NOT LIKE '%\"schedule:%')",
+    );
   }
   params.push(limit, offset);
 
@@ -14448,7 +14455,10 @@ export async function listRecentSessions(
  * a plain count, no recursive chain walk needed.
  */
 export async function countSessions(
-  opts?: Pick<ListRecentSessionsOpts, "source" | "q" | "requestedByUserId">,
+  opts?: Pick<
+    ListRecentSessionsOpts,
+    "source" | "q" | "requestedByUserId" | "includeAutomatic"
+  >,
 ): Promise<number> {
   const sources = opts?.source?.filter((s) => s.length > 0) ?? [];
   const q = opts?.q?.trim();
@@ -14469,6 +14479,11 @@ export async function countSessions(
   if (requestedByUserId) {
     conditions.push("requestedByUserId = ?");
     params.push(requestedByUserId);
+  }
+  if (opts?.includeAutomatic === false) {
+    conditions.push(
+      "(IFNULL(source, '') NOT IN ('schedule', 'system') AND IFNULL(taskType, '') NOT IN ('heartbeat', 'heartbeat-checklist', 'boot-triage', 'health-check') AND IFNULL(taskType, '') NOT LIKE '%-monitor' AND IFNULL(taskType, '') NOT LIKE '%-digest' AND tags NOT LIKE '%\"heartbeat\"%' AND tags NOT LIKE '%\"scheduled\"%' AND tags NOT LIKE '%\"auto-generated\"%' AND tags NOT LIKE '%\"schedule:%')",
+    );
   }
 
   const row = await getDbClient().get<{ count: number }>(

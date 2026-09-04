@@ -12690,6 +12690,7 @@ export interface paths {
                     source?: string;
                     q?: string;
                     requestedByUserId?: string;
+                    includeAutomatic?: "true" | "false";
                     fields?: "full" | "slim";
                 };
                 header?: never;
@@ -15060,6 +15061,7 @@ export interface paths {
                         outputSchema?: {
                             [key: string]: unknown;
                         };
+                        followUpConfig?: components["schemas"]["FollowUpConfig"];
                         contextKey?: string;
                         requestedByUserId?: string;
                         model?: string;

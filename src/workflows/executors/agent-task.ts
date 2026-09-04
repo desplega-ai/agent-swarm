@@ -29,6 +29,7 @@ const AgentTaskConfigSchema = z.object({
   parentTaskId: z.string().uuid().optional(),
   requestedByUserId: z.string().optional(),
   outputSchema: z.record(z.string(), z.unknown()).optional(),
+  inheritParentOutputSchema: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
 });
 
@@ -111,6 +112,7 @@ export class AgentTaskExecutor extends BaseExecutor<
         parentTaskId: config.parentTaskId,
         requestedByUserId: config.requestedByUserId ?? meta.requestedByUserId,
         outputSchema: config.outputSchema,
+        inheritParentOutputSchema: config.inheritParentOutputSchema,
         followUpConfig: config.followUpConfig,
         contextKey: workflowContextKey({ workflowRunId: meta.runId }),
       },

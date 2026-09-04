@@ -348,6 +348,7 @@ export const registerStoreProgressTool = (server: McpServer) => {
                 // biome-ignore lint/correctness/noEmptyPattern: data unused, ctx needed
                 filter: ({}, ctx) => ctx.deps.length > 0,
                 conditions: [{ timeout_ms: 3_600_000 }], // 1 hour
+              });
             });
 
             if (existingTask.agentId) {

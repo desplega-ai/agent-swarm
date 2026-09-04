@@ -1,0 +1,2 @@
+FROM agent-swarm-worker:v1.1-durable-skills-20260818
+COPY --chmod=755 src/agent-swarm-overlay /usr/local/bin/agent-swarm

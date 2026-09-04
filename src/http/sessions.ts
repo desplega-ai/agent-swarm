@@ -89,6 +89,11 @@ const listSessions = route({
      * excluded. Omit to return every session (legacy / non-UI callers).
      */
     requestedByUserId: z.string().min(1).optional(),
+    /** Exclude recurring/system-generated roots for human-facing chat clients. */
+    includeAutomatic: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
     /** `full` restores the legacy shape (full root `AgentTask`); default is slim. */
     fields: z.enum(["full", "slim"]).optional(),
   }),
@@ -151,6 +156,7 @@ export async function handleSessions(
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      includeAutomatic: parsed.query.includeAutomatic,
     };
     // List responses default to slim (root is a task summary); `?fields=full` restores it.
     const sessions =
@@ -163,6 +169,7 @@ export async function handleSessions(
       source: sources,
       q: parsed.query.q,
       requestedByUserId: parsed.query.requestedByUserId,
+      includeAutomatic: parsed.query.includeAutomatic,
     });
     listSessions.respond(res, 200, {
       sessions,

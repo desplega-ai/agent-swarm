@@ -111,10 +111,9 @@ export interface ProviderSessionConfig {
   vcsRepo?: string;
   contextKey?: string;
   /**
-   * @deprecated Never set by the runner — native session resume was removed in
-   * the 2026-05-28 plan. Adapters log + ignore any stray value. Follow-up
-   * continuity flows through the context preamble; see
-   * `src/commands/context-preamble.ts` and `src/commands/resume-session.ts`.
+   * Existing provider thread to resume. General workflow/task continuations
+   * keep using the durable context preamble; this is set only for the explicit
+   * Agent Chat turn contract, where same-agent conversational latency matters.
    */
   resumeSessionId?: string;
   iteration?: number;

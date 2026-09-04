@@ -53,6 +53,7 @@ import {
   type AgentTaskStatus,
   AgentTaskStatusSchema,
   AssetKeySchema,
+  FollowUpConfigSchema,
   isTerminalTaskStatus,
   ModelTierSchema,
   OnUnsupportedSchema,
@@ -229,6 +230,7 @@ const createTask = route({
     key: AssetKeySchema.optional(),
     source: AgentTaskSourceSchema.optional(),
     outputSchema: z.record(z.string(), z.unknown()).optional(),
+    followUpConfig: FollowUpConfigSchema.optional(),
     contextKey: z.string().optional(),
     requestedByUserId: z.string().optional(),
     model: z.string().optional(),
@@ -831,8 +833,17 @@ export async function handleTasks(
         offeredTo: parsed.body.offeredTo || undefined,
         dir: parsed.body.dir || undefined,
         parentTaskId: parsed.body.parentTaskId || undefined,
+        // A Human/API follow-up is a new conversation turn, not a continuation
+        // of the parent's machine output contract. Without this opt-out, a
+        // structured child task can permanently force later PM replies into
+        // raw JSON through transitive parentTaskId inheritance.
+        inheritParentOutputSchema: Boolean(myAgentId),
         source: parsed.body.source || "api",
         outputSchema: parsed.body.outputSchema || undefined,
+        // The route schema has always accepted this field; preserve it at the
+        // persistence boundary so callers can suppress/configure the generic
+        // worker-to-lead completion follow-up.
+        followUpConfig: parsed.body.followUpConfig,
         contextKey: parsed.body.contextKey || undefined,
         requestedByUserId,
         status: parsed.body.draft ? "draft" : undefined,

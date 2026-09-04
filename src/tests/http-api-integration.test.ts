@@ -474,6 +474,19 @@ describe("Tasks", () => {
     ids.task2 = body.id;
   });
 
+  test("POST /api/tasks — persists follow-up configuration", async () => {
+    const { status, body } = await post("/api/tasks", {
+      body: {
+        task: "Direct chat task without lead completion follow-up",
+        agentId: ids.workerAgent,
+        followUpConfig: { disabled: true },
+      },
+    });
+
+    expect(status).toBe(201);
+    expect(body.followUpConfig).toEqual({ disabled: true });
+  });
+
   test("GET /api/tasks — list all tasks", async () => {
     const { status, body } = await get("/api/tasks");
     expect(status).toBe(200);

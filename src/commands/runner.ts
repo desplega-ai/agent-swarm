@@ -5916,10 +5916,18 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
                 providerMeta: parentSession.providerMeta,
               },
             ]);
-            logResumeResolution(role, resumeResolution);
-            // Native resume deprecated: keep `resumeSessionId` undefined so a fresh
-            // session is spawned. Follow-up continuity flows via the context preamble
-            // injected above (see context-preamble.ts).
+            if (
+              taskObj.taskType === "agent-chat-turn" &&
+              state.harnessProvider === "codex" &&
+              parentSession.provider === "codex"
+            ) {
+              resumeSessionId = parentSession.sessionId;
+              console.log(
+                `[${role}] Resuming Agent Chat Codex thread ${resumeSessionId.slice(0, 8)}`,
+              );
+            } else {
+              logResumeResolution(role, resumeResolution);
+            }
           } else {
             console.log(`[${role}] Child task — parent session ID not found, starting fresh`);
           }

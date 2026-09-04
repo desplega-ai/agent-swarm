@@ -1506,15 +1506,12 @@ export async function createInProcessCodexSession(
       model: resolvedModel,
     };
 
-    // Native resume is deprecated. Follow-up continuity is delivered via the
-    // context preamble (see src/commands/context-preamble.ts). Any stray
-    // resumeSessionId is logged and ignored — we always start a fresh thread.
-    if (config.resumeSessionId) {
-      console.warn(
-        "[codex-adapter] resumeSessionId ignored — native resume is disabled by deprecation plan",
-      );
-    }
-    const thread = codex.startThread(threadOptions);
+    // General task continuity still uses the durable context preamble. The
+    // runner supplies resumeSessionId only for an explicit Agent Chat turn,
+    // scoped to the same Codex agent/provider.
+    const thread = config.resumeSessionId
+      ? codex.resumeThread(config.resumeSessionId, threadOptions)
+      : codex.startThread(threadOptions);
 
     return new CodexSession(
       thread,

@@ -32698,6 +32698,18 @@
             "schema": {
               "type": "string",
               "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "includeAutomatic",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
                 "full",
                 "slim"
               ]
@@ -38294,6 +38306,9 @@
                   "outputSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "followUpConfig": {
+                    "$ref": "#/components/schemas/FollowUpConfig"
                   },
                   "contextKey": {
                     "type": "string"
