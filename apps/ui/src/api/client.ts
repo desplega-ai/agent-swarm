@@ -575,14 +575,29 @@ class ApiClient {
   }
 
   async submitFeedback(endpoint: string, data: FeedbackInput): Promise<void> {
-    await fetch(endpoint, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify(data),
-    });
-    // The response is opaque until the proxy enables CORS. When it does, drop
-    // `no-cors` and restore response status handling here.
+    const body = JSON.stringify(data);
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch {
+      // Arbitrary self-hosted origins are not allowlisted by the shared proxy.
+      // Their preflight is blocked before the POST, so retain the simple opaque
+      // request as a fire-and-forget fallback.
+      await fetch(endpoint, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body,
+      });
+      return;
+    }
+
+    if (!response.ok) throw new Error(`Failed to submit feedback: ${response.status}`);
   }
 
   async testConnection(
