@@ -102,20 +102,39 @@ export interface CredentialSelection {
   isRateLimitFallback: boolean;
 }
 
+function isJsonObject(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return false;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * If a value contains commas, split and select one credential.
  * When availableIndices is provided, only those indices are considered (rate-limit aware).
  * Falls back to random selection from all credentials if no available indices match.
+ * A JSON object value (the CODEX_OAUTH blob) is always one credential.
  */
 export function selectCredential(
   value: string,
   availableIndices?: number[],
   keyType = "ANTHROPIC_API_KEY",
 ): CredentialSelection {
-  const credentials = value
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  // A CODEX_OAUTH value is one JSON blob ({access, refresh, expires, accountId}),
+  // never a comma-separated pool: its commas are field separators. Splitting it
+  // handed out fragments such as `"accountId":"..."}` as the selected credential
+  // and stamped `965"}` as the key suffix on task records. Codex pools live in
+  // config-store slots (codex_oauth_<n>), resolved by the runner instead.
+  const credentials = isJsonObject(value)
+    ? [value.trim()]
+    : value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
   if (credentials.length <= 1) {
     const selected = value.trim();
     const isRateLimitFallback = availableIndices !== undefined && availableIndices.length === 0;
