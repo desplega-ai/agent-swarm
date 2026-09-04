@@ -203,9 +203,17 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<st
   return workspaceDir;
 }
 
-function workerCommand(): string[] {
+/**
+ * gosu resets HOME to the target user's passwd entry (/home/worker), which
+ * hides the temp HOME this leg seeded: auth.json, skills, logs. Re-apply HOME
+ * after the user switch so file-based credentials such as the chatgpt-mode
+ * codex auth.json are found.
+ */
+function workerCommand(homeDir: string): string[] {
   const command = ["bun", "run", "src/cli.tsx", "worker", "--yolo"];
-  return process.getuid?.() === 0 && Bun.which("gosu") ? ["gosu", "worker", ...command] : command;
+  return process.getuid?.() === 0 && Bun.which("gosu")
+    ? ["gosu", "worker", "env", `HOME=${homeDir}`, ...command]
+    : command;
 }
 
 function codexCredentialExpiry(): string | undefined {
@@ -220,7 +228,7 @@ function codexCredentialExpiry(): string | undefined {
 }
 
 const CREDENTIAL_FAILURE =
-  /status (401|403)|http (401|403)|\b(401|403) (unauthorized|forbidden)|invalid_grant|unauthorized|authentication failed|token (has )?expired|refresh token/i;
+  /status (401|403)|http (401|403)|\b(401|403) (unauthorized|forbidden)|invalid_grant|unauthorized|authentication failed|token (has )?expired|refresh token|could not be refreshed|log out and sign in/i;
 
 function classifyFailure(
   message: string,
@@ -321,7 +329,7 @@ async function runHarnessAttempt(
     expect(typeof taskId === "string", `${provider} task response has no id`);
 
     writer = Bun.file(logPath).writer();
-    child = Bun.spawn(workerCommand(), {
+    child = Bun.spawn(workerCommand(homeDir), {
       cwd: repoRoot,
       env: workerEnv(provider, agentId, baseUrl, apiKey, model, homeDir),
       stdout: "pipe",
