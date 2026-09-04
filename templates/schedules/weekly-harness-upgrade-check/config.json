@@ -9,6 +9,6 @@
   "category": "schedules",
   "placeholders": ["REPO_URL", "PR_REVIEWER"],
   "requires": ["github"],
-  "runAllSeedersCandidate": true,
+  "runAllSeedersCandidate": false,
   "tags": ["harness", "upgrade", "maintenance"]
 }
