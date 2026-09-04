@@ -27,7 +27,6 @@ import {
   setAgentHarnessProvider,
   updateAgentActivity,
   updateAgentCredStatus,
-  upsertSwarmConfig,
 } from "../be/db";
 import { storeOAuthTokens, upsertOAuthApp } from "../be/db-queries/oauth";
 import { validateProviderCredentials } from "../commands/provider-credentials";
@@ -127,7 +126,6 @@ async function clearTables() {
   await client.run("DELETE FROM agents");
   await client.run("DELETE FROM oauth_authorizations");
   await client.run("DELETE FROM oauth_apps");
-  await client.run("DELETE FROM swarm_config");
 }
 
 beforeAll(async () => {
@@ -162,7 +160,6 @@ describe("buildStatusPayload — identity", () => {
       logo_url: null,
       brand_color: null,
       is_cloud: false,
-      installed_at: null,
       marketing_url: null,
       hide_cloud_promo: false,
       org_id: null,
@@ -184,7 +181,6 @@ describe("buildStatusPayload — identity", () => {
       logo_url: "https://acme.example/logo.png",
       brand_color: "#ff5500",
       is_cloud: true,
-      installed_at: null,
       marketing_url: "https://swarm.acme.example",
       hide_cloud_promo: true,
       org_id: "org_acme_123",
@@ -195,16 +191,6 @@ describe("buildStatusPayload — identity", () => {
     process.env.SWARM_CLOUD = "1";
     const payload = await buildStatusPayload();
     expect(payload.identity.is_cloud).toBe(true);
-  });
-
-  test("exposes the persisted installation anchor", async () => {
-    await upsertSwarmConfig({
-      scope: "global",
-      key: "telemetry_installed_at",
-      value: "2026-08-25T12:00:00.000Z",
-    });
-    const payload = await buildStatusPayload();
-    expect(payload.identity.installed_at).toBe("2026-08-25T12:00:00.000Z");
   });
 });
 

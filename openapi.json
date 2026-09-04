@@ -15152,159 +15152,6 @@
         }
       }
     },
-    "/api/feedback": {
-      "post": {
-        "summary": "Forward an explicit feedback submission to the feedback proxy",
-        "tags": [
-          "Feedback"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "submission_id": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128
-                  },
-                  "name": {
-                    "type": "string",
-                    "maxLength": 200
-                  },
-                  "email": {
-                    "type": "string",
-                    "maxLength": 320,
-                    "format": "email"
-                  },
-                  "newsletter_consent": {
-                    "type": "boolean"
-                  },
-                  "nps": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "enum": [
-                          1
-                        ]
-                      },
-                      {
-                        "type": "number",
-                        "enum": [
-                          2
-                        ]
-                      },
-                      {
-                        "type": "number",
-                        "enum": [
-                          3
-                        ]
-                      },
-                      {
-                        "type": "number",
-                        "enum": [
-                          4
-                        ]
-                      },
-                      {
-                        "type": "number",
-                        "enum": [
-                          5
-                        ]
-                      }
-                    ]
-                  },
-                  "message": {
-                    "type": "string",
-                    "maxLength": 10000
-                  },
-                  "submitted_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "submission_id",
-                  "newsletter_consent",
-                  "submitted_at"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "202": {
-            "description": "Feedback accepted by the configured proxy"
-          },
-          "400": {
-            "description": "Validation error from this server or the feedback proxy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "Feedback body is too large",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Feedback proxy rate limit exceeded",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Feedback proxy request failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Feedback storage is not configured on the proxy",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/fs/capabilities": {
       "get": {
         "summary": "Get active file-storage provider capabilities",
@@ -37699,12 +37546,6 @@
                         "is_cloud": {
                           "type": "boolean"
                         },
-                        "installed_at": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
                         "marketing_url": {
                           "type": [
                             "string",
@@ -37726,7 +37567,6 @@
                         "logo_url",
                         "brand_color",
                         "is_cloud",
-                        "installed_at",
                         "marketing_url",
                         "hide_cloud_promo",
                         "org_id"

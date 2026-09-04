@@ -1,7 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { FeedbackSubmissionError } from "@/api/client";
+import { useConfigs } from "@/api/hooks/use-config-api";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { useStatusContext } from "@/app/status-context";
@@ -29,14 +29,23 @@ import {
 import { cn } from "@/lib/utils";
 
 const CALENDAR_URL = "https://calendar.app.google/R1ngNwcjs4vrJDk96";
+const DEFAULT_FEEDBACK_ENDPOINT = "https://proxy.desplega.sh/v1/feedback";
+const FEEDBACK_ENDPOINT_CONFIG_KEY = "feedback_endpoint";
 
 export function FeedbackDialog() {
   const status = useStatusContext();
   const currentUser = useCurrentUser();
   const { config } = useConfig();
+  const { data: globalConfigs } = useConfigs({ scope: "global" });
   const failedTasks = useTasks({ status: "failed", limit: 1 });
   const otherDialogOpen = useOtherDialogOpen();
-  const submitFeedback = useSubmitFeedback();
+  const configValue = (key: string) =>
+    globalConfigs?.find((entry) => entry.key === key)?.value.trim() || null;
+  const feedbackEndpoint = configValue(FEEDBACK_ENDPOINT_CONFIG_KEY) ?? DEFAULT_FEEDBACK_ENDPOINT;
+  const installId = configValue("telemetry_installation_id");
+  const installedAt = configValue("telemetry_installed_at");
+  const orgName = status.data?.identity.name ?? "";
+  const submitFeedback = useSubmitFeedback(feedbackEndpoint);
   const storageKey = useMemo(
     () => feedbackPopupStorageKey(config.apiUrl, currentUser.userId ?? "pending"),
     [config.apiUrl, currentUser.userId],
@@ -59,19 +68,17 @@ export function FeedbackDialog() {
   const [nps, setNps] = useState<1 | 2 | 3 | 4 | 5>();
   const [message, setMessage] = useState("");
 
-  const apiSupportsFeedback =
+  const open =
     status.data !== null &&
     status.data !== undefined &&
-    Object.hasOwn(status.data.identity, "installed_at");
-  const open =
-    apiSupportsFeedback &&
+    globalConfigs !== undefined &&
     loadedStorageKey === storageKey &&
     shouldShowFeedbackPopup({
       isCloud: status.data?.identity.is_cloud === true,
       currentUserState: currentUser.state,
       user: currentUser.user,
       state: popupState,
-      installedAt: status.data?.identity.installed_at ?? null,
+      installedAt,
       hasFailedTask: (failedTasks.data?.total ?? 0) > 0,
       otherDialogOpen,
     });
@@ -120,6 +127,11 @@ export function FeedbackDialog() {
     submitFeedback.mutate(
       {
         submission_id: attempt.submissionId,
+        user_id: currentUser.userId,
+        install_id: installId,
+        installed_at: installedAt,
+        org_name: orgName,
+        swarm_version: __APP_VERSION__,
         name: name || undefined,
         email: email || undefined,
         newsletter_consent: newsletterConsent,
@@ -137,20 +149,7 @@ export function FeedbackDialog() {
           setAttempt(null);
           toast.success("Thanks for sharing your feedback.");
         },
-        onError: (error) => {
-          if (error instanceof FeedbackSubmissionError && error.status === 429) {
-            const retry = error.retryAfterSeconds;
-            toast.error(
-              retry === null
-                ? "Too many feedback attempts. Please try again later."
-                : `Too many feedback attempts. Please try again in ${retry} seconds.`,
-            );
-            return;
-          }
-          if (error instanceof FeedbackSubmissionError && error.status === 413) {
-            toast.error("This feedback is too long to send. Please shorten the message.");
-            return;
-          }
+        onError: () => {
           toast.error("Could not send feedback. Please try again.");
         },
       },

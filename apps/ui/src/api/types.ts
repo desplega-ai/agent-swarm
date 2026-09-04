@@ -2314,7 +2314,6 @@ export interface StatusIdentity {
   logo_url: string | null;
   brand_color: string | null;
   is_cloud: boolean;
-  installed_at: string | null;
   marketing_url: string | null;
   hide_cloud_promo: boolean;
   /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
@@ -2323,6 +2322,11 @@ export interface StatusIdentity {
 
 export interface FeedbackInput {
   submission_id: string;
+  user_id: string;
+  install_id: string | null;
+  installed_at: string | null;
+  org_name: string;
+  swarm_version: string;
   name?: string;
   email?: string;
   newsletter_consent: boolean;

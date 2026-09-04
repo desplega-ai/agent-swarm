@@ -4,7 +4,7 @@ mock.module("@/lib/config", () => ({
   getConfig: () => ({ apiUrl: "https://api.example.test", apiKey: "" }),
 }));
 
-const { api, FeedbackSubmissionError } = await import("./client");
+const { api } = await import("./client");
 
 const originalFetch = globalThis.fetch;
 
@@ -37,36 +37,35 @@ describe("respondToApprovalRequest", () => {
 describe("submitFeedback", () => {
   const input = {
     submission_id: "attempt-stable-across-retries",
+    user_id: "user-1",
+    install_id: null,
+    installed_at: null,
+    org_name: "Acme",
+    swarm_version: "1.138.0",
     newsletter_consent: false,
     submitted_at: "2026-09-04T12:00:00.000Z",
   };
 
-  test("returns the proxy acceptance response", async () => {
-    globalThis.fetch = async (_url, init) => {
+  test("sends a simple opaque request directly to the configured endpoint", async () => {
+    globalThis.fetch = async (url, init) => {
+      expect(url).toBe("https://proxy.example.test/v1/feedback");
+      expect(init?.method).toBe("POST");
+      expect(init?.mode).toBe("no-cors");
+      expect(init?.headers).toEqual({ "Content-Type": "text/plain;charset=UTF-8" });
       expect(JSON.parse(String(init?.body))).toEqual(input);
-      return Response.json(
-        { status: "accepted", submission_id: input.submission_id },
-        { status: 202 },
-      );
+      return new Response(null, { status: 202 });
     };
 
-    await expect(api.submitFeedback(input)).resolves.toEqual({
-      status: "accepted",
-      submission_id: input.submission_id,
-    });
+    await expect(
+      api.submitFeedback("https://proxy.example.test/v1/feedback", input),
+    ).resolves.toBeUndefined();
   });
 
-  test("preserves a rate limit and its Retry-After seconds", async () => {
-    globalThis.fetch = async () =>
-      new Response("rate limited", { status: 429, headers: { "Retry-After": "3600" } });
+  test("cannot inspect an opaque proxy response", async () => {
+    globalThis.fetch = async () => ({ status: 0, type: "opaque" }) as Response;
 
-    try {
-      await api.submitFeedback(input);
-      throw new Error("Expected submitFeedback to reject");
-    } catch (error) {
-      expect(error).toBeInstanceOf(FeedbackSubmissionError);
-      expect((error as InstanceType<typeof FeedbackSubmissionError>).status).toBe(429);
-      expect((error as InstanceType<typeof FeedbackSubmissionError>).retryAfterSeconds).toBe(3600);
-    }
+    await expect(
+      api.submitFeedback("https://proxy.example.test/v1/feedback", input),
+    ).resolves.toBeUndefined();
   });
 });

@@ -63,7 +63,6 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleFavorites } from "./favorites";
-import { handleFeedback } from "./feedback";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
@@ -351,7 +350,6 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
-        () => handleFeedback(req, res, pathSegments, queryParams),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsers(req, res, pathSegments, queryParams),
         () => handleSessions(req, res, pathSegments, queryParams),
