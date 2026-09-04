@@ -398,6 +398,7 @@ Install: `bun add -g portless`. Enable HTTPS: `portless trust && portless proxy 
 | `VITE_USER_ID` | unset | Fixes the dashboard identity to an existing user. Requires `VITE_API_URL` and `VITE_API_KEY`. |
 | `VITE_DEMO_MODE` | `false` | Shows a diagonal live demo ribbon when set to `true` or `1`. |
 | `VITE_PLAUSIBLE_ANALYTICS` | unset | Build-time flag. Set to `1` to inject the Plausible analytics snippet into the dashboard's `index.html` during `bun run build`. Only our hosted dashboard sets it; self-hosted and local builds ship with no analytics script. |
+| `VITE_PLAUSIBLE_SCRIPT_ID` | hosted dashboard's id | Plausible site script id (the `pa-<id>.js` part of the snippet) used when `VITE_PLAUSIBLE_ANALYTICS` is on. Set it on a second deployment, such as the public demo, so it reports to its own Plausible site. |
 
 Vite includes every `VITE_*` value in public browser assets. Use a restricted credential and a
 demo-safe API deployment for fixed public dashboards.

@@ -45,7 +45,7 @@ bun run build   # outputs apps/ui/dist/
 
 Deploy the `dist/` directory to your static host of choice (Vercel, Netlify, nginx, S3 + CDN, ...).
 
-Self-hosted builds contain no analytics. The hosted dashboard sets the build-time flag `VITE_PLAUSIBLE_ANALYTICS=1`, which injects a [Plausible](https://plausible.io) snippet; leave it unset to keep your build analytics-free.
+Self-hosted builds contain no analytics. The hosted dashboard sets the build-time flag `VITE_PLAUSIBLE_ANALYTICS=1`, which injects a [Plausible](https://plausible.io) snippet; leave it unset to keep your build analytics-free. `VITE_PLAUSIBLE_SCRIPT_ID` selects the Plausible site for a second deployment such as the public demo.
 
 For local development:
 
