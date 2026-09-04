@@ -21,6 +21,7 @@ import { health } from "./scenarios/health";
 import { mcpSurface } from "./scenarios/mcp-surface";
 import { slackMention } from "./scenarios/slack-mention";
 import { taskLifecycle } from "./scenarios/task-lifecycle";
+import { unclaimedTaskTimeout } from "./scenarios/unclaimed-task-timeout";
 import { workflowScriptNode } from "./scenarios/workflow-script-node";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
 import { type Sut, startSut, stopSut, tailLog } from "./sut";
@@ -41,6 +42,7 @@ const scenarios: Scenario[] = [
   health,
   auth,
   taskLifecycle,
+  unclaimedTaskTimeout,
   mcpSurface,
   workflowScriptNode,
   configRoundtrip,
