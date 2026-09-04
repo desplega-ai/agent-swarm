@@ -12727,11 +12727,16 @@ export async function searchSkills(
   limit = 20,
   includeContent = true,
 ): Promise<Skill[]> {
-  const term = `%${query}%`;
+  const tokens = query.split(/\s+/).filter(Boolean);
   const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
+  const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
+  const params = tokens.flatMap((token) => {
+    const term = `%${token}%`;
+    return [term, term, term];
+  });
   const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?`,
-    [term, term, limit],
+    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY name ASC LIMIT ?`,
+    [...params, limit],
   );
   return rows.map(rowToSkill);
 }
