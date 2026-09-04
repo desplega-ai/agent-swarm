@@ -1,14 +1,16 @@
-import { asRecord, expect, expectStatus, pollUntil } from "../http";
+import { expect } from "../http";
 import type { Scenario } from "../run";
-
-// The mock's timeout errors do not say which channel or thread was watched.
-async function waitNamed<T>(what: string, wait: Promise<T>): Promise<T> {
-  try {
-    return await wait;
-  } catch (error) {
-    throw new Error(`${what}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
+import {
+  ask,
+  claim,
+  findSlackTask,
+  finish,
+  registerLead,
+  waitForBotReply,
+  waitForEyes,
+  waitForOutcome,
+  waitForReaction,
+} from "./slack-helpers";
 
 export const slackMention: Scenario = {
   name: "slack-mention",
@@ -23,55 +25,18 @@ export const slackMention: Scenario = {
       `Expected one socket mode connection, found ${ctx.slack.hub.connectionCount}`,
     );
 
-    const leadResponse = await ctx.api("POST", "/api/agents", {
-      body: { name: `e2e-lead-${ctx.nonce}`, isLead: true },
-    });
-    expectStatus(leadResponse, [201], "register lead");
-    const leadId = asRecord(leadResponse.json).id;
-    expect(typeof leadId === "string", "Registered lead has no id");
+    const leadId = await registerLead(ctx, "e2e-lead-mention");
+    const message = await ask(ctx, "say hello from the E2E worker");
+    ctx.markThread("mention", "C0GENERAL0", message.ts);
+    await waitForEyes(ctx, message.ts);
 
-    const ask = await ctx.slack.postMessage({
-      channel: "general",
-      user: "alice",
-      text: `<@${ctx.slack.bot.userId}> say hello from e2e ${ctx.nonce}`,
-    });
-
-    const reaction = await waitNamed(
-      `eyes reaction on general ts ${ask.ts}`,
-      ctx.slack.waitForApiCall("reactions.add", {
-        timeoutMs: 30_000,
-        where: (call) => call.args.name === "eyes" && call.args.timestamp === ask.ts,
-      }),
-    );
+    const reply = await waitForBotReply(ctx, message.ts);
     expect(
-      reaction.ok === true,
-      `reactions.add on ts ${ask.ts} failed: ${reaction.error ?? "no error reported"}`,
+      reply.thread_ts === message.ts,
+      `Bot replied in general on thread ${String(reply.thread_ts)}, expected ${message.ts}`,
     );
 
-    const reply = await waitNamed(
-      `bot reply in the general thread ${ask.ts}`,
-      ctx.slack.waitForMessage(
-        { channel: "general", thread_ts: ask.ts, from: "bot" },
-        { timeoutMs: 30_000 },
-      ),
-    );
-    expect(
-      reply.thread_ts === ask.ts,
-      `Bot replied on thread ${String(reply.thread_ts)}, expected ${ask.ts}`,
-    );
-
-    let task: Record<string, unknown> | undefined;
-    const listed = await pollUntil(async () => {
-      const response = await ctx.api("GET", "/api/tasks?source=slack&fields=full&limit=50");
-      expectStatus(response, [200], "list slack tasks");
-      const tasks = asRecord(response.json).tasks;
-      expect(Array.isArray(tasks), "Task list has no tasks array");
-      task = tasks
-        .map(asRecord)
-        .find((row) => row.slackThreadTs === ask.ts || row.slackTriggerMessageTs === ask.ts);
-      return task !== undefined;
-    }, 30_000);
-    expect(listed && task, `No slack task for thread ${ask.ts} within 30 seconds`);
+    const task = await findSlackTask(ctx, message.ts);
     const taskId = String(task.id);
     expect(
       task.status === "pending",
@@ -86,56 +51,15 @@ export const slackMention: Scenario = {
       `agent_tasks row for ${taskId} has source ${row?.source ?? "<missing row>"}`,
     );
 
-    // Exactly one poll: polling again while the task runs looks like a crash.
-    expectStatus(
-      await ctx.api("GET", "/api/poll", { agentId: leadId }),
-      [200],
-      "lead claims the slack task",
-    );
-    const claimed = await pollUntil(async () => {
-      const response = await ctx.api("GET", `/api/tasks/${taskId}`);
-      expectStatus(response, [200], "read the claimed slack task");
-      return asRecord(response.json).status === "in_progress";
-    }, 15_000);
-    expect(claimed, `Slack task ${taskId} did not reach in_progress within 15 seconds`);
+    await claim(ctx, leadId, taskId);
+    const output = "Hello from the E2E worker.";
+    await finish(ctx, leadId, taskId, { status: "completed", output });
 
-    const output = `hello from the e2e worker ${ctx.nonce}`;
-    expectStatus(
-      await ctx.api("POST", `/api/tasks/${taskId}/finish`, {
-        agentId: leadId,
-        body: { status: "completed", output },
-      }),
-      [200],
-      "finish the slack task",
-    );
-
-    const outcome = await waitNamed(
-      `task outcome in C0GENERAL0 thread ${ask.ts}`,
-      ctx.slack.waitForMessage(
-        (message) =>
-          message.channel === "C0GENERAL0" &&
-          message.thread_ts === ask.ts &&
-          JSON.stringify(message).includes(output),
-        { timeoutMs: 30_000 },
-      ),
-    );
+    const outcome = await waitForOutcome(ctx, message.ts, output);
     expect(
       outcome.bot_id === ctx.slack.bot.botId,
       `Outcome message came from ${String(outcome.bot_id)}, expected the bot`,
     );
-
-    // The Slack watcher ticks every three seconds before it flips the reaction.
-    const acknowledged = await pollUntil(
-      () =>
-        ctx.slack
-          .messages("general")
-          .find((message) => message.ts === ask.ts)
-          ?.reactions?.some((entry) => entry.name === "white_check_mark") === true,
-      30_000,
-    );
-    expect(
-      acknowledged,
-      `Message ${ask.ts} in general never got a white_check_mark within 30 seconds`,
-    );
+    await waitForReaction(ctx, message.ts, "white_check_mark");
   },
 };
