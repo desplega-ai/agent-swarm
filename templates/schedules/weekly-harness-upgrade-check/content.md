@@ -31,7 +31,7 @@ The worker image pins these harnesses via `ARG`. Each week, check upstream for n
    - npm codex: `npm view @openai/codex version`
    - npm opencode-sdk: `npm view @opencode-ai/sdk version`
    - opencode: `curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest | jq -r .tag_name`
-4. Check for an existing open bundled PR — `gh pr list --search "harness upgrade in:title" --state open --repo {{REPO_URL}}`. Look at the branch prefix `harness-upgrade/`. If one is already open AND was created within the last 48h (sibling schedule may have just opened it), skip and complete with `"Skipped: sibling harness upgrade PR already open"` + the existing PR URL.
+4. Check for an existing open bundled PR — `gh pr list --search "harness upgrade in:title" --state open --repo '{{REPO_URL}}'`. Look at the branch prefix `harness-upgrade/`. If one is already open AND was created within the last 48h (sibling schedule may have just opened it), skip and complete with `"Skipped: sibling harness upgrade PR already open"` + the existing PR URL.
 5. Collect ALL outdated harnesses. If none are outdated, complete with output `"All harnesses up to date as of YYYY-MM-DD"` (no PR).
 6. Branch: `harness-upgrade/weekly-YYYY-MM-DD` (e.g. `harness-upgrade/weekly-2026-06-03`).
 7. Edit `Dockerfile.worker` — bump every outdated ARG. Also update `package.json`:
@@ -79,4 +79,3 @@ This schedule has a sibling — `weekly-harness-upgrade-check-wed` (Wednesday 05
 - The PR URL (if one was opened) + the table of harnesses bumped, OR
 - "No-op: all harnesses up to date as of YYYY-MM-DD" with the version table, OR
 - "Skipped: sibling harness upgrade PR already open" with the existing PR URL.
-

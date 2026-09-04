@@ -3,6 +3,7 @@ import { CronExpressionParser } from "cron-parser";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
+import { AutomationParamsSchema } from "../be/automation-preflight";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -52,7 +53,7 @@ const scheduleUpdateBodySchema = z.object({
   workflowId: z.string().uuid().nullable().optional(),
   scriptName: z.string().nullable().optional(),
   scriptArgs: z.record(z.string(), z.unknown()).nullable().optional(),
-  params: z.record(z.string(), z.unknown()).optional(),
+  params: AutomationParamsSchema.optional(),
   requiredParams: z.array(z.string()).optional(),
   requires: z.array(AutomationIntegrationIdSchema).optional(),
 });
@@ -111,7 +112,7 @@ const createSchedule = route({
     workflowId: z.string().uuid().optional(),
     scriptName: z.string().optional(),
     scriptArgs: z.record(z.string(), z.unknown()).optional(),
-    params: z.record(z.string(), z.unknown()).optional(),
+    params: AutomationParamsSchema.optional(),
     requiredParams: z.array(z.string()).optional(),
     requires: z.array(AutomationIntegrationIdSchema).optional(),
     delayMs: z.number().int().optional(),

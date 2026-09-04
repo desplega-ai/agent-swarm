@@ -810,6 +810,19 @@ async function putSchedule(
 }
 
 describe("POST /api/schedules — targetType validation", () => {
+  test("rejects shell-active automation parameters before persistence", async () => {
+    const { status, json } = await postSchedule({
+      name: `http-param-injection-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Review {{REPO_URL}}",
+      params: { REPO_URL: "acme/widgets$(touch /tmp/injected)" },
+      requiredParams: ["REPO_URL"],
+    });
+
+    expect(status).toBe(400);
+    expect(String(json.error)).toContain("Invalid REPO_URL format");
+  });
+
   test("rejects targetType='workflow' with no workflowId", async () => {
     const { status, json } = await postSchedule({
       name: `http-wf-missing-id-${crypto.randomUUID()}`,

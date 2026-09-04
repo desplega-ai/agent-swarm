@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { AssetKeyAuthorizationError, authorizeAssetKeyWrite } from "../be/asset-key-auth";
 import { resolveHttpAuditUserId } from "../be/audit-user";
+import { AutomationParamsSchema } from "../be/automation-preflight";
 import {
   createWorkflow,
   deleteWorkflow,
@@ -127,7 +128,7 @@ const createWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
-    params: z.record(z.string(), z.unknown()).optional(),
+    params: AutomationParamsSchema.optional(),
     requiredParams: z.array(z.string()).optional(),
     requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
@@ -177,7 +178,7 @@ const updateWorkflowRoute = route({
     cooldown: CooldownConfigSchema.optional().nullable(),
     input: z.record(z.string(), InputValueSchema).optional().nullable(),
     triggerSchema: z.record(z.string(), z.unknown()).optional().nullable(),
-    params: z.record(z.string(), z.unknown()).optional(),
+    params: AutomationParamsSchema.optional(),
     requiredParams: z.array(z.string()).optional(),
     requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional().nullable(),
@@ -198,7 +199,10 @@ const patchWorkflowRoute = route({
   summary: "Patch a workflow definition (create/update/delete nodes)",
   tags: ["Workflows"],
   params: z.object({ id: z.string() }),
-  body: WorkflowPatchSchema.extend({ key: AssetKeySchema.optional() }),
+  body: WorkflowPatchSchema.extend({
+    key: AssetKeySchema.optional(),
+    params: AutomationParamsSchema.optional(),
+  }),
   responses: {
     200: { description: "Workflow patched (version snapshot created)", schema: WorkflowSchema },
     400: { description: "Invalid patch or resulting definition" },

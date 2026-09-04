@@ -35,7 +35,7 @@ The key rule: keep the full artifact for audit/debugging, but pass a compact pro
       "type": "agent-task",
       "inputs": { "context": "context-builder" },
       "config": {
-        "template": "Read the slim context only:\nagent-fs --org {{ORG_ID}} cat {{context.taskOutput.contextSlimPath}}\n\nDo not read {{context.taskOutput.contextPath}} unless a human explicitly asks for the full audit artifact. Plan the release from the slim context and return JSON.",
+        "template": "Read the slim context only:\nagent-fs --org '{{ORG_ID}}' cat {{context.taskOutput.contextSlimPath}}\n\nDo not read {{context.taskOutput.contextPath}} unless a human explicitly asks for the full audit artifact. Plan the release from the slim context and return JSON.",
         "outputSchema": {
           "type": "object",
           "properties": {
@@ -53,7 +53,7 @@ The key rule: keep the full artifact for audit/debugging, but pass a compact pro
       "type": "agent-task",
       "inputs": { "context": "context-builder", "plan": "plan-release" },
       "config": {
-        "template": "Read the approved plan and slim context only:\nagent-fs --org {{ORG_ID}} cat {{plan.taskOutput.planPath}}\nagent-fs --org {{ORG_ID}} cat {{context.taskOutput.contextSlimPath}}\n\nDo not read {{context.taskOutput.contextPath}}. Write the release artifact and return JSON.",
+        "template": "Read the approved plan and slim context only:\nagent-fs --org '{{ORG_ID}}' cat {{plan.taskOutput.planPath}}\nagent-fs --org '{{ORG_ID}}' cat {{context.taskOutput.contextSlimPath}}\n\nDo not read {{context.taskOutput.contextPath}}. Write the release artifact and return JSON.",
         "outputSchema": {
           "type": "object",
           "properties": {

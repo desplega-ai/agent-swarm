@@ -193,12 +193,27 @@ describe("preflightAutomation", () => {
     expect(result.failureReason).toBeUndefined();
   });
 
-  test("rejects shell metacharacters in command-line automation parameters", () => {
+  test("rejects shell metacharacters and unsafe paths in seeded automation parameters", () => {
     for (const [key, value] of [
       ["REPO_URL", "acme/widgets; touch /tmp/injected"],
       ["REPO_URL", "acme/widgets$(touch /tmp/injected)"],
       ["GSC_PROPERTY", "example.com; touch /tmp/injected"],
       ["GSC_PROPERTY", "example.com $(touch /tmp/injected)"],
+      ["REPORT_EMAIL", "ops@example.com; touch /tmp/injected"],
+      ["BRANCH", "main$(touch /tmp/injected)"],
+      ["SCOPE_PATH", "../secrets"],
+      ["SCOPE_PATH", "src/../../secrets"],
+      ["REPORT_NAME", "weekly; touch /tmp/injected"],
+      ["PAGE_ID", "page$(touch /tmp/injected)"],
+      ["TAG_PATTERN", "v*; touch /tmp/injected"],
+      ["SLACK_CHANNEL_ID", "C123; touch /tmp/injected"],
+      ["TIMEZONE", "UTC; touch /tmp/injected"],
+      ["PR_REVIEWER", "reviewer$(touch /tmp/injected)"],
+      ["ALERTS_CHANNEL_ID", "C123$(touch /tmp/injected)"],
+      ["COMPETITORS", ["safe competitor", "$(touch /tmp/injected)"]],
+      ["AGENT_FS_ORG_ID", "org; touch /tmp/injected"],
+      ["LINEAR_PROJECT_ID", "project; touch /tmp/injected"],
+      ["ORG_ID", "org$(touch /tmp/injected)"],
     ] as const) {
       const result = preflightAutomation(
         {
@@ -238,6 +253,40 @@ describe("preflightAutomation", () => {
 
       expect(result.state).toBe("running");
     }
+  });
+
+  test("accepts supported values for every seeded automation parameter", () => {
+    const params = {
+      REPO_URL: "acme/widgets",
+      GSC_PROPERTY: "sc-domain:example.com https://docs.example.com/help/",
+      REPORT_EMAIL: "ops@example.com,alerts@example.com",
+      BRANCH: "release/v1.2.3",
+      SCOPE_PATH: "apps/web/src",
+      REPORT_NAME: "weekly-health",
+      PAGE_ID: "0123456789abcdef0123456789abcdef",
+      TAG_PATTERN: "v*",
+      SLACK_CHANNEL_ID: "C0123456789",
+      TIMEZONE: "Europe/Madrid",
+      PR_REVIEWER: "@release-reviewer",
+      ALERTS_CHANNEL_ID: "G0123456789",
+      COMPETITORS: ["Acme Cloud", "https://example.com/product"],
+      AGENT_FS_ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+      LINEAR_PROJECT_ID: "DES",
+      ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+    };
+    const result = preflightAutomation(
+      {
+        id: "all-safe-params",
+        name: "all-safe-params",
+        kind: "workflow",
+        params,
+        requiredParams: Object.keys(params),
+      },
+      { ...setup, github: "verified", slack: "verified" },
+    );
+
+    expect(result.state).toBe("running");
+    expect(result.missing.params).toEqual([]);
   });
 });
 

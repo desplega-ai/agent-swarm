@@ -151,6 +151,23 @@ describe("Workflow HTTP API v2", () => {
   // ─── CREATE ────────────────────────────────────────────────
 
   describe("POST /api/workflows (create)", () => {
+    test("rejects shell-active automation parameters before persistence", async () => {
+      const res = await fetch(`${baseUrl}/api/workflows`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          name: `param-injection-${crypto.randomUUID()}`,
+          definition: simpleDefinition(),
+          params: { GSC_PROPERTY: "example.com; touch /tmp/injected" },
+          requiredParams: ["GSC_PROPERTY"],
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("Invalid GSC_PROPERTY format");
+    });
+
     test("validates swarm-script timeoutMs before creating", async () => {
       const invalidRes = await fetch(`${baseUrl}/api/workflows`, {
         method: "POST",
@@ -506,16 +523,32 @@ describe("Workflow HTTP API v2", () => {
         method: "PATCH",
         headers,
         body: JSON.stringify({
-          params: { SLACK_CHANNEL_ID: "C123" },
+          params: { SLACK_CHANNEL_ID: "C0123456789" },
           requiredParams: ["SLACK_CHANNEL_ID"],
           requires: ["slack"],
         }),
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as Workflow;
-      expect(body.params).toEqual({ SLACK_CHANNEL_ID: "C123" });
+      expect(body.params).toEqual({ SLACK_CHANNEL_ID: "C0123456789" });
       expect(body.requiredParams).toEqual(["SLACK_CHANNEL_ID"]);
       expect(body.requires).toEqual(["slack"]);
+    });
+
+    test("PATCH rejects shell-active automation parameters", async () => {
+      const workflow = await createTestWorkflow();
+
+      const res = await fetch(`${baseUrl}/api/workflows/${workflow.id}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          params: { REPO_URL: "acme/widgets; touch /tmp/injected" },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("Invalid REPO_URL format");
     });
 
     test("rejects invalid definition on update", async () => {

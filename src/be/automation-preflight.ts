@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { AutomationIntegrationId, ScheduledTask, Workflow } from "@/types";
 import { getDbClient } from "./db";
 import { getOAuthApp, getOAuthTokens } from "./db-queries/oauth";
@@ -61,6 +62,15 @@ const GITHUB_REPOSITORY_SLUG =
 const SAFE_SHELL_DATA = /^[A-Za-z0-9._~%/:@ -]+$/;
 const DNS_NAME =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+const SAFE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const SAFE_GIT_REF = /^(?!-)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+$/;
+const SAFE_TAG_PATTERN = /^(?!-)(?!.*(?:\.\.|\/\/))[A-Za-z0-9._*?/-]+$/;
+const SAFE_RELATIVE_PATH = /^(?![-/])(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/;
+const SAFE_FREEFORM_ITEM = /^[A-Za-z0-9][A-Za-z0-9 ._~%/:@+-]*$/;
+const EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$/;
+const SLACK_CHANNEL_ID = /^[CDG][A-Z0-9]{8,}$/;
+const GITHUB_LOGIN = /^@?[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
 function isSafeRepository(value: string): boolean {
   if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value || value.includes(" ")) return false;
@@ -94,13 +104,73 @@ function isSafeGscProperty(value: string): boolean {
   });
 }
 
-/** Reject shell-active values for canonical params that templates pass to command-line tools. */
+function isSafeTimezone(value: string): boolean {
+  if (!/^[A-Za-z0-9._+-]+(?:\/[A-Za-z0-9._+-]+)*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isSafeEmailList(value: unknown): boolean {
+  if (typeof value !== "string" || value.trim() !== value) return false;
+  const addresses = value.split(/[\s,]+/);
+  return addresses.length > 0 && addresses.every((address) => EMAIL.test(address));
+}
+
+function isSafeCompetitorList(value: unknown): boolean {
+  const competitors = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",").map((item) => item.trim())
+      : [];
+  return (
+    competitors.length > 0 &&
+    competitors.every(
+      (competitor) => typeof competitor === "string" && SAFE_FREEFORM_ITEM.test(competitor),
+    )
+  );
+}
+
+const PARAM_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  REPO_URL: (value) => typeof value === "string" && isSafeRepository(value),
+  GSC_PROPERTY: (value) => typeof value === "string" && isSafeGscProperty(value),
+  REPORT_EMAIL: isSafeEmailList,
+  BRANCH: (value) => typeof value === "string" && SAFE_GIT_REF.test(value),
+  SCOPE_PATH: (value) => typeof value === "string" && SAFE_RELATIVE_PATH.test(value),
+  REPORT_NAME: (value) => typeof value === "string" && SAFE_IDENTIFIER.test(value),
+  PAGE_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+  TAG_PATTERN: (value) => typeof value === "string" && SAFE_TAG_PATTERN.test(value),
+  SLACK_CHANNEL_ID: (value) => typeof value === "string" && SLACK_CHANNEL_ID.test(value),
+  TIMEZONE: (value) => typeof value === "string" && isSafeTimezone(value),
+  PR_REVIEWER: (value) => typeof value === "string" && GITHUB_LOGIN.test(value),
+  ALERTS_CHANNEL_ID: (value) => typeof value === "string" && SLACK_CHANNEL_ID.test(value),
+  COMPETITORS: isSafeCompetitorList,
+  AGENT_FS_ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+  LINEAR_PROJECT_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+  ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+};
+
+/** Validate every install parameter consumed by the seeded automation templates. */
 function isUsableParam(key: string, value: unknown): boolean {
   if (!hasValue(value)) return false;
-  if (key === "REPO_URL") return typeof value === "string" && isSafeRepository(value);
-  if (key === "GSC_PROPERTY") return typeof value === "string" && isSafeGscProperty(value);
-  return true;
+  return PARAM_VALIDATORS[key]?.(value) ?? true;
 }
+
+export const AutomationParamsSchema = z
+  .record(z.string(), z.unknown())
+  .superRefine((params, ctx) => {
+    for (const key of Object.keys(PARAM_VALIDATORS)) {
+      if (!Object.hasOwn(params, key) || isUsableParam(key, params[key])) continue;
+      ctx.addIssue({
+        code: "custom",
+        path: [key],
+        message: `Invalid ${key} format`,
+      });
+    }
+  });
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
@@ -142,9 +212,7 @@ export function preflightAutomation(
   setup: AutomationSetupStates,
 ): AutomationPreflightResult {
   const params = input.params ?? {};
-  const guardedParams = Object.keys(params).filter(
-    (key) => key === "REPO_URL" || key === "GSC_PROPERTY",
-  );
+  const guardedParams = Object.keys(params).filter((key) => key in PARAM_VALIDATORS);
   const missingParams = uniqueSorted(
     [...(input.requiredParams ?? []), ...guardedParams].filter(
       (key) => !isUsableParam(key, params[key]),
