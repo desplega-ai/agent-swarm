@@ -15,7 +15,11 @@ import {
   updateAgentProfile,
 } from "../be/db";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
+import { createPoolStarvationDecisionTask } from "../tasks/worker-follow-up";
 import type { RoutingAffinity } from "../types";
+// Side-effect import: registers task lifecycle templates (incl.
+// task.pool.starved.decision), mirroring heartbeat-reroute-decision.test.ts.
+import "../tools/templates";
 
 const TEST_DB_PATH = "./test-pool-affinity.sqlite";
 
@@ -601,6 +605,77 @@ describe("Pool Affinity", () => {
       expect(findings.autoAssigned[0]!.taskId).toBe(eligibleTask.id);
       expect(findings.autoAssigned[0]!.agentId).toBe(coder.id);
       expect((await getTaskById(eligibleTask.id))?.agentId).toBe(coder.id);
+    });
+  });
+
+  // ==========================================================================
+  // Pool-starvation escalation (createPoolStarvationDecisionTask) — the ONLY
+  // path a capability-only (no-role) affinity task can ever get an owner, per
+  // isAgentEligibleForTask's "no fail-open" contract. Pre-existing bug (not
+  // introduced by, and not fixed by, PR #1340): this function force-assigns a
+  // "reroute-decision" task to the Lead with no explicit routingAffinity, so
+  // it plain-fallback-inherited `original`'s own affinity — and the
+  // direct-assignment gate then evaluated that inherited affinity against the
+  // LEAD, who satisfies neither `sourceAgentId` nor `role` on a caller-declared
+  // capability requirement. The escalation is a deliberate system override,
+  // not a continuation of the original's requirements, so it must assert its
+  // own authorization instead.
+  // ==========================================================================
+
+  describe("createPoolStarvationDecisionTask", () => {
+    test("original task has a caller-declared capability-only affinity (no role/sourceAgentId) → escalation to Lead does not throw", async () => {
+      const lead = await createAgent({ name: "starvation-lead", isLead: true, status: "idle" });
+      // Exact shape send-task/task-action's requiredCapabilities build: no
+      // role, no sourceAgentId — zero registered agents (including the Lead)
+      // can ever satisfy this per isAgentEligibleForTask's "no fail-open" rule.
+      const original = await createTaskExtended("Needs a rare capability nobody online has", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["rare-capability"] }),
+      });
+      expect(isAgentEligibleForTask(lead, original)).toBe(false);
+
+      const result = await createPoolStarvationDecisionTask({ original });
+
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") throw new Error("expected created");
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.taskType).toBe("reroute-decision");
+      expect(result.task.parentTaskId).toBe(original.id);
+      expect(result.task.status).toBe("pending");
+    });
+
+    test("idempotent: a second call does not create a duplicate decision", async () => {
+      await createAgent({ name: "starvation-lead-dup", isLead: true, status: "idle" });
+      const original = await createTaskExtended("Duplicate-guard capability task", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["another-rare-capability"] }),
+      });
+
+      const first = await createPoolStarvationDecisionTask({ original });
+      expect(first.kind).toBe("created");
+
+      const second = await createPoolStarvationDecisionTask({ original });
+      expect(second.kind).toBe("skipped");
+      if (second.kind === "skipped") expect(second.reason).toBe("duplicate_exists");
+    });
+
+    test("end-to-end via the heartbeat sweep: a starved capability-only task is escalated, not left throwing", async () => {
+      const lead = await createAgent({ name: "starvation-lead-e2e", isLead: true, status: "idle" });
+      const starved = await createTaskExtended("Starved rare-capability task", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["e2e-rare-capability"] }),
+      });
+      // Age past POOL_AFFINITY_ESCALATION_MIN (default 15 min) so
+      // getStaleUnassignedAffinityTasks picks it up as a candidate.
+      const old = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        old,
+        starved.id,
+      ]);
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.escalatedReroutes.length).toBe(1);
+      expect(findings.escalatedReroutes[0]!.originalTaskId).toBe(starved.id);
+      const decisionId = findings.escalatedReroutes[0]!.decisionTaskId;
+      expect((await getTaskById(decisionId))!.agentId).toBe(lead.id);
     });
   });
 });
