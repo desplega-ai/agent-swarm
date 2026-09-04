@@ -1,10 +1,12 @@
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
-import type { HarnessResult } from "./report";
+import { knownSecrets, redactSecrets } from "./redact";
+import type { HarnessAttempt, HarnessCost, HarnessFailureKind, HarnessResult } from "./report";
+import { usd } from "./report";
 import { minimalEnv, repoRoot, tailLog } from "./sut";
 
 const DEFAULT_MODELS: Record<string, string> = {
-  claude: "claude-haiku-4-5-20251001",
+  claude: "claude-sonnet-5",
   codex: "gpt-5.6-luna",
   pi: "openrouter/deepseek/deepseek-v4-flash",
   opencode: "openrouter/deepseek/deepseek-v4-flash",
@@ -160,12 +162,14 @@ function codexOAuthAuthJson(): string {
   });
 }
 
-async function prepareHarnessHome(homeDir: string, provider: string): Promise<void> {
+/** Seeds the temp HOME for one attempt and returns the session workspace directory. */
+async function prepareHarnessHome(homeDir: string, provider: string): Promise<string> {
   const claudeDir = `${homeDir}/.claude/commands`;
   const piDir = `${homeDir}/.pi/agent/skills/work-on-task`;
   const codexDir = `${homeDir}/.codex/skills/work-on-task`;
   const opencodeDir = `${homeDir}/.opencode/skills/work-on-task`;
-  await Bun.$`mkdir -p ${homeDir}/logs ${claudeDir} ${piDir} ${codexDir} ${opencodeDir}`.quiet();
+  const workspaceDir = `${homeDir}/workspace`;
+  await Bun.$`mkdir -p ${homeDir}/logs ${workspaceDir} ${claudeDir} ${piDir} ${codexDir} ${opencodeDir}`.quiet();
   const command = await Bun.file(`${repoRoot}/plugin/commands/work-on-task.md`).text();
   const piSkill = await Bun.file(`${repoRoot}/plugin/pi-skills/work-on-task/SKILL.md`).text();
   await Promise.all([
@@ -196,6 +200,7 @@ async function prepareHarnessHome(homeDir: string, provider: string): Promise<vo
   if (process.getuid?.() === 0 && Bun.which("gosu")) {
     await Bun.$`chown -R worker:worker ${homeDir}`.quiet();
   }
+  return workspaceDir;
 }
 
 function workerCommand(): string[] {
@@ -203,29 +208,92 @@ function workerCommand(): string[] {
   return process.getuid?.() === 0 && Bun.which("gosu") ? ["gosu", "worker", ...command] : command;
 }
 
+function codexCredentialExpiry(): string | undefined {
+  if (!process.env.CODEX_OAUTH) return undefined;
+  try {
+    const expires = (JSON.parse(process.env.CODEX_OAUTH) as { expires?: unknown }).expires;
+    if (typeof expires === "number" && Number.isFinite(expires)) {
+      return new Date(expires).toISOString();
+    }
+  } catch {}
+  return undefined;
+}
+
+const CREDENTIAL_FAILURE =
+  /status (401|403)|http (401|403)|\b(401|403) (unauthorized|forbidden)|invalid_grant|unauthorized|authentication failed|token (has )?expired|refresh token/i;
+
+function classifyFailure(
+  message: string,
+  tail: string,
+  phase: "setup" | "run",
+): HarnessFailureKind {
+  if (phase === "setup") return "setup";
+  if (message.includes("did not finish within")) return "timeout";
+  if (CREDENTIAL_FAILURE.test(tail)) return "credential";
+  return "task";
+}
+
+/**
+ * The worker POSTs its cost row when the session process exits, which lands a
+ * little after the task turns terminal. Poll briefly so a slow exit is not
+ * reported as a missing record.
+ */
+async function readCost(api: ApiClient, provider: string, agentId: string): Promise<HarnessCost> {
+  const timeoutMs = Number(process.env.E2E_COST_TIMEOUT_MS || 15_000);
+  let rows: Record<string, unknown>[] = [];
+  await pollUntil(
+    async () => {
+      const response = await api("GET", `/api/session-costs?agentId=${agentId}`);
+      if (response.status !== 200) return false;
+      const entries = asRecord(response.json).costs;
+      rows = Array.isArray(entries) ? entries.map(asRecord) : [];
+      return rows.length > 0;
+    },
+    timeoutMs,
+    500,
+  );
+  const sum = (key: string) =>
+    rows.reduce((total, row) => total + (typeof row[key] === "number" ? row[key] : 0), 0);
+  const sources = [...new Set(rows.map((row) => String(row.costSource ?? "harness")))].sort();
+  const cost: HarnessCost = {
+    records: rows.length,
+    totalUsd: sum("totalCostUsd"),
+    inputTokens: sum("inputTokens"),
+    outputTokens: sum("outputTokens"),
+    cacheReadTokens: sum("cacheReadTokens"),
+    cacheWriteTokens: sum("cacheWriteTokens"),
+    costSource: sources.join(","),
+  };
+  const detail = cost.records ? ` (${usd(cost.totalUsd)}, ${cost.costSource})` : "";
+  console.log(`INFO harness ${provider} cost records: ${cost.records}${detail}`);
+  return cost;
+}
+
 // The worker's own HTTP and MCP traffic bypasses the client recorder. It does not count toward MVP coverage.
-export async function runHarnessLeg(
+async function runHarnessAttempt(
   provider: string,
   api: ApiClient,
   baseUrl: string,
   apiKey: string,
   nonce: string,
-): Promise<HarnessResult> {
+  model: string,
+): Promise<HarnessAttempt> {
   const started = Date.now();
-  const model = modelFor(provider);
   const stamp = `${Date.now()}-${provider}`;
   const logPath = `/tmp/e2e-harness-${provider}-${stamp}.log`;
   const homeDir = `/tmp/e2e-harness-home-${stamp}`;
   let child: HarnessChild | undefined;
   let writer: Bun.FileSink | undefined;
   let drains: Promise<unknown> | undefined;
+  let phase: "setup" | "run" = "setup";
+  let cost: HarnessCost | undefined;
   try {
     expect(
       ["claude", "codex", "pi", "opencode"].includes(provider),
       `Unsupported harness provider: ${provider}`,
     );
     requireCredential(provider);
-    await prepareHarnessHome(homeDir, provider);
+    const workspaceDir = await prepareHarnessHome(homeDir, provider);
     const register = await api("POST", "/api/agents", {
       body: {
         name: `e2e-harness-${provider}-${nonce}`,
@@ -238,11 +306,14 @@ export async function runHarnessLeg(
     const agentId = asRecord(register.json).id;
     expect(typeof agentId === "string", `${provider} registration response has no id`);
     const marker = `PONG-${nonce}`;
+    // The session runs in a directory the worker user owns. In CI the checkout
+    // belongs to root, and codex writes AGENTS.md into the session cwd.
     const create = await api("POST", "/api/tasks", {
       body: {
         task: `Reply with exactly the text ${marker} and nothing else. Do not use any tools.`,
         agentId,
         source: "api",
+        dir: workspaceDir,
       },
     });
     expectStatus(create, [201], `create ${provider} harness task`);
@@ -258,6 +329,7 @@ export async function runHarnessLeg(
     });
     activeChildren.add(child);
     drains = Promise.all([drain(child.stdout, writer), drain(child.stderr, writer)]);
+    phase = "run";
 
     let task: Record<string, unknown> | undefined;
     const timeoutMs = Number(process.env.E2E_HARNESS_TIMEOUT_MS || 300_000);
@@ -272,6 +344,8 @@ export async function runHarnessLeg(
       1_000,
     );
     expect(terminal && task, `${provider} task did not finish within ${timeoutMs}ms`);
+    // Read the cost before the assertions so a failed task still reports what it spent.
+    cost = await readCost(api, provider, agentId);
     expect(
       task.status === "completed",
       `${provider} task finished with status ${String(task.status)}`,
@@ -296,25 +370,22 @@ export async function runHarnessLeg(
       typeof task.claudeSessionId === "string" && task.claudeSessionId.length > 0,
       `${provider} task has no session id`,
     );
-
-    const costs = await api("GET", `/api/session-costs?agentId=${agentId}`);
-    if (costs.status === 200) {
-      const entries = asRecord(costs.json).costs;
-      console.log(
-        `INFO harness ${provider} cost records: ${Array.isArray(entries) ? entries.length : 0}`,
-      );
-    }
-    return { provider, model, status: "pass", durationMs: Date.now() - started };
+    return { status: "pass", durationMs: Date.now() - started, cost };
   } catch (error) {
     writer?.flush();
-    const tail = await tailLog(logPath, 60);
+    // The tail and the message reach the job log, the step summary, the sticky
+    // issue, and the artifact. Mask credentials before any of that.
+    const secrets = knownSecrets([apiKey]);
+    const tail = redactSecrets(await tailLog(logPath, 60), secrets);
     if (tail) console.error(`Last 60 lines of ${logPath}:\n${tail}`);
+    const message = redactSecrets(errorMessage(error), secrets);
     return {
-      provider,
-      model,
       status: "fail",
       durationMs: Date.now() - started,
-      error: errorMessage(error),
+      error: message,
+      failureKind: classifyFailure(message, tail, phase),
+      cost,
+      logTail: tail || undefined,
     };
   } finally {
     if (child) await stopChild(child);
@@ -322,4 +393,48 @@ export async function runHarnessLeg(
     writer?.end();
     await Bun.$`rm -rf ${homeDir}`.quiet().catch(() => {});
   }
+}
+
+export async function runHarnessLeg(
+  provider: string,
+  api: ApiClient,
+  baseUrl: string,
+  apiKey: string,
+  nonce: string,
+  maxAttempts = 1,
+): Promise<HarnessResult> {
+  const started = Date.now();
+  const model = modelFor(provider);
+  const attempts: HarnessAttempt[] = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const result = await runHarnessAttempt(
+      provider,
+      api,
+      baseUrl,
+      apiKey,
+      `${nonce}-a${attempt}`,
+      model,
+    );
+    attempts.push(result);
+    if (result.status === "pass") break;
+    if (attempt < maxAttempts) {
+      console.log(
+        `WARN harness ${provider}: attempt ${attempt} of ${maxAttempts} failed, retrying`,
+      );
+    }
+  }
+  const last = attempts[attempts.length - 1]!;
+  return {
+    provider,
+    model,
+    status: last.status,
+    durationMs: Date.now() - started,
+    error: last.error,
+    failureKind: last.failureKind,
+    attempts,
+    cost: last.cost,
+    totalCostUsd: attempts.reduce((total, attempt) => total + (attempt.cost?.totalUsd ?? 0), 0),
+    credentialExpiresAt: provider === "codex" ? codexCredentialExpiry() : undefined,
+    logTail: last.logTail,
+  };
 }

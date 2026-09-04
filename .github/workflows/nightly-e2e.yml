@@ -2,16 +2,60 @@
 # Seed E2E_CODEX_OAUTH from a dedicated login: `env HOME=/tmp/e2e-codex codex login`, then
 # `bun scripts/e2e/codex-oauth-blob.ts /tmp/e2e-codex/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
 # Never use a developer's main login. CI refresh rotates its refresh token and breaks that login.
-# The Codex blob goes stale after its first refresh, about ten days after issue.
+# The Codex blob goes stale after its first refresh, about ten days after issue. The report
+# warns three days before the seeded access token expires.
 # E2E_OPENROUTER_API_KEY is a plain OpenRouter key.
+#
+# Shape: `contract` runs the deterministic scenarios once. Each `harness` leg runs one real
+# LLM task through one provider. `report` merges every result file into one step summary,
+# uploads it as `nightly-e2e-report`, and keeps one sticky issue open while the nightly fails.
 name: Nightly E2E
 
 on:
   schedule:
-    - cron: "0 3 * * *"
+    # Off the hour: on-the-hour schedules queue for a long time on GitHub.
+    - cron: "23 3 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: nightly-e2e
+  cancel-in-progress: false
+
 jobs:
+  contract:
+    if: github.repository == 'desplega-ai/agent-swarm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The floors guard the recorder, not the scenarios: coverage dropping to zero means
+      # the HTTP or MCP recorder broke, which no scenario assertion would catch.
+      - name: Run contract scenarios
+        run: bun run e2e --json out/e2e-results.json --min-route-coverage 3 --min-tool-coverage 2
+
+      - name: Upload contract results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-e2e-contract
+          path: out/
+          if-no-files-found: warn
+
   harness:
     if: github.repository == 'desplega-ai/agent-swarm'
     strategy:
@@ -36,23 +80,133 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Run harness E2E with one retry
+      # `--only health` keeps the contract scenarios in the contract job. The retry lives in
+      # the runner so both attempts land in the result file with their cost and log tail.
+      # `--keep` leaves the SUT log on disk for the upload step below.
+      - name: Run harness leg
         run: >-
-          bun run e2e --harness "${{ matrix.provider }}" --json e2e-results.json --summary-md e2e-summary.md ||
-          bun run e2e --harness "${{ matrix.provider }}" --json e2e-results.json --summary-md e2e-summary.md
+          bun run e2e --only health --harness "${{ matrix.provider }}" --harness-attempts 2
+          --keep --json out/e2e-results.json
 
-      - name: Add E2E job summary
+      # The artifact is readable by anyone with read access to this public repository, so the
+      # copies are redacted: the provider credential this leg holds, plus common token shapes.
+      - name: Collect redacted logs
         if: always()
-        run: test ! -f e2e-summary.md || cat e2e-summary.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          set -euo pipefail
+          mkdir -p out/logs
+          ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
+          bun scripts/e2e/redact.ts --out out/logs /tmp/e2e-*.log
 
-      - name: Upload E2E results
+      - name: Upload harness results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nightly-e2e-${{ matrix.provider }}
-          path: e2e-results.json
+          path: out/
           if-no-files-found: warn
+
+  report:
+    needs: [contract, harness]
+    if: ${{ !cancelled() && github.repository == 'desplega-ai/agent-swarm' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Download job results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: nightly-e2e-*
+          path: results
+
+      # Best effort: a run that predates the report artifact, or an expired artifact, is skipped.
+      - name: Download earlier reports for the cost trend
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p previous
+          gh run list --workflow nightly-e2e.yml --status completed --limit 15 --json databaseId \
+            --jq '.[].databaseId' | while read -r run_id; do
+            [ "$run_id" = "$GITHUB_RUN_ID" ] && continue
+            gh run download "$run_id" -n nightly-e2e-report -D "previous/$run_id" 2>/dev/null || true
+          done
+          echo "earlier reports: $(find previous -name nightly-report.json | wc -l)"
+
+      - name: Build the report
+        id: report
+        run: |
+          set -euo pipefail
+          bun scripts/e2e/nightly-report.ts \
+            --results results \
+            --previous previous \
+            --out nightly-summary.md \
+            --issue-out nightly-issue.md \
+            --json nightly-report.json \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --sha "$GITHUB_SHA" > /dev/null
+          cat nightly-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: nightly-e2e-report
+          path: |
+            nightly-report.json
+            nightly-summary.md
+          retention-days: 90
+
+      # One issue carries the failure state. Its body is the latest summary without worker-log
+      # tails (the issue is public), each failing run adds a comment, and the first green run
+      # closes it.
+      - name: Update the sticky issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OK: ${{ steps.report.outputs.ok }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          marker='<!-- nightly-e2e -->'
+          issue=$(gh issue list --state open --limit 100 --json number,body \
+            --jq ".[] | select(.body | startswith(\"$marker\")) | .number" | head -n 1)
+          if [ "$OK" = "true" ]; then
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "Green again: $RUN_URL"
+              gh issue close "$issue"
+            fi
+            exit 0
+          fi
+          { printf '%s\n\n' "$marker"; cat nightly-issue.md; } > issue.md
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --body-file issue.md
+            gh issue comment "$issue" --body "Still failing: $RUN_URL"
+          else
+            gh issue create --title "Nightly E2E is failing" --body-file issue.md
+          fi
+
+      - name: Fail when any job failed
+        run: |
+          if [ "${{ steps.report.outputs.ok }}" != "true" ]; then
+            echo "Nightly E2E failed. See the job summary." >&2
+            exit 1
+          fi
