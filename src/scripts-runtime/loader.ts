@@ -17,12 +17,17 @@ import { validateScriptImports } from "./import-allowlist";
 /**
  * `capacity_exceeded` (see `ScriptExecutorError`) means the sandboxed process
  * aborted because a host-wide, shared RLIMIT_NPROC budget was momentarily
- * exhausted — not because the script failed. Retry transparently here, once,
- * for every caller (HTTP script runs, workflow script/swarm-script nodes,
- * scheduled scripts), independent of whatever concurrency limiter or retry
- * policy an individual caller does or doesn't configure. Short and bounded:
- * this is a blip mitigation, not a substitute for the caller's own retry
- * policy if the underlying contention is sustained.
+ * exhausted — not because the script failed. The executor (`native.ts`'s
+ * `classifyExit`) only assigns this classification when the abort happened
+ * BEFORE user-authored code got control, using a sentinel file the harness
+ * writes right before it — see `eval-harness.ts`'s `startedFile`. That
+ * guarantees a retry here can never replay a side effect the script already
+ * caused. Retry transparently here, once, for every caller (HTTP script
+ * runs, workflow script/swarm-script nodes, scheduled scripts), independent
+ * of whatever concurrency limiter or retry policy an individual caller does
+ * or doesn't configure. Short and bounded: this is a blip mitigation, not a
+ * substitute for the caller's own retry policy if the underlying contention
+ * is sustained.
  */
 const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
 

@@ -19,25 +19,35 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
 }
 
 /**
- * Exit 134 is SIGABRT. The eval harness never calls `abort()` itself — this
- * signature is the runtime's own C++ layer aborting because it could not
- * create a thread (pthread_create failing under an already-exhausted
- * RLIMIT_NPROC), which is a host-capacity fault, not a bug in the user
- * script. See `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` in
- * `../../utils/sandboxed-process.ts` for the shared-limit mechanism.
+ * Exit 134 is SIGABRT. The framework code that runs before user code gets
+ * control never calls `abort()` itself, so a SIGABRT observed before that
+ * point is the runtime's own C++ layer aborting because it could not create
+ * a thread (pthread_create failing under an already-exhausted RLIMIT_NPROC)
+ * — a host-capacity fault, not a bug in the user script. See
+ * `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` in `../../utils/sandboxed-process.ts`
+ * for the shared-limit mechanism.
+ *
+ * That guarantee does NOT extend past the point user-authored code starts
+ * running: `process.abort()`, a native assertion, or an OOM abort can also
+ * exit 134, and by then the script may already have caused an external side
+ * effect (e.g. an API POST). Retrying that case would silently replay it.
+ * `userCodeStarted` (backed by the sentinel file `eval-harness.ts` writes
+ * immediately before importing the user module) is what tells the two
+ * apart — see `runScript`'s retry loop in `../loader.ts`.
  */
 const SANDBOX_CAPACITY_EXIT_CODE = 134;
 
-function classifyExit(
+export function classifyExit(
   exitCode: number,
   timedOut: boolean,
   killed: boolean,
+  userCodeStarted: boolean,
 ): ScriptExecutorError | undefined {
   if (timedOut) return "timeout";
   if (killed) return "killed";
   if (exitCode === 0) return undefined;
   if (exitCode === 137 || exitCode === 9) return "killed";
-  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE) return "capacity_exceeded";
+  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE && !userCodeStarted) return "capacity_exceeded";
   return "eval_error";
 }
 
@@ -128,6 +138,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const sourceFile = `${tmpdir}/source.ts`;
     const resultFile = `${tmpdir}/result.json`;
     const errorFile = `${tmpdir}/error.json`;
+    const startedFile = `${tmpdir}/started.marker`;
     // In compiled binary mode, import.meta.url points into /$bunfs/ which spawned
     // subprocesses cannot access. Use the pre-built bundle from real filesystem instead.
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
@@ -178,6 +189,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
         SWARM_SCRIPT_SOURCE_FILE: sourceFile,
         SWARM_SCRIPT_RESULT_FILE: resultFile,
         SWARM_SCRIPT_ERROR_FILE: errorFile,
+        SWARM_SCRIPT_STARTED_FILE: startedFile,
       };
 
       const proc = Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
@@ -206,7 +218,8 @@ export class NativeScriptExecutor implements ScriptExecutor {
 
       const result = exitCode === 0 ? await readResultFile(resultFile) : undefined;
       const runtimeError = exitCode === 0 ? undefined : await readRuntimeError(errorFile);
-      const error = classifyExit(exitCode, timedOut, killed);
+      const userCodeStarted = await Bun.file(startedFile).exists();
+      const error = classifyExit(exitCode, timedOut, killed, userCodeStarted);
 
       return {
         result,

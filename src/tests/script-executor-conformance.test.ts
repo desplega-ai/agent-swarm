@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { NativeScriptExecutor } from "../scripts-runtime/executors/native";
+import { classifyExit, NativeScriptExecutor } from "../scripts-runtime/executors/native";
 import type {
   ExecutorInput,
   ExecutorOutput,
@@ -138,5 +138,49 @@ describe("native-only executor behavior", () => {
     controller.abort();
     const output = await new NativeScriptExecutor().run(input({ signal: controller.signal }));
     expect(output.error).toBe("killed");
+  });
+
+  // PR #1326 review finding: exit 134 (SIGABRT) was classified `capacity_exceeded`
+  // — and therefore retried by `runScript` — purely from the exit code, with no
+  // evidence about *when* the abort happened. A script that causes a side effect
+  // (e.g. an API POST) and then aborts must not be replayed. `process.abort()`
+  // called from inside the user function reliably raises SIGABRT independent of
+  // any real RLIMIT_NPROC exhaustion, so this is deterministic.
+  test("SIGABRT raised by user code is not classified capacity_exceeded", async () => {
+    const output = await new NativeScriptExecutor().run(
+      input({ source: "export default async () => { process.abort(); };" }),
+    );
+    expect(output.exitCode).toBe(134);
+    expect(output.error).not.toBe("capacity_exceeded");
+    expect(output.error).toBe("eval_error");
+  });
+});
+
+describe("classifyExit", () => {
+  test("timeout and killed take precedence over exit code", () => {
+    expect(classifyExit(134, true, false, false)).toBe("timeout");
+    expect(classifyExit(134, false, true, false)).toBe("killed");
+  });
+
+  test("exit 0 is success regardless of userCodeStarted", () => {
+    expect(classifyExit(0, false, false, false)).toBeUndefined();
+    expect(classifyExit(0, false, false, true)).toBeUndefined();
+  });
+
+  test("OOM-kill exit codes map to killed", () => {
+    expect(classifyExit(137, false, false, false)).toBe("killed");
+    expect(classifyExit(9, false, false, false)).toBe("killed");
+  });
+
+  test("134 before user code starts is capacity_exceeded (retryable)", () => {
+    expect(classifyExit(134, false, false, false)).toBe("capacity_exceeded");
+  });
+
+  test("134 after user code starts is eval_error (not retryable)", () => {
+    expect(classifyExit(134, false, false, true)).toBe("eval_error");
+  });
+
+  test("other non-zero exit codes map to eval_error", () => {
+    expect(classifyExit(1, false, false, false)).toBe("eval_error");
   });
 });
