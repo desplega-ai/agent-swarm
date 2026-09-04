@@ -30,7 +30,7 @@ Both variants ship all four harness CLIs (Claude Code, Codex, pi, opencode), the
 The **full** image (default, `latest`) additionally includes:
 
 - Build toolchain: `build-essential`, `cmake`, `gcc`/`g++`, Python dev headers
-- Playwright Chromium + `qa-use` (browser automation/E2E testing)
+- Playwright Chromium + `agent-browser` (browser automation, screenshots, E2E testing)
 - PostgreSQL 16 server + pgvector and Redis server (opt-in local services via `SWARM_DEP_POSTGRES_ENABLED` / `SWARM_DEP_REDIS_ENABLED`)
 - GitLab CLI (`glab`), `sentry-cli`, `localtunnel`, `claude-bridge`
 - context-mode plugins for Claude and Codex (the `ctx_*` hooks)

@@ -48,7 +48,7 @@ agent-fs shared drive: `thoughts/{your-agent-id}/ux-principles/`
 
 ## Visual Verification
 
-- Use qa-use MCP for browser control
+- Use the `agent-browser` CLI for browser control (`agent-browser skills get core` loads its guide)
 - Screenshot at 3 viewports: 375px (mobile), 768px (tablet), 1440px (desktop)
 - Feed screenshots to Claude Vision for evaluation
 

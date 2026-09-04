@@ -164,7 +164,7 @@ bun run start:http &
 
 # 2. Build worker image (slim is faster and sufficient for smoke tests;
 #    use `bun run docker:build:worker` + :latest when the test needs
-#    playwright/qa-use, postgres/redis, or glab)
+#    playwright/agent-browser, postgres/redis, or glab)
 bun run docker:build:worker:slim
 
 # 3. Start lead + worker (use branch-specific names to avoid worktree collisions)

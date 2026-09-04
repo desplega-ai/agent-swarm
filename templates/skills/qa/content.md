@@ -28,9 +28,9 @@ Unless Autopilot, ask once at the start:
 
 | Question | Options |
 |----------|---------|
-| "How would you like to execute test cases?" | 1. Browser automation (qa-use) — if available, 2. Manual testing with guided steps, 3. Mixed — automate what we can, manual for the rest |
+| "How would you like to execute test cases?" | 1. Browser automation (agent-browser) if available, 2. Manual testing with guided steps, 3. Mixed: automate what we can, manual for the rest |
 
-**Note on qa-use availability**: Check if `qa-use` is available (look for `qa-use:*` in available skills). Also check if the project's `CLAUDE.md` specifies a different testing tool. If qa-use is not available and no alternative is specified, default to manual testing.
+**Note on agent-browser availability**: Run `command -v agent-browser`. It is the `agent-browser` npm CLI (vercel-labs), a headless Chromium driven over CDP. Also check whether the project's `CLAUDE.md` specifies a different testing tool. If agent-browser is not available and no alternative is specified, default to manual testing. Never use `qa-use` unless the user names it.
 
 ## When to Use
 
@@ -83,17 +83,18 @@ Define test cases covering:
 
 **If sourced from a separate spec**: Use those scenarios as the starting point and augment with exploratory cases.
 
-**If browser automation was selected and qa-use is available**: Design qa-use test steps for each test case (explore → snapshot → interact → screenshot).
+**If browser automation was selected and agent-browser is available**: Design agent-browser steps for each test case (open, snapshot, act on refs, screenshot).
 
 Write all test cases into the QA document's `## Test Cases` section.
 
 ### Step 3: Execute Tests
 
-**For browser automation (qa-use)**:
-1. Use `qa-use:explore` to navigate to the target page
-2. Take snapshots to understand page state
-3. Interact with elements (click, type, navigate)
-4. Capture screenshots as evidence
+**For browser automation (agent-browser)**: if an `agent-browser` skill is installed (the swarm seeds one), follow it. Otherwise:
+1. Load the version-matched guide once per session with `agent-browser skills get core` (do not guess flags from memory), then `agent-browser open <url>`
+2. `agent-browser snapshot -i` to read the page state and its `@eN` refs
+3. Act on refs (`click @eN`, `fill @eN "text"`, `type`, `press`) and re-snapshot after every navigation or state change; refs are only valid for the snapshot that produced them
+4. `agent-browser screenshot /tmp/<name>.png` for evidence, then `agent-browser close`
+5. To share a screenshot outside the machine, upload it to agent-fs with `agent-fs write <path> --file /tmp/<name>.png -m "<what it shows>"` (binary-safe; `--content` mangles PNGs), then `agent-fs signed-url <path> --json` and embed the URL as `![caption](<url>)`. If agent-fs is not configured, report the local path and say the upload was skipped
 
 **For manual testing**:
 1. Present each test case's steps to the user
@@ -116,7 +117,7 @@ For each test case, record the actual result and pass/fail status.
 ### Step 4: Capture Evidence
 
 Gather evidence for the QA report:
-- **Screenshots**: Via qa-use browser screenshots or user-provided
+- **Screenshots**: Via `agent-browser screenshot` (uploaded to agent-fs with a signed URL when they must be shared) or user-provided
 - **Videos**: Session recording URLs (Loom, etc.)
 - **Logs**: Console output, error messages, relevant log lines
 - **External links**: Sentry issues, CI/CD runs, Grafana dashboards, PR URLs
@@ -147,7 +148,7 @@ Write a 1-2 sentence summary in the QA document's `## Verdict` section. Update t
 
 If the project's `CLAUDE.md` or `agents.md` doesn't document how QA is done for this project, offer to add a QA section describing:
 - Testing approach used (manual, browser automation, CLI)
-- Tools used (qa-use, Playwright, etc.)
+- Tools used (agent-browser, Playwright, etc.)
 - Common test patterns discovered
 
 Use **AskUserQuestion** with:

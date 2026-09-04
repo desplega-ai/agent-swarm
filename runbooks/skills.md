@@ -9,7 +9,7 @@ They are **not** interchangeable. Pick deliberately.
 | # | Path | Source | Reaches agents by | Use when |
 |---|---|---|---|---|
 | 1 | **Seeded** ⭐ | `templates/skills/<name>/{config.json,content.md,files/}` | Embedded into the API binary at build time → written to the DB at boot → synced to every harness skill tree | Default for anything the swarm owns |
-| 2 | **Baked** | `plugin/{commands,agents,pi-skills}/` or pinned `npx skills` installs in `Dockerfile.worker` (`plugin/skills/` is retired) | Copied or installed into the worker image | Only for harness-specific commands/agents, Pi-only skills, or third-party skills version-locked to a CLI in the image (currently `agent-fs` and `qa-use`) |
+| 2 | **Baked** | `plugin/{commands,agents,pi-skills}/` or pinned `npx skills` installs in `Dockerfile.worker` (`plugin/skills/` is retired) | Copied or installed into the worker image | Only for harness-specific commands/agents, Pi-only skills, or third-party skills version-locked to a CLI in the image (currently `agent-fs`) |
 | 3 | **Remote-installed** | a `SKILL.md` at a path the integrations catalog points at | `skill-install-remote` fetches `<templatePath>/SKILL.md` from GitHub raw, on demand | Optional per-integration skills the operator opts into |
 
 **Prefer path 1.** Seeded skills are live-updatable without an image rebuild, listed by the skills API, editable in the UI, per-agent toggleable, and version-tracked with user-edit preservation. Baked skills have none of that.
