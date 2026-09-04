@@ -1,0 +1,113 @@
+# Informational job, not part of the merge gate. It runs the three Slack E2E scenarios twice
+# (legacy renderer, then SLACK_RENDER_V2=true), renders one PNG per Slack event from the
+# slack-mock journal, and upserts one sticky PR comment with both columns side by side.
+# Images live on the single-commit `ci-visuals` branch (rebuilt on every run, so history never
+# grows). Fork PRs have a read-only token and only get the artifact.
+name: Slack Visuals
+
+on:
+  pull_request:
+    paths:
+      - "src/slack/**"
+      - "src/prompts/**"
+      - "scripts/e2e/**"
+      - "slack-manifest.json"
+      - "bun.lock"
+      - ".github/workflows/slack-visuals.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: slack-visuals-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visuals:
+    if: github.repository == 'desplega-ai/agent-swarm' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run legacy Slack E2E
+        id: legacy
+        continue-on-error: true
+        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --visuals visuals/legacy --json visuals/legacy.json
+
+      - name: Run v2 Slack E2E
+        id: v2
+        continue-on-error: true
+        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --sut-env SLACK_RENDER_V2=true --visuals visuals/v2 --json visuals/v2.json
+
+      - name: Render Slack visuals
+        if: always()
+        run: |
+          set -euo pipefail
+          if test -f visuals/legacy/manifest.json; then bun run e2e:visuals visuals/legacy; fi
+          if test -f visuals/v2/manifest.json; then bun run e2e:visuals visuals/v2; fi
+
+      - name: Upload Slack visuals
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: slack-visuals
+          path: visuals/
+          if-no-files-found: warn
+
+      - name: Publish Slack visuals
+        if: always() && github.event_name == 'pull_request'
+        id: publish
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          publish_output=$(bash scripts/e2e/visuals-publish.sh visuals "$PR" "$HEAD_SHA")
+          printf '%s\n' "$publish_output"
+          base_url=$(printf '%s\n' "$publish_output" | tail -n 1)
+          echo "base_url=${base_url#base_url=}" >> "$GITHUB_OUTPUT"
+
+      - name: Post Slack visual preview
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_URL: ${{ steps.publish.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          bun scripts/e2e/visuals-comment.ts \
+            --base-url "$BASE_URL" \
+            --profile legacy=visuals/legacy \
+            --profile v2=visuals/v2 \
+            --out comment.md \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --sha "$HEAD_SHA"
+          # --paginate emits one JSON array per page; --jq runs per page, so take the first id.
+          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments?per_page=100" \
+            --jq '.[] | select(.body | startswith("<!-- slack-visuals -->")) | .id' | head -n 1)
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" --raw-field body="$(<comment.md)"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<comment.md)"
+          fi
+
+      - name: Fail when Slack E2E failed
+        if: always()
+        run: |
+          if [ "${{ steps.legacy.outcome }}" != "success" ] || [ "${{ steps.v2.outcome }}" != "success" ]; then
+            echo "Slack visual E2E failed. See the uploaded artifact for partial output." >&2
+            exit 1
+          fi
