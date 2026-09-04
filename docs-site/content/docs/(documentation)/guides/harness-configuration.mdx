@@ -337,7 +337,7 @@ Default: `claude-sonnet-5`. Override per-worker via `MANAGED_AGENT_MODEL`, or pe
 - **System prompt rides in the user message** with a `cache_control: { type: "ephemeral" }` breakpoint between the static prefix and the per-task body, so the static prefix is cache-hit across tasks for the same agent.
 - **Repo provisioning** uses `resources: [{ type: "github_repository", url, authorization_token, checkout: { type: "branch", name: "main" } }]` on `sessions.create` when the task carries `vcsRepo`. Anthropic clones into `/workspace/<repo-name>` server-side before the agent runs.
 
-For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#claude-managed-agents--pre-existing-agent--environment-pattern).
+For full provider design rationale (why we don't `agents.create` at runtime, the SDK shape deviations, the prompt-cache breakpoint decision), see [Adding a Harness Provider §12](/docs/guides/harness-providers#12-claude-managed-agents-pre-existing-agent-environment-pattern).
 
 ---
 

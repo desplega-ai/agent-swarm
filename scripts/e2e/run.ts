@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { basename, resolve } from "node:path";
 import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type Coverage, computeCoverage } from "./coverage";
 import { openReadOnlyDb, type ReadOnlyDb } from "./db";
@@ -19,11 +20,13 @@ import { auth } from "./scenarios/auth";
 import { configRoundtrip } from "./scenarios/config-roundtrip";
 import { health } from "./scenarios/health";
 import { mcpSurface } from "./scenarios/mcp-surface";
+import { slackFailedTask } from "./scenarios/slack-failed-task";
+import { slackFollowUp } from "./scenarios/slack-follow-up";
 import { slackMention } from "./scenarios/slack-mention";
 import { taskLifecycle } from "./scenarios/task-lifecycle";
 import { workflowScriptNode } from "./scenarios/workflow-script-node";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { type Sut, startSut, stopSut, tailLog } from "./sut";
+import { repoRoot, type Sut, startSut, stopSut, tailLog } from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -33,6 +36,7 @@ export type ScenarioContext = {
   db: ReadOnlyDb;
   slack: SlackMock;
   log: (message: string) => void;
+  markThread: (label: string, channel: string, ts: string) => void;
   nonce: string;
 };
 export type Scenario = { name: string; run: (ctx: ScenarioContext) => Promise<void> };
@@ -45,7 +49,11 @@ const scenarios: Scenario[] = [
   workflowScriptNode,
   configRoundtrip,
   slackMention,
+  slackFollowUp,
+  slackFailedTask,
 ];
+
+type ThreadMark = { scenario: string; label: string; channel: string; ts: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -104,8 +112,16 @@ async function main(): Promise<number> {
 
   const started = Date.now();
   const startedAt = new Date(started).toISOString();
-  activeSlack = await startSlackMock(options.keep);
-  activeSut = await startSut(options.keep, activeSlack.mock.env);
+  const visualsDir = options.visualsDir ? resolve(options.visualsDir) : undefined;
+  const journalPath = visualsDir ? `${visualsDir}/slack-journal.jsonl` : undefined;
+  if (visualsDir && journalPath) {
+    await Bun.$`mkdir -p ${visualsDir}`.quiet();
+    await Bun.file(journalPath)
+      .delete()
+      .catch(() => {});
+  }
+  activeSlack = await startSlackMock(options.keep, journalPath);
+  activeSut = await startSut(options.keep, activeSlack.mock.env, options.sutEnv);
   try {
     await activeSlack.mock.waitForConnection(60_000);
   } catch (error) {
@@ -116,7 +132,7 @@ async function main(): Promise<number> {
   }
   activeDb = openReadOnlyDb(activeSut.dbPath);
   const api = createApiClient(activeSut.baseUrl, activeSut.apiKey);
-  const ctx: ScenarioContext = {
+  const ctx: Omit<ScenarioContext, "markThread"> = {
     api,
     connectMcp: createMcpConnector(activeSut.baseUrl, activeSut.apiKey),
     baseUrl: activeSut.baseUrl,
@@ -127,10 +143,19 @@ async function main(): Promise<number> {
     nonce: randomBytes(6).toString("hex"),
   };
   const scenarioResults: ScenarioResult[] = [];
+  const threadMarks: ThreadMark[] = [];
   for (const scenario of scenarios) {
     if (options.only && !options.only.has(scenario.name)) continue;
     if (options.skip.has(scenario.name)) continue;
-    const result = await runScenario(scenario, ctx);
+    const result = await runScenario(scenario, {
+      ...ctx,
+      markThread(label, channel, ts) {
+        if (!/^[a-z0-9-]+$/.test(label)) {
+          throw new Error(`Invalid visual thread label: ${label}`);
+        }
+        threadMarks.push({ scenario: scenario.name, label, channel, ts });
+      },
+    });
     scenarioResults.push(result);
     printScenario(result);
   }
@@ -188,6 +213,30 @@ async function main(): Promise<number> {
     ok,
   };
   await writeReports(result, options.jsonPath, options.summaryPath);
+  if (visualsDir) {
+    await Bun.write(
+      `${visualsDir}/manifest.json`,
+      `${JSON.stringify(
+        {
+          profile: basename(visualsDir),
+          sutEnv: options.sutEnv,
+          journal: "slack-journal.jsonl",
+          slackManifest: resolve(repoRoot, "slack-manifest.json"),
+          scenarios: scenarioResults.map((scenario) => ({
+            name: scenario.name,
+            status: scenario.status,
+            durationMs: scenario.durationMs,
+            error: scenario.error ?? null,
+            threads: threadMarks
+              .filter((thread) => thread.scenario === scenario.name)
+              .map(({ label, channel, ts }) => ({ label, channel, ts })),
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
   console.log(
     `${ok ? "PASS" : "FAIL"}: ${passes} passed, ${failures + harnessFailures} failed, ${skips} skipped`,
   );

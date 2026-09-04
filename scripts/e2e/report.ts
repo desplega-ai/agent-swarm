@@ -39,6 +39,8 @@ export type Options = {
   keep: boolean;
   minRouteCoverage: number;
   minToolCoverage: number;
+  sutEnv: Record<string, string>;
+  visualsDir?: string;
 };
 
 export const helpText = `Usage: bun run e2e [options]
@@ -51,6 +53,8 @@ Options:
   --list                        Print contract scenario names and exit
   --json path                   JSON result path (default: ./e2e-results.json)
   --summary-md path             Optional Markdown summary path
+  --sut-env KEY=VALUE           Set a SUT environment variable (repeatable)
+  --visuals dir                 Write a Slack journal and visual manifest
   --keep                        Keep the database, logs, and temporary directories
   --min-route-coverage N        Minimum route coverage percent (default: 0)
   --min-tool-coverage N         Minimum MCP tool coverage percent (default: 0)
@@ -77,6 +81,12 @@ function coverageValue(value: string, flag: string): number {
   return number;
 }
 
+function sutEnvValue(value: string): [string, string] {
+  const separator = value.indexOf("=");
+  if (separator < 1) throw new Error("--sut-env requires KEY=VALUE");
+  return [value.slice(0, separator), value.slice(separator + 1)];
+}
+
 export function parseOptions(args: string[], scenarioNames: string[]): Options {
   const options: Options = {
     harness: [],
@@ -87,6 +97,7 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
     keep: false,
     minRouteCoverage: 0,
     minToolCoverage: 0,
+    sutEnv: {},
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
@@ -96,6 +107,10 @@ export function parseOptions(args: string[], scenarioNames: string[]): Options {
     else if (arg === "--skip") options.skip = new Set(listValue(value()));
     else if (arg === "--json") options.jsonPath = value();
     else if (arg === "--summary-md") options.summaryPath = value();
+    else if (arg === "--sut-env") {
+      const [key, envValue] = sutEnvValue(value());
+      options.sutEnv[key] = envValue;
+    } else if (arg === "--visuals") options.visualsDir = value();
     else if (arg === "--min-route-coverage") options.minRouteCoverage = coverageValue(value(), arg);
     else if (arg === "--min-tool-coverage") options.minToolCoverage = coverageValue(value(), arg);
     else if (arg === "--list") options.list = true;
