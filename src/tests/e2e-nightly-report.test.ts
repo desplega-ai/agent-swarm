@@ -131,6 +131,9 @@ describe("nightly report", () => {
     expect(markdown).toContain("| pi | | MISSING |");
     expect(markdown).toContain("codex attempt 1: codex task finished with status failed (task)");
     expect(markdown).toContain("EACCES: permission denied");
+    const issue = nightlyMarkdown(report, [], DEFAULT_PROVIDERS, { logTails: false });
+    expect(issue).not.toContain("EACCES");
+    expect(issue).toContain("Worker log tails for the failed attempts are in the [run summary]");
   });
 
   test("warns on a missing cost record, an expiring credential, and a failed contract", () => {

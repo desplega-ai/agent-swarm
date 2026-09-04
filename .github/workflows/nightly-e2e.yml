@@ -94,11 +94,15 @@ jobs:
           bun run e2e --only health --harness "${{ matrix.provider }}" --harness-attempts 2
           --keep --json out/e2e-results.json
 
-      - name: Collect logs
+      # The artifact is readable by anyone with read access to this public repository, so the
+      # copies are redacted: the provider credential this leg holds, plus common token shapes.
+      - name: Collect redacted logs
         if: always()
         run: |
+          set -euo pipefail
           mkdir -p out/logs
-          cp /tmp/e2e-*.log out/logs/ 2>/dev/null || true
+          ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
+          bun scripts/e2e/redact.ts --out out/logs /tmp/e2e-*.log
 
       - name: Upload harness results
         if: always()
@@ -157,6 +161,7 @@ jobs:
             --results results \
             --previous previous \
             --out nightly-summary.md \
+            --issue-out nightly-issue.md \
             --json nightly-report.json \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --sha "$GITHUB_SHA" > /dev/null
@@ -171,8 +176,9 @@ jobs:
             nightly-summary.md
           retention-days: 90
 
-      # One issue carries the failure state. Its body is the latest summary, each failing run
-      # adds a comment, and the first green run closes it.
+      # One issue carries the failure state. Its body is the latest summary without worker-log
+      # tails (the issue is public), each failing run adds a comment, and the first green run
+      # closes it.
       - name: Update the sticky issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -190,7 +196,7 @@ jobs:
             fi
             exit 0
           fi
-          { printf '%s\n\n' "$marker"; cat nightly-summary.md; } > issue.md
+          { printf '%s\n\n' "$marker"; cat nightly-issue.md; } > issue.md
           if [ -n "$issue" ]; then
             gh issue edit "$issue" --body-file issue.md
             gh issue comment "$issue" --body "Still failing: $RUN_URL"

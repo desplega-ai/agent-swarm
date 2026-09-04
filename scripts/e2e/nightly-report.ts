@@ -7,7 +7,9 @@
  * `ok=<bool>` to `$GITHUB_OUTPUT` when that file is set.
  *
  *   bun scripts/e2e/nightly-report.ts --results results --previous previous \
- *     --out summary.md --json nightly-report.json --run-url URL --sha SHA
+ *     --out summary.md --issue-out issue.md --json nightly-report.json --run-url URL --sha SHA
+ *
+ * `--issue-out` writes the same summary without worker-log tails, for the public issue.
  */
 import { parseArgs } from "node:util";
 import type { E2eResult, HarnessResult, ScenarioResult } from "./report";
@@ -146,10 +148,16 @@ function trendRows(current: NightlyReport, previous: NightlyReport[], providers:
   });
 }
 
+export type MarkdownOptions = {
+  /** Include the worker-log tails of failed attempts. Off for the public sticky issue. */
+  logTails: boolean;
+};
+
 export function nightlyMarkdown(
   report: NightlyReport,
   previous: NightlyReport[],
   providers: string[],
+  options: MarkdownOptions = { logTails: true },
 ): string {
   const passedLegs = report.harness.filter((leg) => leg.status === "pass").length;
   const shaLabel = report.sha ? `\`${report.sha.slice(0, 7)}\`` : "";
@@ -215,8 +223,14 @@ export function nightlyMarkdown(
     "",
     "</details>",
     "",
-    ...harnessFailureDetails(report.harness),
   );
+  if (options.logTails) lines.push(...harnessFailureDetails(report.harness));
+  else if (report.harness.some((leg) => leg.attempts.some((a) => a.status === "fail"))) {
+    lines.push(
+      `Worker log tails for the failed attempts are in the [run summary](${report.runUrl}).`,
+      "",
+    );
+  }
   return lines.join("\n");
 }
 
@@ -241,6 +255,7 @@ async function main(): Promise<void> {
       results: { type: "string" },
       previous: { type: "string" },
       out: { type: "string", default: "nightly-summary.md" },
+      "issue-out": { type: "string" },
       json: { type: "string", default: "nightly-report.json" },
       "run-id": { type: "string", default: process.env.GITHUB_RUN_ID ?? "" },
       "run-url": { type: "string", default: "" },
@@ -270,6 +285,12 @@ async function main(): Promise<void> {
   });
   const markdown = nightlyMarkdown(report, previous, providers);
   await Bun.write(values.out, markdown);
+  if (values["issue-out"]) {
+    await Bun.write(
+      values["issue-out"],
+      nightlyMarkdown(report, previous, providers, { logTails: false }),
+    );
+  }
   await Bun.write(values.json, `${JSON.stringify(report, null, 2)}\n`);
   if (process.env.GITHUB_OUTPUT) {
     await Bun.write(

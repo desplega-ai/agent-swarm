@@ -1,5 +1,6 @@
 import type { ApiClient } from "./http";
 import { asRecord, expect, expectStatus, pollUntil } from "./http";
+import { knownSecrets, redactSecrets } from "./redact";
 import type { HarnessAttempt, HarnessCost, HarnessFailureKind, HarnessResult } from "./report";
 import { usd } from "./report";
 import { minimalEnv, repoRoot, tailLog } from "./sut";
@@ -372,9 +373,12 @@ async function runHarnessAttempt(
     return { status: "pass", durationMs: Date.now() - started, cost };
   } catch (error) {
     writer?.flush();
-    const tail = await tailLog(logPath, 60);
+    // The tail and the message reach the job log, the step summary, the sticky
+    // issue, and the artifact. Mask credentials before any of that.
+    const secrets = knownSecrets([apiKey]);
+    const tail = redactSecrets(await tailLog(logPath, 60), secrets);
     if (tail) console.error(`Last 60 lines of ${logPath}:\n${tail}`);
-    const message = errorMessage(error);
+    const message = redactSecrets(errorMessage(error), secrets);
     return {
       status: "fail",
       durationMs: Date.now() - started,

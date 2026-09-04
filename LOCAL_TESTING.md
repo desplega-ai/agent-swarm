@@ -87,6 +87,8 @@ E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
 result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
 turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
 the USD total, token counts, and `costSource`. A passing task with no cost row is reported as `no record`.
+Log tails and error messages pass through `scripts/e2e/redact.ts` (exact credential values from the
+environment plus common token shapes) before they enter the result file or the console.
 
 ### Nightly E2E workflow
 
@@ -95,7 +97,8 @@ leg per provider inside the `worker:slim` image, then a `report` job that merges
 `scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
 lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
 Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
-issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it.
+issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it. The issue body
+omits the log tails, and the uploaded log files are redacted copies, because both are public.
 
 Rebuild a report locally from downloaded artifacts:
 
