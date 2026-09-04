@@ -618,6 +618,22 @@ export async function createPoolStarvationDecisionTask(args: {
     // Same rationale as createRerouteDecisionTask: don't hold the Lead's
     // re-delegation decision to the original work's output contract.
     inheritParentOutputSchema: false,
+    // Explicit authorization, not an inherited-affinity side effect. Without
+    // this, a plain parent-fallback inherit would carry `original`'s own
+    // routing affinity onto this direct assignment, and createTaskExtended's
+    // direct-assignment gate (isAgentEligibleForTask) evaluates it against
+    // the LEAD, not the original task's intended worker. A caller-declared,
+    // capability-only affinity (no role/sourceAgentId — the exact shape
+    // `send-task`/`task-action`'s `requiredCapabilities` build) has no
+    // fail-open per isAgentEligibleForTask's "no fail-open" contract, so the
+    // inherited gate rejects the Lead too — this function is invoked
+    // (`escalateStarvedPoolTasks`) ONLY when isAgentEligibleForTask already
+    // found zero eligible registered agents for `original`, and it throws
+    // before the decision task is ever created. This escalation is a
+    // deliberate system override, not a continuation of the original's
+    // requirements, so it asserts its own authorization instead of
+    // depending on how `original`'s affinity happens to be shaped.
+    routingAffinity: { leadOnly: true, capabilities: [] },
   });
 
   return { kind: "created", task: created };

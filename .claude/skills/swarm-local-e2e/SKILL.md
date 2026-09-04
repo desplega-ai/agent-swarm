@@ -17,7 +17,7 @@ This skill should be invoked in two modes:
    - **Task lifecycle changes** (poll, runner, store-progress): Create assigned + pool tasks, verify they complete and have correct logs
    - **Session log changes**: Run two sequential tasks on the same agent, verify log isolation (unique sessionIds, no cross-contamination)
    - **Docker / entrypoint changes**: Build image, start containers, verify boot logs and registration
-   - **UI changes**: Start the dashboard, use agent-browser/qa-use to verify rendering
+   - **UI changes**: Start the dashboard, use agent-browser to verify rendering
    - **API endpoint changes**: Call the endpoint directly and verify the response
 
 You do not need to run every step — pick the subset relevant to the changes being tested.
@@ -199,16 +199,15 @@ cd apps/ui && bun run dev --port 5276
 
 The UI connects to the API via `VITE_API_URL` (check `apps/ui/.env` or defaults to `http://localhost:$PORT`).
 
-### Visual verification with agent-browser / qa-use
+### Visual verification with agent-browser
 
-Use `agent-browser` or `qa-use` to automate UI checks:
+Use `agent-browser` to automate UI checks (never `qa-use` unless explicitly asked):
 
 ```bash
 # Quick visual gut-check with agent-browser
-agent-browser --url http://localhost:5175 snapshot
-
-# Or use qa-use to verify specific flows
-qa-use explore http://localhost:5175
+agent-browser open http://localhost:5175
+agent-browser snapshot
+agent-browser screenshot /tmp/e2e-dashboard.png
 ```
 
 Things to verify in the UI:

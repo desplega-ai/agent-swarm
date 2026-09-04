@@ -34943,7 +34943,8 @@
                         "killed",
                         "import_violation",
                         "eval_error",
-                        "executor_error"
+                        "executor_error",
+                        "capacity_exceeded"
                       ]
                     },
                     "runtimeError": {

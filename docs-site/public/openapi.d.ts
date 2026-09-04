@@ -23424,7 +23424,7 @@ export interface operations {
                         stderr: string;
                         exitCode: number;
                         /** @enum {string} */
-                        error?: "timeout" | "oom" | "killed" | "import_violation" | "eval_error" | "executor_error";
+                        error?: "timeout" | "oom" | "killed" | "import_violation" | "eval_error" | "executor_error" | "capacity_exceeded";
                         runtimeError?: {
                             name: string;
                             message: string;

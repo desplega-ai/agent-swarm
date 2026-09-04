@@ -174,6 +174,7 @@ async function main(): Promise<number> {
       activeSut.baseUrl,
       activeSut.apiKey,
       ctx.nonce,
+      options.harnessAttempts,
     );
     harnessResults.push(result);
     printHarness(result);
