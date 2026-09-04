@@ -41,6 +41,15 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # ubuntu-latest ships without ffmpeg. Without it the renderer skips the step GIFs and
+      # the comment reads "no ffmpeg on the runner". Signed Ubuntu packages, about 40 seconds.
+      - name: Install ffmpeg for the step GIFs
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          ffmpeg -version | head -n 1
+
       - name: Run legacy Slack E2E
         id: legacy
         continue-on-error: true
