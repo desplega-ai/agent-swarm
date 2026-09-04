@@ -37,7 +37,11 @@
         "shardTotal": { "type": "integer", "minimum": 1 },
         "startedAt": { "type": "string", "format": "date-time" },
         "finishedAt": { "type": "string", "format": "date-time" },
-        "ciUrl": { "type": "string" }
+        "ciUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "Absolute http(s) URL linking back to the CI run. Non-http(s) schemes are rejected at ingest."
+        }
       }
     },
     "results": {
@@ -76,7 +80,8 @@
           },
           "url": {
             "type": "string",
-            "description": "Absolute URL. Required when storage is github. GitHub Actions artifact URLs expire with their run."
+            "format": "uri",
+            "description": "Absolute http(s) URL. Required when storage is github. Non-http(s) schemes (javascript:, data:, ...) are rejected at ingest because this value becomes an href on the public tracker page. GitHub Actions artifact URLs expire with their run."
           },
           "orgId": { "type": "string", "description": "agent-fs org; falls back to UI_E2E_AGENT_FS_ORG_ID." },
           "driveId": { "type": "string", "description": "agent-fs drive; falls back to UI_E2E_AGENT_FS_DRIVE_ID." },

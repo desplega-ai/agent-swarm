@@ -205,7 +205,7 @@ async function ensureSchedules(ctx: any): Promise<Record<string, string | null>>
  * so an attacker-supplied value cannot close the block early and have the rest
  * of its text read as instructions.
  */
-const UNTRUSTED_FENCE = "<<<UI_E2E_UNTRUSTED_DATA>>>";
+export const UNTRUSTED_FENCE = "<<<UI_E2E_UNTRUSTED_DATA>>>";
 
 /** Hard cap on any single interpolated report field. */
 const MAX_UNTRUSTED_FIELD_CHARS = 2000;
@@ -230,7 +230,7 @@ const MAX_UNTRUSTED_FIELD_CHARS = 2000;
  * so the prompt ALSO tells the agent these blocks are untrusted evidence, and
  * the workflow's structured output is a closed enum validated server-side.
  */
-function untrusted(value: unknown): string {
+export function untrusted(value: unknown): string {
   const raw = String(value ?? "")
     .replace(/\r\n/g, "\n")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the point

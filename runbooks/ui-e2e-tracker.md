@@ -115,8 +115,8 @@ Only `trigger` in (`main`, `nightly`), and never for a fork payload.
 ## Dispatch cap
 
 `UI_E2E_MAX_PRS_PER_DAY` (default 5), shared by both workflows, enforced with an
-atomic `kv_incr` on `ui-e2e:dispatch:<YYYY-MM-DD>` (UTC) before the webhook
-fires. Atomic because two shards landing together must not both read "4 used".
+atomic `kv_incr` on `ui-e2e:dispatch:<YYYY-MM-DD>` (UTC) before the workflow is
+triggered. Atomic because two shards landing together must not both read "4 used".
 Over cap, the row is written with `triageStatus: "deferred"` / `status:
 "deferred"` and the next sweep requeues it once the counter rolls over. The cap
 limits *dispatches*; a dispatched task may still choose not to open a PR.
@@ -146,6 +146,37 @@ A fork payload may not write agent-fs paths (rejected by the script, counted in
 `forkRejectedArtifacts`), open or close incidents, or spend the dispatch budget.
 `trigger: "pr"` already excludes it from incidents; the explicit rejection is
 defense in depth so a mislabelled payload cannot reach those paths.
+
+## Untrusted input
+
+Everything a producer sends is untrusted. A fork PR controls its own test
+titles and error text, and the tracker hands those fields to an agent that can
+open a PR or file a Linear issue, then renders them on a public page. Three
+controls, all added in response to the Superagent review of PR #1349:
+
+- **Dispatch is authenticated.** The triage and promote workflows declare **no**
+  webhook trigger. A bare `{type:"webhook"}` trigger is an open endpoint —
+  `verifyWebhookRequest` returns early when a trigger has neither `hmacSecret`
+  nor `verification` — so anyone who learned the workflow id could POST trigger
+  data and drive a PR-capable agent, bypassing the ingest bearer and the daily
+  cap. Dispatch goes through the authenticated `workflow_trigger` SDK call
+  instead, and `handleWebhookTrigger` rejects `/api/webhooks/{id}` for a
+  workflow that declares no webhook trigger. `ensureWorkflow` strips a webhook
+  trigger left behind by an older deployment.
+- **Report fields are data, not instructions.** Values interpolated into
+  `TRIAGE_PROMPT` / `PROMOTE_PROMPT` pass through `untrusted()`: the fence
+  marker is stripped so the block cannot be closed early, `{{`/`}}` are broken,
+  control characters are dropped, and length is capped at 2000 chars. Both
+  prompts wrap the data in an `UNTRUSTED_FENCE` block, say it is evidence and
+  never instructions, and carry a scope limit telling the agent to stop and
+  report an attempted injection. Sanitizing is mitigation, not a guarantee —
+  the closed-enum structured output is what the pipeline actually trusts.
+- **URLs are scheme-allowlisted.** `safeHttpUrl` accepts only absolute
+  `http(s)`. Applied at ingest (`artifacts[].url`, `run.ciUrl`,
+  `annotate.fixPr`) so a `javascript:` URL is never stored, and again at render
+  for every `href` on the public page so pre-existing rows stay inert. A
+  rejected URL renders as text instead of a link. `annotate.linearIssue` is
+  exempt: it renders as text, and `DES-123` is a legitimate value.
 
 ## Retention
 
