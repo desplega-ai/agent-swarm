@@ -8,12 +8,8 @@ import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
-import {
-  automationDisplayName,
-  automationFixText,
-  automationPurpose,
-} from "@/lib/automation-setup";
 import { cn } from "@/lib/utils";
+import { AutomationSetupRows } from "./automation-setup-rows";
 
 const CURRENT_VERSION = __APP_VERSION__;
 const ORG_NAME_KEY = "SWARM_ORG_NAME";
@@ -45,31 +41,8 @@ export function DashboardNudges() {
         <NudgeBanner
           priority="primary"
           icon={Wrench}
-          title={`${waitingAutomations.length} automation${waitingAutomations.length === 1 ? "" : "s"} waiting on setup`}
-          description={
-            <details>
-              <summary className="inline cursor-pointer list-none text-muted-foreground hover:text-foreground">
-                Review the values or integrations each automation still needs.
-              </summary>
-              <ul className="mt-2 space-y-1.5 border-t pt-2">
-                {waitingAutomations.map((automation) => {
-                  return (
-                    <li key={`${automation.kind}:${automation.id}`} className="space-y-0.5">
-                      <p className="font-medium text-foreground">
-                        {automationDisplayName(automation)}
-                      </p>
-                      <p className="text-muted-foreground text-sm">
-                        {automationPurpose(automation)}
-                      </p>
-                      <Link to={automation.fixUrl} className="text-primary text-sm hover:underline">
-                        {automationFixText(automation)}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </details>
-          }
+          title="Automations waiting on setup"
+          description={<AutomationSetupRows automations={waitingAutomations} />}
         />
       )}
 

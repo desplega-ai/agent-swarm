@@ -39,6 +39,17 @@ describe("preflightAutomation", () => {
         params: ["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"],
         integrations: ["github", "slack"],
       },
+      fixes: [
+        { type: "param", key: "REPO_URL", url: "/schedules/schedule-1?param=REPO_URL" },
+        {
+          type: "param",
+          key: "SLACK_CHANNEL_ID",
+          url: "/schedules/schedule-1?param=SLACK_CHANNEL_ID",
+        },
+        { type: "param", key: "TIMEZONE", url: "/schedules/schedule-1?param=TIMEZONE" },
+        { type: "integration", key: "github", url: "/settings/integrations/github" },
+        { type: "integration", key: "slack", url: "/settings/integrations/slack" },
+      ],
       fixUrl: "/schedules/schedule-1?param=REPO_URL",
       failureReason:
         "needs_setup: params=[REPO_URL,SLACK_CHANNEL_ID,TIMEZONE] integrations=[github,slack]",
@@ -83,7 +94,7 @@ describe("preflightAutomation", () => {
         name: "gsc-topic-miner",
         requires: ["gsc", "agentfs"],
         param: "GSC_PROPERTY",
-        fixUrl: "/settings/secrets",
+        fixUrl: "/settings/integrations/gsc",
       },
       {
         name: "linear-drain-loop",
@@ -149,8 +160,8 @@ describe("preflightAutomation", () => {
       ["linear", "/settings/integrations/linear"],
       ["jira", "/settings/integrations/jira"],
       ["agentmail", "/settings/integrations/agentmail"],
-      ["gsc", "/settings/secrets"],
-      ["agentfs", "/settings/secrets"],
+      ["gsc", "/settings/integrations/gsc"],
+      ["agentfs", "/settings/integrations/agentfs"],
     ];
     const unverifiedSetup: AutomationSetupStates = {
       slack: "unverified",
@@ -167,8 +178,11 @@ describe("preflightAutomation", () => {
         preflightAutomation(
           { id: `workflow-${id}`, name: id, kind: "workflow", requires: [id] },
           unverifiedSetup,
-        ).fixUrl,
-      ).toBe(fixUrl);
+        ),
+      ).toMatchObject({
+        fixUrl,
+        fixes: [{ type: "integration", key: id, url: fixUrl }],
+      });
     }
   });
 
@@ -188,6 +202,7 @@ describe("preflightAutomation", () => {
     expect(result).toMatchObject({
       state: "running",
       missing: { params: [], integrations: [] },
+      fixes: [],
       fixUrl: "/workflows/workflow-2",
     });
     expect(result.failureReason).toBeUndefined();

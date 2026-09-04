@@ -34,6 +34,10 @@ export interface AutomationPreflightResult {
     params: string[];
     integrations: AutomationIntegrationId[];
   };
+  fixes: Array<
+    | { type: "param"; key: string; url: string }
+    | { type: "integration"; key: AutomationIntegrationId; url: string }
+  >;
   fixUrl: string;
   failureReason?: string;
 }
@@ -131,8 +135,8 @@ const INTEGRATION_FIX_URL: Record<AutomationIntegrationId, string> = {
   linear: "/settings/integrations/linear",
   jira: "/settings/integrations/jira",
   agentmail: "/settings/integrations/agentmail",
-  gsc: "/settings/secrets",
-  agentfs: "/settings/secrets",
+  gsc: "/settings/integrations/gsc",
+  agentfs: "/settings/integrations/agentfs",
 };
 
 // Requiring one of these bindings is the persisted signal that the v4 matrix
@@ -168,6 +172,18 @@ export function preflightAutomation(
   );
   const missing = { params: missingParams, integrations: missingIntegrations };
   const baseUrl = automationUrl(input);
+  const fixes: AutomationPreflightResult["fixes"] = [
+    ...missingParams.map((key) => ({
+      type: "param" as const,
+      key,
+      url: `${baseUrl}?param=${encodeURIComponent(key)}`,
+    })),
+    ...missingIntegrations.map((key) => ({
+      type: "integration" as const,
+      key,
+      url: automationIntegrationFixUrl(key),
+    })),
+  ];
 
   if (missingParams.length === 0 && missingIntegrations.length === 0) {
     return {
@@ -176,6 +192,7 @@ export function preflightAutomation(
       kind: input.kind,
       state: "running",
       missing,
+      fixes,
       fixUrl: baseUrl,
     };
   }
@@ -201,6 +218,7 @@ export function preflightAutomation(
     kind: input.kind,
     state: "needs_setup",
     missing,
+    fixes,
     fixUrl,
     failureReason,
   };

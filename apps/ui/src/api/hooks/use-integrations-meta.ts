@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { api } from "@/api/client";
+import { invalidateStatusQuery } from "@/api/hooks/status-query";
 import { getConfig } from "@/lib/config";
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,9 @@ export function useReloadConfig() {
   const queryClient = useQueryClient();
   return useMutation<ReloadConfigResult, Error>({
     mutationFn: postReloadConfig,
+    onSuccess: () => {
+      void invalidateStatusQuery(queryClient);
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["config", "env-presence"] });
       queryClient.invalidateQueries({ queryKey: ["configs"] });

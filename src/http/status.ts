@@ -131,6 +131,16 @@ export const AutomationStatusSchema = z.object({
     params: z.array(z.string()),
     integrations: z.array(AutomationIntegrationIdSchema),
   }),
+  fixes: z.array(
+    z.discriminatedUnion("type", [
+      z.object({ type: z.literal("param"), key: z.string(), url: z.string() }),
+      z.object({
+        type: z.literal("integration"),
+        key: AutomationIntegrationIdSchema,
+        url: z.string(),
+      }),
+    ]),
+  ),
   fixUrl: z.string(),
 });
 export type AutomationStatus = z.infer<typeof AutomationStatusSchema>;
