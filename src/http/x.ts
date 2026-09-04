@@ -141,6 +141,11 @@ function buildExecutionError(output: RunScriptOutput): ExternalError {
       return { type: "timeout", message: "Script timed out" };
     case "import_violation":
       return { type: "import_violation", message: output.stderr || "Disallowed import" };
+    case "capacity_exceeded":
+      return {
+        type: "capacity_exceeded",
+        message: "Sandbox was at capacity; retries were exhausted. Try again.",
+      };
     default:
       return {
         type: "runtime_error",

@@ -18,6 +18,16 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
   };
 }
 
+/**
+ * Exit 134 is SIGABRT. The eval harness never calls `abort()` itself — this
+ * signature is the runtime's own C++ layer aborting because it could not
+ * create a thread (pthread_create failing under an already-exhausted
+ * RLIMIT_NPROC), which is a host-capacity fault, not a bug in the user
+ * script. See `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` in
+ * `../../utils/sandboxed-process.ts` for the shared-limit mechanism.
+ */
+const SANDBOX_CAPACITY_EXIT_CODE = 134;
+
 function classifyExit(
   exitCode: number,
   timedOut: boolean,
@@ -27,6 +37,7 @@ function classifyExit(
   if (killed) return "killed";
   if (exitCode === 0) return undefined;
   if (exitCode === 137 || exitCode === 9) return "killed";
+  if (exitCode === SANDBOX_CAPACITY_EXIT_CODE) return "capacity_exceeded";
   return "eval_error";
 }
 

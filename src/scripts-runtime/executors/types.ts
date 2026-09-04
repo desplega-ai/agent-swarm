@@ -49,7 +49,16 @@ export type ScriptExecutorError =
   | "killed"
   | "import_violation"
   | "eval_error"
-  | "executor_error";
+  | "executor_error"
+  /**
+   * The sandboxed process aborted at startup (SIGABRT / exit 134) because the
+   * host-wide RLIMIT_NPROC budget it shares with every other process running
+   * under the same UID was already exhausted — not because the script itself
+   * is broken. Transient and independent of any concurrency limiter this
+   * process holds; `runScript` in `../loader.ts` retries it a bounded number
+   * of times before giving up.
+   */
+  | "capacity_exceeded";
 
 export type ScriptStackFrame = {
   file: string;

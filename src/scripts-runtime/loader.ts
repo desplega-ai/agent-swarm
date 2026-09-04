@@ -14,6 +14,18 @@ import {
 } from "./executors/types";
 import { validateScriptImports } from "./import-allowlist";
 
+/**
+ * `capacity_exceeded` (see `ScriptExecutorError`) means the sandboxed process
+ * aborted because a host-wide, shared RLIMIT_NPROC budget was momentarily
+ * exhausted — not because the script failed. Retry transparently here, once,
+ * for every caller (HTTP script runs, workflow script/swarm-script nodes,
+ * scheduled scripts), independent of whatever concurrency limiter or retry
+ * policy an individual caller does or doesn't configure. Short and bounded:
+ * this is a blip mitigation, not a substitute for the caller's own retry
+ * policy if the underlying contention is sustained.
+ */
+const CAPACITY_EXCEEDED_RETRY_DELAYS_MS = [200, 750];
+
 export type RunScriptInput = {
   source: string;
   args?: unknown;
@@ -96,15 +108,23 @@ export async function runScript(input: RunScriptInput): Promise<RunScriptOutput>
     ...(input.timeoutMs ? { wallClockMs: input.timeoutMs } : {}),
   };
 
-  const output = await getScriptExecutor().run({
+  const configPayload = await buildConfigPayload(input);
+  const executorInput = {
     source: input.source,
     args: input.args ?? null,
-    configPayload: await buildConfigPayload(input),
+    configPayload,
     resources,
     fsMode: input.fsMode ?? "none",
-    network: "open",
+    network: "open" as const,
     signal: input.signal,
-  });
+  };
+
+  let output = await getScriptExecutor().run(executorInput);
+  for (const delayMs of CAPACITY_EXCEEDED_RETRY_DELAYS_MS) {
+    if (output.error !== "capacity_exceeded" || input.signal?.aborted) break;
+    await Bun.sleep(delayMs);
+    output = await getScriptExecutor().run(executorInput);
+  }
 
   return {
     ...output,

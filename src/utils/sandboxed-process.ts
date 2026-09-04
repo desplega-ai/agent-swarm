@@ -39,9 +39,24 @@ export const DEFAULT_SANDBOX_LIMITS: SandboxResourceLimits = {
  * threads before user code runs. Give their process trees enough RLIMIT_AS
  * and RLIMIT_NPROC headroom to boot while retaining the stricter defaults for
  * direct non-interpreter commands.
+ *
+ * `ulimit -u` is `RLIMIT_NPROC`: a per-real-UID, kernel-wide count of
+ * processes/threads, not a per-process-tree cap. On a host that runs many
+ * sibling containers under the same UID, this value competes with a live,
+ * fleet-wide number that has nothing to do with this container's own
+ * concurrency — it can already be within a few hundred of the ceiling before
+ * this process spawns anything. A soft limit set close to that live number
+ * makes an interpreter's own thread-pool startup (which this constant exists
+ * to allow) the thing that trips the cap, i.e. self-inflicted failures on top
+ * of the real constraint. This value only needs to sit well above observed
+ * ambient headroom (measured swinging in the high hundreds); it is not, and
+ * cannot be, a fix for the shared kernel-wide limit itself — see
+ * `ScriptExecutorError`'s `capacity_exceeded` classification in
+ * `src/scripts-runtime/executors/types.ts` for how that residual risk is
+ * handled instead.
  */
 export const BUN_SANDBOX_VIRTUAL_MEMORY_MB = 4096;
-export const JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS = 512;
+export const JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS = 4096;
 
 const JAVASCRIPT_RUNTIMES = new Set(["bun", "bunx", "node", "nodejs", "npx"]);
 const SHELL_RUNTIMES = new Set(["bash", "dash", "sh"]);
