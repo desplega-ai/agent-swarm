@@ -381,6 +381,12 @@ jobs:
       - name: Check Bun version pins
         run: bun run check:bun-version
 
+      # scripts/pre-push-tests.sh prints a skip-list when its worker-image sandbox
+      # probe trips; keep it mechanically synced to the SKIP_SANDBOX_SPAWN_TESTS
+      # importer set so it can't silently drift again.
+      - name: Check sandbox-spawn skip-list sync
+        run: bun run check:sandbox-spawn-skip-list
+
       # Same-run calls merge server-side. See agent-fs docs/ci-timings.md.
       # Skipped on merge_group events and forks (no secret); never blocks the gate.
       - name: Report check timings to ci-timings
