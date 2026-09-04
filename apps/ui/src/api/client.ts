@@ -575,6 +575,21 @@ class ApiClient {
   }
 
   async submitFeedback(endpoint: string, data: FeedbackInput): Promise<void> {
+    let parsedEndpoint: URL;
+    try {
+      parsedEndpoint = new URL(endpoint);
+    } catch {
+      throw new Error("Invalid feedback endpoint");
+    }
+
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+    if (
+      parsedEndpoint.protocol !== "https:" &&
+      !(parsedEndpoint.protocol === "http:" && loopbackHosts.has(parsedEndpoint.hostname))
+    ) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
     const body = JSON.stringify(data);
     let response: Response;
 

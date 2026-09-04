@@ -100,6 +100,32 @@ describe("submitFeedback", () => {
     ).resolves.toBeUndefined();
   });
 
+  test("allows HTTP feedback submissions to loopback hosts", async () => {
+    globalThis.fetch = async (url) => {
+      expect(url).toBe("http://localhost:3013/v1/feedback");
+      return new Response(null, { status: 202 });
+    };
+
+    await expect(
+      api.submitFeedback("http://localhost:3013/v1/feedback", input),
+    ).resolves.toBeUndefined();
+  });
+
+  test("rejects unsafe feedback endpoints before fetching", async () => {
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return new Response(null, { status: 202 });
+    };
+
+    for (const endpoint of ["http://evil.example/v1/feedback", "not a URL"]) {
+      await expect(api.submitFeedback(endpoint, input)).rejects.toThrow(
+        "Invalid feedback endpoint",
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
   test("surfaces a readable non-2xx response without falling back", async () => {
     let call = 0;
     globalThis.fetch = async () => {
