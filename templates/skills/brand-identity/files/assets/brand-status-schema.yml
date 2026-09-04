@@ -1,0 +1,11 @@
+brand: ""
+revision: ""
+status: WORKING # WORKING | ACCEPTED | ARCHIVE
+mode: BRAND_REVIEW # BRAND_REVIEW | BRAND_ELEMENT | BRAND_EVOLUTION | FULL_BRAND_IDENTITY
+elements:
+  - name: ""
+    control: FLEXIBLE # FIXED | ADJUSTABLE | FLEXIBLE
+    status: WORKING
+    artifact_ref: ""
+    accepted_decision_ref: null
+open_decisions: []

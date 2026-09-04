@@ -23,6 +23,76 @@
       "content": "---\ndate: [Current date and time with timezone in ISO format]\nauthor: [Author name]\ntopic: \"[Topic]\"\ntags: [brainstorm, relevant-tags]\nstatus: in-progress\nexploration_type: [problem|idea|comparison|workflow|other]\nlast_updated: [Current date in YYYY-MM-DD format]\nlast_updated_by: [Author name]\n---\n\n# [Topic] — Brainstorm\n\n## Context\n\n[Initial framing: what we know, what prompted this exploration, any existing context or constraints]\n\n## Exploration\n\n[Q&A pairs accumulate here during the session]\n\n## Synthesis\n\n### Key Decisions\n- [Filled after exploration — includes \"Deferred: X, defaulting to Y\" entries for consciously parked decisions]\n\n### Open Questions\n- [Fact-shaped questions only (answerable by /research) — undecided decisions don't belong here]\n\n### Constraints Identified\n- [Filled after exploration]\n\n### Core Requirements\n- [Filled after exploration]\n\n## Next Steps\n\n- [Handoff decision: research, plan, or parked]\n"
     }
   ],
+  "brand-identity": [
+    {
+      "path": "assets/brand-asset-manifest-schema.yml",
+      "content": "brand: \"\"\nrevision: \"\"\nstatus: WORKING\nassets:\n  - id: \"\"\n    role: \"\"\n    variant: \"\"\n    format: \"\"\n    source_artifact: \"\"\n    source_revision: \"\"\n    usage: \"\"\n    restrictions: []\n    checksum: \"\"\n"
+    },
+    {
+      "path": "assets/brand-decision-record-template.md",
+      "content": "# Brand decision record\n\n- Decision:\n- Status: PROPOSED\n- Date:\n- Decision owner: Human\n- Evidence considered:\n- Recommendation:\n- Rationale:\n- Alternatives and consequences:\n- Affected elements:\n- Accepted artifact revision:\n- Follow-up mappings:\n"
+    },
+    {
+      "path": "assets/brand-discovery-template.md",
+      "content": "# Brand discovery\n\n## Evidence and sources\n## Audience and context\n## Positioning and intended meaning\n## Existing equity\n## Constraints\n## Current state\n## Open decisions\n## Recommended mode and next step\n"
+    },
+    {
+      "path": "assets/brand-guideline-blueprint.md",
+      "content": "# Brand guideline blueprint\n\n## Status and scope\n## Foundations\n## Generative idea\n## Logo system\n## Colour system\n## Typography\n## Visual language\n## Imagery and art direction\n## Iconography and illustration\n## Motion\n## Applications and stress tests\n## Accessibility and production\n## Governance and asset register\n"
+    },
+    {
+      "path": "assets/brand-status-schema.yml",
+      "content": "brand: \"\"\nrevision: \"\"\nstatus: WORKING # WORKING | ACCEPTED | ARCHIVE\nmode: BRAND_REVIEW # BRAND_REVIEW | BRAND_ELEMENT | BRAND_EVOLUTION | FULL_BRAND_IDENTITY\nelements:\n  - name: \"\"\n    control: FLEXIBLE # FIXED | ADJUSTABLE | FLEXIBLE\n    status: WORKING\n    artifact_ref: \"\"\n    accepted_decision_ref: null\nopen_decisions: []\n"
+    },
+    {
+      "path": "references/accessibility-internationalisation-and-production.md",
+      "content": "# Accessibility, internationalisation, and production\n\nVerify contrast and non-colour cues, readable scale, motion alternatives, language and script coverage, bidirectional implications where relevant, and culturally sensitive meanings. Verify deliverable formats, colour profiles, font licenses, vector integrity, export naming, safe areas, and reproduction constraints. Record known limitations rather than hiding them in presentation mocks.\n"
+    },
+    {
+      "path": "references/application-and-stress-testing.md",
+      "content": "# Application and stress testing\n\nBefore proposing a baseline, test the system in representative situations: smallest and largest logo use, monochrome, light/dark, low contrast, dense information, quiet editorial space, social/avatar crop, document, presentation, marketing surface, and relevant product context. Compose these examples in OpenPencil. Test failure boundaries, not just ideal usage. List observed failures and required corrections.\n"
+    },
+    {
+      "path": "references/brand-to-ice-handoff.md",
+      "content": "# Brand to ICE handoff\n\nRead only after a Human has accepted a brand decision and explicitly authorized product propagation. Map accepted brand semantics to proposed ICE tokens, primitives, assets, or components without changing the brand source. Identify affected product surfaces, accessibility impacts, compatibility, rollout, and rollback. ICE and Storybook become the implementation and review surface for this separate mapping task; OpenPencil remains the brand source artifact.\n"
+    },
+    {
+      "path": "references/colour-craft.md",
+      "content": "# Colour craft\n\nDefine colour by semantic role and usage relationship, not swatch names alone. Include primary, supporting, neutral, surface, text, and status relationships only when relevant. Record source values and conversion assumptions for RGB/HEX and print systems. Test contrast, light/dark contexts, colour-blind distinguishability, low-quality displays, and monochrome fallback. Brand acceptance does not waive product accessibility requirements.\n"
+    },
+    {
+      "path": "references/generative-idea-and-creative-territories.md",
+      "content": "# Generative idea and creative territories\n\nTranslate strategy into a concise idea capable of generating a system, not a slogan pasted onto visuals. When alternatives are needed, build a small set of genuinely distinct territories with a premise, visual mechanism, strengths, risks, and rejection criteria. Avoid cosmetic variants of one idea. Recommend the strongest territory and state what Human approval would authorize.\n"
+    },
+    {
+      "path": "references/iconography-and-illustration.md",
+      "content": "# Iconography and illustration\n\nDefine grid, stroke/shape logic, corner treatment, perspective, detail level, optical correction, colour behavior, and small-size limits. Distinguish functional product icons from expressive brand illustration. Product icon implementation belongs downstream; brand work defines the accepted visual rule and representative examples.\n"
+    },
+    {
+      "path": "references/imagery-and-art-direction.md",
+      "content": "# Imagery and art direction\n\nSpecify subject, perspective, light, colour treatment, cropping, realism, diversity, sourcing, and prohibited patterns. Use references to explain principles, not as unlicensed deliverables. Identify whether photography, generated imagery, illustration, or mixed media is appropriate and record provenance and usage constraints for final assets.\n"
+    },
+    {
+      "path": "references/logo-craft-and-brand-architecture.md",
+      "content": "# Logo craft and brand architecture\n\nTreat a logo as a coordinated system: primary, compact, icon, monochrome, reversed/light-dark, and required lockups. Check silhouette, optical balance, counterforms, spacing, minimum size, pixel behavior, one-colour reproduction, background control, and misuse resistance. Define relationships among master brand, products, sub-brands, descriptors, and endorsed marks only when scope requires them. Do not add architecture to solve a naming problem without Human authority.\n"
+    },
+    {
+      "path": "references/motion-craft.md",
+      "content": "# Motion craft\n\nDefine motion purpose, tempo, easing character, sequencing, transformation logic, and reduced-motion behavior. Use motion to reinforce identity or comprehension, not decoration. Document representative transitions and constraints; production animation or UI component work requires a separate downstream task.\n"
+    },
+    {
+      "path": "references/research-strategy-and-visual-audit.md",
+      "content": "# Research, strategy, and visual audit\n\nUse for every BRAND_REVIEW and before broader creation. Inspect accepted foundations, audiences, positioning, existing assets, touchpoints, competitors, cultural context, and production constraints. Mark each conclusion as evidence, inference, or open decision. Audit recognition, distinctiveness, coherence, accessibility, reproduction, scalability, and fit to intended meaning. End with the design problem, equity to preserve, liabilities to resolve, and a recommended next scope.\n"
+    },
+    {
+      "path": "references/typography-craft.md",
+      "content": "# Typography craft\n\nSelect type for voice, legibility, language coverage, licensing, availability, and production reality. Define roles and hierarchy before enumerating sizes. Test headlines, long reading, data, UI-like labels where relevant, numerals, punctuation, diacritics, and fallback behavior. Record licensed sources and permitted distribution; never package an unlicensed font.\n"
+    },
+    {
+      "path": "references/visual-language-and-composition.md",
+      "content": "# Visual language and composition\n\nDefine repeatable principles for geometry, spacing, framing, rhythm, density, contrast, layout, and recognizable brand gestures. Show rules across varied formats rather than one polished hero. Separate invariant identity signals from flexible campaign expression. Avoid rules that depend on one application size or a single background.\n"
+    }
+  ],
   "delegate-work": [
     {
       "path": "scripts/codex-exec.sh",

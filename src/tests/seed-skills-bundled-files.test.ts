@@ -79,6 +79,35 @@ describe("seeded skills with bundled files", () => {
     expect(skills.find((skill) => skill.name === "kv-storage")?.files).toEqual([]);
   });
 
+  test("brand-identity ships its progressive references and output templates", async () => {
+    const skills = await loadSeedSkills();
+    const brandIdentity = skills.find((skill) => skill.name === "brand-identity");
+
+    expect(brandIdentity?.systemDefault).toBe(false);
+    expect(brandIdentity?.userInvocable).toBe(true);
+    expect(brandIdentity?.content).toContain("All `brand-identity` visual authoring MUST use the managed OpenPencil workspace");
+    expect(brandIdentity?.content).toContain("Storybook is not a brand-authoring environment");
+    expect(brandIdentity?.files.map((file) => file.path).sort()).toEqual([
+      "assets/brand-asset-manifest-schema.yml",
+      "assets/brand-decision-record-template.md",
+      "assets/brand-discovery-template.md",
+      "assets/brand-guideline-blueprint.md",
+      "assets/brand-status-schema.yml",
+      "references/accessibility-internationalisation-and-production.md",
+      "references/application-and-stress-testing.md",
+      "references/brand-to-ice-handoff.md",
+      "references/colour-craft.md",
+      "references/generative-idea-and-creative-territories.md",
+      "references/iconography-and-illustration.md",
+      "references/imagery-and-art-direction.md",
+      "references/logo-craft-and-brand-architecture.md",
+      "references/motion-craft.md",
+      "references/research-strategy-and-visual-audit.md",
+      "references/typography-craft.md",
+      "references/visual-language-and-composition.md",
+    ]);
+  });
+
   test("embedded manifest matches the on-disk templates", async () => {
     const embedded = await loadSeedSkills();
     const fromDisk = await loadSeedSkills(TEMPLATES_DIR);

@@ -1,0 +1,15 @@
+{
+  "category": "skills",
+  "description": "Create, review, and evolve brand identity systems with explicit governance and Human approval of material identity decisions. Use for logos, brand systems, colour, typography, visual language, imagery, iconography, motion, guidelines, and brand applications; do not use for ordinary product UI design or executable UI prototypes.",
+  "displayName": "Brand Identity",
+  "kind": "skill",
+  "name": "brand-identity",
+  "placeholders": [],
+  "runAllSeedersCandidate": true,
+  "slug": "brand-identity",
+  "systemDefault": false,
+  "tags": ["brand", "identity", "design"],
+  "title": "Brand Identity",
+  "userInvocable": true,
+  "version": "1.0.0"
+}

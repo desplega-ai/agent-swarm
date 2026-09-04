@@ -32,6 +32,12 @@ import brainstormingConfig from "../../../templates/skills/brainstorming/config.
 import brainstormingContent from "../../../templates/skills/brainstorming/content.md" with {
   type: "text",
 };
+import brandIdentityConfig from "../../../templates/skills/brand-identity/config.json" with {
+  type: "text",
+};
+import brandIdentityContent from "../../../templates/skills/brand-identity/content.md" with {
+  type: "text",
+};
 import codeQualityConfig from "../../../templates/skills/code-quality/config.json" with {
   type: "text",
 };
@@ -297,6 +303,7 @@ const BUILT_IN_SKILL_SOURCES = [
   { config: assetNamespacesConfig, body: assetNamespacesContent },
   { config: attioInteractionConfig, body: attioInteractionContent },
   { config: brainstormingConfig, body: brainstormingContent },
+  { config: brandIdentityConfig, body: brandIdentityContent },
   { config: codeQualityConfig, body: codeQualityContent },
   { config: codeReviewingConfig, body: codeReviewingContent },
   { config: composioConfig, body: composioContent },

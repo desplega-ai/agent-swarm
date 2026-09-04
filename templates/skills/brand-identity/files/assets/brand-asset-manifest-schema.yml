@@ -1,0 +1,13 @@
+brand: ""
+revision: ""
+status: WORKING
+assets:
+  - id: ""
+    role: ""
+    variant: ""
+    format: ""
+    source_artifact: ""
+    source_revision: ""
+    usage: ""
+    restrictions: []
+    checksum: ""
