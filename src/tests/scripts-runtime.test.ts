@@ -311,6 +311,7 @@ describe("runScript", () => {
         "SWARM_SCRIPT_ERROR_FILE",
         "SWARM_SCRIPT_RESULT_FILE",
         "SWARM_SCRIPT_SOURCE_FILE",
+        "SWARM_SCRIPT_STARTED_FILE",
         "SWARM_SCRIPT_TMPDIR",
         "TMPDIR",
       ],
