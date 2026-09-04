@@ -27,6 +27,52 @@ export interface PendingIdentity {
   name?: string;
 }
 
+export interface PendingApiUrlTrust {
+  origin: string;
+  allowed: boolean;
+}
+
+function isPrivateOrLoopbackHostname(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return true;
+
+  const octets = host.split(".").map(Number);
+  if (octets.length === 4 && octets.every((octet) => Number.isInteger(octet))) {
+    return (
+      octets[0] === 10 ||
+      octets[0] === 127 ||
+      (octets[0] === 172 && octets[1]! >= 16 && octets[1]! <= 31) ||
+      (octets[0] === 192 && octets[1] === 168)
+    );
+  }
+
+  return /^(?:fc|fd|fe[89ab])/i.test(host);
+}
+
+/** A deep-linked destination may receive credentials only over HTTPS or a private dev address. */
+export function inspectPendingApiUrl(apiUrl: string): PendingApiUrlTrust {
+  try {
+    const url = new URL(apiUrl);
+    return {
+      origin: url.origin,
+      allowed:
+        !url.username &&
+        !url.password &&
+        (url.protocol === "https:" ||
+          (url.protocol === "http:" && isPrivateOrLoopbackHostname(url.hostname))),
+    };
+  } catch {
+    return { origin: apiUrl, allowed: false };
+  }
+}
+
+export function pendingApiUrlSubmissionError(apiUrl: string, confirmed: boolean): string | null {
+  if (!inspectPendingApiUrl(apiUrl).allowed) {
+    return "Deep-linked API URLs must use HTTPS, except for private or loopback addresses.";
+  }
+  return confirmed ? null : "Confirm the destination before sending your API key.";
+}
+
 interface ConfigContextValue {
   /** All saved connections */
   connections: Connection[];

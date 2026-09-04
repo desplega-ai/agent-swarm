@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useConfig } from "@/hooks/use-config";
+import { inspectPendingApiUrl, pendingApiUrlSubmissionError, useConfig } from "@/hooks/use-config";
 import { generateSlug } from "@/lib/slugs";
 
 function resolvePostConnectRedirect(from: unknown): string {
@@ -30,12 +30,15 @@ export function WelcomeCard() {
 
   const [name, setName] = useState("");
   const [apiUrl, setApiUrl] = useState(pendingApiUrl ?? "http://localhost:3013");
+  const [apiUrlFromDeepLink, setApiUrlFromDeepLink] = useState(pendingApiUrl !== null);
+  const [deepLinkConfirmed, setDeepLinkConfirmed] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [copied, setCopied] = useState(false);
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const [placeholder] = useState(() => generateSlug());
+  const deepLinkDestination = apiUrlFromDeepLink ? inspectPendingApiUrl(apiUrl) : null;
 
   function handleCopyApiKey() {
     navigator.clipboard.writeText(apiKey);
@@ -44,8 +47,18 @@ export function WelcomeCard() {
   }
 
   async function handleConnect() {
-    setStatus("loading");
     setErrorMsg("");
+
+    const deepLinkError = apiUrlFromDeepLink
+      ? pendingApiUrlSubmissionError(apiUrl, deepLinkConfirmed)
+      : null;
+    if (deepLinkError) {
+      setStatus("error");
+      setErrorMsg(deepLinkError);
+      return;
+    }
+
+    setStatus("loading");
 
     try {
       const url = apiUrl.replace(/\/+$/, "");
@@ -107,10 +120,38 @@ export function WelcomeCard() {
               type="url"
               placeholder="http://localhost:3013"
               value={apiUrl}
-              onChange={(e) => setApiUrl(e.target.value)}
+              onChange={(e) => {
+                setApiUrl(e.target.value);
+                setApiUrlFromDeepLink(false);
+                setDeepLinkConfirmed(false);
+              }}
               disabled={status === "loading"}
             />
           </div>
+          {deepLinkDestination && (
+            <Alert variant={deepLinkDestination.allowed ? "default" : "destructive"}>
+              <AlertDescription className="space-y-2">
+                <p>This link prefilled the API destination. Your API key will be sent to:</p>
+                <p className="break-all font-mono text-xs font-semibold">
+                  {deepLinkDestination.origin}
+                </p>
+                {deepLinkDestination.allowed ? (
+                  <label className="flex cursor-pointer items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={deepLinkConfirmed}
+                      onChange={(event) => setDeepLinkConfirmed(event.target.checked)}
+                      disabled={status === "loading"}
+                      className="mt-0.5 h-4 w-4"
+                    />
+                    <span>I trust this destination to receive my API key.</span>
+                  </label>
+                ) : (
+                  <p>Use HTTPS, or enter a private or loopback development address yourself.</p>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="space-y-2">
             <Label htmlFor="welcome-key">API Key</Label>
             <div className="flex gap-1">
@@ -167,7 +208,12 @@ export function WelcomeCard() {
 
           <Button
             onClick={handleConnect}
-            disabled={status === "loading" || !apiUrl || !apiKey}
+            disabled={
+              status === "loading" ||
+              !apiUrl ||
+              !apiKey ||
+              (deepLinkDestination !== null && (!deepLinkDestination.allowed || !deepLinkConfirmed))
+            }
             className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {status === "loading" ? (

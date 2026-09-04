@@ -1471,7 +1471,9 @@ function rowToAgentTaskSummary(row: AgentTaskRow): AgentTaskSummary {
     effort: t.effort,
     provider: t.provider,
     requestedByUserId: t.requestedByUserId,
-    failureReason: t.failureReason ? previewText(t.failureReason, TASK_PREVIEW_LENGTH) : undefined,
+    failureReason: t.failureReason
+      ? previewText(scrubSecrets(t.failureReason), TASK_PREVIEW_LENGTH)
+      : undefined,
     progress: t.progress,
     createdAt: t.createdAt,
     lastUpdatedAt: t.lastUpdatedAt,
@@ -3226,7 +3228,7 @@ export async function cancelTask(id: string, reason?: string): Promise<AgentTask
   }
 
   const finishedAt = new Date().toISOString();
-  const cancelReason = reason ?? "Cancelled by user";
+  const cancelReason = scrubSecrets(reason ?? "Cancelled by user");
   // Status predicate re-checks the idempotency guard atomically (a racing
   // terminal transition can land during the await above).
   const row = await getDbClient().get<AgentTaskRow>(

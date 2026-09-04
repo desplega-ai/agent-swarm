@@ -12,6 +12,7 @@ import {
   getAgentById,
   getAllAgents,
   getAllTasks,
+  getDbClient,
   getScheduledTasks,
   initDb,
   listAllPages,
@@ -229,6 +230,21 @@ describe("list-endpoint slimming", () => {
     expect(full?.task).toBe(longText);
     expect(full?.failureReason).toBe(longFailureReason);
     expect(full?.totalCostUsd).toBeCloseTo(0.0168, 6);
+  });
+
+  test("getAllTasks — slim scrubs a legacy unsanitized failure reason", async () => {
+    const task = await createTaskExtended("Legacy unsafe failure", { agentId: "slim-agent-1" });
+    const unsafeReason =
+      "Provider rejected ghp_abcdefghijklmnopqrstuvwxyz0123456789 while starting the task";
+    await getDbClient().run("UPDATE agent_tasks SET failureReason = ? WHERE id = ?", [
+      unsafeReason,
+      task.id,
+    ]);
+
+    const slim = (await getAllTasks({}, { slim: true })).find((item) => item.id === task.id);
+    expect(slim?.failureReason).toBe(
+      "Provider rejected [REDACTED:github_token] while starting the task",
+    );
   });
 
   test("listRecentSessions — slim root is a truncated task summary", async () => {
