@@ -40,10 +40,10 @@ Stable page ID: `{{PAGE_ID}}`
 
    ```bash
    BASE_DIR=/workspace/code-maat \
-   REPO_NAME={{REPORT_NAME}} \
-   REPO_URL={{REPO_URL}} \
-   BRANCH={{BRANCH}} \
-   SCOPE_PATH={{SCOPE_PATH}} \
+   REPO_NAME='{{REPORT_NAME}}' \
+   REPO_URL='{{REPO_URL}}' \
+   BRANCH='{{BRANCH}}' \
+   SCOPE_PATH='{{SCOPE_PATH}}' \
    bash /workspace/code-maat/run.sh
    ```
 

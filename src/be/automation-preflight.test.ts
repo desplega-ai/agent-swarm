@@ -193,12 +193,26 @@ describe("preflightAutomation", () => {
     expect(result.failureReason).toBeUndefined();
   });
 
-  test("rejects shell metacharacters in command-line automation parameters", () => {
+  test("rejects shell metacharacters and unsafe paths in shell-consumed parameters", () => {
     for (const [key, value] of [
       ["REPO_URL", "acme/widgets; touch /tmp/injected"],
       ["REPO_URL", "acme/widgets$(touch /tmp/injected)"],
       ["GSC_PROPERTY", "example.com; touch /tmp/injected"],
       ["GSC_PROPERTY", "example.com $(touch /tmp/injected)"],
+      ["BRANCH", "main; touch /tmp/injected"],
+      ["BRANCH", "main$(touch /tmp/injected)"],
+      ["SCOPE_PATH", "../secrets"],
+      ["SCOPE_PATH", "src/../../secrets"],
+      ["SCOPE_PATH", "src; touch /tmp/injected"],
+      ["SCOPE_PATH", "src$(touch /tmp/injected)"],
+      ["REPORT_NAME", "weekly; touch /tmp/injected"],
+      ["REPORT_NAME", "weekly$(touch /tmp/injected)"],
+      ["TAG_PATTERN", "v*; touch /tmp/injected"],
+      ["TAG_PATTERN", "v*$(touch /tmp/injected)"],
+      ["AGENT_FS_ORG_ID", "org; touch /tmp/injected"],
+      ["AGENT_FS_ORG_ID", "org$(touch /tmp/injected)"],
+      ["ORG_ID", "org; touch /tmp/injected"],
+      ["ORG_ID", "org$(touch /tmp/injected)"],
     ] as const) {
       const result = preflightAutomation(
         {
@@ -238,6 +252,32 @@ describe("preflightAutomation", () => {
 
       expect(result.state).toBe("running");
     }
+  });
+
+  test("accepts supported values for every shell-consumed automation parameter", () => {
+    const params = {
+      REPO_URL: "acme/widgets",
+      GSC_PROPERTY: "sc-domain:example.com https://docs.example.com/help/",
+      BRANCH: "release/v1.2.3",
+      SCOPE_PATH: "apps/web/src",
+      REPORT_NAME: "Weekly health report",
+      TAG_PATTERN: "v*",
+      AGENT_FS_ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+      ORG_ID: "648a5f3c-35c8-4f11-8673-b89de52cd6bd",
+    };
+    const result = preflightAutomation(
+      {
+        id: "all-safe-params",
+        name: "all-safe-params",
+        kind: "workflow",
+        params,
+        requiredParams: Object.keys(params),
+      },
+      { ...setup, github: "verified", slack: "verified" },
+    );
+
+    expect(result.state).toBe("running");
+    expect(result.missing.params).toEqual([]);
   });
 });
 

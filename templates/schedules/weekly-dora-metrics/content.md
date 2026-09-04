@@ -40,10 +40,10 @@ Stable page ID: `{{PAGE_ID}}`
 
    ```bash
    BASE_DIR=/workspace/dora-metrics \
-   REPO_NAME={{REPORT_NAME}} \
-   REPO_URL={{REPO_URL}} \
-   BRANCH={{BRANCH}} \
-   TAG_PATTERN={{TAG_PATTERN}} \
+   REPO_NAME='{{REPORT_NAME}}' \
+   REPO_URL='{{REPO_URL}}' \
+   BRANCH='{{BRANCH}}' \
+   TAG_PATTERN='{{TAG_PATTERN}}' \
    WINDOW_DAYS=90 \
    bash /workspace/dora-metrics/run.sh
    ```

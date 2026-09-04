@@ -61,6 +61,11 @@ const GITHUB_REPOSITORY_SLUG =
 const SAFE_SHELL_DATA = /^[A-Za-z0-9._~%/:@ -]+$/;
 const DNS_NAME =
   /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+const SAFE_EXTERNAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const SAFE_GIT_REF = /^(?!-)(?!.*(?:\.\.|@\{|\/\/))[A-Za-z0-9._/-]+$/;
+const SAFE_TAG_PATTERN = /^(?!-)(?!.*(?:\.\.|\/\/))[A-Za-z0-9._*?/-]+$/;
+const SAFE_RELATIVE_PATH = /^(?![-/])(?!.*(?:^|\/)\.\.(?:\/|$))[A-Za-z0-9._/-]+$/;
+const SAFE_REPORT_NAME = /^(?!\.{1,2}$)[A-Za-z0-9][A-Za-z0-9._ -]{0,127}$/;
 
 function isSafeRepository(value: string): boolean {
   if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value || value.includes(" ")) return false;
@@ -94,12 +99,22 @@ function isSafeGscProperty(value: string): boolean {
   });
 }
 
-/** Reject shell-active values for canonical params that templates pass to command-line tools. */
+const PARAM_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  REPO_URL: (value) => typeof value === "string" && isSafeRepository(value),
+  GSC_PROPERTY: (value) => typeof value === "string" && isSafeGscProperty(value),
+  BRANCH: (value) => typeof value === "string" && SAFE_GIT_REF.test(value),
+  SCOPE_PATH: (value) => typeof value === "string" && SAFE_RELATIVE_PATH.test(value),
+  REPORT_NAME: (value) =>
+    typeof value === "string" && value.trim() === value && SAFE_REPORT_NAME.test(value),
+  TAG_PATTERN: (value) => typeof value === "string" && SAFE_TAG_PATTERN.test(value),
+  AGENT_FS_ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+  ORG_ID: (value) => typeof value === "string" && SAFE_EXTERNAL_ID.test(value),
+};
+
+/** Validate every install parameter consumed by the seeded automation templates. */
 function isUsableParam(key: string, value: unknown): boolean {
   if (!hasValue(value)) return false;
-  if (key === "REPO_URL") return typeof value === "string" && isSafeRepository(value);
-  if (key === "GSC_PROPERTY") return typeof value === "string" && isSafeGscProperty(value);
-  return true;
+  return PARAM_VALIDATORS[key]?.(value) ?? true;
 }
 
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
@@ -142,9 +157,7 @@ export function preflightAutomation(
   setup: AutomationSetupStates,
 ): AutomationPreflightResult {
   const params = input.params ?? {};
-  const guardedParams = Object.keys(params).filter(
-    (key) => key === "REPO_URL" || key === "GSC_PROPERTY",
-  );
+  const guardedParams = Object.keys(params).filter((key) => key in PARAM_VALIDATORS);
   const missingParams = uniqueSorted(
     [...(input.requiredParams ?? []), ...guardedParams].filter(
       (key) => !isUsableParam(key, params[key]),
