@@ -428,10 +428,10 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
   });
 
   test("reroute-decision rejects cross-agent crash recovery", async () => {
-    const lead = createAgent({ name: "lead", isLead: true, status: "busy" });
+    const lead = await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { agent: originalOwner, original, r1 } = await seedPinnedCrash("flow-owner");
     const peer = await createAgent({ name: "adjacent-peer", isLead: false, status: "idle" });
-    const created = createRerouteDecisionTask({
+    const created = await createRerouteDecisionTask({
       original,
       staleResume: r1,
       reason: "crash_recovery",
@@ -470,7 +470,7 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
       tags: [`${RESUME_GENERATION_TAG_PREFIX}1`, CRASH_RECOVERY_PIN_TAG],
     });
     await supersedeTask(original.id, { reason: "crash", resumeTaskId: r1.id });
-    const created = createRerouteDecisionTask({
+    const created = await createRerouteDecisionTask({
       original: (await getTaskById(original.id))!,
       staleResume: r1,
       reason: "crash_recovery",

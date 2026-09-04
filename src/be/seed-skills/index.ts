@@ -539,7 +539,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       existing.systemDefault,
       liveFiles,
       existing.userInvocable,
-      existing.scope,
+      item.skill.scope,
     );
   },
 
