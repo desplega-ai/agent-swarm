@@ -2327,7 +2327,6 @@ export interface FeedbackInput {
   newsletter_consent: boolean;
   nps?: 1 | 2 | 3 | 4 | 5;
   message?: string;
-  user_id: string;
 }
 
 export interface StatusActivity {

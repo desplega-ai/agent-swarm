@@ -15218,15 +15218,10 @@
                   "message": {
                     "type": "string",
                     "maxLength": 10000
-                  },
-                  "user_id": {
-                    "type": "string",
-                    "minLength": 1
                   }
                 },
                 "required": [
-                  "newsletter_consent",
-                  "user_id"
+                  "newsletter_consent"
                 ]
               }
             }

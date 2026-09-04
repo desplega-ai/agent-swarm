@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { z } from "zod";
 import { createFeedbackSubmission, relayPendingFeedback } from "../feedback";
+import { getRequestAuth } from "../utils/request-auth-context";
 import { route } from "./route-def";
 import { jsonError } from "./utils";
 
@@ -16,7 +17,6 @@ const createFeedbackRoute = route({
     newsletter_consent: z.boolean(),
     nps: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)]).optional(),
     message: z.string().trim().max(10_000).optional(),
-    user_id: z.string().min(1),
   }),
   responses: {
     202: {
@@ -30,7 +30,7 @@ const createFeedbackRoute = route({
   auth: { apiKey: true },
   rbac: {
     ungated:
-      "self-scoped: any authenticated console user submits their own feedback; no role or permission is implied",
+      "any authenticated caller may submit feedback; user attribution comes only from a user-bound bearer",
   },
 });
 
@@ -45,7 +45,9 @@ export async function handleFeedback(
   if (!parsed) return true;
 
   try {
-    const submissionId = await createFeedbackSubmission(parsed.body);
+    const auth = getRequestAuth(req);
+    const userId = auth?.kind === "user" ? auth.userId : null;
+    const submissionId = await createFeedbackSubmission(parsed.body, userId);
     createFeedbackRoute.respond(res, 202, { success: true, submission_id: submissionId });
     void relayPendingFeedback().catch((error) => {
       console.warn(

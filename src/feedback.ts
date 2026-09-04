@@ -14,7 +14,6 @@ export interface FeedbackInput {
   newsletter_consent: boolean;
   nps?: 1 | 2 | 3 | 4 | 5;
   message?: string;
-  user_id: string;
 }
 
 export interface FeedbackPayload {
@@ -24,7 +23,7 @@ export interface FeedbackPayload {
   newsletter_consent: boolean;
   nps: number | null;
   message: string | null;
-  user_id: string;
+  user_id: string | null;
   install_id: string;
   swarm_version: string;
   org_name: string | null;
@@ -39,7 +38,7 @@ interface FeedbackRow {
   newsletter_consent: number;
   nps: number | null;
   message: string | null;
-  user_id: string;
+  user_id: string | null;
   install_id: string;
   swarm_version: string;
   org_name: string | null;
@@ -79,6 +78,7 @@ function rowToPayload(row: FeedbackRow): FeedbackPayload {
 
 export async function createFeedbackSubmission(
   input: FeedbackInput,
+  userId: string | null,
   now = new Date().toISOString(),
 ): Promise<string> {
   const id = randomUUID();
@@ -96,7 +96,7 @@ export async function createFeedbackSubmission(
       input.newsletter_consent ? 1 : 0,
       input.nps ?? null,
       optionalText(input.message),
-      input.user_id,
+      userId,
       identity.installId,
       pkg.version,
       optionalText(process.env.SWARM_ORG_NAME),
@@ -105,8 +105,8 @@ export async function createFeedbackSubmission(
       now,
       now,
       now,
-      input.user_id,
-      input.user_id,
+      userId,
+      userId,
     ],
   );
   return id;

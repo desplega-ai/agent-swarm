@@ -63,7 +63,6 @@ export function FeedbackDialog() {
         newsletter_consent: newsletterConsent,
         nps,
         message: message || undefined,
-        user_id: currentUser.userId,
       },
       {
         onSuccess: () => {

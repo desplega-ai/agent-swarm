@@ -5498,7 +5498,6 @@ export interface paths {
                         newsletter_consent: boolean;
                         nps?: 1 | 2 | 3 | 4 | 5;
                         message?: string;
-                        user_id: string;
                     };
                 };
             };

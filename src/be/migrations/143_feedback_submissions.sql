@@ -6,7 +6,7 @@ CREATE TABLE feedback_submissions (
     CHECK (newsletter_consent IN (0, 1)),
   nps INTEGER CHECK (nps BETWEEN 1 AND 5),
   message TEXT,
-  user_id TEXT NOT NULL,
+  user_id TEXT,
   install_id TEXT NOT NULL,
   swarm_version TEXT NOT NULL,
   org_name TEXT,

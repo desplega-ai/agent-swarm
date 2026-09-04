@@ -1,9 +1,57 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
-import { closeDb, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
+import { Readable } from "node:stream";
+import { closeDb, createUser, getDbClient, initDb, upsertSwarmConfig } from "../be/db";
 import { createFeedbackSubmission, relayPendingFeedback } from "../feedback";
+import { handleFeedback } from "../http/feedback";
+import { getPathSegments, parseQueryParams } from "../http/utils";
+import { setRequestAuth } from "../utils/request-auth-context";
 
 const TEST_DB_PATH = "./test-feedback.sqlite";
+
+function jsonReq(body: unknown) {
+  const req = Readable.from([Buffer.from(JSON.stringify(body))]) as Readable & {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+  };
+  req.method = "POST";
+  req.url = "/api/feedback";
+  req.headers = { "content-type": "application/json" };
+  return req;
+}
+
+function resRecorder() {
+  let statusCode = 200;
+  const chunks: string[] = [];
+  return {
+    res: {
+      setHeader: () => {},
+      writeHead: (code: number) => {
+        statusCode = code;
+      },
+      end: (chunk?: string) => {
+        if (chunk) chunks.push(chunk);
+      },
+    },
+    result: () => ({
+      statusCode,
+      body: chunks.length > 0 ? JSON.parse(chunks.join("")) : null,
+    }),
+  };
+}
+
+async function waitForRelay(id: string) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const row = await getDbClient().get<{ relayed_at: string | null }>(
+      "SELECT relayed_at FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
+    if (row?.relayed_at) return;
+    await Bun.sleep(10);
+  }
+  throw new Error(`Feedback relay did not finish for ${id}`);
+}
 
 async function removeDbFiles() {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -33,6 +81,55 @@ afterAll(async () => {
 });
 
 describe("feedback relay", () => {
+  test("binds feedback to the authenticated user instead of a client-supplied user ID", async () => {
+    process.env.FEEDBACK_ENDPOINT = "data:text/plain,ok";
+    const user = await createUser({ name: "Authenticated Feedback User" });
+    const req = jsonReq({
+      newsletter_consent: false,
+      message: "Secure attribution",
+      user_id: "user_another_person",
+    });
+    setRequestAuth(req, { kind: "user", userId: user.id, user });
+    const recorder = resRecorder();
+
+    await handleFeedback(
+      req,
+      recorder.res as never,
+      getPathSegments(req.url),
+      parseQueryParams(req.url),
+    );
+
+    expect(recorder.result()).toMatchObject({ statusCode: 202, body: { success: true } });
+    const row = await getDbClient().get<{ user_id: string | null; created_by: string | null }>(
+      "SELECT user_id, created_by FROM feedback_submissions WHERE id = ?",
+      [recorder.result().body.submission_id],
+    );
+    expect(row).toEqual({ user_id: user.id, created_by: user.id });
+    await waitForRelay(recorder.result().body.submission_id);
+  });
+
+  test("keeps shared operator-key feedback unattributed", async () => {
+    process.env.FEEDBACK_ENDPOINT = "data:text/plain,ok";
+    const req = jsonReq({ newsletter_consent: false, user_id: "user_spoofed" });
+    setRequestAuth(req, { kind: "operator", fingerprint: "op:test-feedback" });
+    const recorder = resRecorder();
+
+    await handleFeedback(
+      req,
+      recorder.res as never,
+      getPathSegments(req.url),
+      parseQueryParams(req.url),
+    );
+
+    expect(recorder.result()).toMatchObject({ statusCode: 202, body: { success: true } });
+    const row = await getDbClient().get<{ user_id: string | null; created_by: string | null }>(
+      "SELECT user_id, created_by FROM feedback_submissions WHERE id = ?",
+      [recorder.result().body.submission_id],
+    );
+    expect(row).toEqual({ user_id: null, created_by: null });
+    await waitForRelay(recorder.result().body.submission_id);
+  });
+
   test("persists optional fields and relays the enriched contract", async () => {
     process.env.SWARM_ORG_NAME = "Acme";
     const submittedAt = "2026-09-03T12:00:00.000Z";
@@ -49,8 +146,8 @@ describe("feedback relay", () => {
         newsletter_consent: true,
         nps: 5,
         message: " Great tool ",
-        user_id: "user_ada",
       },
+      "user_ada",
       submittedAt,
     );
 
@@ -88,10 +185,7 @@ describe("feedback relay", () => {
 
   test("does not fabricate an install date when feedback mints a missing install ID", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    const id = await createFeedbackSubmission(
-      { newsletter_consent: false, user_id: "user_1" },
-      submittedAt,
-    );
+    const id = await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
 
     const row = await getDbClient().get<{ install_id: string; installed_at: string | null }>(
       "SELECT install_id, installed_at FROM feedback_submissions WHERE id = ?",
@@ -108,10 +202,7 @@ describe("feedback relay", () => {
 
   test("keeps a retryable non-2xx submission local and backs off before retry", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    const id = await createFeedbackSubmission(
-      { newsletter_consent: false, user_id: "user_1" },
-      submittedAt,
-    );
+    const id = await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
 
     const failed = await relayPendingFeedback({
       now: new Date(submittedAt),
@@ -144,10 +235,7 @@ describe("feedback relay", () => {
 
   test("accepts a 202 as success, same as 204", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    const id = await createFeedbackSubmission(
-      { newsletter_consent: false, user_id: "user_1" },
-      submittedAt,
-    );
+    const id = await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
 
     const result = await relayPendingFeedback({
       now: new Date(submittedAt),
@@ -164,10 +252,7 @@ describe("feedback relay", () => {
 
   test("marks a 400 terminal and never retries it again", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    const id = await createFeedbackSubmission(
-      { newsletter_consent: false, user_id: "user_1" },
-      submittedAt,
-    );
+    const id = await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
 
     const result = await relayPendingFeedback({
       now: new Date(submittedAt),
@@ -203,10 +288,7 @@ describe("feedback relay", () => {
 
   test("treats a 429 as retryable, not terminal", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    const id = await createFeedbackSubmission(
-      { newsletter_consent: false, user_id: "user_1" },
-      submittedAt,
-    );
+    const id = await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
 
     const result = await relayPendingFeedback({
       now: new Date(submittedAt),
@@ -244,7 +326,7 @@ describe("feedback relay", () => {
 
   test("claims a due row once across overlapping relay sweeps", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
-    await createFeedbackSubmission({ newsletter_consent: false, user_id: "user_1" }, submittedAt);
+    await createFeedbackSubmission({ newsletter_consent: false }, "user_1", submittedAt);
     let sends = 0;
     const fetchImpl: typeof fetch = async () => {
       sends += 1;
