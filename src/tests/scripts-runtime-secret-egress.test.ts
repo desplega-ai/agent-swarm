@@ -5,8 +5,13 @@ import {
 } from "../scripts-runtime/egress-secrets";
 import { runScript } from "../scripts-runtime/loader";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 const savedEnv = { ...process.env };
+// Every test in the "runtime secret egress" block below calls runScript(),
+// which shells out via Bun.spawn. The egress-substitution block below it is
+// pure JS (mocked fetch) and stays on plain `test`.
+const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 beforeEach(() => {
   process.env.AGENT_SWARM_API_KEY = "runtime-egress-secret-1234567890";
@@ -25,7 +30,7 @@ afterEach(() => {
 });
 
 describe("runtime secret egress", () => {
-  test("scrubObject catches unwrapped returned config secrets", async () => {
+  spawnTest("scrubObject catches unwrapped returned config secrets", async () => {
     const output = await runScript({
       agentId: "agent-1",
       resources: { memoryMb: 2048 },
@@ -36,7 +41,7 @@ describe("runtime secret egress", () => {
     expect(output.result).toEqual({ leaked: "[REDACTED:AGENT_SWARM_API_KEY]" });
   });
 
-  test("wrapped config values stringify to redacted in the result file", async () => {
+  spawnTest("wrapped config values stringify to redacted in the result file", async () => {
     const output = await runScript({
       agentId: "agent-1",
       resources: { memoryMb: 2048 },
@@ -46,7 +51,7 @@ describe("runtime secret egress", () => {
     expect(output.result).toEqual({ wrapped: "<redacted>" });
   });
 
-  test("drops unresolved placeholder headers when no credentials resolve", async () => {
+  spawnTest("drops unresolved placeholder headers when no credentials resolve", async () => {
     delete process.env.GITHUB_TOKEN;
     let observedAuthorization: string | null = null;
     const server = Bun.serve({

@@ -100,6 +100,7 @@
     "check:script-types": "bash scripts/check-script-types-freshness.sh",
     "check:audit-columns": "bash scripts/check-audit-columns.sh",
     "check:bun-version": "bun scripts/check-bun-version.ts",
+    "check:sandbox-spawn-skip-list": "bash scripts/check-sandbox-spawn-skip-list.sh",
     "lint:structure": "konsistent check",
     "prepare-release": "bun scripts/prepare-release.ts",
     "refresh:vendored-openapi": "bun scripts/refresh-vendored-openapi.ts",
