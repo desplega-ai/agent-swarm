@@ -20,6 +20,7 @@
     "external-apis",
     "fs",
     "favorites",
+    "feedback",
     "heartbeat",
     "inbox-state",
     "integrations",

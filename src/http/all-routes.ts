@@ -24,6 +24,7 @@ import "./ecosystem";
 import "./api-keys";
 import "./events";
 import "./favorites";
+import "./feedback";
 import "./fs";
 import "./heartbeat";
 import "./inbox-state";

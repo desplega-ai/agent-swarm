@@ -36,6 +36,7 @@ import type {
   FavoriteItemType,
   FavoriteSetResponse,
   FavoritesResponse,
+  FeedbackInput,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -570,6 +571,17 @@ class ApiClient {
     // hide the home page + sidebar entry instead of erroring.
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
+    return res.json();
+  }
+
+  async submitFeedback(data: FeedbackInput): Promise<{ success: true; submission_id: string }> {
+    const url = `${this.getBaseUrl()}/api/feedback`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: this.getHeaders(),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(`Failed to submit feedback: ${res.status}`);
     return res.json();
   }
 

@@ -25,6 +25,7 @@ import {
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { startFeedbackRelay, stopFeedbackRelay } from "../feedback";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -63,6 +64,7 @@ import { handleDbQuery } from "./db-query";
 import { handleEcosystem } from "./ecosystem";
 import { handleEvents } from "./events";
 import { handleFavorites } from "./favorites";
+import { handleFeedback } from "./feedback";
 import { handleFs } from "./fs";
 import { handleHeartbeat } from "./heartbeat";
 import { handleInboxState } from "./inbox-state";
@@ -350,6 +352,7 @@ const httpServer = createHttpServer(async (req, res) => {
         () => handleApiKeys(req, res, pathSegments, queryParams),
         () => handleHeartbeat(req, res, pathSegments),
         () => handleEvents(req, res, pathSegments, queryParams, myAgentId),
+        () => handleFeedback(req, res, pathSegments, queryParams),
         () => handleFavorites(req, res, pathSegments, queryParams, myAgentId),
         () => handleUsers(req, res, pathSegments, queryParams),
         () => handleSessions(req, res, pathSegments, queryParams),
@@ -452,6 +455,8 @@ async function shutdown() {
 
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
+
+  stopFeedbackRelay();
 
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
@@ -629,6 +634,7 @@ httpServer
     if (process.env.GITHUB_TOKEN) {
       await emitBuiltInIntegrationConnectedOnce("github");
     }
+    startFeedbackRelay();
 
     // Start Slack bot (if configured)
     await startSlackApp();

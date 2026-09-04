@@ -15152,6 +15152,145 @@
         }
       }
     },
+    "/api/feedback": {
+      "post": {
+        "summary": "Store an explicit feedback submission and queue it for relay",
+        "tags": [
+          "Feedback"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320,
+                    "format": "email"
+                  },
+                  "newsletter_consent": {
+                    "type": "boolean"
+                  },
+                  "nps": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "enum": [
+                          1
+                        ]
+                      },
+                      {
+                        "type": "number",
+                        "enum": [
+                          2
+                        ]
+                      },
+                      {
+                        "type": "number",
+                        "enum": [
+                          3
+                        ]
+                      },
+                      {
+                        "type": "number",
+                        "enum": [
+                          4
+                        ]
+                      },
+                      {
+                        "type": "number",
+                        "enum": [
+                          5
+                        ]
+                      }
+                    ]
+                  },
+                  "message": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  "user_id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "newsletter_consent",
+                  "user_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Feedback stored locally and queued for relay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    },
+                    "submission_id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "submission_id"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Persistence error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/fs/capabilities": {
       "get": {
         "summary": "Get active file-storage provider capabilities",
@@ -37546,6 +37685,12 @@
                         "is_cloud": {
                           "type": "boolean"
                         },
+                        "installed_at": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "marketing_url": {
                           "type": [
                             "string",
@@ -37567,6 +37712,7 @@
                         "logo_url",
                         "brand_color",
                         "is_cloud",
+                        "installed_at",
                         "marketing_url",
                         "hide_cloud_promo",
                         "org_id"

@@ -5472,6 +5472,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Store an explicit feedback submission and queue it for relay */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        /** Format: email */
+                        email?: string;
+                        newsletter_consent: boolean;
+                        nps?: 1 | 2 | 3 | 4 | 5;
+                        message?: string;
+                        user_id: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Feedback stored locally and queued for relay */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @enum {boolean} */
+                            success: true;
+                            submission_id: string;
+                        };
+                    };
+                };
+                /** @description Validation error */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Unauthorized */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Persistence error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fs/capabilities": {
         parameters: {
             query?: never;
@@ -14799,6 +14878,7 @@ export interface paths {
                                 logo_url: string | null;
                                 brand_color: string | null;
                                 is_cloud: boolean;
+                                installed_at: string | null;
                                 marketing_url: string | null;
                                 hide_cloud_promo: boolean;
                                 org_id: string | null;

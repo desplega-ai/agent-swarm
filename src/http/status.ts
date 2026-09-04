@@ -27,6 +27,7 @@ import {
 } from "../be/db";
 import { getOAuthApp, getOAuthTokens } from "../be/db-queries/oauth";
 import { getFileStorageProvider } from "../fs/registry";
+import { readInstallationIdentity } from "../installation-identity";
 import { type AgentCredStatus, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -86,6 +87,7 @@ export const StatusIdentitySchema = z.object({
   logo_url: z.string().nullable(),
   brand_color: z.string().nullable(),
   is_cloud: z.boolean(),
+  installed_at: z.string().nullable(),
   marketing_url: z.string().nullable(),
   hide_cloud_promo: z.boolean(),
   /**
@@ -240,14 +242,16 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
 
 // ─── Identity ────────────────────────────────────────────────────────────────
 
-function buildIdentity(): StatusIdentity {
+async function buildIdentity(): Promise<StatusIdentity> {
   const cloudRaw = process.env.SWARM_CLOUD;
   const hideRaw = process.env.SWARM_HIDE_CLOUD_PROMO;
+  const { installedAt } = await readInstallationIdentity();
   return {
     name: process.env.SWARM_ORG_NAME?.trim() || "Swarm",
     logo_url: process.env.SWARM_ORG_LOGO_URL?.trim() || null,
     brand_color: process.env.SWARM_BRAND_COLOR?.trim() || null,
     is_cloud: cloudRaw === "true" || cloudRaw === "1",
+    installed_at: installedAt,
     marketing_url: process.env.SWARM_MARKETING_URL?.trim() || null,
     hide_cloud_promo: hideRaw === "true" || hideRaw === "1",
     org_id: process.env.SWARM_ORG_ID?.trim() || null,
@@ -572,7 +576,7 @@ export function computeHealth(setup: SetupMilestone[]): StatusHealth {
 export async function buildStatusPayload(): Promise<StatusResponse> {
   const setup = await buildSetup();
   return {
-    identity: buildIdentity(),
+    identity: await buildIdentity(),
     setup,
     activity: await getInstanceActivity(),
     agent_fs: {

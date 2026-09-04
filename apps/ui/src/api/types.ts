@@ -2314,10 +2314,20 @@ export interface StatusIdentity {
   logo_url: string | null;
   brand_color: string | null;
   is_cloud: boolean;
+  installed_at: string | null;
   marketing_url: string | null;
   hide_cloud_promo: boolean;
   /** Stable org/tenant identifier (set via `SWARM_ORG_ID`); null on self-host. */
   org_id: string | null;
+}
+
+export interface FeedbackInput {
+  name?: string;
+  email?: string;
+  newsletter_consent: boolean;
+  nps?: 1 | 2 | 3 | 4 | 5;
+  message?: string;
+  user_id: string;
 }
 
 export interface StatusActivity {
