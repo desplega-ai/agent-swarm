@@ -1226,6 +1226,74 @@ describe("Heartbeat Triage", () => {
       }
     });
 
+    test("skips in_progress task claimed after boot even with no session", async () => {
+      const bootTime = Date.now() - 10_000; // booted 10s ago
+      const original = gs.__runId;
+      gs.__runId = `run_${bootTime}`;
+
+      try {
+        const agent = await createAgent({ name: "worker-postboot", isLead: false, status: "busy" });
+        const task = await createTaskExtended("Task claimed after boot", { agentId: agent.id });
+        await startTask(task.id);
+
+        // Claimed 1s ago: after boot, and backdated past the same-ms cutoff of
+        // getStalledInProgressTasks(0). No active session yet: the worker is
+        // still inside the provider spawn.
+        const claimedAt = new Date(Date.now() - 1000).toISOString();
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          claimedAt,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        const updated = await getTaskById(task.id);
+        expect(updated?.status).toBe("in_progress");
+        const retries = await getDbClient().query(
+          "SELECT * FROM agent_tasks WHERE parentTaskId = ?",
+          [task.id],
+        );
+        expect(retries.length).toBe(0);
+        expect(getRebootAffectedTasks().length).toBe(0);
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
+    test("auto-fails in_progress task claimed before boot with no session", async () => {
+      const bootTime = Date.now();
+      const original = gs.__runId;
+      gs.__runId = `run_${bootTime}`;
+
+      try {
+        const agent = await createAgent({
+          name: "worker-preboot-nosession",
+          isLead: false,
+          status: "busy",
+        });
+        const task = await createTaskExtended("Task claimed before boot", { agentId: agent.id });
+        await startTask(task.id);
+
+        const claimedAt = new Date(bootTime - 60_000).toISOString();
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          claimedAt,
+          task.id,
+        ]);
+
+        await runRebootSweep();
+
+        const updated = await getTaskById(task.id);
+        expect(updated?.status).toBe("failed");
+        expect(updated?.failureReason).toContain("reboot sweep");
+        const affected = getRebootAffectedTasks();
+        expect(affected.length).toBe(1);
+        expect(affected[0]!.original.id).toBe(task.id);
+        expect(affected[0]!.retryTaskId).not.toBeNull();
+      } finally {
+        gs.__runId = original;
+      }
+    });
+
     test("falls back to legacy skip-when-session-exists when __runId is missing", async () => {
       const original = gs.__runId;
       delete gs.__runId;

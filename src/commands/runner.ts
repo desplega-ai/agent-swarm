@@ -5513,6 +5513,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Per-task runner session ID so session logs are scoped to this task
         const resumeRunnerSessionId = crypto.randomUUID();
 
+        // Register the active session BEFORE the provider spawn so the API's
+        // sweeps never see this in_progress task without a session row (see
+        // the main task path for the full rationale).
+        await registerActiveSession(apiConfig, {
+          taskId: task.id,
+          triggerType: "task_resumed",
+          taskDescription: task.task?.slice(0, 200),
+          runnerSessionId: resumeRunnerSessionId,
+        });
+
         let runningTask: RunningTask;
         try {
           runningTask = await spawnProviderProcess(
@@ -5558,21 +5568,11 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
             undefined,
             state.harnessProvider,
           );
+          await removeActiveSession(apiConfig, task.id);
           continue;
         }
 
         state.activeTasks.set(task.id, runningTask);
-        registerActiveSession(apiConfig, {
-          taskId: task.id,
-          triggerType: "task_resumed",
-          taskDescription: task.task?.slice(0, 200),
-          runnerSessionId: resumeRunnerSessionId,
-        }).catch((err) =>
-          console.error(
-            "[runner] active-session registration failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
         console.log(
           `[${role}] Resumed task ${task.id.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active)`,
         );
@@ -6061,6 +6061,25 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
         // Per-task runner session ID so session logs are scoped to this task
         const taskRunnerSessionId = crypto.randomUUID();
 
+        // Register the active session BEFORE the provider spawn. The API's
+        // reboot sweep and stalled-task sweeps treat an in_progress task with
+        // no session row as orphaned, and a cold opencode spawn can take
+        // longer than the 5s post-boot sweep delay. The provider session id is
+        // filled in on `session_init` (saveProviderSessionId). Pool triggers
+        // with no task id get their synthetic session after the spawn below.
+        const taskDesc =
+          trigger.task && typeof trigger.task === "object" && "task" in trigger.task
+            ? String((trigger.task as { task: string }).task).slice(0, 200)
+            : undefined;
+        if (trigger.taskId) {
+          await registerActiveSession(apiConfig, {
+            taskId: trigger.taskId,
+            triggerType: trigger.type,
+            taskDescription: taskDesc,
+            runnerSessionId: taskRunnerSessionId,
+          });
+        }
+
         // Spawn without blocking (await to set up session, but process runs async)
         let runningTask: RunningTask;
         try {
@@ -6105,6 +6124,7 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               undefined,
               state.harnessProvider,
             );
+            await removeActiveSession(apiConfig, trigger.taskId);
           }
           continue;
         }
@@ -6139,22 +6159,21 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
 
         state.activeTasks.set(runningTask.taskId, runningTask);
 
-        // Register active session for concurrency awareness
-        const taskDesc =
-          trigger.task && typeof trigger.task === "object" && "task" in trigger.task
-            ? String((trigger.task as { task: string }).task).slice(0, 200)
-            : undefined;
-        registerActiveSession(apiConfig, {
-          taskId: runningTask.taskId,
-          triggerType: trigger.type,
-          taskDescription: taskDesc,
-          runnerSessionId: taskRunnerSessionId,
-        }).catch((err) =>
-          console.error(
-            "[runner] active-session registration failed:",
-            scrubSecrets(err instanceof Error ? err.message : String(err)),
-          ),
-        );
+        // Pool triggers have no task id before the spawn; their session is
+        // keyed on the synthetic id `spawnProviderProcess` minted.
+        if (!trigger.taskId) {
+          registerActiveSession(apiConfig, {
+            taskId: runningTask.taskId,
+            triggerType: trigger.type,
+            taskDescription: taskDesc,
+            runnerSessionId: taskRunnerSessionId,
+          }).catch((err) =>
+            console.error(
+              "[runner] active-session registration failed:",
+              scrubSecrets(err instanceof Error ? err.message : String(err)),
+            ),
+          );
+        }
 
         console.log(
           `[${role}] Started task ${runningTask.taskId.slice(0, 8)} (${state.activeTasks.size}/${state.maxConcurrent} active, trigger: ${trigger.type})`,

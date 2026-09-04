@@ -131,6 +131,28 @@ const MODEL_CACHE_REFRESH_TIMEOUT_MS = 15_000;
 // OPENCODE_SERVER_TIMEOUT_MS.
 const DEFAULT_SERVER_START_TIMEOUT_MS = 30_000;
 
+function serverStartTimeoutMs(): number {
+  return Number(process.env.OPENCODE_SERVER_TIMEOUT_MS) || DEFAULT_SERVER_START_TIMEOUT_MS;
+}
+
+/** Reject with `message` if `promise` has not settled within `ms`. */
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // The abandoned promise may still settle later; keep it from surfacing
+      // as an unhandled rejection.
+      promise.catch(() => {});
+      reject(new Error(message));
+    }, ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function isOpenRouterModel(model: string | undefined): boolean {
   return Boolean(model?.toLowerCase().startsWith("openrouter/"));
 }
@@ -872,7 +894,7 @@ export class OpencodeAdapter implements ProviderAdapter {
       ({ client, server } = await createOpencode({
         hostname: "127.0.0.1",
         port: 0,
-        timeout: Number(process.env.OPENCODE_SERVER_TIMEOUT_MS) || DEFAULT_SERVER_START_TIMEOUT_MS,
+        timeout: serverStartTimeoutMs(),
         config: opencodeConfig,
       }));
     } finally {
@@ -892,8 +914,23 @@ export class OpencodeAdapter implements ProviderAdapter {
       }
     }
 
-    // Create the opencode session (project directory = config.cwd)
-    const createResult = await client.session.create({ query: { directory: config.cwd } });
+    // Create the opencode session (project directory = config.cwd). The first
+    // session in a fresh data home installs plugins and fetches the models
+    // list, and on a cold container that call has hung with no opencode events
+    // at all. Bound it with the same budget as the server start so a hang
+    // fails fast as a spawn failure instead of stalling the worker.
+    const sessionCreateTimeoutMs = serverStartTimeoutMs();
+    let createResult: Awaited<ReturnType<typeof client.session.create>>;
+    try {
+      createResult = await withTimeout(
+        client.session.create({ query: { directory: config.cwd } }),
+        sessionCreateTimeoutMs,
+        `opencode session create timed out after ${sessionCreateTimeoutMs}ms`,
+      );
+    } catch (err) {
+      server.close();
+      throw err;
+    }
     if (!createResult.data) {
       server.close();
       throw new Error("Failed to create opencode session");
