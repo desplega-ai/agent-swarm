@@ -66,7 +66,9 @@ export function FieldRenderer({
   // Secrets (tokens, API keys, webhook secrets): show masked read-only + Replace
   // until the user opts in. Non-secret values (emails, channel names, flags)
   // are shown in plaintext and edited in place — they're not sensitive.
-  const existingMasked = field.isSecret === true && existingConfig !== undefined;
+  const writeOnlyValuePresent = field.writeOnly === true && inEnv;
+  const existingMasked =
+    field.isSecret === true && (existingConfig !== undefined || writeOnlyValuePresent);
   const showMaskedReadOnly = existingMasked && !markedForReplace;
 
   const poolSize =
@@ -86,26 +88,33 @@ export function FieldRenderer({
   // swarm_config". When both are true the DB row was already loaded into env at
   // boot (or env set and DB row match) — either way it's live.
   const inDb = existingConfig !== undefined;
-  const sourceChip: { label: string; className: string; title: string } | null = inDb
-    ? inEnv
+  const sourceChip: { label: string; className: string; title: string } | null =
+    writeOnlyValuePresent
       ? {
-          label: "db+env",
+          label: "api-managed",
           className: "bg-status-success/10 text-status-success-strong border-status-success/30",
-          title: "Set in DB and loaded into process.env. Live on the server.",
+          title: "Set on the API server. The value is write-only; use Replace to rotate it.",
         }
-      : {
-          label: "db (pending reload)",
-          className: "bg-status-active/10 text-status-active-strong border-status-active/30",
-          title: "Saved to DB but not yet in process.env — reload or restart the API to apply.",
-        }
-    : inEnv
-      ? {
-          label: "env (deploy)",
-          className: "bg-status-info/10 text-status-info-strong border-status-info/30",
-          title:
-            "Set via deployment env (.env / docker). No DB row — save here to persist across DB reloads.",
-        }
-      : null;
+      : inDb
+        ? inEnv
+          ? {
+              label: "db+env",
+              className: "bg-status-success/10 text-status-success-strong border-status-success/30",
+              title: "Set in DB and loaded into process.env. Live on the server.",
+            }
+          : {
+              label: "db (pending reload)",
+              className: "bg-status-active/10 text-status-active-strong border-status-active/30",
+              title: "Saved to DB but not yet in process.env — reload or restart the API to apply.",
+            }
+        : inEnv
+          ? {
+              label: "env (deploy)",
+              className: "bg-status-info/10 text-status-info-strong border-status-info/30",
+              title:
+                "Set via deployment env (.env / docker). No DB row — save here to persist across DB reloads.",
+            }
+          : null;
 
   return (
     <div className="space-y-1.5">

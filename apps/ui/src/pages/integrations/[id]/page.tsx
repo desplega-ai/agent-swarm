@@ -274,6 +274,24 @@ function IntegrationDetailInner({
     const saveResult = await upsertBatch.mutateAsync(dirtyEntries);
     if (saveResult.failureCount > 0) return; // upsertBatch already surfaced the error toast
 
+    const savedWriteOnlyKeys = new Set(
+      allFields
+        .filter((field) => field.writeOnly)
+        .map((field) => field.key)
+        .filter((key) => dirtyEntries.some((entry) => entry.key === key)),
+    );
+    if (savedWriteOnlyKeys.size > 0) {
+      setState((previous) => ({
+        ...previous,
+        ...Object.fromEntries(
+          [...savedWriteOnlyKeys].map((key) => [
+            key,
+            { value: SECRET_MASK_SENTINEL, markedForReplace: false },
+          ]),
+        ),
+      }));
+    }
+
     // Auto-install skills flagged installOnSetup so operators don't need a
     // separate visit to /settings/skills after configuring the integration.
     const autoInstallSkills =
@@ -307,7 +325,7 @@ function IntegrationDetailInner({
     } catch {
       // reload hook surfaces its own error toast
     }
-  }, [hasDirty, dirtyEntries, upsertBatch, reloadConfig, def, installRemoteSkill]);
+  }, [hasDirty, dirtyEntries, upsertBatch, reloadConfig, def, installRemoteSkill, allFields]);
 
   // Cmd/Ctrl+S = Save. We intentionally let it fire even when focus is inside
   // a textarea (private keys, etc.) — users expect cmd+S universally and can
@@ -342,7 +360,7 @@ function IntegrationDetailInner({
   }
 
   function handleReset() {
-    const keys = allFields.map((f) => f.key);
+    const keys = allFields.filter((f) => !f.writeOnly).map((f) => f.key);
     if (def.disableKey) keys.push(def.disableKey);
     deleteBatch.mutate({ configs, keys });
     setConfirmResetOpen(false);
@@ -561,9 +579,9 @@ function IntegrationDetailInner({
           <AlertDialogHeader>
             <AlertDialogTitle>Reset {def.name} integration?</AlertDialogTitle>
             <AlertDialogDescription>
-              This deletes every configuration key for this integration
+              This deletes every dashboard-managed configuration key for this integration
               {def.disableKey ? ` (including ${def.disableKey})` : ""}. You'll be able to
-              reconfigure from scratch.
+              reconfigure them from scratch. API-managed write-only credentials are preserved.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

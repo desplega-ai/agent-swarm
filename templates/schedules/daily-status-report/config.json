@@ -1,0 +1,14 @@
+{
+  "kind": "schedule",
+  "name": "daily-status-report",
+  "displayName": "Daily Status Report",
+  "slug": "daily-status-report",
+  "title": "Daily Status Report",
+  "description": "Summarize swarm health and the automations waiting for setup.",
+  "version": "1.0.0",
+  "category": "schedules",
+  "placeholders": [],
+  "requires": [],
+  "runAllSeedersCandidate": true,
+  "tags": ["operations", "status", "digest"]
+}

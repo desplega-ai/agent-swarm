@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "alerts-triage",
+  "displayName": "Alerts Triage",
+  "slug": "alerts-triage",
+  "title": "Alerts Triage",
+  "description": "Triage eligible Slack alerts and route only verified, actionable incidents.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["ALERTS_CHANNEL_ID"],
+  "requires": ["slack"],
+  "runAllSeedersCandidate": true,
+  "tags": ["slack", "alerts", "triage"]
+}

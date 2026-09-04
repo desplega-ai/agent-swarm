@@ -41,6 +41,7 @@ import type {
   WorkflowRunStatus,
   WorkflowVersion,
 } from "@/api/types";
+import { AutomationParamsFields } from "@/components/automations/automation-params-fields";
 import { AgentLink } from "@/components/shared/agent-link";
 import { CollapsibleDescription } from "@/components/shared/collapsible-description";
 import { CopyableField, CopyIconButton, SecretField } from "@/components/shared/copyable-fields";
@@ -59,6 +60,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -69,6 +71,7 @@ import { JsonTree } from "@/components/workflows/json-tree";
 import { WorkflowGraph } from "@/components/workflows/workflow-graph";
 import { useTheme } from "@/hooks/use-theme";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { isAutomationSetupError } from "@/lib/automation-setup";
 import { getConfig } from "@/lib/config";
 import { modelTierLabel } from "@/lib/model-tiers";
 import { monacoDarkTheme, monacoLightTheme } from "@/lib/monaco-themes";
@@ -86,6 +89,7 @@ export default function WorkflowDetailPage() {
   const { searchParams, setParam } = useUrlSearchState();
   const activeTab = readStringParam(searchParams, "tab", "definition");
   const selectedNodeId = readStringParam(searchParams, "node") || null;
+  const focusedParam = readStringParam(searchParams, "param") || undefined;
   const graphMaximized = readBooleanParam(searchParams, "graph");
   const setActiveTab = useCallback(
     (tab: string) => setParam("tab", tab, { defaultValue: "definition" }),
@@ -123,15 +127,29 @@ export default function WorkflowDetailPage() {
     }
   }, [selectedNodeId, setSelectedNodeId, workflow]);
 
+  useEffect(() => {
+    if (!focusedParam || !workflow?.requiredParams?.includes(focusedParam)) return;
+    if (activeTab !== "setup") setActiveTab("setup");
+  }, [activeTab, focusedParam, setActiveTab, workflow?.requiredParams]);
+
   const runColumns = useMemo<ColDef<WorkflowRun>[]>(
     () => [
       {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: WorkflowRunStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRun }) =>
+          isAutomationSetupError(params.data?.error) ? (
+            <Badge
+              variant="outline"
+              size="tag"
+              className="border-status-pending/30 text-status-pending-strong"
+            >
+              Needs setup
+            </Badge>
+          ) : (
+            <StatusBadge status={params.value} />
+          ),
       },
       {
         field: "startedAt",
@@ -198,7 +216,10 @@ export default function WorkflowDetailPage() {
             <Switch
               checked={workflow.enabled}
               onCheckedChange={(checked) =>
-                updateWorkflow.mutate({ id: workflow.id, data: { enabled: checked } })
+                updateWorkflow.mutate({
+                  id: workflow.id,
+                  data: { enabled: checked },
+                })
               }
             />
             <span className="text-xs text-muted-foreground">
@@ -216,7 +237,10 @@ export default function WorkflowDetailPage() {
               favorite={workflow.favorite}
               disabled={favoriteToggle.isPending}
               onToggle={() =>
-                favoriteToggle.mutate({ itemId: workflow.id, favorite: !workflow.favorite })
+                favoriteToggle.mutate({
+                  itemId: workflow.id,
+                  favorite: !workflow.favorite,
+                })
               }
             />
             <TopBarTriggerButton
@@ -271,6 +295,7 @@ export default function WorkflowDetailPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col flex-1 min-h-0">
         <TabsList className="shrink-0">
           <TabsTrigger value="definition">Definition</TabsTrigger>
+          <TabsTrigger value="setup">Setup ({workflow.requiredParams?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="triggers">Triggers ({workflow.triggers.length})</TabsTrigger>
           <TabsTrigger value="runs">Runs ({runs?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="versions">Versions</TabsTrigger>
@@ -340,6 +365,10 @@ export default function WorkflowDetailPage() {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="setup" className="flex flex-col flex-1 min-h-0">
+          <WorkflowSetupPanel workflow={workflow} focusParam={focusedParam} />
         </TabsContent>
 
         {/* Triggers tab */}
@@ -414,6 +443,67 @@ export default function WorkflowDetailPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function WorkflowSetupPanel({
+  workflow,
+  focusParam,
+}: {
+  workflow: {
+    id: string;
+    requiredParams?: string[];
+    params?: Record<string, unknown>;
+  };
+  focusParam?: string;
+}) {
+  const updateWorkflow = useUpdateWorkflow();
+  const [params, setParams] = useState<Record<string, unknown>>(workflow.params ?? {});
+
+  useEffect(() => setParams(workflow.params ?? {}), [workflow.params]);
+
+  return (
+    <Card className="max-w-2xl">
+      <CardHeader>
+        <CardTitle>Automation setup</CardTitle>
+        <CardDescription>
+          These values are required before this workflow can create a run.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <AutomationParamsFields
+          requiredParams={workflow.requiredParams}
+          params={params}
+          focusParam={focusParam}
+          onChange={setParams}
+        />
+        {workflow.requiredParams?.length ? (
+          <Button
+            type="button"
+            size="sm"
+            disabled={updateWorkflow.isPending}
+            onClick={() =>
+              updateWorkflow.mutate(
+                { id: workflow.id, data: { params } },
+                {
+                  onSuccess: () => toast.success("Workflow parameters saved"),
+                  onError: (error) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Failed to save parameters",
+                    ),
+                },
+              )
+            }
+          >
+            Save parameters
+          </Button>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            This workflow does not require setup parameters.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -898,7 +988,11 @@ function channelIcon(channel: string | null): React.ElementType | null {
 
 function PropertyMatchConfig({ config }: { config: Record<string, unknown> }) {
   const conditions = Array.isArray(config.conditions)
-    ? (config.conditions as Array<{ field?: string; op?: string; value?: unknown }>)
+    ? (config.conditions as Array<{
+        field?: string;
+        op?: string;
+        value?: unknown;
+      }>)
     : null;
   const mode = typeof config.mode === "string" ? config.mode : "all";
 
@@ -1142,7 +1236,10 @@ function TopBarTriggerButton({
  * own `triggers[].scheduleId` bindings, which a schedule doesn't know about).
  */
 function LinkedSchedulesSection({ workflowId }: { workflowId: string }) {
-  const { data: schedules } = useScheduledTasks({ targetType: "workflow", workflowId });
+  const { data: schedules } = useScheduledTasks({
+    targetType: "workflow",
+    workflowId,
+  });
 
   if (!schedules || schedules.length === 0) return null;
 
@@ -1420,7 +1517,10 @@ function TriggerSchemaSection({
     }
     setParseError(null);
     updateWorkflow.mutate(
-      { id: workflowId, data: { triggerSchema: parsed as Record<string, unknown> } },
+      {
+        id: workflowId,
+        data: { triggerSchema: parsed as Record<string, unknown> },
+      },
       {
         onSuccess: () => {
           toast.success("Trigger schema saved");
@@ -1819,7 +1919,8 @@ function getWebhookVerificationDisplay(trigger: TriggerConfig): {
           Sign <code className="font-mono">&lt;timestamp&gt;.&lt;raw body&gt;</code> with
           HMAC-SHA256, then send{" "}
           <code className="font-mono">
-            {verification.header}: {timestampKey}=&lt;timestamp&gt;,{signatureKey}=&lt;hex&gt;
+            {verification.header}: {timestampKey}=&lt;timestamp&gt;,
+            {signatureKey}=&lt;hex&gt;
           </code>
           .
         </>

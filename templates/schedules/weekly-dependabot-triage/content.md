@@ -1,5 +1,7 @@
 # Weekly Dependency Triage
 
+Template parameters: {{SLACK_CHANNEL_ID}}, {{REPO_URL}}, {{TIMEZONE}}
+
 Review dependency update PRs, group safe patches, and flag risky upgrades.
 
 ## Schedule
@@ -7,7 +9,7 @@ Review dependency update PRs, group safe patches, and flag risky upgrades.
 ```json
 {
   "cron": "40 3 * * 0",
-  "timezone": "UTC",
+  "timezone": "{{TIMEZONE}}",
   "agentRole": "lead",
   "enabled": true
 }
@@ -19,7 +21,7 @@ This is a reusable starting prompt. Before enabling it, replace the repository, 
 
 Task Type: Weekly Dependency Triage
 
-Repository: `owner/repo`
+Repository: `{{REPO_URL}}`
 Important paths: `path-one`, `path-two`
 
 ## Instructions
@@ -42,7 +44,7 @@ Important paths: `path-one`, `path-two`
 - Create a branch per path group
 - Cherry-pick, merge, or manually apply each dependency update as appropriate
 - Run the repo's required dependency checks before pushing
-- Push, open PRs, request the configured reviewers, and notify the configured channel or thread
+- Push, open PRs, request the configured reviewers, and notify {{SLACK_CHANNEL_ID}}
 
 ## Completion
 

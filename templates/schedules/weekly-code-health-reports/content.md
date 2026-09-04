@@ -1,5 +1,7 @@
 # Weekly Code Health Reports
 
+Template parameters: {{REPO_URL}}, {{BRANCH}}, {{SCOPE_PATH}}, {{REPORT_NAME}}, {{PAGE_ID}}
+
 Run a recurring Code Maat + D3 code-health report for a repository and update the same stable report page in place.
 
 This schedule is the templates gallery entry point for the community package in `templates/community/code-health-reports/`. The package itself is intentionally not an agent-template config; it is a runnable playbook bundle (`PLAYBOOK.md`, `run.sh`, `report.mjs`, and `lead-prompt.md`) used by this schedule.
@@ -21,11 +23,11 @@ This is a reusable starting prompt. Before enabling it, replace the repository, 
 
 Task Type: Weekly Code Health Reports
 
-Repository: `https://github.com/OWNER/REPO.git`
-Default branch: `main`
-Path scope: `src`
-Report name: `my-repo`
-Stable page ID: `<PAGE_ID>`
+Repository: `{{REPO_URL}}`
+Default branch: `{{BRANCH}}`
+Path scope: `{{SCOPE_PATH}}`
+Report name: `{{REPORT_NAME}}`
+Stable page ID: `{{PAGE_ID}}`
 
 ## Instructions
 
@@ -38,14 +40,14 @@ Stable page ID: `<PAGE_ID>`
 
    ```bash
    BASE_DIR=/workspace/code-maat \
-   REPO_NAME=my-repo \
-   REPO_URL=https://github.com/OWNER/REPO.git \
-   BRANCH=main \
-   SCOPE_PATH=src \
+   REPO_NAME='{{REPORT_NAME}}' \
+   REPO_URL='{{REPO_URL}}' \
+   BRANCH='{{BRANCH}}' \
+   SCOPE_PATH='{{SCOPE_PATH}}' \
    bash /workspace/code-maat/run.sh
    ```
 
-4. Publish `/workspace/code-maat/out/my-repo/latest.html` to the existing stable page ID. Do not create a new page for routine refreshes.
+4. Publish `/workspace/code-maat/out/{{REPORT_NAME}}/latest.html` to the existing stable page ID. Do not create a new page for routine refreshes.
 5. Verify the rendered page loads and the D3 charts are not blank.
 6. If the run fails because of a local runner, dependency, branch, or report-generator issue, diagnose and fix it before reporting failure.
 

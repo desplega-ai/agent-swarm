@@ -32,7 +32,7 @@ interface WorkflowNodeDef {
   id: string;
   type: string;
   config?: Record<string, unknown>;
-  next?: string[];
+  next?: string | string[] | Record<string, string>;
   inputs?: Record<string, unknown>;
 }
 
@@ -162,6 +162,13 @@ const nodeTypes = { workflowNode: WorkflowFlowNode };
 const NODE_WIDTH = 260;
 const NODE_HEIGHT = 90;
 
+function getNextTargets(next: WorkflowNodeDef["next"]): string[] {
+  if (!next) return [];
+  if (typeof next === "string") return [next];
+  if (Array.isArray(next)) return next;
+  return Object.values(next);
+}
+
 function buildGraph(definition: WorkflowDefinitionLike): {
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
@@ -183,11 +190,11 @@ function buildGraph(definition: WorkflowDefinitionLike): {
     };
   });
 
-  // Edges are implied by each node's `next` array (no top-level `edges`).
+  // Edges are implied by each node's `next` value (no top-level `edges`).
   const validIds = new Set(defNodes.map((n) => n.id));
   const edges: Edge[] = [];
   for (const node of defNodes) {
-    for (const target of node.next ?? []) {
+    for (const target of getNextTargets(node.next)) {
       if (!validIds.has(target)) continue;
       edges.push({
         id: `${node.id}->${target}`,

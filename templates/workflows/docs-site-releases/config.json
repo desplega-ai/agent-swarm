@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "docs-site-releases",
+  "displayName": "Documentation Release Notes",
+  "slug": "docs-site-releases",
+  "title": "Documentation Release Notes",
+  "description": "Build reviewed documentation release notes from a tagged repository release.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["REPO_URL"],
+  "requires": ["github", "agentfs"],
+  "runAllSeedersCandidate": true,
+  "tags": ["github", "docs", "releases"]
+}

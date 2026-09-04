@@ -1,5 +1,7 @@
 # Daily Blocker Digest
 
+Delivery uses configured admin channels with an in-app fallback.
+
 Ask the lead to summarize stuck work, failing checks, and owner decisions every weekday.
 
 ## Schedule
@@ -93,7 +95,7 @@ Do not trust stale notes. If verification shows the item is resolved, mark it `R
 
 ## Phase 3: Post One Digest
 
-Post one message to your team's chosen channel. Replace `<OWNER_OR_TEAM_MENTION>` and `<CHANNEL_ID>` before enabling this schedule.
+Post one message through configured admin delivery channels, using the in-app fallback when no external channel is configured. Replace `<OWNER_OR_TEAM_MENTION>` before enabling this schedule.
 
 Template:
 

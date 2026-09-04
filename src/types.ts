@@ -1520,6 +1520,17 @@ export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
 // Scheduled Task Types
 // ============================================================================
 
+export const AutomationIntegrationIdSchema = z.enum([
+  "slack",
+  "github",
+  "linear",
+  "jira",
+  "gsc",
+  "agentmail",
+  "agentfs",
+]);
+export type AutomationIntegrationId = z.infer<typeof AutomationIntegrationIdSchema>;
+
 export const ScheduledTaskTargetTypeSchema = z.enum(["agent-task", "workflow", "script"]);
 export type ScheduledTaskTargetType = z.infer<typeof ScheduledTaskTargetTypeSchema>;
 
@@ -1551,6 +1562,9 @@ export const ScheduledTaskSchema = z
     workflowId: z.uuid().optional(),
     scriptName: z.string().optional(),
     scriptArgs: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
     createdBy: z.string().optional(),
@@ -1949,6 +1963,9 @@ export const WorkflowPatchSchema = z
           "Validator subset: type, required, properties, enum, const, items. " +
           "Other JSON-Schema keywords are silently ignored.",
       ),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
   })
   .openapi("WorkflowPatch");
 export type WorkflowPatch = z.infer<typeof WorkflowPatchSchema>;
@@ -2019,6 +2036,10 @@ export const TriggerConfigSchema = z
       type: z.literal("schedule"),
       scheduleId: z.string().uuid(),
     }),
+    z.object({
+      type: z.literal("event"),
+      eventName: z.literal("slack.message"),
+    }),
   ])
   .superRefine((trigger, ctx) => {
     if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
@@ -2086,6 +2107,9 @@ export const WorkflowSnapshotSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     enabled: z.boolean(),
@@ -2107,6 +2131,9 @@ export const WorkflowSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     createdByAgentId: z.string().optional(),
