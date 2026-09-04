@@ -49,6 +49,11 @@ import taskContextGatheringSrc from "./catalog/task-context-gathering.ts" with {
 import taskFailureAuditSrc from "./catalog/task-failure-audit.ts" with { type: "text" };
 import textDiffSrc from "./catalog/text-diff.ts" with { type: "text" };
 import toolUsageSrc from "./catalog/tool-usage.ts" with { type: "text" };
+// @ts-expect-error Bun text imports synthesize a default string for this helper.
+import uiE2eCoreSrc from "./catalog/ui-e2e-core.inline.ts" with { type: "text" };
+import uiE2eIngestSrc from "./catalog/ui-e2e-ingest.inline.ts" with { type: "text" };
+import uiE2ePruneSrc from "./catalog/ui-e2e-prune.inline.ts" with { type: "text" };
+import uiE2eSweepSrc from "./catalog/ui-e2e-sweep.inline.ts" with { type: "text" };
 import waitForTaskSrc from "./catalog/wait-for-task.ts" with { type: "text" };
 
 export type SeedScript = {
@@ -68,6 +73,19 @@ function bundleCatalogReport(source: string): string {
   const helper = asText(catalogReportSrc);
   if (!CATALOG_REPORT_IMPORT_RE.test(source)) return source;
   return `${helper}\n\n${source.replace(CATALOG_REPORT_IMPORT_RE, "")}`;
+}
+
+// The UI E2E scripts share `ui-e2e-core`; the runtime has no module resolver,
+// so the helper is text-prepended and the relative import stripped. `[^}]*`
+// (not `[\s\S]*?`) is load-bearing: a lazy any-char class starting at the
+// FIRST `import {` on the line above would swallow the `zod` import too, and
+// the failure surfaces only as "Cannot find name 'z'" inside the sandbox.
+const UI_E2E_CORE_IMPORT_RE = /^import\s+\{[^}]*\}\s+from "\.\/ui-e2e-core";\n\n?/m;
+
+function bundleUiE2eCore(source: string): string {
+  const helper = asText(uiE2eCoreSrc);
+  if (!UI_E2E_CORE_IMPORT_RE.test(source)) return source;
+  return `${helper}\n\n${source.replace(UI_E2E_CORE_IMPORT_RE, "")}`;
 }
 
 export const SEED_SCRIPTS: SeedScript[] = [
@@ -274,6 +292,30 @@ export const SEED_SCRIPTS: SeedScript[] = [
     intent:
       "See who is in the swarm and what tasks are running — swarm stats / agent list / task counts in a single call.",
     source: asText(swarmOverviewSrc),
+  },
+  {
+    name: "ui-e2e-ingest",
+    description:
+      "Single ingest point for Playwright UI E2E results: upserts a shard run, its per-spec results, artifacts and exploratory findings, aggregates shards into a run group, opens or closes failure incidents by fingerprint on main/nightly, and regenerates the public tracker page.",
+    intent:
+      "Report a Playwright E2E shard, a nightly UI run, or an exploratory browser-testing session into the UI E2E tracker — the endpoint CI curls and swarm workers call.",
+    source: bundleUiE2eCore(asText(uiE2eIngestSrc)),
+  },
+  {
+    name: "ui-e2e-sweep",
+    description:
+      "Close out UI E2E run groups whose shards never reported (marks them incomplete and materializes the missing shard rows) and requeue triage/promote work that the daily dispatch cap deferred.",
+    intent:
+      "Scheduled watchdog for the UI E2E tracker: resolve stuck runs waiting on a dead shard and unblock deferred triage once the daily cap rolls over.",
+    source: bundleUiE2eCore(asText(uiE2eSweepSrc)),
+  },
+  {
+    name: "ui-e2e-prune",
+    description:
+      "Apply the UI E2E tracker's 30-day retention: delete stale run groups, shard runs, spec results, artifacts, settled findings and closed incidents, then delete the matching agent-fs artifact paths. Open incidents are never pruned.",
+    intent:
+      "Scheduled retention sweep for the UI E2E tracker app rows and their agent-fs artifact paths.",
+    source: bundleUiE2eCore(asText(uiE2ePruneSrc)),
   },
 ];
 

@@ -55,8 +55,8 @@ afterAll(async () => {
 });
 
 describe("seed-scripts catalog", () => {
-  test("manifest holds 26 unique, well-described scripts", () => {
-    expect(SEED_SCRIPTS.length).toBe(26);
+  test("manifest holds 29 unique, well-described scripts", () => {
+    expect(SEED_SCRIPTS.length).toBe(29);
     const names = SEED_SCRIPTS.map((s) => s.name);
     expect(new Set(names).size).toBe(names.length);
     for (const s of SEED_SCRIPTS) {
@@ -70,7 +70,16 @@ describe("seed-scripts catalog", () => {
 
   test("inline catalog files stay in sync with their runtime files", async () => {
     const catalogDir = join(import.meta.dir, "../be/seed-scripts/catalog");
-    const inlineFiles = ["boot-triage", "catalog-report", "compound-insights", "ops-catalog-audit"];
+    const inlineFiles = [
+      "boot-triage",
+      "catalog-report",
+      "compound-insights",
+      "ops-catalog-audit",
+      "ui-e2e-core",
+      "ui-e2e-ingest",
+      "ui-e2e-prune",
+      "ui-e2e-sweep",
+    ];
 
     for (const name of inlineFiles) {
       const runtimeSource = await Bun.file(join(catalogDir, `${name}.ts`)).text();

@@ -1,0 +1,148 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://desplega.ai/schemas/ui-e2e-ingest.v1.schema.json",
+  "title": "UI E2E tracker ingest payload (v1)",
+  "description": "Body posted to POST /api/x/script/{endpointId} (CI, bearer auth) or passed as args to script-run name=\"ui-e2e-ingest\" scope=\"global\" (swarm workers). Mirrors the Zod argsSchema in src/be/seed-scripts/catalog/ui-e2e-ingest.ts; src/tests/scripts-ui-e2e-tracker.test.ts asserts the two stay in sync.",
+  "type": "object",
+  "required": ["schemaVersion", "run", "results"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "run": {
+      "type": "object",
+      "description": "Run identity. One report per shard.",
+      "required": [
+        "repo",
+        "ref",
+        "sha",
+        "prNumber",
+        "isFork",
+        "trigger",
+        "runner",
+        "shardIndex",
+        "shardTotal",
+        "startedAt",
+        "finishedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[^/\\s]+/[^/\\s]+$" },
+        "ref": { "type": "string", "minLength": 1 },
+        "sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "prNumber": { "type": ["integer", "null"], "minimum": 1 },
+        "isFork": { "type": "boolean" },
+        "trigger": { "type": "string", "enum": ["pr", "main", "nightly", "manual"] },
+        "runner": { "type": "string", "enum": ["ci", "swarm-worker", "sandbox"] },
+        "shardIndex": { "type": "integer", "minimum": 1 },
+        "shardTotal": { "type": "integer", "minimum": 1 },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "finishedAt": { "type": "string", "format": "date-time" },
+        "ciUrl": { "type": "string" }
+      }
+    },
+    "results": {
+      "type": "array",
+      "description": "Per-spec results for THIS shard. May be empty for a findings-only report.",
+      "items": {
+        "type": "object",
+        "required": ["specId", "title", "status", "durationMs", "retries"],
+        "additionalProperties": false,
+        "properties": {
+          "specId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable identity: '<spec file path>:<full test title>'. Half the failure fingerprint, so it must not vary between runs."
+          },
+          "title": { "type": "string", "minLength": 1 },
+          "status": { "type": "string", "enum": ["passed", "failed", "skipped", "flaky"] },
+          "durationMs": { "type": "number", "minimum": 0 },
+          "retries": { "type": "integer", "minimum": 0 },
+          "error": { "type": "string", "description": "Required when status is failed." }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "storage"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": { "type": "string", "enum": ["screenshot", "trace", "video", "report", "log"] },
+          "storage": { "type": "string", "enum": ["agent-fs", "github"] },
+          "path": {
+            "type": "string",
+            "description": "agent-fs path, conventionally e2e/<repo>/<pr-N|main>/<sha>/<shard>/... Required when storage is agent-fs. Rejected when run.isFork is true."
+          },
+          "url": {
+            "type": "string",
+            "description": "Absolute URL. Required when storage is github. GitHub Actions artifact URLs expire with their run."
+          },
+          "orgId": { "type": "string", "description": "agent-fs org; falls back to UI_E2E_AGENT_FS_ORG_ID." },
+          "driveId": { "type": "string", "description": "agent-fs drive; falls back to UI_E2E_AGENT_FS_DRIVE_ID." },
+          "specId": { "type": ["string", "null"] },
+          "sizeBytes": { "type": "number", "minimum": 0 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "description": "Exploratory findings from a swarm-worker session. Each one opens a promote-to-spec task.",
+      "items": {
+        "type": "object",
+        "required": ["title", "severity", "steps", "evidence", "suspectedArea"],
+        "additionalProperties": false,
+        "properties": {
+          "title": { "type": "string", "minLength": 1 },
+          "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+          "steps": { "type": "string", "minLength": 1 },
+          "evidence": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Artifact paths or urls also present in `artifacts`."
+          },
+          "suspectedArea": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "description": "Optional; meaningful for runner=swarm-worker.",
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string" },
+        "tokens": { "type": "number" },
+        "usd": { "type": "number" }
+      }
+    },
+    "regeneratePage": {
+      "type": "boolean",
+      "default": true,
+      "description": "Regenerate the public projection page after this ingest."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["ingest", "annotate"],
+      "default": "ingest",
+      "description": "'annotate' writes triage/promote results back onto an incident or finding instead of ingesting a run."
+    },
+    "annotate": {
+      "type": "object",
+      "description": "Write-back payload for mode=annotate, posted by the triage and promote workflows.",
+      "additionalProperties": false,
+      "properties": {
+        "incidentKey": { "type": "string" },
+        "findingKey": { "type": "string" },
+        "classification": { "type": "string", "enum": ["unknown", "app-bug", "flaky-spec", "infra"] },
+        "triageTaskId": { "type": "string" },
+        "promoteTaskId": { "type": "string" },
+        "fixPr": { "type": "string" },
+        "linearIssue": { "type": "string" },
+        "findingStatus": {
+          "type": "string",
+          "enum": ["open", "dispatched", "deferred", "promoted", "dismissed"]
+        }
+      }
+    }
+  }
+}
