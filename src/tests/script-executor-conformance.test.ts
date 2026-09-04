@@ -154,6 +154,30 @@ describe("native-only executor behavior", () => {
     expect(output.error).not.toBe("capacity_exceeded");
     expect(output.error).toBe("eval_error");
   });
+
+  // PR #1326 review finding (comment 3932610586): the sentinel is written
+  // immediately before `eval-harness.ts` dynamic-imports the user module, and
+  // importing a module executes its top-level code. The prior test above only
+  // proves the boundary holds for an abort inside the *exported* function
+  // (which only runs after import — and therefore the sentinel write —
+  // completes); it does not exercise an abort that happens *during* import,
+  // while top-level module code is running. This test closes that gap: the
+  // side effect (the console.log) and the abort both happen at module scope,
+  // before the harness ever reaches `mod.default(...)`. If this were
+  // misclassified `capacity_exceeded`, `runScript` in loader.ts would
+  // transparently retry and the side effect would replay.
+  test("SIGABRT during top-level module evaluation (after import starts) is not classified capacity_exceeded", async () => {
+    const output = await new NativeScriptExecutor().run(
+      input({
+        source:
+          "console.log('TOP_LEVEL_SIDE_EFFECT'); process.abort(); export default async () => {};",
+      }),
+    );
+    expect(output.stdout).toContain("TOP_LEVEL_SIDE_EFFECT");
+    expect(output.exitCode).toBe(134);
+    expect(output.error).not.toBe("capacity_exceeded");
+    expect(output.error).toBe("eval_error");
+  });
 });
 
 describe("classifyExit", () => {

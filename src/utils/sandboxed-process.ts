@@ -137,6 +137,14 @@ export function buildSandboxedCommand(
     `ulimit -u ${maxProcs} 2>/dev/null || true`,
     `ulimit -f ${limits.maxFileKb} 2>/dev/null || true`,
     `ulimit -n ${limits.maxFdCount} 2>/dev/null || true`,
+    // Disable core dumps: a crash (e.g. SIGABRT/SIGSEGV) in the sandboxed
+    // process otherwise writes a core file containing the child's full
+    // address space — which can hold the decrypted stdin config payload
+    // (bearer token, egress secrets) — to disk. Also avoids multi-hundred-MB
+    // core writes stalling the parent's wait() on slow/contended CI storage,
+    // which manifested as a spurious ~10s hang on a deterministic
+    // process.abort() test that runs in well under 1s locally.
+    "ulimit -c 0 2>/dev/null || true",
   ].join("; ");
 
   const envAssignments = Object.entries(env)
