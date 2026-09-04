@@ -687,8 +687,15 @@ export async function runRebootSweep(): Promise<void> {
         await restoreAgentIdleAfterRemediation(task.agentId);
       }
 
-      // Don't retry system-generated heartbeat tasks
-      if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "")) {
+      // State-engine-owned stage tasks carry runtime identity in their prompt.
+      // Replaying the same task after reboot cannot claim that runtime under a
+      // new task ID. Leave recovery to the owning engine, which creates a new
+      // runtime through RETRY_STAGE.
+      const taskTags = task.tags ?? [];
+      const isManagedStageTask = taskTags.includes("product-delivery");
+
+      // Don't retry system-generated heartbeat tasks or managed stage tasks.
+      if (SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "") || isManagedStageTask) {
         rebootAffectedTasks.push({ original: failed, retryTaskId: null });
         continue;
       }

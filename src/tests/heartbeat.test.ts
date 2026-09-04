@@ -781,6 +781,27 @@ describe("Heartbeat Triage", () => {
       expect(await claimTask(retryId!, lead.id)).not.toBeNull();
     });
 
+    test("does not replay a state-engine-owned stage task with stale runtime identity", async () => {
+      const agent = await createAgent({ name: "stage-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Managed stage runtime", {
+        agentId: agent.id,
+        tags: ["product-delivery", "stage:prototype"],
+      });
+      await startTask(task.id);
+      const past = new Date(Date.now() - 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        past,
+        task.id,
+      ]);
+
+      await runRebootSweep();
+
+      expect((await getTaskById(task.id))?.status).toBe("failed");
+      const affected = getRebootAffectedTasks();
+      expect(affected).toHaveLength(1);
+      expect(affected[0]!.retryTaskId).toBeNull();
+    });
+
     test("falls back to an affinity-stamped pool retry when the agent is at capacity", async () => {
       const agent = await createAgent({
         name: "full-worker",
