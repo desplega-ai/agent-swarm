@@ -218,13 +218,27 @@ cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 
 ### When you need to verify a UI change
 
-Use the `qa-use` tool family:
+Use `agent-browser` (never `qa-use` unless explicitly asked):
 
-- `/qa-use:explore <url>` — quick walkthrough, AI-powered element discovery
-- `/qa-use:verify` — verify a defined feature
-- `/qa-use:test-run` — run existing E2E tests
+```bash
+agent-browser skills get core                 # version-matched usage guide, once per session
+agent-browser open http://localhost:5274/tasks
+agent-browser snapshot                        # accessibility tree with @eN refs
+agent-browser click @e12                      # act on refs from the snapshot
+agent-browser screenshot /tmp/ui-tasks.png
+agent-browser close
+```
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
+To share a screenshot (PR body, review comment, Slack), upload it to agent-fs and paste the signed URL:
+
+```bash
+agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
+agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
+```
+
+`agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
 
 ### Port-conflict resolution
 

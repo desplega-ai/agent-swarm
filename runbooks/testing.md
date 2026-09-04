@@ -9,15 +9,15 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 | Writing or running unit tests (`bun run test:root` from the workspace root), the Docker smoke-test, the entrypoint round-trip checklist, the MCP handshake sequence | [LOCAL_TESTING.md](../LOCAL_TESTING.md) |
 | Running the **full guided E2E flow** (tasks, session logs, UI verification) | Invoke the `swarm-local-e2e` skill |
 | Drafting a plan with verification / E2E / QA steps | [LOCAL_TESTING.md](../LOCAL_TESTING.md) — copy command forms verbatim, don't paraphrase |
-| Preparing a frontend PR (`apps/ui/`, `apps/templates-ui/`) | qa-use session + screenshots required (merge gate). Per-package conventions in `apps/ui/CLAUDE.md` |
+| Preparing a frontend PR (`apps/ui/`, `apps/templates-ui/`) | `agent-browser` screenshots uploaded to agent-fs, signed URL in the PR body (reviewer convention, not a CI gate). Recipe in [LOCAL_TESTING.md § When you need to verify a UI change](../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Per-package conventions in `apps/ui/CLAUDE.md` |
 | Modifying memory-system code | [memory-system.md](./memory-system.md) — runs all four memory test files |
 | Testing Slack integration / driving the **LOCAL** dev swarm | Dev channel `#swarm-dev-2` (`C0AR967K0KZ`), bot `@dev-swarm` (`U0ALZGQCF96`). Send via `slack_send_message` MCP tool to trigger task-assignment flow |
 | Sending a task to the **PRODUCTION / deployed** swarm | Use the swarm-user MCP `mcp__agent-swarm-user__send-task` (creates an unassigned task in the production pool; read back with `mcp__agent-swarm-user__get-tasks`). **Not** the dev Slack channel. MCP may not be enabled every session — check for `mcp__agent-swarm-user__*` first |
-| Picking which qa-use slash command | `/qa-use:test-run` (run), `/qa-use:verify` (feature works), `/qa-use:explore` (open page) |
+| Driving a browser to verify UI | `agent-browser` only (`open`, `snapshot`, `screenshot`). Load the guide with `agent-browser skills get core`. Never `qa-use` unless explicitly asked |
 
 ## Hard rules
 
-1. **Frontend PRs require a qa-use session with screenshots.** Enforced by `.github/workflows/merge-gate.yml`.
+1. **Frontend PRs require `agent-browser` screenshots uploaded to agent-fs.** Reviewer convention. `.github/workflows/merge-gate.yml` does not check it.
 2. **Plan-mode verification steps must reference real commands** from `LOCAL_TESTING.md` — invented commands break agent runs.
 3. **Memory tests are not optional** when touching memory code — all four files in [memory-system.md](./memory-system.md).
 4. **Never hard-code a test port.** CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `listenOnFreePort(server)` / `getFreePort()` / `waitForServer()` from `src/tests/test-net.ts`. Commands, the preload template cache, and the `--changed` pre-push hook are in [LOCAL_TESTING.md](../LOCAL_TESTING.md).
