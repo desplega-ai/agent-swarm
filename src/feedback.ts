@@ -48,6 +48,13 @@ interface FeedbackRow {
   relay_attempts: number;
 }
 
+// 4xx means the proxy rejected the payload itself (bad schema, body too large, etc) —
+// retrying an unchanged payload can never succeed. 408/429 are exceptions: they signal
+// a transient condition on the caller side (timeout, rate limit), not a bad request.
+function isTerminalRelayStatus(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
+}
+
 function optionalText(value: string | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
@@ -120,7 +127,7 @@ export async function relayPendingFeedback(
     `SELECT id, name, email, newsletter_consent, nps, message, user_id,
             install_id, swarm_version, org_name, installed_at, submitted_at, relay_attempts
        FROM feedback_submissions
-      WHERE relayed_at IS NULL AND next_retry_at <= ?
+      WHERE relayed_at IS NULL AND relay_terminal_at IS NULL AND next_retry_at <= ?
       ORDER BY created_at ASC
       LIMIT ?`,
     [nowIso, options.limit ?? 20],
@@ -137,7 +144,7 @@ export async function relayPendingFeedback(
     const claimed = await getDbClient().run(
       `UPDATE feedback_submissions
           SET next_retry_at = ?, updated_at = ?, updated_by = 'feedback-relay'
-        WHERE id = ? AND relayed_at IS NULL AND next_retry_at <= ?`,
+        WHERE id = ? AND relayed_at IS NULL AND relay_terminal_at IS NULL AND next_retry_at <= ?`,
       [new Date(now.getTime() + MAX_RETRY_DELAY_MS).toISOString(), nowIso, row.id, nowIso],
     );
     if (claimed.changes !== 1) continue;
@@ -152,14 +159,30 @@ export async function relayPendingFeedback(
         body: JSON.stringify(rowToPayload(row)),
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await getDbClient().run(
-        `UPDATE feedback_submissions
-            SET relayed_at = ?, updated_at = ?, updated_by = 'feedback-relay'
-          WHERE id = ? AND relayed_at IS NULL`,
-        [nowIso, nowIso, row.id],
-      );
-      relayed += 1;
+      if (response.ok) {
+        await getDbClient().run(
+          `UPDATE feedback_submissions
+              SET relayed_at = ?, updated_at = ?, updated_by = 'feedback-relay'
+            WHERE id = ? AND relayed_at IS NULL`,
+          [nowIso, nowIso, row.id],
+        );
+        relayed += 1;
+      } else if (isTerminalRelayStatus(response.status)) {
+        console.warn(
+          `[feedback] Relay rejected for ${row.id}: HTTP ${response.status} (terminal, will not retry)`,
+        );
+        await getDbClient().run(
+          `UPDATE feedback_submissions
+              SET relay_attempts = relay_attempts + 1,
+                  relay_terminal_at = ?, relay_failure_status = ?,
+                  updated_at = ?, updated_by = 'feedback-relay'
+            WHERE id = ? AND relayed_at IS NULL`,
+          [nowIso, response.status, nowIso, row.id],
+        );
+        failed += 1;
+      } else {
+        throw new Error(`HTTP ${response.status}`);
+      }
     } catch (error) {
       const errorLabel = error instanceof Error ? error.message : String(error);
       console.warn(`[feedback] Relay failed for ${row.id}: ${errorLabel}`);

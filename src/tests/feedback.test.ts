@@ -106,7 +106,7 @@ describe("feedback relay", () => {
     expect(anchor).toBeNull();
   });
 
-  test("keeps non-2xx submissions local and backs off before retry", async () => {
+  test("keeps a retryable non-2xx submission local and backs off before retry", async () => {
     const submittedAt = "2026-09-03T12:00:00.000Z";
     const id = await createFeedbackSubmission(
       { newsletter_consent: false, user_id: "user_1" },
@@ -115,19 +115,22 @@ describe("feedback relay", () => {
 
     const failed = await relayPendingFeedback({
       now: new Date(submittedAt),
-      fetchImpl: async () => new Response(null, { status: 404 }),
+      fetchImpl: async () => new Response(null, { status: 500 }),
     });
     expect(failed).toEqual({ relayed: 0, failed: 1 });
 
     const row = await getDbClient().get<{
       relayed_at: string | null;
+      relay_terminal_at: string | null;
       relay_attempts: number;
       next_retry_at: string;
-    }>("SELECT relayed_at, relay_attempts, next_retry_at FROM feedback_submissions WHERE id = ?", [
-      id,
-    ]);
+    }>(
+      "SELECT relayed_at, relay_terminal_at, relay_attempts, next_retry_at FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
     expect(row).toEqual({
       relayed_at: null,
+      relay_terminal_at: null,
       relay_attempts: 1,
       next_retry_at: "2026-09-03T12:01:00.000Z",
     });
@@ -137,6 +140,106 @@ describe("feedback relay", () => {
       fetchImpl: async () => new Response(null, { status: 204 }),
     });
     expect(early).toEqual({ relayed: 0, failed: 0 });
+  });
+
+  test("accepts a 202 as success, same as 204", async () => {
+    const submittedAt = "2026-09-03T12:00:00.000Z";
+    const id = await createFeedbackSubmission(
+      { newsletter_consent: false, user_id: "user_1" },
+      submittedAt,
+    );
+
+    const result = await relayPendingFeedback({
+      now: new Date(submittedAt),
+      fetchImpl: async () => new Response(null, { status: 202 }),
+    });
+    expect(result).toEqual({ relayed: 1, failed: 0 });
+
+    const row = await getDbClient().get<{ relayed_at: string | null }>(
+      "SELECT relayed_at FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
+    expect(row?.relayed_at).toBe(submittedAt);
+  });
+
+  test("marks a 400 terminal and never retries it again", async () => {
+    const submittedAt = "2026-09-03T12:00:00.000Z";
+    const id = await createFeedbackSubmission(
+      { newsletter_consent: false, user_id: "user_1" },
+      submittedAt,
+    );
+
+    const result = await relayPendingFeedback({
+      now: new Date(submittedAt),
+      fetchImpl: async () => new Response(null, { status: 400 }),
+    });
+    expect(result).toEqual({ relayed: 0, failed: 1 });
+
+    const row = await getDbClient().get<{
+      relayed_at: string | null;
+      relay_terminal_at: string | null;
+      relay_failure_status: number | null;
+      relay_attempts: number;
+    }>(
+      "SELECT relayed_at, relay_terminal_at, relay_failure_status, relay_attempts FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
+    expect(row).toEqual({
+      relayed_at: null,
+      relay_terminal_at: submittedAt,
+      relay_failure_status: 400,
+      relay_attempts: 1,
+    });
+
+    // A later sweep, even far in the future, must not pick this row up again.
+    const later = await relayPendingFeedback({
+      now: new Date("2026-09-03T18:00:00.000Z"),
+      fetchImpl: async () => {
+        throw new Error("should not be called for a terminal row");
+      },
+    });
+    expect(later).toEqual({ relayed: 0, failed: 0 });
+  });
+
+  test("treats a 429 as retryable, not terminal", async () => {
+    const submittedAt = "2026-09-03T12:00:00.000Z";
+    const id = await createFeedbackSubmission(
+      { newsletter_consent: false, user_id: "user_1" },
+      submittedAt,
+    );
+
+    const result = await relayPendingFeedback({
+      now: new Date(submittedAt),
+      fetchImpl: async () => new Response(null, { status: 429 }),
+    });
+    expect(result).toEqual({ relayed: 0, failed: 1 });
+
+    const row = await getDbClient().get<{
+      relayed_at: string | null;
+      relay_terminal_at: string | null;
+      relay_attempts: number;
+      next_retry_at: string;
+    }>(
+      "SELECT relayed_at, relay_terminal_at, relay_attempts, next_retry_at FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
+    expect(row).toEqual({
+      relayed_at: null,
+      relay_terminal_at: null,
+      relay_attempts: 1,
+      next_retry_at: "2026-09-03T12:01:00.000Z",
+    });
+
+    const later = await relayPendingFeedback({
+      now: new Date("2026-09-03T12:01:00.000Z"),
+      fetchImpl: async () => new Response(null, { status: 204 }),
+    });
+    expect(later).toEqual({ relayed: 1, failed: 0 });
+    const relayedRow = await getDbClient().get<{ relayed_at: string | null }>(
+      "SELECT relayed_at FROM feedback_submissions WHERE id = ?",
+      [id],
+    );
+    expect(relayedRow?.relayed_at).toBe("2026-09-03T12:01:00.000Z");
   });
 
   test("claims a due row once across overlapping relay sweeps", async () => {
