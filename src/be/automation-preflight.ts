@@ -56,6 +56,52 @@ function hasValue(value: unknown): boolean {
   return true;
 }
 
+const GITHUB_REPOSITORY_SLUG =
+  /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9][A-Za-z0-9._-]{0,99}(?:\.git)?$/;
+const SAFE_SHELL_DATA = /^[A-Za-z0-9._~%/:@ -]+$/;
+const DNS_NAME =
+  /^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+
+function isSafeRepository(value: string): boolean {
+  if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value || value.includes(" ")) return false;
+  const slug = value
+    .replace(/^https:\/\/github\.com\//, "")
+    .replace(/^git@github\.com:/, "")
+    .replace(/\/$/, "");
+  return GITHUB_REPOSITORY_SLUG.test(slug);
+}
+
+function isSafeGscProperty(value: string): boolean {
+  if (!SAFE_SHELL_DATA.test(value) || value.trim() !== value) return false;
+  return value.split(" ").every((property) => {
+    if (!property) return false;
+    if (property.startsWith("sc-domain:")) return DNS_NAME.test(property.slice(10));
+    if (DNS_NAME.test(property)) return true;
+    try {
+      const url = new URL(property);
+      return (
+        url.protocol === "https:" &&
+        !url.username &&
+        !url.password &&
+        !url.port &&
+        !url.search &&
+        !url.hash &&
+        DNS_NAME.test(url.hostname)
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Reject shell-active values for canonical params that templates pass to command-line tools. */
+function isUsableParam(key: string, value: unknown): boolean {
+  if (!hasValue(value)) return false;
+  if (key === "REPO_URL") return typeof value === "string" && isSafeRepository(value);
+  if (key === "GSC_PROPERTY") return typeof value === "string" && isSafeGscProperty(value);
+  return true;
+}
+
 function uniqueSorted<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
@@ -96,8 +142,13 @@ export function preflightAutomation(
   setup: AutomationSetupStates,
 ): AutomationPreflightResult {
   const params = input.params ?? {};
+  const guardedParams = Object.keys(params).filter(
+    (key) => key === "REPO_URL" || key === "GSC_PROPERTY",
+  );
   const missingParams = uniqueSorted(
-    (input.requiredParams ?? []).filter((key) => !hasValue(params[key])),
+    [...(input.requiredParams ?? []), ...guardedParams].filter(
+      (key) => !isUsableParam(key, params[key]),
+    ),
   );
   const missingIntegrations = uniqueSorted(
     (input.requires ?? []).filter((id) => setup[id] === "unverified"),

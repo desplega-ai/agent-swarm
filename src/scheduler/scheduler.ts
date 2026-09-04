@@ -147,9 +147,6 @@ export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): Promise<DispatchScheduleResult> {
-  // Render the complete target snapshot before any metadata lookup or dispatch.
-  schedule = renderScheduledTaskParams(schedule);
-  schedule = await withoutDeletedRequester(schedule);
   const preflight = preflightAutomation(
     schedulePreflightInput(schedule),
     await getAutomationSetupStates(),
@@ -158,6 +155,10 @@ export async function dispatchScheduleTarget(
     await recordSchedulePreflightFailure(schedule.id, preflight.failureReason!);
     throw new AutomationNeedsSetupError(preflight.failureReason!);
   }
+  // Params are safe and integrations are ready. Only now render values into
+  // the complete target snapshot, before metadata lookup or dispatch.
+  schedule = renderScheduledTaskParams(schedule);
+  schedule = await withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
       if (!schedule.workflowId) {

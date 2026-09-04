@@ -192,6 +192,53 @@ describe("preflightAutomation", () => {
     });
     expect(result.failureReason).toBeUndefined();
   });
+
+  test("rejects shell metacharacters in command-line automation parameters", () => {
+    for (const [key, value] of [
+      ["REPO_URL", "acme/widgets; touch /tmp/injected"],
+      ["REPO_URL", "acme/widgets$(touch /tmp/injected)"],
+      ["GSC_PROPERTY", "example.com; touch /tmp/injected"],
+      ["GSC_PROPERTY", "example.com $(touch /tmp/injected)"],
+    ] as const) {
+      const result = preflightAutomation(
+        {
+          id: "schedule-injection",
+          name: "gtm-weekly-review",
+          kind: "schedule",
+          params: { [key]: value },
+          requiredParams: [],
+        },
+        setup,
+      );
+
+      expect(result.state).toBe("needs_setup");
+      expect(result.missing.params).toEqual([key]);
+    }
+  });
+
+  test("accepts supported repository and Search Console property formats", () => {
+    for (const params of [
+      { REPO_URL: "acme/widgets", GSC_PROPERTY: "example.com docs.example.com" },
+      {
+        REPO_URL: "https://github.com/acme/widgets.git",
+        GSC_PROPERTY: "sc-domain:example.com https://docs.example.com/help/",
+      },
+      { REPO_URL: "git@github.com:acme/widgets.git", GSC_PROPERTY: "example.co.uk" },
+    ]) {
+      const result = preflightAutomation(
+        {
+          id: "schedule-safe-params",
+          name: "gtm-weekly-review",
+          kind: "schedule",
+          params,
+          requiredParams: ["REPO_URL", "GSC_PROPERTY"],
+        },
+        { ...setup, github: "verified" },
+      );
+
+      expect(result.state).toBe("running");
+    }
+  });
 });
 
 describe("renderAutomationTokens", () => {
