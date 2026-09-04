@@ -3,7 +3,7 @@ date: 2026-09-04
 author: Claude
 topic: "Slack visual E2E: screenshots and step GIFs from slack-mock, posted to the PR"
 tags: [e2e, slack, slack-mock, ci, visuals]
-status: in-progress
+status: implemented (PR #1338)
 autonomy: yolo
 ---
 
@@ -350,8 +350,9 @@ bunx actionlint .github/workflows/slack-visuals.yml 2>/dev/null || echo "actionl
 
 ## Follow-ups (not in this PR)
 
-- slack-mock `frames` command (prompt at `/tmp/2026-09-04-slack-mock-frames-prompt.md`) replaces the
-  per-frame `SlackMock.start` loop in `visuals.ts`.
+- DONE 2026-09-04: slack-mock 0.2.0 shipped `frames()`; `visuals.ts` now calls it per thread and only
+  boots one `SlackMock` for the channel screenshot. Note: `file.add` lines never produce a frame (the
+  file shows in the frame of the message that shares it).
 - Delegation scenario (child task nested under the parent in the v2 tree).
 - `/agent-swarm-status` ephemeral capture.
 - Prune `pr-*` dirs for closed PRs by API instead of the 30-day rule.
