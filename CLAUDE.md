@@ -273,12 +273,12 @@ Operator-tunable env vars are surfaced on the dashboard **Settings → Configura
 
 <important if="you are writing or running tests, drafting a plan with verification / E2E / QA steps, or preparing a frontend PR (apps/ui/, apps/templates-ui/)">
 
-Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, qa-use, swarm-local-e2e skill, memory tests, Slack E2E.
+Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md, agent-browser UI verification, swarm-local-e2e skill, memory tests, Slack E2E.
 
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
 - The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`.
-- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include a `qa-use` session with screenshots — enforced by merge gate.
+- Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally, captured with `agent-browser` and uploaded to agent-fs (signed URL in the PR body). Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Recipe: LOCAL_TESTING.md § When you need to verify a UI change.
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
 
@@ -322,7 +322,7 @@ Drift checks — run only if you touched the trigger files, MUST commit any rege
 - Touched `apps/ui/` — or root `bun.lock`/`package.json`/`bunfig.toml` (ui deps resolve from the root lock)? → `cd apps/ui && bun install --frozen-lockfile && bun run lint && bunx tsc -b` (CI uses `tsc -b`, not `--noEmit`)
 - Touched `Dockerfile` / `Dockerfile.worker` / `apps/evals/Dockerfile` / files they COPY (incl. `bunfig.toml`, member `package.json`s, `.dockerignore`)? → `docker build -f <Dockerfile> .` — CI builds all three images
 
-Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require a `qa-use` session with screenshots.
+Frontend (`apps/ui/`, `apps/templates-ui/`) PRs additionally require `agent-browser` screenshots uploaded to agent-fs (recipe: LOCAL_TESTING.md § When you need to verify a UI change).
 
 </important>
 

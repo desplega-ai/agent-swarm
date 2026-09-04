@@ -70,6 +70,43 @@ bun run e2e --min-route-coverage 4 --min-tool-coverage 3
 bun run e2e --keep
 ```
 
+### Harness legs (`--harness`)
+
+A harness leg registers a worker agent, creates one task, and boots a real worker process for one provider.
+The task runs in a workspace directory under the leg's temporary HOME, never in the repository checkout.
+Defaults: claude `claude-sonnet-5`, codex `gpt-5.6-luna`, pi and opencode `openrouter/deepseek/deepseek-v4-flash`.
+Override with `E2E_MODEL_<PROVIDER>`. Each leg needs its provider credential in the environment.
+
+```bash
+bun run e2e --only health --harness claude
+bun run e2e --only health --harness claude,pi --harness-attempts 2
+E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+```
+
+`--harness-attempts N` runs a failed leg again, N attempts in total. Every attempt lands in the JSON
+result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
+turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
+the USD total, token counts, and `costSource`. A passing task with no cost row is reported as `no record`.
+Log tails and error messages pass through `scripts/e2e/redact.ts` (exact credential values from the
+environment plus common token shapes) before they enter the result file or the console.
+
+### Nightly E2E workflow
+
+`.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
+leg per provider inside the `worker:slim` image, then a `report` job that merges every result file with
+`scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
+lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
+Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
+issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it. The issue body
+omits the log tails, and the uploaded log files are redacted copies, because both are public.
+
+Rebuild a report locally from downloaded artifacts:
+
+```bash
+gh run download <run-id> -p 'nightly-e2e-*' -D /tmp/nightly/results
+bun scripts/e2e/nightly-report.ts --results /tmp/nightly/results --out /tmp/nightly/summary.md --json /tmp/nightly/report.json
+```
+
 Use repeatable `--sut-env KEY=VALUE` flags to override environment variables for the spawned API server.
 Use `--visuals <dir>` to retain the Slack journal and write its `manifest.json` file.
 Render the journal with `bun run e2e:visuals <dir>`.
@@ -218,13 +255,27 @@ cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 
 ### When you need to verify a UI change
 
-Use the `qa-use` tool family:
+Use `agent-browser` (never `qa-use` unless explicitly asked):
 
-- `/qa-use:explore <url>` — quick walkthrough, AI-powered element discovery
-- `/qa-use:verify` — verify a defined feature
-- `/qa-use:test-run` — run existing E2E tests
+```bash
+agent-browser skills get core                 # version-matched usage guide, once per session
+agent-browser open http://localhost:5274/tasks
+agent-browser snapshot                        # accessibility tree with @eN refs
+agent-browser click @e12                      # act on refs from the snapshot
+agent-browser screenshot /tmp/ui-tasks.png
+agent-browser close
+```
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
+To share a screenshot (PR body, review comment, Slack), upload it to agent-fs and paste the signed URL:
+
+```bash
+agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
+agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
+```
+
+`agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
 
 ### Port-conflict resolution
 
