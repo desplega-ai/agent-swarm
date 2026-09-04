@@ -70,6 +70,40 @@ bun run e2e --min-route-coverage 4 --min-tool-coverage 3
 bun run e2e --keep
 ```
 
+### Harness legs (`--harness`)
+
+A harness leg registers a worker agent, creates one task, and boots a real worker process for one provider.
+The task runs in a workspace directory under the leg's temporary HOME, never in the repository checkout.
+Defaults: claude `claude-sonnet-5`, codex `gpt-5.6-luna`, pi and opencode `openrouter/deepseek/deepseek-v4-flash`.
+Override with `E2E_MODEL_<PROVIDER>`. Each leg needs its provider credential in the environment.
+
+```bash
+bun run e2e --only health --harness claude
+bun run e2e --only health --harness claude,pi --harness-attempts 2
+E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+```
+
+`--harness-attempts N` runs a failed leg again, N attempts in total. Every attempt lands in the JSON
+result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
+turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
+the USD total, token counts, and `costSource`. A passing task with no cost row is reported as `no record`.
+
+### Nightly E2E workflow
+
+`.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
+leg per provider inside the `worker:slim` image, then a `report` job that merges every result file with
+`scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
+lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
+Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
+issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it.
+
+Rebuild a report locally from downloaded artifacts:
+
+```bash
+gh run download <run-id> -p 'nightly-e2e-*' -D /tmp/nightly/results
+bun scripts/e2e/nightly-report.ts --results /tmp/nightly/results --out /tmp/nightly/summary.md --json /tmp/nightly/report.json
+```
+
 Use repeatable `--sut-env KEY=VALUE` flags to override environment variables for the spawned API server.
 Use `--visuals <dir>` to retain the Slack journal and write its `manifest.json` file.
 Render the journal with `bun run e2e:visuals <dir>`.
