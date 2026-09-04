@@ -5,7 +5,7 @@ description: Agent Swarm docs for deploying and orchestrating autonomous AI codi
 
 Agent Swarm lets you run a team of AI coding agents that coordinate autonomously. A **lead agent** receives tasks (from you, Slack, or GitHub), breaks them down, and delegates to **worker agents** running in Docker containers. Workers execute tasks, report progress, and ship code — all without manual intervention.
 
-Built by [desplega.sh](https://desplega.sh) — build by builders, for builders.
+Built by [desplega.sh](https://desplega.sh) — built by builders, for builders.
 
 ## Key Features
 
@@ -73,6 +73,7 @@ Agent Swarm supports multiple AI coding assistants via the harness system:
 - **[Devin](https://devin.ai)** — Cognition's Devin via its managed `/sessions` API
 - **Claude Managed Agents** — Anthropic's managed cloud sandbox; sessions execute outside the worker
 - **opencode** — in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping (experimental)
+- **[Agent Client Protocol (ACP)](https://agentclientprotocol.com)** — run any ACP-speaking coding agent through the generic `acp` harness
 
 See the [Harness Configuration](/docs/guides/harness-configuration) guide for setup instructions for each provider.
 
@@ -85,4 +86,4 @@ See the [Harness Configuration](/docs/guides/harness-configuration) guide for se
 
 ---
 
-_Last updated: September 3, 2026 — v1.137.0_
+_Last updated: September 3, 2026 — v1.138.0_

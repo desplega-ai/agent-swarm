@@ -153,7 +153,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
-    "@desplega.ai/slack-mock": "^0.1.0",
+    "@desplega.ai/slack-mock": "^0.1.2",
     "@faker-js/faker": "^10.4.0",
     "@opencode-ai/plugin": "1.17.4",
     "@types/bun": "latest",

@@ -36682,12 +36682,16 @@
                     },
                     "steeringEnabled": {
                       "type": "boolean"
+                    },
+                    "multiRuntimeEnabled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "agents",
                     "tasks",
-                    "steeringEnabled"
+                    "steeringEnabled",
+                    "multiRuntimeEnabled"
                   ]
                 }
               }

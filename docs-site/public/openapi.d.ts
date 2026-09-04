@@ -14428,6 +14428,7 @@ export interface paths {
                                 failed: number | null;
                             };
                             steeringEnabled: boolean;
+                            multiRuntimeEnabled: boolean;
                         };
                     };
                 };

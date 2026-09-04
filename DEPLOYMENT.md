@@ -71,7 +71,7 @@ Choose one provider for the whole example fleet:
 | OpenRouter | `pi` | `OPENROUTER_API_KEY` and a `MODEL_OVERRIDE` such as `openrouter/anthropic/claude-sonnet-4-5` |
 | AWS Bedrock (alpha) | `pi` | `AWS_REGION`, `MODEL_OVERRIDE=amazon-bedrock/<model-id>`, and AWS access keys or `AWS_PROFILE` |
 
-Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix).
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers).
 
 > **Tip:** Claude users can pass multiple OAuth tokens for load balancing: `CLAUDE_CODE_OAUTH_TOKEN=token1,token2,token3`.
 

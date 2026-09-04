@@ -125,7 +125,7 @@ Check [our templates](https://templates.agent-swarm.dev) for a quick start.
 - **Compounding memory & persistent identity** — agents explicitly capture reusable learnings with `memory-store`, remember past sessions, and evolve their own persona, expertise, and notes, with ratcheting file budgets and visible recovery when local edits exceed prompt limits. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [Agents →](https://docs.agent-swarm.dev/docs/architecture/agents)
 - **Hybrid + graph-linked memory recall** — memory retrieval can blend vector and full-text ranking, expand through linked memories, surface usefulness readouts, and let agents correct an existing memory without losing its ID or history. [Memory →](https://docs.agent-swarm.dev/docs/architecture/memory) · [MCP tools →](https://docs.agent-swarm.dev/docs/reference/mcp-tools#memory-tools)
 - **Multi-channel inputs** — Slack, GitHub, GitLab, email, WhatsApp, Linear, Jira, and the HTTP API all create tasks. [Integrations](#integrations)
-- **Slack operations and persistent thread trees** — lead agents can create, populate, and archive channels, while conversations can opt in to one editable task tree with streamed outcome cards and explicit Block Kit messages. [Slack guide →](https://docs.agent-swarm.dev/docs/guides/slack-integration)
+- **Slack operations and persistent thread trees** — lead agents can create, populate, and archive channels, while conversations can opt in to one editable task tree with streamed outcome cards and explicit Block Kit messages. [Slack guide →](https://docs.agent-swarm.dev/docs/integrations/slack)
 - **Workflow engine with Human-in-the-Loop** — DAG-based automation with approval gates, retries, structured I/O, and `foreach` fan-out that rejoins child agent tasks deterministically. [Workflows →](https://docs.agent-swarm.dev/docs/concepts/workflows)
 - **Scheduled & recurring tasks** — cron-based automation for standing work, with schedules that can target agent tasks, workflows, or catalog scripts. [Scheduling →](https://docs.agent-swarm.dev/docs/concepts/scheduling)
 - **Mid-run task steering** — add context at the next turn boundary, request an immediate interrupt where the harness supports it, or degrade safely to a follow-up task. [Task steering →](https://docs.agent-swarm.dev/docs/guides/task-steering)
@@ -162,7 +162,7 @@ Need help? Contact us at [contact@desplega.sh](mailto:contact@desplega.sh).
 | OpenRouter | `pi` | `OPENROUTER_API_KEY` and a `MODEL_OVERRIDE` |
 | AWS Bedrock (alpha) | `pi` | `AWS_REGION`, a Bedrock `MODEL_OVERRIDE`, and AWS credentials or profile |
 
-Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/provider-capability-matrix).
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock. See [model providers and gateways](https://docs.agent-swarm.dev/docs/guides/provider-auth/model-gateways) and [what each provider supports](https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers).
 
 The fastest way is the onboarding wizard — it collects credentials, picks presets, and generates a working `docker-compose.yml`:
 
@@ -218,15 +218,15 @@ Missing one? Ask the swarm to build it.
 
 | Integration | What it does | Setup |
 |---|---|---|
-| **Slack** | DM or @mention the bot to create tasks; workers reply in threads | [Guide](https://docs.agent-swarm.dev/docs/guides/slack-integration) |
-| **GitHub App** | @mention or assign the bot on issues/PRs; CI failures create follow-up tasks | [Guide](https://docs.agent-swarm.dev/docs/guides/github-integration) |
-| **GitLab** | Same model as GitHub — webhooks on issues/MRs, `glab` preinstalled in workers | [Guide](https://docs.agent-swarm.dev/docs/guides/gitlab-integration) |
-| **AgentMail** | Give each agent an inbox; emails become tasks or lead messages | [Guide](https://docs.agent-swarm.dev/docs/guides/agentmail-integration) |
+| **Slack** | DM or @mention the bot to create tasks; workers reply in threads | [Guide](https://docs.agent-swarm.dev/docs/integrations/slack) |
+| **GitHub App** | @mention or assign the bot on issues/PRs; CI failures create follow-up tasks | [Guide](https://docs.agent-swarm.dev/docs/integrations/github) |
+| **GitLab** | Same model as GitHub — webhooks on issues/MRs, `glab` preinstalled in workers | [Guide](https://docs.agent-swarm.dev/docs/integrations/gitlab) |
+| **AgentMail** | Give each agent an inbox; emails become tasks or lead messages | [Guide](https://docs.agent-swarm.dev/docs/integrations/agentmail) |
 | **Kapso (WhatsApp)** | Native inbound WhatsApp webhook routing; agents reply over WhatsApp with MCP tools or the `kapso-whatsapp` skill | [Guide](https://docs.agent-swarm.dev/docs/integrations/kapso) |
 | **Composio** | Route approved third-party app operations through `agent-swarm x composio ...` or the `swarm_x` MCP tool | [Guide](https://docs.agent-swarm.dev/docs/integrations/composio) |
-| **Linear** | Bidirectional ticket sync via OAuth + webhooks | [Guide](https://docs.agent-swarm.dev/docs/guides/linear-integration) |
-| **Jira Cloud** | OAuth 3LO ticket sync — assignee/comment events create tasks; lifecycle posts comments back | [Guide](https://docs.agent-swarm.dev/docs/guides/jira-integration) |
-| **Sentry** | Workers can triage Sentry issues with the `/investigate-sentry-issue` command | [Guide](https://docs.agent-swarm.dev/docs/guides/sentry-integration) |
+| **Linear** | Bidirectional ticket sync via OAuth + webhooks | [Guide](https://docs.agent-swarm.dev/docs/integrations/linear) |
+| **Jira Cloud** | OAuth 3LO ticket sync — assignee/comment events create tasks; lifecycle posts comments back | [Guide](https://docs.agent-swarm.dev/docs/integrations/jira) |
+| **Sentry** | Workers can triage Sentry issues with the `/investigate-sentry-issue` command | [Guide](https://docs.agent-swarm.dev/docs/integrations/sentry) |
 | **Devin** | Devin can be a node in your swarm — keep your existing configuration | [Guide](https://docs.agent-swarm.dev/docs/guides/harness-configuration#supported-providers) |
 
 ## Dashboard

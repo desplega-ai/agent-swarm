@@ -37,7 +37,7 @@ The swarm joins data across [ClickHouse](https://clickhouse.com/), [Postgres](ht
 
 ## What it does
 
-Reports render as **auto-hosted HTML [Pages](/docs/concepts) with charts** when complex, or Slack threads with chart replies for recurring digests.
+Reports render as **auto-hosted HTML [Pages](/docs/reference/mcp-tools#pages-tools) with charts** when complex, or Slack threads with chart replies for recurring digests.
 
 ## Agents
 
@@ -54,7 +54,7 @@ Reports render as **auto-hosted HTML [Pages](/docs/concepts) with charts** when 
 
 - **Integration skills (one per source):** `gsc-analytics` ([Search Console](https://search.google.com/search-console)), `posthog-interaction` ([PostHog](https://posthog.com/) HogQL — also joins [Convex](https://www.convex.dev/) / [Clerk](https://clerk.com/) / [Stripe](https://stripe.com/) warehouses), `clerk-analytics` (user/org growth from [Clerk](https://clerk.com/)), `turso-interaction` ([Turso](https://turso.tech/) LibSQL state), `signoz-interaction` ([SigNoz](https://signoz.io/) observability), `granola-api` ([Granola](https://www.granola.ai/) meeting signal), `telemetry-report` (charts from internal telemetry).
 - **`daily-growth-snapshot` swarm-script** — calls every source over HTTP/SQL and emits a unified JSON payload, so the agent-side report is mostly framing, not data-pulling. Date-window discipline (align to complete UTC days, exclude today) is encoded in the script.
-- **Chart-generation skill** — renders the JSON payload into chart images embedded in the [Page](/docs/concepts) or Slack reply. Backed by [Chart.js](https://www.chartjs.org/) running inside a `swarm-script` node so output is deterministic and snapshot-comparable.
+- **Chart-generation skill** — renders the JSON payload into chart images embedded in the [Page](/docs/reference/mcp-tools#pages-tools) or Slack reply. Backed by [Chart.js](https://www.chartjs.org/) running inside a `swarm-script` node so output is deterministic and snapshot-comparable.
 
 ## Workflows / Schedules
 
@@ -72,7 +72,7 @@ Reports render as **auto-hosted HTML [Pages](/docs/concepts) with charts** when 
 
 - **Use deterministic `swarm-script` nodes for "fetch + JSON" sections.** Keep the LLM out of the loop where it adds no value — faster, cheaper, more reliable.
 - **Always exclude the partial current day** from time-windowed metrics. Today's numbers are incomplete and the agent will draw wrong conclusions.
-- **Render multi-chart reports as a [Page](/docs/concepts)**, not a Slack thread. People want skimmable: a linked HTML page with 8 charts beats 8 image replies.
+- **Render multi-chart reports as a [Page](/docs/reference/mcp-tools#pages-tools)**, not a Slack thread. People want skimmable: a linked HTML page with 8 charts beats 8 image replies.
 - **One agent owns the cross-source secrets** (scoped per agent), keeping the secret surface small and auditable.
 - **Cache slow warehouse queries in KV** with a short TTL — a 1-hour cache is invisible to users and saves a lot of cycles.
 - **Ask the swarm questions in Slack and let it pick the source** — a well-skilled lead routes "active orgs last week?" to [Clerk](https://clerk.com/), "activation funnel?" to [PostHog](https://posthog.com/), "top GSC query?" to [Google Search Console](https://search.google.com/search-console), without you naming the source.

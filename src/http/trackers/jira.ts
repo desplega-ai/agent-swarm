@@ -17,7 +17,7 @@ import { route } from "../route-def";
 import { deriveApiBaseUrl, parseQueryParams } from "../utils";
 
 const MANUAL_WEBHOOK_INSTRUCTIONS =
-  "See docs-site/.../guides/jira-integration.mdx for manual webhook registration steps.";
+  "See docs-site/.../integrations/jira.mdx for manual webhook registration steps.";
 
 // ─── Response Schemas ────────────────────────────────────────────────────────
 
