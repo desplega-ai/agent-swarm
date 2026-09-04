@@ -6,7 +6,6 @@ import { useConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useStatusContext } from "@/app/status-context";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
 import {
@@ -41,15 +40,42 @@ export function DashboardNudges() {
   if (!showUpgrade && !showOrgName && !showAutomations) return null;
 
   return (
-    <div
-      className={cn(
-        "grid gap-3",
-        Number(showUpgrade) + Number(showOrgName) + Number(showAutomations) > 1 &&
-          "md:grid-cols-2 xl:grid-cols-3",
+    <div className="flex flex-col gap-2">
+      {showAutomations && waitingAutomations && waitingAutomations.length > 0 && (
+        <NudgeBanner
+          priority="primary"
+          icon={Wrench}
+          title={`${waitingAutomations.length} automation${waitingAutomations.length === 1 ? "" : "s"} waiting on setup`}
+          description={
+            <details>
+              <summary className="inline cursor-pointer list-none text-muted-foreground hover:text-foreground">
+                Review the values or integrations each automation still needs.
+              </summary>
+              <ul className="mt-2 space-y-1.5 border-t pt-2">
+                {waitingAutomations.map((automation) => {
+                  return (
+                    <li key={`${automation.kind}:${automation.id}`} className="space-y-0.5">
+                      <p className="font-medium text-foreground">
+                        {automationDisplayName(automation)}
+                      </p>
+                      <p className="text-muted-foreground text-sm">
+                        {automationPurpose(automation)}
+                      </p>
+                      <Link to={automation.fixUrl} className="text-primary text-sm hover:underline">
+                        {automationFixText(automation)}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </details>
+          }
+        />
       )}
-    >
+
       {showUpgrade && upgradeGate.currentVersion && (
-        <NudgeCard
+        <NudgeBanner
+          priority="secondary"
           icon={ArrowUpCircle}
           title="A newer Agent Swarm version is available"
           description={
@@ -65,7 +91,8 @@ export function DashboardNudges() {
                 target="_blank"
                 rel="noreferrer"
               >
-                View release notes
+                <span className="hidden sm:inline">Release notes</span>
+                <span className="sm:hidden">Notes</span>
                 <ExternalLink aria-hidden="true" />
               </a>
             </Button>
@@ -75,76 +102,69 @@ export function DashboardNudges() {
       )}
 
       {showOrgName && (
-        <NudgeCard
+        <NudgeBanner
+          priority="secondary"
           icon={Building2}
           title="Make this dashboard yours"
           description="Add your organization name so it appears in the dashboard, status page, and outbound messages."
           action={
             <Button asChild size="sm" variant="outline">
               <Link to="/settings/configuration?search=SWARM_ORG_NAME#setting-SWARM_ORG_NAME">
-                Add organization name
+                <span className="hidden sm:inline">Add organization name</span>
+                <span className="sm:hidden">Add name</span>
               </Link>
             </Button>
           }
           onDismiss={orgNameCard.dismiss}
         />
       )}
-
-      {waitingAutomations && waitingAutomations.length > 0 && (
-        <NudgeCard
-          icon={Wrench}
-          title={`${waitingAutomations.length} automations waiting on setup`}
-          description={
-            <details>
-              <summary>Review the values or integrations each automation still needs.</summary>
-              <ul className="mt-2 space-y-1">
-                {waitingAutomations.map((automation) => {
-                  return (
-                    <li key={`${automation.kind}:${automation.id}`} className="space-y-0.5">
-                      <p className="font-medium text-foreground">
-                        {automationDisplayName(automation)}
-                      </p>
-                      <p>{automationPurpose(automation)}</p>
-                      <Link to={automation.fixUrl} className="text-primary hover:underline">
-                        {automationFixText(automation)}
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </details>
-          }
-        />
-      )}
     </div>
   );
 }
 
-function NudgeCard({
+function NudgeBanner({
+  priority,
   icon: Icon,
   title,
   description,
   action,
   onDismiss,
 }: {
+  priority: "primary" | "secondary";
   icon: LucideIcon;
   title: string;
   description: ReactNode;
   action?: ReactNode;
   onDismiss?: () => void;
 }) {
+  const isPrimary = priority === "primary";
+
   return (
-    <Card className="gap-4 border-primary/20 bg-primary/[0.025] py-4 shadow-none">
-      <CardContent className="flex items-start gap-3 px-4 sm:px-5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <Icon className="size-4" aria-hidden="true" />
+    <div
+      className={cn(
+        "w-full rounded-lg border px-3 py-2.5 shadow-none",
+        isPrimary ? "border-primary/30 bg-primary/[0.04]" : "border-border/60 bg-muted/30",
+      )}
+    >
+      <div className="flex items-start gap-2.5 sm:items-center">
+        <div
+          className={cn(
+            "flex size-7 shrink-0 items-center justify-center rounded-md text-xs",
+            isPrimary ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+          )}
+        >
+          <Icon className="size-3.5" aria-hidden="true" />
         </div>
-        <div className="min-w-0 flex-1 space-y-1.5 pt-0.5">
-          <CardTitle className="text-sm">{title}</CardTitle>
-          <CardDescription className="max-w-2xl leading-relaxed">{description}</CardDescription>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
+            <p className="text-sm font-medium leading-snug text-foreground">{title}</p>
+            <div className="text-sm text-muted-foreground">{description}</div>
+          </div>
         </div>
+
         {(action || onDismiss) && (
-          <div className="flex items-start gap-1">
+          <div className="flex shrink-0 items-start gap-1 sm:items-center">
             {action}
             {onDismiss && (
               <Button
@@ -160,7 +180,7 @@ function NudgeCard({
             )}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
