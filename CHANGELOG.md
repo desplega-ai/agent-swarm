@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
-- **Worker browser automation moves from `qa-use` to `agent-browser`** (#TBD). The full worker image installs `agent-browser` 0.31.1 next to a direct `playwright` 1.58.0 pin and points it at the existing Playwright Chromium, so the image still ships one browser. The `qa-use` CLI and its baked skill are gone. A new seeded `agent-browser` skill covers the snapshot, act, screenshot loop, the agent-fs upload recipe, and the manual fallback on the slim image, and the seeded `qa` skill now defaults to it (pristine seeded copies update at the next boot; operator-edited copies are preserved as usual).
+- **Worker browser automation moves from `qa-use` to `agent-browser`** (#1352). The full worker image installs `agent-browser` 0.31.1 next to a direct `playwright` 1.58.0 pin and points it at the existing Playwright Chromium, so the image still ships one browser. The `qa-use` CLI and its baked skill are gone. A new seeded `agent-browser` skill covers the snapshot, act, screenshot loop, the agent-fs upload recipe, and the manual fallback on the slim image, and the seeded `qa` skill now defaults to it (pristine seeded copies update at the next boot; operator-edited copies are preserved as usual).
 
 ## [1.137.0] - 2026-09-03
 

@@ -34,7 +34,7 @@ Swarm workers on the full image drive browsers with `agent-browser` instead of `
 - [x] Proof: full image worker takes an example.com screenshot with agent-browser, uploads to agent-fs, signed URL in store-progress (task 70597cf8); slim image degrades to manual fallback (task be5f8062). Evidence: thoughts/taras/qa/2026-09-04-des-781-agent-browser-worker.md
 - [x] ai-toolbox PR for `cc-plugin/base/skills/qa/SKILL.md`
 - [x] Code review (Standards + Spec, both Opus): Critical vendoring drift fixed via re-sync; Important TARGETARCH prune fixed; CHANGELOG clause added. Minor left as noted: em dashes carried in three re-flowed pre-existing lines; docs-site playbooks (`ux-command-center.mdx`, `self-documenting-release-reports.mdx`) and `README.md:109` still describe qa-use, per the instruction to leave playbooks; `.wts-setup.ts` / `.gitignore` still know `.qa-use-tests.json`.
-- [ ] Commit, PR, DES-781 comment
+- [x] Commit, PR #1352, ai-toolbox PR #34, DES-781 comment
 
 ## Verification
 
