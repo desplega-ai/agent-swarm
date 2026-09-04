@@ -787,6 +787,33 @@ export function escapeHtml(value: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
+/**
+ * Scheme allowlist for every URL this page turns into an `href`.
+ *
+ * `escapeHtml` stops markup injection but NOT an executable scheme: a stored
+ * `javascript:alert(1)` survives escaping intact and runs on click, and the
+ * tracker page is public. So an href is rendered ONLY when it parses as an
+ * absolute http(s) URL; everything else (javascript:, data:, vbscript:, file:,
+ * a protocol-relative `//evil`, a relative path) collapses to "" and the caller
+ * renders inert text instead of a link.
+ *
+ * Applied at ingest so bad URLs are never stored, AND here at render so rows
+ * written before this check — or by any other writer — still cannot execute.
+ */
+export function safeHttpUrl(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    // Not absolute (relative path, protocol-relative `//host`, or malformed).
+    return "";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return "";
+  return parsed.href;
+}
+
 function formatDuration(ms: number): string {
   if (!ms || ms < 0) return "—";
   if (ms < 1000) return `${ms}ms`;
@@ -848,10 +875,14 @@ export function renderTrackerPage(model: PageModel): string {
         .map((g) => {
           const links = g.artifacts.length
             ? g.artifacts
-                .map(
-                  (a) =>
-                    `<a href="${escapeHtml(a.href)}" title="${escapeHtml(a.storage)}">${escapeHtml(a.label)}</a>`,
-                )
+                .map((a) => {
+                  // Unsafe scheme -> render the label as inert text, never an href.
+                  const safe = safeHttpUrl(a.href);
+                  if (!safe) {
+                    return `<span class=muted title="${escapeHtml(a.storage)}">${escapeHtml(a.label)}</span>`;
+                  }
+                  return `<a href="${escapeHtml(safe)}" title="${escapeHtml(a.storage)}">${escapeHtml(a.label)}</a>`;
+                })
                 .join(" ")
             : "<span class=muted>none</span>";
           const color = STATUS_COLORS[g.status] ?? "#57606a";
@@ -876,17 +907,21 @@ export function renderTrackerPage(model: PageModel): string {
     .join("\n");
 
   const incidentRows = model.incidents
-    .map(
-      (i) => `<tr>
+    .map((i) => {
+      // fixPr is written back by the triage agent, so it gets the same scheme
+      // allowlist as artifact links rather than bare HTML escaping.
+      const fixPr = safeHttpUrl(i.fixPr);
+      const fixPrCell = fixPr ? `<a href="${escapeHtml(fixPr)}">PR</a>` : "";
+      return `<tr>
   <td><code>${escapeHtml(i.specId)}</code></td>
   <td>${escapeHtml(i.classification)}</td>
   <td>${i.occurrences}</td>
   <td><code>${escapeHtml(i.lastSeenSha.slice(0, 8))}</code></td>
   <td class=muted>${escapeHtml(i.lastSeenAt)}</td>
   <td>${escapeHtml(i.triageStatus)}</td>
-  <td>${i.fixPr ? `<a href="${escapeHtml(i.fixPr)}">PR</a>` : ""} ${escapeHtml(i.linearIssue)}</td>
-</tr>`,
-    )
+  <td>${fixPrCell} ${escapeHtml(i.linearIssue)}</td>
+</tr>`;
+    })
     .join("\n");
 
   const findingRows = model.findings
@@ -900,6 +935,9 @@ export function renderTrackerPage(model: PageModel): string {
 </tr>`,
     )
     .join("\n");
+
+  const safeAppUrl = safeHttpUrl(model.appUrl);
+  const appLink = safeAppUrl ? ` · <a href="${escapeHtml(safeAppUrl)}">private app</a>` : "";
 
   return `<!doctype html>
 <html lang=en>
@@ -923,7 +961,7 @@ code { font: 12px ui-monospace, SFMono-Regular, monospace; }
 </head>
 <body>
 <h1>UI E2E tracker</h1>
-<p class=sub>Read-only projection. Generated ${escapeHtml(model.generatedAt)} · <a href="${escapeHtml(model.appUrl)}">private app</a></p>
+<p class=sub>Read-only projection. Generated ${escapeHtml(model.generatedAt)}${appLink}</p>
 ${targetSections}
 <h2>Open incidents</h2>
 <table>
