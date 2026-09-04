@@ -2322,11 +2322,13 @@ export interface StatusIdentity {
 }
 
 export interface FeedbackInput {
+  submission_id: string;
   name?: string;
   email?: string;
   newsletter_consent: boolean;
   nps?: 1 | 2 | 3 | 4 | 5;
   message?: string;
+  submitted_at: string;
 }
 
 export interface StatusActivity {

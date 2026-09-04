@@ -5481,7 +5481,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Store an explicit feedback submission and queue it for relay */
+        /** Forward an explicit feedback submission to the feedback proxy */
         post: {
             parameters: {
                 query?: never;
@@ -5492,30 +5492,27 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
+                        submission_id: string;
                         name?: string;
                         /** Format: email */
                         email?: string;
                         newsletter_consent: boolean;
                         nps?: 1 | 2 | 3 | 4 | 5;
                         message?: string;
+                        /** Format: date-time */
+                        submitted_at: string;
                     };
                 };
             };
             responses: {
-                /** @description Feedback stored locally and queued for relay */
+                /** @description Feedback accepted by the configured proxy */
                 202: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content: {
-                        "application/json": {
-                            /** @enum {boolean} */
-                            success: true;
-                            submission_id: string;
-                        };
-                    };
+                    content?: never;
                 };
-                /** @description Validation error */
+                /** @description Validation error from this server or the feedback proxy */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -5533,8 +5530,35 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
-                /** @description Persistence error */
+                /** @description Feedback body is too large */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Feedback proxy rate limit exceeded */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Feedback proxy request failed */
                 500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Feedback storage is not configured on the proxy */
+                503: {
                     headers: {
                         [name: string]: unknown;
                     };

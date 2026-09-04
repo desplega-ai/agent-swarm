@@ -25,7 +25,6 @@ import {
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
-import { startFeedbackRelay, stopFeedbackRelay } from "../feedback";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -456,8 +455,6 @@ async function shutdown() {
   // Stop scratch-script retention garbage collector
   stopScratchScriptGc();
 
-  stopFeedbackRelay();
-
   // Stop RBAC audit: retention GC, flush interval, final drain, detach sink
   stopAuditGc();
   stopAuditWriter();
@@ -634,7 +631,6 @@ httpServer
     if (process.env.GITHUB_TOKEN) {
       await emitBuiltInIntegrationConnectedOnce("github");
     }
-    startFeedbackRelay();
 
     // Start Slack bot (if configured)
     await startSlackApp();

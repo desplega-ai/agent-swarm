@@ -22,12 +22,12 @@ import {
   getDbClient,
   getInstanceActivity,
   getLiveAgentCounts,
+  getSwarmConfigs,
   hasFirstCompletedTask,
   listAgentsWithCredStatusByProvider,
 } from "../be/db";
 import { getOAuthApp, getOAuthTokens } from "../be/db-queries/oauth";
 import { getFileStorageProvider } from "../fs/registry";
-import { readInstallationIdentity } from "../installation-identity";
 import { type AgentCredStatus, ProviderNameSchema } from "../types";
 import { route } from "./route-def";
 import { json, jsonError } from "./utils";
@@ -245,13 +245,14 @@ async function rollupCredStatusForProvider(provider: string): Promise<CredRollup
 async function buildIdentity(): Promise<StatusIdentity> {
   const cloudRaw = process.env.SWARM_CLOUD;
   const hideRaw = process.env.SWARM_HIDE_CLOUD_PROMO;
-  const { installedAt } = await readInstallationIdentity();
+  const installedAt = (await getSwarmConfigs({ scope: "global", key: "telemetry_installed_at" }))[0]
+    ?.value;
   return {
     name: process.env.SWARM_ORG_NAME?.trim() || "Swarm",
     logo_url: process.env.SWARM_ORG_LOGO_URL?.trim() || null,
     brand_color: process.env.SWARM_BRAND_COLOR?.trim() || null,
     is_cloud: cloudRaw === "true" || cloudRaw === "1",
-    installed_at: installedAt,
+    installed_at: installedAt || null,
     marketing_url: process.env.SWARM_MARKETING_URL?.trim() || null,
     hide_cloud_promo: hideRaw === "true" || hideRaw === "1",
     org_id: process.env.SWARM_ORG_ID?.trim() || null,

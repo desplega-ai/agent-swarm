@@ -15154,7 +15154,7 @@
     },
     "/api/feedback": {
       "post": {
-        "summary": "Store an explicit feedback submission and queue it for relay",
+        "summary": "Forward an explicit feedback submission to the feedback proxy",
         "tags": [
           "Feedback"
         ],
@@ -15169,6 +15169,11 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "submission_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
                   "name": {
                     "type": "string",
                     "maxLength": 200
@@ -15218,10 +15223,16 @@
                   "message": {
                     "type": "string",
                     "maxLength": 10000
+                  },
+                  "submitted_at": {
+                    "type": "string",
+                    "format": "date-time"
                   }
                 },
                 "required": [
-                  "newsletter_consent"
+                  "submission_id",
+                  "newsletter_consent",
+                  "submitted_at"
                 ]
               }
             }
@@ -15229,32 +15240,10 @@
         },
         "responses": {
           "202": {
-            "description": "Feedback stored locally and queued for relay",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean",
-                      "enum": [
-                        true
-                      ]
-                    },
-                    "submission_id": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "success",
-                    "submission_id"
-                  ]
-                }
-              }
-            }
+            "description": "Feedback accepted by the configured proxy"
           },
           "400": {
-            "description": "Validation error",
+            "description": "Validation error from this server or the feedback proxy",
             "content": {
               "application/json": {
                 "schema": {
@@ -15273,8 +15262,38 @@
               }
             }
           },
+          "413": {
+            "description": "Feedback body is too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Feedback proxy rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
-            "description": "Persistence error",
+            "description": "Feedback proxy request failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Feedback storage is not configured on the proxy",
             "content": {
               "application/json": {
                 "schema": {

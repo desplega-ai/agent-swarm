@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { FeedbackSubmissionError } from "@/api/client";
 import { useSubmitFeedback } from "@/api/hooks/use-feedback";
 import { useTasks } from "@/api/hooks/use-tasks";
 import { useStatusContext } from "@/app/status-context";
@@ -17,9 +18,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useCurrentUser } from "@/contexts/current-user-context";
-import { useDismissibleCard } from "@/hooks/use-dismissible-card";
+import { useConfig } from "@/hooks/use-config";
 import { useOtherDialogOpen } from "@/hooks/use-other-dialog-open";
-import { shouldShowFeedbackPopup } from "@/lib/feedback-popup";
+import {
+  type FeedbackPopupState,
+  feedbackPopupStorageKey,
+  parseFeedbackPopupState,
+  shouldShowFeedbackPopup,
+} from "@/lib/feedback-popup";
 import { cn } from "@/lib/utils";
 
 const CALENDAR_URL = "https://calendar.app.google/R1ngNwcjs4vrJDk96";
@@ -27,10 +33,26 @@ const CALENDAR_URL = "https://calendar.app.google/R1ngNwcjs4vrJDk96";
 export function FeedbackDialog() {
   const status = useStatusContext();
   const currentUser = useCurrentUser();
+  const { config } = useConfig();
   const failedTasks = useTasks({ status: "failed", limit: 1 });
-  const card = useDismissibleCard(`feedback-popup:${currentUser.userId ?? "pending"}`);
   const otherDialogOpen = useOtherDialogOpen();
   const submitFeedback = useSubmitFeedback();
+  const storageKey = useMemo(
+    () => feedbackPopupStorageKey(config.apiUrl, currentUser.userId ?? "pending"),
+    [config.apiUrl, currentUser.userId],
+  );
+  const [popupState, setPopupState] = useState<FeedbackPopupState>(() => {
+    try {
+      return parseFeedbackPopupState(localStorage.getItem(storageKey));
+    } catch {
+      return parseFeedbackPopupState(null);
+    }
+  });
+  const [loadedStorageKey, setLoadedStorageKey] = useState(storageKey);
+  const [attempt, setAttempt] = useState<{
+    submissionId: string;
+    submittedAt: string;
+  } | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [newsletterConsent, setNewsletterConsent] = useState(false);
@@ -43,33 +65,94 @@ export function FeedbackDialog() {
     Object.hasOwn(status.data.identity, "installed_at");
   const open =
     apiSupportsFeedback &&
+    loadedStorageKey === storageKey &&
     shouldShowFeedbackPopup({
       isCloud: status.data?.identity.is_cloud === true,
       currentUserState: currentUser.state,
       user: currentUser.user,
-      dismissed: card.dismissed,
+      state: popupState,
       installedAt: status.data?.identity.installed_at ?? null,
       hasFailedTask: (failedTasks.data?.total ?? 0) > 0,
       otherDialogOpen,
     });
 
+  useEffect(() => {
+    try {
+      setPopupState(parseFeedbackPopupState(localStorage.getItem(storageKey)));
+    } catch {
+      setPopupState(parseFeedbackPopupState(null));
+    }
+    setLoadedStorageKey(storageKey);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (open && !attempt) {
+      setAttempt({ submissionId: crypto.randomUUID(), submittedAt: new Date().toISOString() });
+    }
+  }, [attempt, open]);
+
+  useEffect(() => {
+    const handler = (event: StorageEvent) => {
+      if (event.key === storageKey) setPopupState(parseFeedbackPopupState(event.newValue));
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [storageKey]);
+
+  function savePopupState(next: FeedbackPopupState) {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      // Storage can be unavailable in privacy mode; in-memory state still suppresses this session.
+    }
+    setPopupState(next);
+    setLoadedStorageKey(storageKey);
+  }
+
+  function dismiss() {
+    savePopupState({ ...popupState, lastDismissedAt: new Date().toISOString() });
+    setAttempt(null);
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!currentUser.userId) return;
+    if (!currentUser.userId || !attempt) return;
     submitFeedback.mutate(
       {
+        submission_id: attempt.submissionId,
         name: name || undefined,
         email: email || undefined,
         newsletter_consent: newsletterConsent,
         nps,
         message: message || undefined,
+        submitted_at: attempt.submittedAt,
       },
       {
         onSuccess: () => {
-          card.dismiss();
+          savePopupState({
+            ...popupState,
+            lastSubmittedAt: new Date().toISOString(),
+            submissionCount: popupState.submissionCount + 1,
+          });
+          setAttempt(null);
           toast.success("Thanks for sharing your feedback.");
         },
-        onError: () => toast.error("Could not send feedback. Please try again."),
+        onError: (error) => {
+          if (error instanceof FeedbackSubmissionError && error.status === 429) {
+            const retry = error.retryAfterSeconds;
+            toast.error(
+              retry === null
+                ? "Too many feedback attempts. Please try again later."
+                : `Too many feedback attempts. Please try again in ${retry} seconds.`,
+            );
+            return;
+          }
+          if (error instanceof FeedbackSubmissionError && error.status === 413) {
+            toast.error("This feedback is too long to send. Please shorten the message.");
+            return;
+          }
+          toast.error("Could not send feedback. Please try again.");
+        },
       },
     );
   }
@@ -78,7 +161,7 @@ export function FeedbackDialog() {
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) card.dismiss();
+        if (!nextOpen) dismiss();
       }}
     >
       <DialogContent
@@ -167,7 +250,7 @@ export function FeedbackDialog() {
                 <ExternalLink aria-hidden="true" />
               </a>
             </Button>
-            <Button type="submit" disabled={submitFeedback.isPending}>
+            <Button type="submit" disabled={submitFeedback.isPending || !attempt}>
               {submitFeedback.isPending ? "Sending…" : "Send"}
             </Button>
           </DialogFooter>

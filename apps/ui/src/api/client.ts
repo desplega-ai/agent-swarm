@@ -162,6 +162,19 @@ export class TriggerSchemaApiError extends Error {
   }
 }
 
+export class FeedbackSubmissionError extends Error {
+  readonly status: number;
+  readonly retryAfterSeconds: number | null;
+
+  constructor(status: number, retryAfter: string | null) {
+    super(`Failed to submit feedback: ${status}`);
+    this.name = "FeedbackSubmissionError";
+    this.status = status;
+    const parsed = retryAfter ? Number.parseInt(retryAfter, 10) : Number.NaN;
+    this.retryAfterSeconds = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  }
+}
+
 /**
  * Every non-OK `/api/apps/*` answer. `message` is the flattened, human-readable
  * form (what generic error surfaces render); `issues` is the server's own
@@ -574,14 +587,16 @@ class ApiClient {
     return res.json();
   }
 
-  async submitFeedback(data: FeedbackInput): Promise<{ success: true; submission_id: string }> {
+  async submitFeedback(
+    data: FeedbackInput,
+  ): Promise<{ status: "accepted"; submission_id: string }> {
     const url = `${this.getBaseUrl()}/api/feedback`;
     const res = await fetch(url, {
       method: "POST",
       headers: this.getHeaders(),
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error(`Failed to submit feedback: ${res.status}`);
+    if (!res.ok) throw new FeedbackSubmissionError(res.status, res.headers.get("Retry-After"));
     return res.json();
   }
 
