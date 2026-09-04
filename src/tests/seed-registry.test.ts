@@ -39,16 +39,16 @@ describe("seeder registry", () => {
   });
 
   test("the built-in catalogs expose the expected candidate counts", () => {
-    expect(workflowsSeeder.items()).toHaveLength(7);
-    expect(schedulesSeeder.items()).toHaveLength(5);
+    expect(workflowsSeeder.items()).toHaveLength(5);
+    expect(schedulesSeeder.items()).toHaveLength(4);
   });
 
   test("seeds all starter workflow and schedule rows on a fresh database", async () => {
     const workflowResult = await runSeeder(workflowsSeeder, { quiet: true });
     const scheduleResult = await runSeeder(schedulesSeeder, { quiet: true });
 
-    expect(workflowResult).toMatchObject({ created: 7, failed: [] });
-    expect(scheduleResult).toMatchObject({ created: 5, failed: [] });
-    expect(await listWorkflows()).toHaveLength(7);
+    expect(workflowResult).toMatchObject({ created: 5, failed: [] });
+    expect(scheduleResult).toMatchObject({ created: 4, failed: [] });
+    expect(await listWorkflows()).toHaveLength(5);
   });
 });

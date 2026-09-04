@@ -9,6 +9,6 @@
   "category": "workflows",
   "placeholders": ["GSC_PROPERTY"],
   "requires": ["gsc", "agentfs"],
-  "runAllSeedersCandidate": true,
+  "runAllSeedersCandidate": false,
   "tags": ["gsc", "research", "content"]
 }

@@ -50,14 +50,18 @@ afterEach(async () => {
 });
 
 describe("workflows seeder", () => {
-  test("loads only the seven starter candidates with their setup metadata", () => {
+  test("loads only the five starter candidates with their setup metadata", () => {
     const workflows = loadSeedWorkflows();
-    expect(workflows).toHaveLength(7);
+    expect(workflows).toHaveLength(5);
     expect(workflows.find((workflow) => workflow.name === "autopilot")).toMatchObject({
       requiredParams: ["REPO_URL"],
       requires: ["github"],
     });
     expect(workflows.some((workflow) => workflow.name === "ralph-loop")).toBe(false);
+    expect(workflows.some((workflow) => workflow.name === "claude-code-changelog-watch")).toBe(
+      false,
+    );
+    expect(workflows.some((workflow) => workflow.name === "gsc-topic-miner")).toBe(false);
   });
 
   test("seeds a workflow and re-runs as a no-op", async () => {

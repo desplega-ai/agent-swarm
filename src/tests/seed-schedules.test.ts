@@ -50,15 +50,18 @@ afterEach(async () => {
 });
 
 describe("schedules seeder", () => {
-  test("loads only the five starter candidates, including the unfenced schedule block", () => {
+  test("loads only the four starter candidates, including the unfenced schedule block", () => {
     const schedules = loadSeedSchedules();
-    expect(schedules).toHaveLength(5);
+    expect(schedules).toHaveLength(4);
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
       cronExpression: "15 2 * * *",
       requiredParams: [],
       requires: [],
     });
     expect(schedules.some((schedule) => schedule.name === "weekly-dependabot-triage")).toBe(false);
+    expect(schedules.some((schedule) => schedule.name === "weekly-harness-upgrade-check")).toBe(
+      false,
+    );
   });
 
   test("seeds a schedule with setup metadata and re-runs as a no-op", async () => {

@@ -10,12 +10,6 @@ import autopilotConfig from "../../../templates/workflows/autopilot/config.json"
 import autopilotContent from "../../../templates/workflows/autopilot/content.md" with {
   type: "text",
 };
-import claudeCodeChangelogWatchConfig from "../../../templates/workflows/claude-code-changelog-watch/config.json" with {
-  type: "text",
-};
-import claudeCodeChangelogWatchContent from "../../../templates/workflows/claude-code-changelog-watch/content.md" with {
-  type: "text",
-};
 import competitorRadarConfig from "../../../templates/workflows/competitor-radar/config.json" with {
   type: "text",
 };
@@ -26,12 +20,6 @@ import docsSiteReleasesConfig from "../../../templates/workflows/docs-site-relea
   type: "text",
 };
 import docsSiteReleasesContent from "../../../templates/workflows/docs-site-releases/content.md" with {
-  type: "text",
-};
-import gscTopicMinerConfig from "../../../templates/workflows/gsc-topic-miner/config.json" with {
-  type: "text",
-};
-import gscTopicMinerContent from "../../../templates/workflows/gsc-topic-miner/content.md" with {
   type: "text",
 };
 import linearDrainLoopConfig from "../../../templates/workflows/linear-drain-loop/config.json" with {
@@ -110,13 +98,8 @@ const asText = (value: unknown): string => value as string;
 const BUILT_IN_WORKFLOW_SOURCES: readonly WorkflowTemplateSource[] = [
   { config: asText(alertsTriageConfig), content: asText(alertsTriageContent) },
   { config: asText(autopilotConfig), content: asText(autopilotContent) },
-  {
-    config: asText(claudeCodeChangelogWatchConfig),
-    content: asText(claudeCodeChangelogWatchContent),
-  },
   { config: asText(competitorRadarConfig), content: asText(competitorRadarContent) },
   { config: asText(docsSiteReleasesConfig), content: asText(docsSiteReleasesContent) },
-  { config: asText(gscTopicMinerConfig), content: asText(gscTopicMinerContent) },
   { config: asText(linearDrainLoopConfig), content: asText(linearDrainLoopContent) },
   { config: asText(llmSafeReleaseContextConfig), content: asText(llmSafeReleaseContextContent) },
   { config: asText(prReviewStatusSweepConfig), content: asText(prReviewStatusSweepContent) },
