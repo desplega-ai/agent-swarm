@@ -2,9 +2,9 @@
  * Built-in swarm skills catalog.
  *
  * Skill templates live under `templates/skills/<name>/`. Entries with
- * `runAllSeedersCandidate: true` are seeded into the DB at swarm scope and are
- * versioned by the generic seeder harness, so pristine built-ins update while
- * user-modified skills are preserved.
+ * `runAllSeedersCandidate: true` are seeded into the DB at their configured
+ * scope and are versioned by the generic seeder harness, so pristine built-ins
+ * update while user-modified skills are preserved.
  */
 
 import { join } from "node:path";
@@ -275,6 +275,7 @@ export type SeedSkill = {
   content: string;
   systemDefault: boolean;
   userInvocable: boolean;
+  scope: "swarm" | "agent";
   /** Bundled files. Empty for simple (single-SKILL.md) skills. */
   files: SeedSkillFile[];
 };
@@ -380,6 +381,7 @@ function skillSeedHash(
   systemDefault: boolean,
   files: SeedSkillFile[],
   userInvocable = true,
+  scope: "swarm" | "agent" = "swarm",
 ): string {
   // Same back-compat rule as the file section: the userInvocable segment is
   // appended ONLY when the flag is false, so every skill with the default
@@ -388,6 +390,7 @@ function skillSeedHash(
   // pristine and the next source update would silently revert their edit.
   let base = `${content}\n\n# seed:systemDefault=${systemDefault ? "1" : "0"}\n`;
   if (userInvocable === false) base += "# seed:userInvocable=0\n";
+  if (scope === "agent") base += "# seed:scope=agent\n";
   if (files.length === 0) return computeContentHash(base);
   return computeContentHash(`${base}# seed:files\n${canonicalFiles(files)}\n`);
 }
@@ -405,6 +408,7 @@ function seedSkillFromSource(
     content: buildSkillContent(config, body),
     systemDefault: config.systemDefault === true,
     userInvocable: config.userInvocable !== false,
+    scope: config.scope ?? "swarm",
     files: BUILT_IN_SKILL_FILES[config.name] ?? [],
   };
 }
@@ -476,6 +480,7 @@ export async function loadSeedSkills(templatesDir?: string): Promise<SeedSkill[]
       content: buildSkillContent(config, await contentFile.text()),
       systemDefault: config.systemDefault === true,
       userInvocable: config.userInvocable !== false,
+      scope: config.scope ?? "swarm",
       files: await readSkillFilesDir(dir),
     });
   }
@@ -514,13 +519,14 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         skill.systemDefault,
         skill.files,
         skill.userInvocable,
+        skill.scope,
       ),
       skill,
     }));
   },
 
   async upstreamHash(item): Promise<string | null> {
-    const existing = await getSkillByName(item.key, "swarm");
+    const existing = await getSkillByName(item.key, item.skill.scope);
     if (!existing) return null;
     // Hash the live bundled files too, so an edit to one is detected as drift
     // on the same footing as an edit to SKILL.md.
@@ -533,6 +539,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       existing.systemDefault,
       liveFiles,
       existing.userInvocable,
+      existing.scope,
     );
   },
 
@@ -556,7 +563,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
       // `existing.id` is needed here.
       const existing = await getDbClient().get<{ id: string }>(
         "SELECT id FROM skills WHERE name = ? AND scope = ? AND COALESCE(ownerAgentId, '') = ?",
-        [skill.name, "swarm", ""],
+        [skill.name, skill.scope, ""],
       );
 
       if (existing) {
@@ -564,7 +571,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
           name: skill.name,
           description: skill.description,
           content: skill.content,
-          scope: "swarm",
+          scope: skill.scope,
           systemDefault: skill.systemDefault,
           userInvocable: skill.userInvocable,
           isComplex: skill.files.length > 0,
@@ -578,7 +585,7 @@ export const skillsSeeder: Seeder<SkillSeedItem> = {
         description: skill.description,
         content: skill.content,
         type: "personal",
-        scope: "swarm",
+        scope: skill.scope,
         ownerAgentId: undefined,
         systemDefault: skill.systemDefault,
         userInvocable: skill.userInvocable,

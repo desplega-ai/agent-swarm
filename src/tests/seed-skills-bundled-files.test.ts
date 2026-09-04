@@ -85,6 +85,7 @@ describe("seeded skills with bundled files", () => {
 
     expect(brandIdentity?.systemDefault).toBe(false);
     expect(brandIdentity?.userInvocable).toBe(true);
+    expect(brandIdentity?.scope).toBe("agent");
     expect(brandIdentity?.content).toContain("All `brand-identity` visual authoring MUST use the managed OpenPencil workspace");
     expect(brandIdentity?.content).toContain("Storybook is not a brand-authoring environment");
     expect(brandIdentity?.files.map((file) => file.path).sort()).toEqual([
@@ -106,6 +107,11 @@ describe("seeded skills with bundled files", () => {
       "references/typography-craft.md",
       "references/visual-language-and-composition.md",
     ]);
+  });
+
+  test("brand-identity is seeded as assignment-managed rather than swarm-wide", async () => {
+    expect((await getSkillByName("brand-identity", "agent"))?.scope).toBe("agent");
+    expect(await getSkillByName("brand-identity", "swarm")).toBeNull();
   });
 
   test("embedded manifest matches the on-disk templates", async () => {

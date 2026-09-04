@@ -6,6 +6,7 @@
   "name": "brand-identity",
   "placeholders": [],
   "runAllSeedersCandidate": true,
+  "scope": "agent",
   "slug": "brand-identity",
   "systemDefault": false,
   "tags": ["brand", "identity", "design"],

@@ -14,6 +14,8 @@ export type SkillTemplateConfig = {
   systemDefault?: boolean;
   /** `false` renders `user-invocable: false` frontmatter (skill is model-invoked only). */
   userInvocable?: boolean;
+  /** Seed catalog scope. Agent-scoped entries are assigned by the reconciler. */
+  scope?: "swarm" | "agent";
 };
 
 /**
