@@ -4797,6 +4797,15 @@ export async function createTaskExtended(
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
   let requestedByUserIdInherited = false;
+  // True only when `options.routingAffinity` ends up populated purely via
+  // the plain parent-fallback inherit below (child declared no affinity of
+  // its own, and the parent wasn't lead-only). That shape is PROVENANCE — a
+  // record of where the continuation came from (`sourceAgentId`/`role`/
+  // `harnessProvider`) — not a requirement any caller declared. It must
+  // never gate the direct-assignment/offer enforcement further down; only
+  // an explicit caller-declared requirement, or a lead-only ratchet, does.
+  // See #1276 (3c857542) for the ratchet this must NOT weaken.
+  let routingAffinityIsInheritedProvenance = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   // `status: "draft"` wins over offeredTo/agentId — a draft task keeps its
@@ -4961,6 +4970,11 @@ export async function createTaskExtended(
         // requiredCapabilities and therefore built a fresh affinity object).
         if (!options.routingAffinity) {
           options.routingAffinity = parent.routingAffinity;
+          // A non-lead-only parent's affinity, inherited here only because
+          // the child supplied nothing of its own, is provenance — not a
+          // requirement. A lead-only parent's affinity is always a
+          // requirement (the ratchet), so it's excluded below.
+          routingAffinityIsInheritedProvenance = !parent.routingAffinity.leadOnly;
         } else if (parent.routingAffinity.leadOnly) {
           // Child-supplied affinity may add requirements, but never remove an
           // authorization-affecting requirement inherited from a Lead-only
@@ -5061,8 +5075,15 @@ export async function createTaskExtended(
   // Direct assignment and offers bypass the pool claim gate, so enforce the
   // complete structured affinity here. This is after parent inheritance so
   // continuations cannot shed a Lead-only boundary or its capabilities.
+  // Exception: an affinity that is pure inherited PROVENANCE (see
+  // `routingAffinityIsInheritedProvenance` above) describes where this
+  // continuation came from, not a requirement anyone declared for it — an
+  // explicit direct assignment/offer is the caller overriding routing, and
+  // provenance must not veto that override. A caller-declared requirement
+  // (explicit `leadOnly`/`capabilities`, or a lead-only ratchet) still gates
+  // as before.
   const targetAgentId = options.agentId ?? options.offeredTo;
-  if (options.routingAffinity && targetAgentId) {
+  if (options.routingAffinity && targetAgentId && !routingAffinityIsInheritedProvenance) {
     const target = await getAgentById(targetAgentId);
     if (!target || !isAgentEligibleForTask(target, { routingAffinity: options.routingAffinity })) {
       try {

@@ -90,7 +90,7 @@ afterAll(async () => {
 });
 
 describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
-  test("a UI follow-up replaces inherited worker affinity with Lead-only routing", async () => {
+  test("a UI follow-up lands on the Lead without being stamped Lead-only", async () => {
     const worker = await createAgent({
       name: "session-parent-worker",
       isLead: false,
@@ -111,7 +111,13 @@ describe("POST /api/tasks draft:true + /promote-draft (#1240)", () => {
     expect(created.status).toBe(201);
     expect(created.body.agentId).toBe(leadAgentId);
     expect(created.body.parentTaskId).toBe(parent.id);
-    expect(created.body.routingAffinity).toMatchObject({ leadOnly: true });
+    // The parent's worker-specific affinity is inherited PROVENANCE (where
+    // the continuation came from), not an authorization requirement — it
+    // must not block the Lead from being direct-assigned here, and it must
+    // not be replaced with an authorization flag that ratchets forever
+    // (see #1316 / #1276 interaction; `leadOnly` is reserved for a genuine
+    // caller-declared or ratcheted requirement).
+    expect(created.body.routingAffinity?.leadOnly).not.toBe(true);
   });
 
   test("draft:true creates a task in draft status, invisible to the assigned agent's dispatch queue", async () => {

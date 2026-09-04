@@ -323,6 +323,48 @@ describe("Pool Affinity", () => {
       expect(child.routingAffinity?.capabilities).toEqual(["merge", "typescript"]);
       expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
+
+    test("a child of a task whose affinity is inherited provenance (not a declared requirement) can be direct-assigned to a worker lacking the parent's capabilities", async () => {
+      const originalWorker = await createAgent({
+        name: "provenance-original-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(originalWorker.id, {
+        role: "Implementation Engineer / Coder",
+        capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+      });
+      const differentWorker = await createAgent({
+        name: "provenance-different-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(differentWorker.id, { role: "researcher", capabilities: [] });
+
+      // Parent's routingAffinity is a snapshot of the ORIGINAL agent
+      // (sourceAgentId/role/capabilities) — provenance, not a caller-declared
+      // requirement. No `leadOnly`.
+      const parent = await createTaskExtended("Original session", {
+        agentId: originalWorker.id,
+        routingAffinity: affinity({
+          sourceAgentId: originalWorker.id,
+          role: "Implementation Engineer / Coder",
+          capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+        }),
+      });
+
+      // The child declares no routingAffinity of its own, so it falls back to
+      // inheriting the parent's — but a direct assignment to a DIFFERENT
+      // agent lacking that capability list must succeed: the inherited blob
+      // is provenance, not an authorization requirement (#1276's ratchet is
+      // for declared requirements and lead-only parents only).
+      const child = await createTaskExtended("Continue with someone else", {
+        parentTaskId: parent.id,
+        agentId: differentWorker.id,
+      });
+      expect(child.agentId).toBe(differentWorker.id);
+      expect(child.routingAffinity).toMatchObject({ sourceAgentId: originalWorker.id });
+    });
   });
 
   // ==========================================================================
