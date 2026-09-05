@@ -11,6 +11,7 @@
     "personalization",
     "secrets-encryption",
     "harness-configuration",
+    "provider-capability-matrix",
     "harness-providers",
     "task-steering",
     "observability-opentelemetry",
