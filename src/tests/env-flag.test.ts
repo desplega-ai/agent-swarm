@@ -99,6 +99,19 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("MEMORY_ACCESS_BOOST_MAX", "0.5")).toContain(">= 1");
   });
 
+  test("feedback endpoints require HTTPS except on loopback hosts", () => {
+    expect(validateConfigValue("feedback_endpoint", "https://feedback.example.com/v1")).toBeNull();
+    expect(validateConfigValue("feedback_endpoint", "http://localhost:3013/v1")).toBeNull();
+    expect(validateConfigValue("feedback_endpoint", "http://127.0.0.1:3013/v1")).toBeNull();
+    expect(validateConfigValue("feedback_endpoint", "http://[::1]:3013/v1")).toBeNull();
+    expect(validateConfigValue("feedback_endpoint", "http://evil.example/v1")).toContain(
+      "Invalid FEEDBACK_ENDPOINT",
+    );
+    expect(validateConfigValue("feedback_endpoint", "not a URL")).toContain(
+      "Invalid FEEDBACK_ENDPOINT",
+    );
+  });
+
   test("unknown keys stay unvalidated", () => {
     expect(validateConfigValue("SOME_RANDOM_KEY", "whatever")).toBeNull();
   });

@@ -2320,6 +2320,21 @@ export interface StatusIdentity {
   org_id: string | null;
 }
 
+export interface FeedbackInput {
+  submission_id: string;
+  user_id: string;
+  install_id: string | null;
+  installed_at: string | null;
+  org_name: string;
+  swarm_version: string;
+  name?: string;
+  email?: string;
+  newsletter_consent: boolean;
+  nps?: 1 | 2 | 3 | 4 | 5;
+  message?: string;
+  submitted_at: string;
+}
+
 export interface StatusActivity {
   agents_online: number;
   leads_online: number;

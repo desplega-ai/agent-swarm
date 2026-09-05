@@ -36,6 +36,7 @@ import type {
   FavoriteItemType,
   FavoriteSetResponse,
   FavoritesResponse,
+  FeedbackInput,
   IdentitiesResponse,
   IdentityEvent,
   IdentityEventsResponse,
@@ -571,6 +572,47 @@ class ApiClient {
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`Failed to fetch status: ${res.status}`);
     return res.json();
+  }
+
+  async submitFeedback(endpoint: string, data: FeedbackInput): Promise<void> {
+    let parsedEndpoint: URL;
+    try {
+      parsedEndpoint = new URL(endpoint);
+    } catch {
+      throw new Error("Invalid feedback endpoint");
+    }
+
+    const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+    if (
+      parsedEndpoint.protocol !== "https:" &&
+      !(parsedEndpoint.protocol === "http:" && loopbackHosts.has(parsedEndpoint.hostname))
+    ) {
+      throw new Error("Invalid feedback endpoint");
+    }
+
+    const body = JSON.stringify(data);
+    let response: Response;
+
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    } catch {
+      // Arbitrary self-hosted origins are not allowlisted by the shared proxy.
+      // Their preflight is blocked before the POST, so retain the simple opaque
+      // request as a fire-and-forget fallback.
+      await fetch(endpoint, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body,
+      });
+      return;
+    }
+
+    if (!response.ok) throw new Error(`Failed to submit feedback: ${response.status}`);
   }
 
   async testConnection(
