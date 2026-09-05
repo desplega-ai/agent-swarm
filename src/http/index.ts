@@ -25,6 +25,7 @@ import {
 } from "../be/rbac-audit";
 import { startScratchScriptGc, stopScratchScriptGc } from "../be/scripts/retention";
 import { seedLegacyCapabilitiesConfig } from "../be/seed-capabilities";
+import { buildOnboardDashboardUrl } from "../commands/onboard/dashboard-url";
 import { initGitHub } from "../github";
 import { initGitLab } from "../gitlab";
 import { stopHeartbeat } from "../heartbeat";
@@ -44,7 +45,7 @@ import { getServerSessionsProcessed } from "../server-runtime-counters";
 import { startSlackApp, stopSlackApp } from "../slack";
 import { initTelemetry, telemetry } from "../telemetry";
 import { getApiKey } from "../utils/api-key";
-import { getMcpBaseUrl } from "../utils/constants";
+import { getMcpBaseUrl, getPublicMcpBaseUrl } from "../utils/constants";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { initWorkflows } from "../workflows";
@@ -597,6 +598,11 @@ await initOtel("api");
 httpServer
   .listen(port, async () => {
     console.log(`MCP HTTP server running on http://localhost:${port}/mcp`);
+    const dashboardApiUrl =
+      process.env.PUBLIC_MCP_BASE_URL?.trim() || process.env.MCP_BASE_URL?.trim()
+        ? getPublicMcpBaseUrl()
+        : `http://localhost:${port}`;
+    console.log(`Open the dashboard: ${buildOnboardDashboardUrl({ apiUrl: dashboardApiUrl })}`);
 
     ensure({
       id: "listen",

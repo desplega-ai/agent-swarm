@@ -105,10 +105,12 @@ flowchart TD
   steer -- no --> cls{"classify (per task)"}
   cls -->|"A — no active session<br/>AND taskAge ≥ 5m"| remA["remediateCrashedWorkerTask<br/>reason = crash_recovery"]
   cls -->|"B — session stale<br/>hb ≥ 15m AND taskAge ≥ 15m"| remB["remediateCrashedWorkerTask<br/>reason = crash_recovery<br/>(+ cleanup session)"]
-  cls -->|"C — session fresh<br/>AND taskAge ≥ 30m"| esc["escalate to Lead<br/>(stalledTasks, no auto-fail)"]
+  cls -->|"C — session fresh<br/>AND taskAge ≥ 30m"| esc["surface stalledTasks"]
+  esc -->|"taskAge ≥ 120m"| fail["failTask with bounded reason"]
 ```
 
-- Candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. Tasks in `pending`/`offered` are **not** seen by this sweep. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume.
+- The in-progress candidate set = `getStalledInProgressTasks(STALL_THRESHOLD_NO_SESSION_MIN)` → `status='in_progress' AND lastUpdatedAt > 5m`. A candidate with a pending steering message newer than `STEERING_STALL_GRACE_MIN` is deferred for that sweep; once the bounded grace expires, normal classification and remediation resume. Fresh-session Case C is reported at 30 minutes and hard-stopped through `failTask` at 120 minutes if task progress still has not changed; timestamp and progress guards keep a racing worker update from being overwritten.
+- A separate bounded scan covers dependency-ready `unassigned`, `pending`, and `offered` tasks. It records a stable `Waiting to start: …` explanation at 15 minutes, then fails the task with that same human-readable reason at 60 minutes. Reasons distinguish a credential-blocked Lead, no available agent, and no agent matching required routing capabilities. This path does not depend on Slack.
 - An **active_session** = one worker-*run* process for a task (`active_sessions`, `UNIQUE(taskId)`), created lazily *after* the provider process spawns, heartbeated by **tool activity** (throttled ~5s; no wall-clock ping between tool calls). "No active session" is AND-gated with `lastUpdatedAt > 5m`, so it means *"no live run **and** no task progress in 5 min."* It can false-positive on a long-but-quiet live worker; the resume-generation budget (`MAX_RESUME_GENERATIONS`) bounds the blast radius.
 - Thresholds (env-overridable): `STALL_THRESHOLD_NO_SESSION_MIN=5` (`HEARTBEAT_STALL_NO_SESSION_MIN`), `STALL_THRESHOLD_STALE_HEARTBEAT_MIN=15`, `STALL_THRESHOLD_MINUTES=30`, `STEERING_STALL_GRACE_MIN=5` (`HEARTBEAT_STEERING_GRACE_MIN`), `STALE_CLEANUP_THRESHOLD_MINUTES=30`.
 
@@ -279,6 +281,9 @@ Rollback switches accept `0`/`false` interchangeably (both parse through
 | No-session stall (Case A) | 5 min | `HEARTBEAT_STALL_NO_SESSION_MIN` |
 | Stale-heartbeat stall (Case B) | 15 min | `HEARTBEAT_STALL_STALE_HB_MIN` |
 | Lead-escalation stall (Case C) | 30 min | `HEARTBEAT_STALL_THRESHOLD_MIN` |
+| Fresh-session hard stop (Case C) | 120 min | `HEARTBEAT_IN_PROGRESS_HARD_STOP_MIN` |
+| Unclaimed-task warning | 15 min | `HEARTBEAT_UNCLAIMED_STALL_MIN` |
+| Unclaimed-task failure | 60 min | `HEARTBEAT_UNCLAIMED_FAIL_MIN` |
 | Pending-steering stall grace | 5 min | `HEARTBEAT_STEERING_GRACE_MIN` |
 | Stale-resource cleanup | 30 min | `HEARTBEAT_STALE_CLEANUP_MIN` |
 | Runtime liveness window (§1a) | 5 min | `RUNTIME_STALE_THRESHOLD_MIN` |

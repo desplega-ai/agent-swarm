@@ -2210,7 +2210,7 @@ export type ScheduledTaskSummary = Omit<ScheduledTask, "taskTemplate"> & {
 /**
  * `/api/tasks` + `/api/sessions` list item — a strict subset of `AgentTask`.
  * The `task` text is truncated to a bounded preview (~300 chars) and the
- * completion/integration/context blobs (`output`, `failureReason`, `vcs*`,
+ * completion/integration/context blobs (`output`, `vcs*`,
  * `slack*`, `agentmail*`, `providerMeta`, …) are dropped. Because every field
  * here also exists on `AgentTask` (with the dropped ones optional), an
  * `AgentTaskSummary` value is assignable wherever an `AgentTask` is expected —
@@ -2242,6 +2242,7 @@ export type AgentTaskSummary = Pick<
   | "provider"
   | "requestedByUserId"
   | "progress"
+  | "failureReason"
   | "createdAt"
   | "lastUpdatedAt"
   | "finishedAt"

@@ -25,11 +25,13 @@ import {
   getTaskStats,
   getTasksByStatus,
   getUnassignedPoolTasks,
+  getUnclaimedTasksForHeartbeat,
   hasNonTerminalResumeChild,
   hasPendingSteering,
   isAgentEligibleForTask,
   isPoolAffinityEnforcementEnabled,
   MAX_EMPTY_POLLS,
+  markTaskStalled,
   promoteAbandonedDraftTasks,
   releaseStaleMentionProcessing,
   releaseStaleOfferedTasksForOfflineAgents,
@@ -56,9 +58,10 @@ import {
   REBOOT_RETRY_PIN_TAG,
   resolveLeadOnlyRecoveryAssignment,
 } from "../tasks/worker-follow-up";
-import type { AgentTask } from "../types";
+import type { Agent, AgentTask, AgentTaskStatus } from "../types";
 import { isMultiRuntimeEnabled } from "../utils/multi-runtime";
 import { scrubSecrets } from "../utils/secret-scrubber";
+import { classifyTaskFailureReason, type TaskFailureClass } from "../utils/task-failure-class";
 import { getExecutorRegistry } from "../workflows";
 import { recoverIncompleteRuns } from "../workflows/recovery";
 // Side-effect import: registers heartbeat event templates in the in-memory registry
@@ -111,6 +114,82 @@ function stallThresholdNoSessionMin(): number {
 /** Stall threshold: tasks with stale worker heartbeat */
 function stallThresholdStaleHeartbeatMin(): number {
   return Number(process.env.HEARTBEAT_STALL_STALE_HB_MIN) || 15;
+}
+
+/** Warn when a dispatch-eligible task has not been claimed. */
+function unclaimedStallThresholdMin(): number {
+  return Number(process.env.HEARTBEAT_UNCLAIMED_STALL_MIN) || 15;
+}
+
+/** Fail an unclaimed task after this many minutes in the warning state. */
+function unclaimedFailThresholdMin(): number {
+  return Number(process.env.HEARTBEAT_UNCLAIMED_FAIL_MIN) || 60;
+}
+
+/** Final bound for a task whose worker is alive but has made no task progress. */
+function inProgressHardStopMin(): number {
+  return Number(process.env.HEARTBEAT_IN_PROGRESS_HARD_STOP_MIN) || 120;
+}
+
+const UNCLAIMED_STALL_PREFIX = "Waiting to start: ";
+
+type UnclaimedReason = { failureClass: TaskFailureClass; message: string };
+
+function missingCredentials(agent: Agent | undefined): string[] {
+  if (!agent || (agent.credStatus?.ready !== false && agent.credentialMissing == null)) return [];
+  const reported =
+    agent.credStatus?.missing && agent.credStatus.missing.length > 0
+      ? agent.credStatus.missing
+      : (agent.credentialMissing ?? []);
+  return [...new Set(reported)].sort();
+}
+
+/** Stable, human-readable reason shown before and after an unclaimed timeout. */
+export function resolveUnclaimedTaskReason(task: AgentTask, agents: Agent[]): UnclaimedReason {
+  const holderId = task.status === "offered" ? task.offeredTo : task.agentId;
+  const holder = holderId ? agents.find((agent) => agent.id === holderId) : undefined;
+  const lead = holder?.isLead
+    ? holder
+    : task.routingAffinity?.leadOnly
+      ? agents.find((agent) => agent.isLead)
+      : undefined;
+  const missing = missingCredentials(lead);
+  if (missing.length > 0) {
+    return {
+      failureClass: "credential_missing",
+      message: `The lead agent is missing required LLM credentials: ${missing.join(", ")}.`,
+    };
+  }
+
+  if (holder) {
+    if (holder.status === "offline") {
+      return { failureClass: "no_agent", message: "No available agent has claimed this task." };
+    }
+    return { failureClass: "no_agent", message: "The assigned agent has not claimed this task." };
+  }
+
+  const pool = agents.filter((agent) =>
+    task.routingAffinity?.leadOnly ? agent.isLead : !agent.isLead,
+  );
+  const onlinePool = pool.filter((agent) => agent.status !== "offline");
+  if (onlinePool.length === 0) {
+    return {
+      failureClass: "no_agent",
+      message: "No agents eligible to claim this task are online.",
+    };
+  }
+
+  if (
+    (task.routingAffinity || task.routingAffinityInvalid) &&
+    !pool.some((agent) => isAgentEligibleForTask(agent, task))
+  ) {
+    return {
+      failureClass: "no_capable_agent",
+      message: "No registered agent matches this task's required role or capabilities.",
+    };
+  }
+
+  return { failureClass: "no_agent", message: "No available agent has claimed this task." };
 }
 
 /** Grace window for a fresh pending steering message before normal stall remediation resumes. */
@@ -206,7 +285,7 @@ const HEARTBEAT_CHECKLIST_DISABLE = Boolean(process.env.HEARTBEAT_CHECKLIST_DISA
 
 export interface HeartbeatFindings {
   stalledTasks: AgentTask[];
-  autoFailedTasks: Array<{ taskId: string; agentId: string; reason: string }>;
+  autoFailedTasks: Array<{ taskId: string; agentId?: string; reason: string }>;
   autoResumedTasks: Array<{
     taskId: string;
     resumeTaskId: string;
@@ -245,6 +324,7 @@ export interface HeartbeatFindings {
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let checklistInterval: ReturnType<typeof setInterval> | null = null;
 let isSweeping = false;
+let beforeHeartbeatStallMarkForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 let beforeHeartbeatSupersedeForTests: ((task: AgentTask) => void | Promise<void>) | null = null;
 
 /** Tasks auto-failed during the reboot sweep, consumed by boot triage */
@@ -254,6 +334,12 @@ export function setBeforeHeartbeatSupersedeForTests(
   hook: ((task: AgentTask) => void | Promise<void>) | null,
 ): void {
   beforeHeartbeatSupersedeForTests = hook;
+}
+
+export function setBeforeHeartbeatStallMarkForTests(
+  hook: ((task: AgentTask) => void | Promise<void>) | null,
+): void {
+  beforeHeartbeatStallMarkForTests = hook;
 }
 
 // ============================================================================
@@ -269,16 +355,16 @@ export async function preflightGate(): Promise<boolean> {
   const agents = await getAllAgents();
 
   const hasInProgressTasks = stats.in_progress > 0;
+  const hasPendingTasks = stats.pending > 0;
   const hasUnassignedTasks = stats.unassigned > 0;
   const hasOfferedTasks = stats.offered > 0;
   const hasReviewingTasks = stats.reviewing > 0;
 
   const onlineAgents = agents.filter((a) => a.status !== "offline");
-  const idleWorkers = onlineAgents.filter((a) => !a.isLead && a.status === "idle");
   const busyWorkers = onlineAgents.filter((a) => !a.isLead && a.status === "busy");
 
   // Gate conditions — if any are true, proceed with triage
-  if (hasUnassignedTasks && idleWorkers.length > 0) return true; // Pool tasks + idle workers → auto-assign
+  if (hasUnassignedTasks || hasPendingTasks) return true; // Could be waiting past the claim timeout
   if (hasInProgressTasks) return true; // Could have stalls
   if (hasOfferedTasks || hasReviewingTasks) return true; // Could have stale offers/reviews
   if (busyWorkers.length > 0) return true; // Need to verify worker health
@@ -335,7 +421,10 @@ export async function codeLevelTriage(): Promise<HeartbeatFindings> {
   // 3. Auto-assign pool tasks to idle workers
   await autoAssignPoolTasks(findings);
 
-  // 4. Cleanup stale resources (including workflow run recovery)
+  // 4. Warn, then fail, tasks that still have not been claimed.
+  await remediateUnclaimedTasks(findings);
+
+  // 5. Cleanup stale resources (including workflow run recovery)
   await cleanupStaleResources(findings);
 
   return findings;
@@ -380,12 +469,17 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
     if (!session) {
       // Case A: No active session — worker is dead
       if (taskAgeMs >= stallThresholdNoSessionMin() * 60 * 1000) {
+        await beforeHeartbeatStallMarkForTests?.(task);
+        if (await getActiveSessionForTask(task.id)) continue;
         await remediateCrashedWorkerTask(findings, task, {
           supersedeReason:
             "Auto-superseded by heartbeat: worker session not found (no active session for task)",
           legacyFailReason:
             "Auto-failed by heartbeat: worker session not found (no active session for task)",
           shortLabel: "no active session",
+          stallReason: "Worker session not found.",
+          stallClass: "session_crash",
+          sessionGuard: { mode: "absent" },
         });
       }
     } else {
@@ -395,21 +489,120 @@ async function detectAndRemediateStalledTasks(findings: HeartbeatFindings): Prom
       if (isStaleHeartbeat) {
         // Case B: Session exists but heartbeat is stale — worker likely crashed
         if (taskAgeMs >= stallThresholdStaleHeartbeatMin() * 60 * 1000) {
+          await beforeHeartbeatStallMarkForTests?.(task);
+          const staleHeartbeatBefore = new Date(
+            Date.now() - stallThresholdStaleHeartbeatMin() * 60 * 1000,
+          ).toISOString();
+          const sessionBeforeMark = await getActiveSessionForTask(task.id);
+          if (!sessionBeforeMark || sessionBeforeMark.lastHeartbeatAt > staleHeartbeatBefore)
+            continue;
           await remediateCrashedWorkerTask(findings, task, {
             supersedeReason:
               "Auto-superseded by heartbeat: worker session heartbeat is stale (likely crashed)",
             legacyFailReason:
               "Auto-failed by heartbeat: worker session heartbeat is stale (likely crashed)",
             shortLabel: "stale session heartbeat",
+            stallReason: "Worker session heartbeat is stale.",
+            stallClass: "stale_heartbeat",
+            sessionGuard: { mode: "stale", heartbeatBefore: staleHeartbeatBefore },
             cleanupActiveSession: true,
           });
         }
       } else {
         // Case C: Session exists and heartbeat is fresh — ambiguous
-        if (taskAgeMs >= stallThresholdMinutes() * 60 * 1000) {
-          findings.stalledTasks.push(task);
+        const hardStopReason = `Task made no progress for ${inProgressHardStopMin()} minutes despite an active worker session.`;
+        if (taskAgeMs >= inProgressHardStopMin() * 60 * 1000) {
+          const marked = await markTaskStalled(task.id, hardStopReason, "unknown", {
+            expectedStatuses: ["in_progress"],
+            expectedLastUpdatedAt: task.lastUpdatedAt,
+            expectedProgress: task.progress ?? null,
+          });
+          if (!marked && task.progress !== hardStopReason) continue;
+          const failed = await failTask(task.id, hardStopReason, {
+            expectedStatuses: ["in_progress"],
+            expectedLastUpdatedAt: task.lastUpdatedAt,
+            expectedProgress: hardStopReason,
+            failureClass: "unknown",
+          });
+          if (failed) {
+            findings.autoFailedTasks.push({
+              taskId: task.id,
+              agentId: task.agentId ?? undefined,
+              reason: hardStopReason,
+            });
+            await deleteActiveSession(task.id);
+            if ((await getActiveTaskCount(task.agentId)) === 0) {
+              await restoreAgentIdleAfterRemediation(task.agentId);
+            }
+          }
+        } else if (taskAgeMs >= stallThresholdMinutes() * 60 * 1000) {
+          const marked = await markTaskStalled(
+            task.id,
+            "Task progress is stale despite an active worker session.",
+            "unknown",
+            {
+              expectedStatuses: ["in_progress"],
+              expectedLastUpdatedAt: task.lastUpdatedAt,
+              expectedProgress: task.progress ?? null,
+            },
+          );
+          if (marked) findings.stalledTasks.push(marked);
         }
       }
+    }
+  }
+}
+
+/**
+ * Two-stage timeout for tasks that are dispatch-eligible but never claimed.
+ * `lastUpdatedAt` becomes the durable warning timestamp, so dependency-blocked
+ * or newly-assigned work always receives the full warning window before failure.
+ */
+async function remediateUnclaimedTasks(findings: HeartbeatFindings): Promise<void> {
+  const agents = await getAllAgents();
+  const warningMs = unclaimedStallThresholdMin() * 60 * 1000;
+  const failureAfterWarningMs =
+    Math.max(1, unclaimedFailThresholdMin() - unclaimedStallThresholdMin()) * 60 * 1000;
+  const dueBefore = new Date(Date.now() - Math.min(warningMs, failureAfterWarningMs)).toISOString();
+  const candidates = await getUnclaimedTasksForHeartbeat(dueBefore);
+
+  for (const task of candidates) {
+    const ageMs = Date.now() - new Date(task.lastUpdatedAt).getTime();
+    const warned = task.progress?.startsWith(UNCLAIMED_STALL_PREFIX) === true;
+    if (!warned) {
+      if (ageMs < warningMs) continue;
+      const reason = resolveUnclaimedTaskReason(task, agents);
+      const marked = await markTaskStalled(
+        task.id,
+        `${UNCLAIMED_STALL_PREFIX}${reason.message}`,
+        reason.failureClass,
+        {
+          expectedStatuses: [task.status as AgentTaskStatus],
+          expectedLastUpdatedAt: task.lastUpdatedAt,
+          expectedProgress: task.progress ?? null,
+          touchLastUpdatedAt: true,
+        },
+      );
+      if (marked) findings.stalledTasks.push(marked);
+      continue;
+    }
+
+    if (ageMs < failureAfterWarningMs) continue;
+    const failureReason = task.progress!.slice(UNCLAIMED_STALL_PREFIX.length);
+    const failed = await failTask(task.id, failureReason, {
+      expectedStatuses: [task.status as AgentTaskStatus],
+      expectedLastUpdatedAt: task.lastUpdatedAt,
+      expectedProgress: task.progress,
+      // Preserve the reason that was shown at the warning boundary even if
+      // agent availability changes during the grace window.
+      failureClass: classifyTaskFailureReason(failureReason),
+    });
+    if (failed) {
+      findings.autoFailedTasks.push({
+        taskId: task.id,
+        agentId: task.agentId ?? undefined,
+        reason: failureReason,
+      });
     }
   }
 }
@@ -431,10 +624,27 @@ async function remediateCrashedWorkerTask(
     supersedeReason: string;
     legacyFailReason: string;
     shortLabel: string;
+    stallReason: string;
+    stallClass: TaskFailureClass;
+    sessionGuard: { mode: "absent" } | { mode: "stale"; heartbeatBefore: string };
     cleanupActiveSession?: boolean;
   },
 ): Promise<void> {
   if (!task.agentId) return; // Type guard — caller already checked.
+  const transitionGuard = {
+    expectedStatuses: ["in_progress"] as AgentTaskStatus[],
+    expectedLastUpdatedAt: task.lastUpdatedAt,
+    expectedProgress: task.progress ?? null,
+    sessionGuard: opts.sessionGuard,
+  };
+
+  const recordConfirmedStall = async (terminalTask: AgentTask): Promise<void> => {
+    await markTaskStalled(task.id, opts.stallReason, opts.stallClass, {
+      expectedStatuses: [terminalTask.status],
+      expectedLastUpdatedAt: terminalTask.lastUpdatedAt,
+      expectedProgress: terminalTask.progress ?? null,
+    });
+  };
 
   const skipAutoResume = SKIP_AUTO_RESUME_TYPES.has(task.taskType ?? "");
   // Workflow-step tasks: skip supersede entirely so the engine's retry policy
@@ -452,8 +662,9 @@ async function remediateCrashedWorkerTask(
     !skipAutoResume && !isWorkflowStep && (await hasNonTerminalResumeChild(task.id));
 
   if (isWorkflowStep) {
-    const failed = await failTask(task.id, "superseded_workflow_task");
+    const failed = await failTask(task.id, "superseded_workflow_task", transitionGuard);
     if (failed) {
+      await recordConfirmedStall(failed);
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
@@ -470,8 +681,9 @@ async function remediateCrashedWorkerTask(
   }
 
   if (skipAutoResume || alreadyResumed) {
-    const failed = await failTask(task.id, opts.legacyFailReason);
+    const failed = await failTask(task.id, opts.legacyFailReason, transitionGuard);
     if (failed) {
+      await recordConfirmedStall(failed);
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
@@ -491,8 +703,9 @@ async function remediateCrashedWorkerTask(
 
   const nextResumeGeneration = getNextResumeGeneration(task);
   if (nextResumeGeneration > maxResumeGenerations()) {
-    const failed = await failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON);
+    const failed = await failTask(task.id, RESUME_BUDGET_EXHAUSTED_REASON, transitionGuard);
     if (failed) {
+      await recordConfirmedStall(failed);
       findings.autoFailedTasks.push({
         taskId: task.id,
         agentId: task.agentId,
@@ -510,13 +723,18 @@ async function remediateCrashedWorkerTask(
 
   await beforeHeartbeatSupersedeForTests?.(task);
 
-  const superseded = await supersedeTask(task.id, {
-    reason: opts.supersedeReason,
-    resumeTaskId: null,
-  });
+  const superseded = await supersedeTask(
+    task.id,
+    {
+      reason: opts.supersedeReason,
+      resumeTaskId: null,
+    },
+    transitionGuard,
+  );
   if (!superseded) {
     return;
   }
+  await recordConfirmedStall(superseded);
 
   try {
     await promotePendingSteeringForTask(

@@ -169,6 +169,20 @@ describe("Task Cancellation", () => {
       expect(cancelled?.finishedAt).toBeTruthy();
     });
 
+    test("scrubs secrets from cancellation reasons before persistence", async () => {
+      const task = await createTaskExtended("Task with unsafe cancellation reason", {
+        creatorAgentId: "lead-agent-cancel",
+        agentId: "worker-agent-cancel",
+      });
+
+      const cancelled = await cancelTask(
+        task.id,
+        "Cancelled after ghp_abcdefghijklmnopqrstuvwxyz0123456789 was rejected",
+      );
+
+      expect(cancelled?.failureReason).toBe("Cancelled after [REDACTED:github_token] was rejected");
+    });
+
     test("should cancel an in_progress task", async () => {
       const workerAgent = await createAgent({
         id: "worker-in-progress",

@@ -241,6 +241,31 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         placeholder: "15",
       },
       {
+        key: "HEARTBEAT_UNCLAIMED_STALL_MIN",
+        label: "Unclaimed warning (min)",
+        description: "Minutes before a task that has not started shows a stable stall reason.",
+        kind: "number",
+        defaultValue: "15",
+        placeholder: "15",
+      },
+      {
+        key: "HEARTBEAT_UNCLAIMED_FAIL_MIN",
+        label: "Unclaimed failure (min)",
+        description: "Total warning-plus-grace period before an unclaimed task fails.",
+        kind: "number",
+        defaultValue: "60",
+        placeholder: "60",
+      },
+      {
+        key: "HEARTBEAT_IN_PROGRESS_HARD_STOP_MIN",
+        label: "In-progress hard stop (min)",
+        description:
+          "Minutes without task progress before even a live worker session is stopped as stalled.",
+        kind: "number",
+        defaultValue: "120",
+        placeholder: "120",
+      },
+      {
         key: "HEARTBEAT_MAX_AUTO_ASSIGN",
         label: "Max auto-assigns per sweep",
         description: "Upper bound on how many pool tasks a single heartbeat sweep may auto-assign.",

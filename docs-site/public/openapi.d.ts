@@ -14935,7 +14935,7 @@ export interface paths {
         };
         /**
          * List tasks with filters
-         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview` and completion/integration blobs dropped by default — list views only need the preview. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.
+         * @description Returns tasks with the full `task` text replaced by a bounded `taskPreview`; `failureReason` stays available for broken-task inboxes while other completion/integration blobs are dropped by default. Pass `fields=full` to restore the full `AgentTask`. Fetch a single task in full via `GET /api/tasks/{id}`.
          */
         get: {
             parameters: {
@@ -15008,6 +15008,7 @@ export interface paths {
                                 provider?: "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode" | "acp";
                                 requestedByUserId?: string;
                                 progress?: string;
+                                failureReason?: string;
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */

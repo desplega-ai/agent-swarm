@@ -183,6 +183,8 @@ docker compose -f docker-compose.example.yml --env-file .env up -d
 
 The API runs on port `3013`, with interactive docs at `http://localhost:3013/docs` and an OpenAPI 3.1 spec at `http://localhost:3013/openapi.json`.
 
+Open the [dashboard with the local API URL prefilled](https://app.agent-swarm.dev?apiUrl=http%3A%2F%2Flocalhost%3A3013), then enter your API key in the connection form. The link intentionally does not include the key. The hosted HTTPS dashboard cannot connect to a non-localhost plain-HTTP API because browsers block it as mixed content. For a LAN API without TLS, run the dashboard locally or put the API behind HTTPS.
+
 <details>
 <summary><strong>Other setups</strong></summary>
 

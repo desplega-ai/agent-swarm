@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import {
   claimTask,
@@ -17,23 +17,30 @@ import {
   initDb,
   insertActiveSession,
   MAX_EMPTY_POLLS,
+  markTaskStalled,
   resetOrphanedInProgressTasksForAgent,
   startTask,
+  updateAgentCredentialState,
   updateAgentProfile,
   updateAgentStatus,
   updateTaskClaudeSessionId,
+  updateTaskProgress,
 } from "../be/db";
 import {
   codeLevelTriage,
   getBootEpochMs,
   getRebootAffectedTasks,
   preflightGate,
+  resolveUnclaimedTaskReason,
   runHeartbeatSweep,
   runRebootSweep,
+  setBeforeHeartbeatStallMarkForTests,
+  setBeforeHeartbeatSupersedeForTests,
   startHeartbeat,
   stopHeartbeat,
 } from "../heartbeat/heartbeat";
 import { createResumeFollowUp } from "../tasks/worker-follow-up";
+import { telemetry } from "../telemetry";
 
 const TEST_DB_PATH = "./test-heartbeat.sqlite";
 
@@ -349,6 +356,143 @@ describe("Heartbeat Triage", () => {
       expect(session).toBeNull();
     });
 
+    test("does not overwrite racing worker progress in no-session or stale-heartbeat cases", async () => {
+      const agent = await createAgent({ name: "recovering-worker", isLead: false, status: "busy" });
+      const noSessionTask = await createTaskExtended("No-session race", { agentId: agent.id });
+      const staleSessionTask = await createTaskExtended("Stale-session race", {
+        agentId: agent.id,
+      });
+      await startTask(noSessionTask.id);
+      await startTask(staleSessionTask.id);
+      await insertActiveSession({
+        agentId: agent.id,
+        taskId: staleSessionTask.id,
+        triggerType: "task_assigned",
+      });
+      const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
+        oldTime,
+        noSessionTask.id,
+        staleSessionTask.id,
+      ]);
+      await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        oldTime,
+        staleSessionTask.id,
+      ]);
+      setBeforeHeartbeatStallMarkForTests(async (task) => {
+        if (task.id === noSessionTask.id || task.id === staleSessionTask.id) {
+          await updateTaskProgress(task.id, "Worker made fresh progress");
+        }
+      });
+
+      try {
+        const findings = await codeLevelTriage();
+        expect(findings.autoResumedTasks).toHaveLength(0);
+        for (const task of [noSessionTask, staleSessionTask]) {
+          const updated = await getTaskById(task.id);
+          expect(updated?.status).toBe("in_progress");
+          expect(updated?.progress).toBe("Worker made fresh progress");
+        }
+      } finally {
+        setBeforeHeartbeatStallMarkForTests(null);
+      }
+    });
+
+    test("does not report or terminalize a crash when session liveness recovers before transition", async () => {
+      const agent = await createAgent({
+        name: "session-recovery-worker",
+        isLead: false,
+        status: "busy",
+      });
+      const noSessionTask = await createTaskExtended("Session appears", { agentId: agent.id });
+      const staleSessionTask = await createTaskExtended("Heartbeat refreshes", {
+        agentId: agent.id,
+      });
+      await startTask(noSessionTask.id);
+      await startTask(staleSessionTask.id);
+      await insertActiveSession({
+        agentId: agent.id,
+        taskId: staleSessionTask.id,
+        triggerType: "task_assigned",
+      });
+      const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id IN (?, ?)", [
+        oldTime,
+        noSessionTask.id,
+        staleSessionTask.id,
+      ]);
+      await getDbClient().run("UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?", [
+        oldTime,
+        staleSessionTask.id,
+      ]);
+      const taskEvents: Array<{ event: string; props: Record<string, unknown> }> = [];
+      const telemetrySpy = spyOn(telemetry, "taskEvent").mockImplementation((event, props) => {
+        taskEvents.push({ event, props });
+      });
+      setBeforeHeartbeatStallMarkForTests(async (task) => {
+        if (task.id === noSessionTask.id) {
+          await insertActiveSession({
+            agentId: agent.id,
+            taskId: task.id,
+            triggerType: "task_assigned",
+          });
+        } else if (task.id === staleSessionTask.id) {
+          await getDbClient().run(
+            "UPDATE active_sessions SET lastHeartbeatAt = ? WHERE taskId = ?",
+            [new Date().toISOString(), task.id],
+          );
+        }
+      });
+
+      try {
+        const findings = await codeLevelTriage();
+        for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(findings.autoResumedTasks).toHaveLength(0);
+        for (const task of [noSessionTask, staleSessionTask]) {
+          const updated = await getTaskById(task.id);
+          expect(updated?.status).toBe("in_progress");
+          expect(updated?.progress).toBeUndefined();
+          expect(taskEvents.filter((item) => item.props.taskId === task.id)).toHaveLength(0);
+        }
+      } finally {
+        setBeforeHeartbeatStallMarkForTests(null);
+        telemetrySpy.mockRestore();
+      }
+    });
+
+    test("does not terminalize a crash task when a session appears at the final transition", async () => {
+      const agent = await createAgent({
+        name: "late-recovery-worker",
+        isLead: false,
+        status: "busy",
+      });
+      const task = await createTaskExtended("Transition race", { agentId: agent.id });
+      await startTask(task.id);
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+      setBeforeHeartbeatSupersedeForTests(async (candidate) => {
+        if (candidate.id === task.id) {
+          await insertActiveSession({
+            agentId: agent.id,
+            taskId: task.id,
+            triggerType: "task_assigned",
+          });
+        }
+      });
+
+      try {
+        const findings = await codeLevelTriage();
+        expect(findings.autoResumedTasks).toHaveLength(0);
+        const updated = await getTaskById(task.id);
+        expect(updated?.status).toBe("in_progress");
+        expect(updated?.progress).toBeUndefined();
+      } finally {
+        setBeforeHeartbeatSupersedeForTests(null);
+      }
+    });
+
     test("escalates stalled task with fresh session heartbeat (ambiguous)", async () => {
       const agent = await createAgent({ name: "alive-worker", isLead: false, status: "busy" });
       const task = await createTaskExtended("Stalled task", { agentId: agent.id });
@@ -377,6 +521,161 @@ describe("Heartbeat Triage", () => {
       // Task should NOT be failed
       const updated = await getTaskById(task.id);
       expect(updated?.status).toBe("in_progress");
+    });
+
+    test("hard-stops an ambiguous in-progress stall after 120 minutes", async () => {
+      const agent = await createAgent({ name: "stuck-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("Stuck task", { agentId: agent.id });
+      await startTask(task.id);
+      await insertActiveSession({
+        agentId: agent.id,
+        taskId: task.id,
+        triggerType: "task_assigned",
+      });
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 121 * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+
+      const taskEvents: Array<{ event: string; props: Record<string, unknown> }> = [];
+      const telemetrySpy = spyOn(telemetry, "taskEvent").mockImplementation((event, props) => {
+        taskEvents.push({ event, props });
+      });
+      const findings = await codeLevelTriage();
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+      telemetrySpy.mockRestore();
+
+      expect(findings.autoFailedTasks.map((item) => item.taskId)).toContain(task.id);
+      const updated = await getTaskById(task.id);
+      expect(updated?.status).toBe("failed");
+      expect(updated?.failureReason).toBe(
+        "Task made no progress for 120 minutes despite an active worker session.",
+      );
+      expect(await getActiveSessionForTask(task.id)).toBeNull();
+      expect(taskEvents.filter((item) => item.props.taskId === task.id)).toEqual([
+        expect.objectContaining({
+          event: "stalled",
+          props: expect.objectContaining({ reason: "unknown" }),
+        }),
+        expect.objectContaining({
+          event: "failed",
+          props: expect.objectContaining({ failure_class: "unknown" }),
+        }),
+      ]);
+    });
+
+    test("warns at 15 minutes and fails an unclaimed task after its 60-minute window", async () => {
+      const lead = await createAgent({
+        name: "blocked-lead",
+        isLead: true,
+        status: "idle",
+      });
+      await updateAgentCredentialState(lead.id, false, ["OPENAI_API_KEY"]);
+      const task = await createTaskExtended("First task", { agentId: lead.id, source: "ui" });
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+
+      await codeLevelTriage();
+
+      const warned = await getTaskById(task.id);
+      expect(warned?.status).toBe("pending");
+      expect(warned?.progress).toBe(
+        "Waiting to start: The lead agent is missing required LLM credentials: OPENAI_API_KEY.",
+      );
+
+      // Keep the explanation shown at the warning boundary even if agent
+      // state changes during the grace window.
+      await updateAgentCredentialState(lead.id, true, null);
+
+      await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+        new Date(Date.now() - 46 * 60 * 1000).toISOString(),
+        task.id,
+      ]);
+      await codeLevelTriage();
+
+      const failed = await getTaskById(task.id);
+      expect(failed?.status).toBe("failed");
+      expect(failed?.failureReason).toBe(
+        "The lead agent is missing required LLM credentials: OPENAI_API_KEY.",
+      );
+    });
+
+    test("warns unassigned/offered tasks and skips dependency-blocked tasks", async () => {
+      const waitingWorker = await createAgent({
+        name: "waiting-worker",
+        isLead: false,
+        status: "waiting_for_credentials",
+      });
+      const dependency = await createTaskExtended("unfinished dependency", {
+        agentId: waitingWorker.id,
+      });
+      const unassigned = await createTaskExtended("pool task");
+      const offered = await createTaskExtended("offered task", { offeredTo: waitingWorker.id });
+      const blocked = await createTaskExtended("blocked task", {
+        agentId: waitingWorker.id,
+        dependsOn: [dependency.id],
+      });
+      const staleAt = new Date(Date.now() - 16 * 60 * 1000).toISOString();
+      for (const task of [unassigned, offered, blocked]) {
+        await getDbClient().run("UPDATE agent_tasks SET lastUpdatedAt = ? WHERE id = ?", [
+          staleAt,
+          task.id,
+        ]);
+      }
+
+      await codeLevelTriage();
+
+      expect((await getTaskById(unassigned.id))?.progress).toBe(
+        "Waiting to start: No available agent has claimed this task.",
+      );
+      expect((await getTaskById(offered.id))?.progress).toBe(
+        "Waiting to start: The assigned agent has not claimed this task.",
+      );
+      expect((await getTaskById(blocked.id))?.progress).toBeUndefined();
+    });
+
+    test("does not overwrite progress that raced a heartbeat stall decision", async () => {
+      const agent = await createAgent({ name: "racing-worker", isLead: false, status: "busy" });
+      const task = await createTaskExtended("racing task", { agentId: agent.id });
+      await startTask(task.id);
+      const observed = (await getTaskById(task.id))!;
+      await getDbClient().run(
+        "UPDATE agent_tasks SET progress = ?, lastUpdatedAt = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
+        ["Worker reported fresh progress", task.id],
+      );
+
+      expect(
+        await markTaskStalled(task.id, "Task progress is stale.", "unknown", {
+          expectedStatuses: ["in_progress"],
+          expectedLastUpdatedAt: observed.lastUpdatedAt,
+          expectedProgress: observed.progress ?? null,
+        }),
+      ).toBeNull();
+      expect((await getTaskById(task.id))?.progress).toBe("Worker reported fresh progress");
+    });
+
+    test("classifies a pool task with no matching agent capabilities", async () => {
+      const worker = await createAgent({
+        name: "writer",
+        isLead: false,
+        status: "idle",
+        role: "writer",
+        capabilities: ["copy"],
+      });
+      const task = await createTaskExtended("Review code", {
+        routingAffinity: {
+          sourceAgentId: "missing-reviewer",
+          role: "reviewer",
+          capabilities: ["typescript"],
+        },
+      });
+
+      expect(resolveUnclaimedTaskReason(task, [worker])).toEqual({
+        failureClass: "no_capable_agent",
+        message: "No registered agent matches this task's required role or capabilities.",
+      });
     });
 
     test("auto-assigns pool tasks to idle workers", async () => {

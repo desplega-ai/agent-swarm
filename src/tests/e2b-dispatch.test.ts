@@ -886,6 +886,13 @@ describe("E2B swarm grouping + deep-link (Phase 4)", () => {
     expect(url.startsWith("https://app.agent-swarm.dev?")).toBe(true);
   });
 
+  test("dashboard builder can prefill an API URL without exposing an API key", () => {
+    const url = buildOnboardDashboardUrl({ apiUrl: "http://localhost:3013" });
+
+    expect(url).toContain("apiUrl=http%3A%2F%2Flocalhost%3A3013");
+    expect(url).not.toContain("apiKey=");
+  });
+
   test("swarmGroupMembers restricts a named swarm to dispatcher-owned sandboxes", () => {
     const sandboxes: E2BSandboxInfo[] = [
       // Ours: matching slug + our launcher tag.
