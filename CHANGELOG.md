@@ -6,8 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.139.0] - 2026-09-05
+
+### Added
+- **Pull requests can publish Slack workflow screenshots as visual E2E evidence** (#1338), with legacy and v2 rendering scenarios, artifact capture, and an automated PR comment.
+- **Hosted dashboard builds can select their Plausible site independently** (#1334) through `VITE_PLAUSIBLE_SCRIPT_ID`, so demo and production deployments do not mix analytics.
+- **The authenticated stats endpoint reports effective multi-runtime state** (#1327), allowing clients to distinguish a disabled feature from an enabled deployment with no registered runtimes.
+
 ### Changed
-- **Worker harness pins track current compatible releases** — Codex plus its SDK move to 0.153.4, adding GPT-6 Astra to the explicit-model catalog with current pricing, context-window, and reasoning metadata.
+- **Bundled agent-fs deployments move to v0.13.5** (#1347) across worker, Docker Compose, Helm, and co-deployment documentation pins.
+- **Product integration documentation uses one consolidated section** (#1325), with canonical guides and corrected cross-links across setup, playbooks, and references.
+- **Provider documentation makes capability gaps explicit** (#1353), with a dedicated comparison matrix and clearer personalization guidance.
+- **Worker harness pins track current compatible releases** (#1358) — Codex plus its SDK move to 0.153.4, adding GPT-6 Astra to the explicit-model catalog with current pricing, context-window, and reasoning metadata.
+
+### Fixed
+- **Reboot recovery preserves tasks claimed after server boot** (#1351), registers active sessions before slow provider startup, and bounds opencode session creation.
+- **The script sandbox handles loaded-host process limits predictably** (#1326), with additional process headroom and retryable `capacity_exceeded` classification.
+- **Pool-starvation escalation enforces Lead authorization explicitly** (#1344) instead of inheriting ordinary routing affinity.
+- **Worker bootstrap rewrites remove stale files first** (#1350), preventing failed overwrites during container startup.
+- **Skill search tokenizes multi-word queries** (#1328), improving matches without changing the skill catalog.
+- **Nightly E2E reporting preserves Codex OAuth data and collects logs portably** (#1348).
+- **Agent-fs provisioning retries after boot registration** (#1355), recovering when the initial worker setup races agent registration.
+- **Sandbox-spawning SIGABRT tests use an explicit timeout** (#1354), preserving coverage under parallel CI load.
+
+## [1.138.0] - 2026-09-03
+
+### Added
+- **A generic Agent Client Protocol harness can run any ACP-speaking coding agent** (#1320), including provider selection, session execution, and setup documentation.
+- **Microsoft Graph joins the built-in connection catalog** (#1318), with credential binding and typed access from swarm scripts.
+- **A black-box E2E runner validates REST and MCP contracts against live swarm stacks** (#1311), with deterministic coverage reporting and reusable scenario infrastructure.
+- **The dashboard supports a fixed public demo mode** (#1319) and reports actionable setup failures during a user's first task (#1312).
+- **Onboarding treats harness-provider selection as a first-class setup step** (#1315).
+- **Integration connection telemetry records successful setup events** (#1324).
+
+### Fixed
+- **UI follow-up tasks route to the Lead** (#1316), preserving authorization and intended ownership.
+- **Codex OAuth respects `HOME` overrides** (#1313) when locating the local credential store.
+- **Slack can target a mock API endpoint for deterministic integration tests** (#1310).
+- **Pre-push sandbox checks probe process capacity before running affected tests** (#1314, #1317), reducing loaded-host false failures.
+- **Memory search consumption counts each returned document once** (#1264).
+- **Next build output is excluded from repository lint scans** (#1321).
 
 ## [1.137.0] - 2026-09-03
 

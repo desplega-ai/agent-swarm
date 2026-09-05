@@ -40,6 +40,13 @@ the worker rollout must finish first. An old worker can otherwise fail to
 register on its next reconnect, and its anonymous shutdown cannot take the
 legacy agent-wide close path.
 
+Authenticated clients can read `multiRuntimeEnabled` from `GET /api/stats` to
+check the effective server setting. Use this field before interpreting an empty
+runtime-instance list: it distinguishes "the feature is off" from "the feature
+is on, but no runtime has registered yet." The value is evaluated per request,
+so it follows configuration reloads without exposing feature flags on the
+unauthenticated health endpoint.
+
 ### The task-limit seed
 
 On the first multi-runtime registration for an agent, Agent Swarm creates the
