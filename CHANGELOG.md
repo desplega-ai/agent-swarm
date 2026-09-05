@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Worker harness pins track current compatible releases** — Codex plus its SDK move to 0.153.4, adding GPT-6 Astra to the explicit-model catalog with current pricing, context-window, and reasoning metadata.
+
 ## [1.137.0] - 2026-09-03
 
 ### Added

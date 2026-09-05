@@ -35,6 +35,12 @@ describe("reasoningCapability — cache-sourced levels", () => {
     expect(cap.levels).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
   });
 
+  test("codex gpt-6-astra supports models.dev reasoning efforts", () => {
+    const cap = reasoningCapability("codex", "gpt-6-astra");
+    expect(cap.supported).toBe(true);
+    expect(cap.levels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+
   test("codex gpt-5.1-codex-max: cache already includes xhigh", () => {
     const cap = reasoningCapability("codex", "gpt-5.1-codex-max");
     expect(cap.supported).toBe(true);
@@ -165,6 +171,13 @@ describe("applyReasoningEffort — codex-config shape", () => {
 
   test("max on gpt-5.6-sol is applied", () => {
     expect(applyReasoningEffort("codex", "gpt-5.6-sol", "max")).toEqual({
+      kind: "codex-config",
+      config: { model_reasoning_effort: "max" },
+    });
+  });
+
+  test("max on gpt-6-astra is applied", () => {
+    expect(applyReasoningEffort("codex", "gpt-6-astra", "max")).toEqual({
       kind: "codex-config",
       config: { model_reasoning_effort: "max" },
     });

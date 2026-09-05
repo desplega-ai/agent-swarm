@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { lookupModelCost } from "./pricing.ts";
 import { recomputeCost, recomputeCostMulti } from "./recompute.ts";
 
 // ---- claude fixtures (shape copied from evals.db raw-session-logs artifacts) ----
@@ -208,8 +209,12 @@ describe("recomputeCost: pi", () => {
         },
       ],
     });
-    // deepseek/deepseek-v4-flash: $0.0882 in / $0.1764 out per 1M
-    expect(result.costUsd).toBeCloseTo((1000 * 0.0882 + 500 * 0.1764) / 1e6, 12);
+    // Derive the rates from the committed snapshot so pricing refreshes do not stale this fixture.
+    const model = await lookupModelCost("pi", "deepseek/deepseek-v4-flash");
+    if (model?.inputPerM == null || model.outputPerM == null) {
+      throw new Error("Missing deepseek/deepseek-v4-flash rates from the committed snapshot");
+    }
+    expect(result.costUsd).toBeCloseTo((1000 * model.inputPerM + 500 * model.outputPerM) / 1e6, 12);
   });
 });
 

@@ -102,8 +102,15 @@ describe("judge step pricing", () => {
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
     };
-    // 10000*0.435 + 2000*0.87 = 6090 → /1e6 (no cache tokens involved)
-    expect(priceUsage(priced, tokens, { inputIncludesCacheRead: true })).toBeCloseTo(0.00609, 10);
+    if (priced.inputPerM == null || priced.outputPerM == null) {
+      throw new Error("Missing deepseek/deepseek-v4-pro rates from the committed snapshot");
+    }
+    const expectedCost =
+      (tokens.inputTokens * priced.inputPerM + tokens.outputTokens * priced.outputPerM) / 1e6;
+    expect(priceUsage(priced, tokens, { inputIncludesCacheRead: true })).toBeCloseTo(
+      expectedCost,
+      10,
+    );
   });
 });
 

@@ -41,6 +41,19 @@ describe("carryForwardDelistedModels", () => {
 });
 
 describe("FALLBACK_CODEX_MODEL_PRICING (advisory table)", () => {
+  test("gpt-6 Astra and gpt-5.6 Sol carry the published rates", () => {
+    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-6-astra"]).toEqual({
+      inputPerMillion: 10,
+      cachedInputPerMillion: 1,
+      outputPerMillion: 50,
+    });
+    expect(FALLBACK_CODEX_MODEL_PRICING["gpt-5.6-sol"]).toEqual({
+      inputPerMillion: 4,
+      cachedInputPerMillion: 0.4,
+      outputPerMillion: 20,
+    });
+  });
+
   test("gpt-5.6 terra/luna carry the published rates", () => {
     // Direct assertions: through computeCodexCostUsd the models.dev snapshot
     // shadows this table, so drift here would otherwise go unnoticed.
