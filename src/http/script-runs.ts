@@ -18,6 +18,7 @@ import {
   listScriptRuns,
   updateScriptRun,
   updateScriptRunIfNotTerminal,
+  updateScriptRunIfRunning,
   upsertScriptRunJournalStep,
 } from "../be/db";
 import { lintWorkflowLabels } from "../script-workflows/label-lint";
@@ -137,7 +138,7 @@ const createScriptRunRoute = route({
   // Matches the inline `POST /api/scripts/run` route and the `launch-script-run`
   // MCP tool (src/tools/script-runs.ts, UNGATED_TOOL_FILES pin): open to every
   // authenticated agent by design, not a permission gate. Execution safety comes
-  // from the shared sandbox (ulimits, clean env, bearer over stdin — see
+  // from the shared sandbox (ulimits, clean env, brokered capabilities — see
   // buildSandboxedCommand / LocalProcessScriptExecutor.start), not from
   // restricting who may launch a run.
   rbac: {
@@ -571,15 +572,14 @@ export async function handleScriptRuns(
       jsonError(res, "Script run not found", 404);
       return true;
     }
-    if (TERMINAL_SCRIPT_RUN_STATUSES.some((status) => status === run.status)) {
+    if (run.status !== "running") {
       res.writeHead(204);
       res.end();
       return true;
     }
-    // Terminal-guarded write: the guard above ran before this handler's own
-    // awaits, so an operator DELETE cancelling the run in that window would
-    // otherwise be overwritten by this status.
-    await updateScriptRunIfNotTerminal(parsed.params.runId, {
+    // Running-guarded write: a pause is resumable rather than terminal, but it
+    // must still win over a delayed subprocess callback after SIGTERM.
+    await updateScriptRunIfRunning(parsed.params.runId, {
       status: parsed.body.status,
       pid: null,
       finishedAt: parsed.body.status === "paused" ? null : new Date().toISOString(),

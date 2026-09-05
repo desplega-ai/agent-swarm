@@ -1,11 +1,20 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { closeDb, createAgent, getDbClient, initDb, listScriptRunJournalSteps } from "../be/db";
+import {
+  closeDb,
+  createAgent,
+  getDbClient,
+  getScriptRun,
+  initDb,
+  listScriptRunJournalSteps,
+} from "../be/db";
 import { handleCore } from "../http/core";
 import { handleScriptRuns } from "../http/script-runs";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
+import { MAX_ACTIVE_CAPABILITY_DISPATCHES } from "../script-workflows/executor";
+import { pauseScriptRunProcess } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
@@ -19,6 +28,16 @@ let agentId: string;
 let server: Server;
 let baseUrl: string;
 let savedEnv: NodeJS.ProcessEnv;
+let heartbeatCount = 0;
+let holdAgentTaskResponses = false;
+let agentTaskRequestCount = 0;
+let agentTaskClosedCount = 0;
+const heldAgentTaskResponses = new Set<ServerResponse>();
+let holdMcpBridgeResponses = false;
+let mcpBridgeRequestCount = 0;
+let activeMcpBridgeRequests = 0;
+let maxActiveMcpBridgeRequests = 0;
+const heldMcpBridgeResponses = new Set<ServerResponse>();
 
 async function removeDbFiles(path: string): Promise<void> {
   for (const suffix of ["", "-wal", "-shm"]) {
@@ -38,13 +57,82 @@ function closeServer(server: Server): Promise<void> {
 
 async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const agentId = req.headers["x-agent-id"] as string | undefined;
+  if (req.method === "POST" && req.url?.endsWith("/heartbeat")) heartbeatCount += 1;
   if (await handleCore(req, res, agentId, API_KEY)) return;
+  if (req.method === "POST" && req.url === "/api/mcp-bridge") {
+    if (req.headers.authorization !== `Bearer ${API_KEY}`) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "unauthorized" }));
+      return;
+    }
+    let rawBody = "";
+    for await (const chunk of req) rawBody += String(chunk);
+    const requestBody = JSON.parse(rawBody) as {
+      args?: { forceError?: unknown };
+    };
+    if (requestBody.args?.forceError === true) {
+      res.writeHead(418, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "teapot" }));
+      return;
+    }
+    if (holdMcpBridgeResponses) {
+      mcpBridgeRequestCount += 1;
+      activeMcpBridgeRequests += 1;
+      maxActiveMcpBridgeRequests = Math.max(maxActiveMcpBridgeRequests, activeMcpBridgeRequests);
+      heldMcpBridgeResponses.add(res);
+      res.once("close", () => {
+        activeMcpBridgeRequests -= 1;
+        heldMcpBridgeResponses.delete(res);
+      });
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ brokered: true }));
+    return;
+  }
+  if (holdAgentTaskResponses && req.method === "POST" && req.url?.endsWith("/agent-task")) {
+    for await (const _chunk of req) {
+      // Consume the request body before holding the long-poll response open.
+    }
+    agentTaskRequestCount += 1;
+    heldAgentTaskResponses.add(res);
+    res.once("close", () => {
+      agentTaskClosedCount += 1;
+      heldAgentTaskResponses.delete(res);
+    });
+    return;
+  }
   const pathSegments = getPathSegments(req.url || "");
   const queryParams = parseQueryParams(req.url || "");
   if (await handleScriptRuns(req, res, pathSegments, queryParams, agentId)) return;
   if (await handleScripts(req, res, pathSegments, queryParams, agentId)) return;
   res.writeHead(404);
   res.end("Not Found");
+}
+
+async function waitUntil(predicate: () => boolean, message: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(message);
+}
+
+function completeHeldAgentTasks(): void {
+  for (const res of [...heldAgentTaskResponses]) {
+    if (res.writableEnded || res.destroyed) continue;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ taskId: crypto.randomUUID(), taskOutput: { ok: true } }));
+  }
+}
+
+function completeHeldMcpBridgeRequests(): void {
+  for (const res of [...heldMcpBridgeResponses]) {
+    if (res.writableEnded || res.destroyed) continue;
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ brokered: true }));
+  }
 }
 
 async function api(path: string, init: RequestInit = {}): Promise<Response> {
@@ -62,7 +150,7 @@ async function api(path: string, init: RequestInit = {}): Promise<Response> {
 async function waitForRun(
   id: string,
 ): Promise<{ status: string; output?: unknown; error?: string }> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     const res = await api(`/api/script-runs/${id}`);
     const body = (await res.json()) as {
@@ -123,8 +211,29 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  completeHeldAgentTasks();
+  completeHeldMcpBridgeRequests();
+  heartbeatCount = 0;
+  holdAgentTaskResponses = false;
+  agentTaskRequestCount = 0;
+  agentTaskClosedCount = 0;
+  heldAgentTaskResponses.clear();
+  holdMcpBridgeResponses = false;
+  mcpBridgeRequestCount = 0;
+  activeMcpBridgeRequests = 0;
+  maxActiveMcpBridgeRequests = 0;
+  heldMcpBridgeResponses.clear();
   await getDbClient().run("DELETE FROM script_run_journal");
   await getDbClient().run("DELETE FROM script_runs");
+});
+
+afterEach(() => {
+  holdAgentTaskResponses = false;
+  completeHeldAgentTasks();
+  heldAgentTaskResponses.clear();
+  holdMcpBridgeResponses = false;
+  completeHeldMcpBridgeRequests();
+  heldMcpBridgeResponses.clear();
 });
 
 describe("script workflow runtime", () => {
@@ -190,6 +299,187 @@ describe("script workflow runtime", () => {
       // Not the real key, not any truthy value — the env var simply isn't set
       // in the harness's process anymore (bearer travels over stdin instead).
       expect((run.output as { apiKeyEnv: unknown }).apiKeyEnv).toBeNull();
+    },
+  );
+
+  spawnTest(
+    "user fetch replacement cannot observe brokered swarm or lifecycle bearer",
+    async () => {
+      const source = `
+      export default async function main(_args, ctx) {
+        const observed = [];
+        globalThis.fetch = async (input, init) => {
+          observed.push({
+            url: String(input),
+            authorization: new Headers(init?.headers).get("authorization"),
+          });
+          return new Response(JSON.stringify({ intercepted: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        };
+        await Bun.sleep(10_250);
+        const info = await ctx.swarm.agent_info();
+        let errorMessage = null;
+        try {
+          await ctx.swarm.agent_info({ forceError: true });
+        } catch (error) {
+          errorMessage = error.message;
+        }
+        let rejectedConfig = null;
+        let rejectedUnknown = null;
+        try { await ctx.swarm.config(); } catch (error) { rejectedConfig = error.message; }
+        try { await ctx.swarm.future_sensitive_property(); } catch (error) { rejectedUnknown = error.message; }
+        return {
+          observed,
+          info,
+          errorMessage,
+          apiKeyEnv: process.env.AGENT_SWARM_API_KEY ?? null,
+          configType: typeof ctx.swarm.config,
+          rejectedConfig,
+          rejectedUnknown,
+        };
+      }
+    `;
+
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as { id: string };
+
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      expect(run.output).toMatchObject({
+        observed: [],
+        apiKeyEnv: null,
+        configType: "undefined",
+        errorMessage: "/api/mcp-bridge failed with 418: teapot",
+        rejectedConfig: expect.stringContaining("not a function"),
+        rejectedUnknown: expect.stringContaining("not a function"),
+      });
+      expect(heartbeatCount).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(run.output)).not.toContain(API_KEY);
+      expect((run.output as { info: unknown }).info).toEqual({ brokered: true });
+    },
+    { timeout: 20_000 },
+  );
+
+  spawnTest("guest failures preserve the prior terminal error message shape", async () => {
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({
+        source: `export default async function main() { throw new TypeError("guest boom"); }`,
+        background: true,
+      }),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("guest boom");
+  });
+
+  spawnTest("bounds active host broker work under a guest flood", async () => {
+    holdMcpBridgeResponses = true;
+    const callCount = MAX_ACTIVE_CAPABILITY_DISPATCHES + 4;
+    const source = `
+      export default async function main(_args, ctx) {
+        return await Promise.all(
+          Array.from({ length: ${callCount} }, () => ctx.swarm.agent_info()),
+        );
+      }
+    `;
+
+    const created = await api("/api/script-runs", {
+      method: "POST",
+      body: JSON.stringify({ source, background: true }),
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    await waitUntil(
+      () => mcpBridgeRequestCount === MAX_ACTIVE_CAPABILITY_DISPATCHES,
+      `Expected ${MAX_ACTIVE_CAPABILITY_DISPATCHES} active broker calls, observed ${mcpBridgeRequestCount}`,
+    );
+    await Bun.sleep(100);
+    expect(mcpBridgeRequestCount).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+    expect(maxActiveMcpBridgeRequests).toBe(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+
+    completeHeldMcpBridgeRequests();
+    await waitUntil(
+      () => mcpBridgeRequestCount === callCount,
+      `Expected all ${callCount} broker calls to dispatch, observed ${mcpBridgeRequestCount}`,
+    );
+    expect(maxActiveMcpBridgeRequests).toBeLessThanOrEqual(MAX_ACTIVE_CAPABILITY_DISPATCHES);
+    completeHeldMcpBridgeRequests();
+
+    const run = await waitForRun(id);
+    expect(run.status).toBe("completed");
+    expect(run.output).toHaveLength(callCount);
+  });
+
+  spawnTest(
+    "dispatches more than four durable capability calls before any child finishes",
+    async () => {
+      holdAgentTaskResponses = true;
+      const source = `
+      export default async function main(_args, ctx) {
+        return await Promise.all([
+          ctx.step.agentTask("fanout-1", { task: "one" }),
+          ctx.step.agentTask("fanout-2", { task: "two" }),
+          ctx.step.agentTask("fanout-3", { task: "three" }),
+          ctx.step.agentTask("fanout-4", { task: "four" }),
+          ctx.step.agentTask("fanout-5", { task: "five" }),
+        ]);
+      }
+    `;
+
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({ source, background: true }),
+      });
+      const { id } = (await created.json()) as { id: string };
+
+      await waitUntil(
+        () => agentTaskRequestCount === 5,
+        `Expected all five agent tasks to dispatch, observed ${agentTaskRequestCount}`,
+      );
+      completeHeldAgentTasks();
+
+      const run = await waitForRun(id);
+      expect(run.status).toBe("completed");
+      expect(await listScriptRunJournalSteps(id)).toHaveLength(5);
+    },
+  );
+
+  spawnTest(
+    "pausing aborts host polling without journaling or overwriting paused status",
+    async () => {
+      holdAgentTaskResponses = true;
+      const created = await api("/api/script-runs", {
+        method: "POST",
+        body: JSON.stringify({
+          source: `
+          export default async function main(_args, ctx) {
+            return await ctx.step.agentTask("paused-step", { task: "stay pending" });
+          }
+        `,
+          background: true,
+        }),
+      });
+      const { id } = (await created.json()) as { id: string };
+      await waitUntil(() => agentTaskRequestCount === 1, "Agent task poll did not start");
+
+      await pauseScriptRunProcess(id);
+      await waitUntil(
+        () => agentTaskClosedCount === 1,
+        "Host-side agent task poll was not aborted",
+      );
+      await Bun.sleep(250);
+
+      expect((await getScriptRun(id))?.status).toBe("paused");
+      expect(await listScriptRunJournalSteps(id)).toHaveLength(0);
     },
   );
 
