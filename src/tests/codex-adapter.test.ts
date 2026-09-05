@@ -819,6 +819,10 @@ describe("resolveCodexModel", () => {
     expect(resolveCodexModel("gpt-5.6-luna")).toBe("gpt-5.6-luna");
   });
 
+  test("passthrough GPT-6 Astra", () => {
+    expect(resolveCodexModel("GPT-6-ASTRA")).toBe("gpt-6-astra");
+  });
+
   test("passthrough 'gpt-5.3-codex' → gpt-5.3-codex", () => {
     expect(resolveCodexModel("gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
@@ -856,6 +860,10 @@ describe("getCodexContextWindow", () => {
     expect(getCodexContextWindow("gpt-5.6-luna")).toBe(1_050_000);
   });
 
+  test("GPT-6 Astra → models.dev context", () => {
+    expect(getCodexContextWindow("gpt-6-astra")).toBe(1_050_000);
+  });
+
   test("gpt-5.3-codex → models.dev context", () => {
     expect(getCodexContextWindow("gpt-5.3-codex")).toBe(400_000);
   });
@@ -879,11 +887,16 @@ describe("computeCodexCostUsd", () => {
   });
 
   test("GPT-5.6 Codex fallback pricing matches the vendored models.dev snapshot", () => {
-    expect(computeCodexCostUsd("gpt-5.6-sol", 1_000_000, 0, 1_000_000)).toBeCloseTo(35, 4);
+    expect(computeCodexCostUsd("gpt-5.6-sol", 1_000_000, 0, 1_000_000)).toBeCloseTo(24, 4);
     expect(computeCodexCostUsd("gpt-5.6-terra", 1_000_000, 0, 1_000_000)).toBeCloseTo(14, 4);
     expect(computeCodexCostUsd("gpt-5.6-luna", 1_000_000, 0, 1_000_000)).toBeCloseTo(1.4, 4);
     expect(computeCodexCostUsd("gpt-5.6-terra", 0, 1_000_000, 0)).toBeCloseTo(0.2, 4);
     expect(computeCodexCostUsd("gpt-5.6-luna", 0, 1_000_000, 0)).toBeCloseTo(0.02, 4);
+  });
+
+  test("GPT-6 Astra pricing matches the vendored models.dev snapshot", () => {
+    expect(computeCodexCostUsd("gpt-6-astra", 1_000_000, 0, 1_000_000)).toBeCloseTo(60, 4);
+    expect(computeCodexCostUsd("gpt-6-astra", 1_000_000, 1_000_000, 0)).toBeCloseTo(1, 4);
   });
 
   test("gpt-5.4 with cached input applies the cached discount", () => {

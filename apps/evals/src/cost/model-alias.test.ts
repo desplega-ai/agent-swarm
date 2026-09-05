@@ -62,9 +62,9 @@ describe("resolveClaudeAlias", () => {
 });
 
 describe("against the committed models.dev snapshot", () => {
-  test("fable resolves to claude-fable-5 (round-7 item 4/8)", async () => {
+  test("fable resolves to claude-fable-5-1 (round-7 item 4/8)", async () => {
     const map = await getClaudeAliasMap();
-    expect(map.fable).toBe("claude-fable-5");
+    expect(map.fable).toBe("claude-fable-5-1");
   });
 
   test("every standing alias resolves to an undated claude id", async () => {
@@ -81,7 +81,7 @@ describe("against the committed models.dev snapshot", () => {
 
   test("lookupModelCost prices bare aliases via the alias map", async () => {
     const fable = await lookupModelCost("claude", "fable");
-    expect(fable?.id).toBe("claude-fable-5");
+    expect(fable?.id).toBe("claude-fable-5-1");
     expect(fable?.inputPerM).not.toBeNull();
     const haiku = await lookupModelCost("claude", "haiku");
     expect(haiku?.id).toBe("claude-haiku-4-5");

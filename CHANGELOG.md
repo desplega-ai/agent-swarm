@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 - **Bundled agent-fs deployments move to v0.13.5** (#1347) across worker, Docker Compose, Helm, and co-deployment documentation pins.
 - **Product integration documentation uses one consolidated section** (#1325), with canonical guides and corrected cross-links across setup, playbooks, and references.
+- **Provider documentation makes capability gaps explicit** (#1353), with a dedicated comparison matrix and clearer personalization guidance.
+- **Worker harness pins track current compatible releases** (#1358) — Codex plus its SDK move to 0.153.4, adding GPT-6 Astra to the explicit-model catalog with current pricing, context-window, and reasoning metadata.
 
 ### Fixed
 - **Reboot recovery preserves tasks claimed after server boot** (#1351), registers active sessions before slow provider startup, and bounds opencode session creation.
@@ -24,6 +26,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Worker bootstrap rewrites remove stale files first** (#1350), preventing failed overwrites during container startup.
 - **Skill search tokenizes multi-word queries** (#1328), improving matches without changing the skill catalog.
 - **Nightly E2E reporting preserves Codex OAuth data and collects logs portably** (#1348).
+- **Agent-fs provisioning retries after boot registration** (#1355), recovering when the initial worker setup races agent registration.
+- **Sandbox-spawning SIGABRT tests use an explicit timeout** (#1354), preserving coverage under parallel CI load.
 
 ## [1.138.0] - 2026-09-03
 
