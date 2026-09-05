@@ -319,7 +319,7 @@ jobs:
           docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-worker:latest
 
   # Slim worker variant (--target worker-slim): all four harness CLIs but no
-  # Playwright/qa-use browsers, postgres/redis servers, glab, or build toolchain.
+  # Playwright/agent-browser browsers, postgres/redis servers, glab, or build toolchain.
   # Published as :slim / :{VERSION}-slim / :sha-...-slim for CI + E2E consumers.
   build-and-push-worker-slim-amd64:
     runs-on: ubuntu-latest

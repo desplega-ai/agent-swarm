@@ -45,7 +45,7 @@ The autonomy mode is passed by the invoking command. If not specified, default t
 
 Decide silently — **do not** ask the user "which mode?". Use the following heuristics:
 
-1. **Scan recent session tool-use history** (the last ~20 tool calls in the current conversation) for test/validation-shaped activity: `curl`/`fetch` calls, `bun run`/`python`/`pytest`, database queries, `qa-use` browser actions, repeated `grep`/log inspection of a single endpoint or table. If ≥2 such actions targeting the same area exist → **retrospective mode**. Separately, if the history (or the task ahead) shows the *same call shape repeated ~10+ times or a fan-out over a list* → **gather-script mode**: propose replacing the repetition with one `gather-*` script before continuing.
+1. **Scan recent session tool-use history** (the last ~20 tool calls in the current conversation) for test/validation-shaped activity: `curl`/`fetch` calls, `bun run`/`python`/`pytest`, database queries, `agent-browser` actions, repeated `grep`/log inspection of a single endpoint or table. If ≥2 such actions targeting the same area exist → **retrospective mode**. Separately, if the history (or the task ahead) shows the *same call shape repeated ~10+ times or a fan-out over a list* → **gather-script mode**: propose replacing the repetition with one `gather-*` script before continuing.
 2. **Parse the user's invocation message** for cues:
    - Narrative cues → retrospective: *"we just figured out"*, *"turn this into a script"*, *"wrap that in"*, *"that thing we just did"*.
    - Intent cues → forward-declared: *"I want to test"*, *"validate that"*, *"smoke check"*, *"check before deploy"*.

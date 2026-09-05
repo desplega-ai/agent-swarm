@@ -6,8 +6,9 @@
 #   prek, builder                — pinned tool + compiled agent-swarm binary
 #   worker-base                  — minimal system + ALL four harness CLIs
 #   worker-slim  (target)        — worker-base + repo artifacts. For CI + E2E.
-#   worker-full-base             — worker-base + dev toolchain, Playwright,
-#                                  postgres/redis, glab, context-mode plugins
+#   worker-full-base             — worker-base + dev toolchain, Playwright
+#                                  Chromium + agent-browser, postgres/redis,
+#                                  glab, context-mode plugins
 #   worker-full  (target, LAST)  — worker-full-base + repo artifacts. Default
 #                                  build; published as :latest.
 #
@@ -207,15 +208,14 @@ USER worker
 COPY --from=prek /prek /usr/local/bin/prek
 
 # Install CLI-coupled skills with `npx skills` (vercel-labs skills-only
-# installer), pinned to tags for reproducible builds. agent-fs is installed
-# here; qa-use is installed in worker-full-base. The ai-toolbox catalog is
-# DB-seeded from templates/skills/ instead. Deliberately NOT `|| true`-guarded:
+# installer), pinned to tags for reproducible builds. agent-fs is the only
+# one. The ai-toolbox catalog (including the `agent-browser` and `qa` skills)
+# is DB-seeded from templates/skills/ instead. Deliberately NOT `|| true`-guarded:
 # a pinned fetch failure should fail the build.
 # Gotcha (vercel-labs/skills#851): global claude-code installs occasionally
 # land only in ~/.agents/skills — the `test -e` asserts catch that, and the
 # mirror step in the leaf stages dereferences symlinks when fanning out to
-# other harnesses. The qa-use skill is installed in worker-full-base only
-# (its CLI isn't present in slim).
+# other harnesses.
 ARG SKILLS_CLI_VERSION
 # agent-fs version pins BOTH the skill source tag (here) and the CLI in
 # /opt/global-deps (below). Bump with `bun run bump:agent-fs` so the chart,
@@ -281,9 +281,9 @@ RUN mkdir -p /etc/codex && printf '%s\n' \
 USER worker
 
 # Base global npm tools (pinned versions for cache stability): the set the
-# entrypoint and core agent workflows depend on. Full-image extras (qa-use,
-# sentry-cli, localtunnel, claude-bridge) live in a SEPARATE staging dir in
-# worker-full-base so this layer is never rewritten.
+# entrypoint and core agent workflows depend on. Full-image extras
+# (agent-browser, playwright, sentry-cli, localtunnel, claude-bridge) live in a
+# SEPARATE staging dir in worker-full-base so this layer is never rewritten.
 #
 # Staging-dir `npm install` + symlink pattern (instead of `npm install -g`) so
 # we can apply `overrides` for broken/bloated upstream transitives:
@@ -474,8 +474,8 @@ RUN curl -fsSL "https://gitlab.com/api/v4/projects/gitlab-org%2Fcli/packages/gen
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 
 # Install the Ubuntu 24.04 packages Playwright's Chromium binary needs at
-# runtime. `qa-use install-deps` only installs the browser binary itself via
-# `playwright install chromium`; it does not apt-install these shared libs.
+# runtime. `playwright install chromium` (below) only installs the browser
+# binary itself; it does not apt-install these shared libs.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
       libasound2t64 \
@@ -504,6 +504,13 @@ RUN apt-get update \
 # Full-image global npm tools, staged in a SEPARATE dir from worker-base's
 # /opt/global-deps so its layer is never rewritten. Same overrides rationale
 # as worker-base (see that heredoc's comment).
+#
+# agent-browser (vercel-labs; native binary + Node launcher) is the workers'
+# browser-automation CLI. It drives Chrome over CDP and reuses Playwright's
+# Chromium through AGENT_BROWSER_EXECUTABLE_PATH (set below), so the image
+# ships exactly ONE browser. playwright is a direct dep, pinned to the version
+# the retired qa-use CLI used to pull in, because `playwright install chromium`
+# is what puts that browser into /opt/playwright.
 RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <<'EOF'
 {
   "name": "global-deps-full",
@@ -511,8 +518,9 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
   "dependencies": {
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
-    "@desplega.ai/qa-use": "2.19.0",
-    "@desplega.ai/claude-bridge": "0.2.2"
+    "@desplega.ai/claude-bridge": "0.2.2",
+    "agent-browser": "0.31.1",
+    "playwright": "1.58.0"
   },
   "overrides": {
     "@huggingface/hub": "2.11.0",
@@ -545,14 +553,47 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
       && for bin in /opt/global-deps-full/node_modules/.bin/*; do \
            ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
          done \
-      && qa-use install-deps' \
+      && playwright install chromium' \
     && cd /opt/global-deps-full \
     && chromium_path="$(node -e 'const { chromium } = require("playwright"); process.stdout.write(chromium.executablePath())')" \
     && ldd "$chromium_path" | tee /tmp/chromium-ldd.txt \
     && ! grep -F "not found" /tmp/chromium-ldd.txt \
     && node -e 'const { chromium } = require("playwright"); (async () => { const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] }); const page = await browser.newPage(); await page.setContent("<main>chromium smoke ok</main>"); await browser.close(); })().catch((error) => { console.error(error); process.exit(1); });' \
+    && ln -sfn "$chromium_path" /opt/playwright/chromium \
+    && ab_bin="agent-browser-linux-$([ "$TARGETARCH" = "amd64" ] && echo x64 || echo "$TARGETARCH")" \
+    && test -x "/opt/global-deps-full/node_modules/agent-browser/bin/$ab_bin" \
+    && find /opt/global-deps-full/node_modules/agent-browser/bin -name 'agent-browser-*' ! -name "$ab_bin" -delete \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache \
     && chmod -R a+rX /opt/playwright
+
+# agent-browser finds the browser through this stable symlink; the real path
+# carries Playwright's build number (e.g. chromium-1208/chrome-linux/chrome).
+# The npm package ships a native binary per platform (~70 MB for the seven
+# of them); the prune above keeps only this image's TARGETARCH binary, and
+# the `test -x` before it fails the build if upstream moves the binaries.
+# The Node launcher (bin/agent-browser.js) only ever probes the exact
+# platform name, so the others are never consulted.
+# Chrome's user-namespace sandbox is unavailable under Docker's default seccomp
+# profile and in BuildKit RUN steps ("No usable sandbox!"), so launch with
+# --no-sandbox, exactly what Playwright does by default (chromiumSandbox:
+# false). --disable-dev-shm-usage is the other Playwright default that matters
+# in containers: /dev/shm is 64 MB and large pages crash the renderer without
+# it. An explicit `--args` on the command line replaces this env, so callers
+# who pass their own args must include --no-sandbox again.
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/opt/playwright/chromium \
+    AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage
+
+# Build-time assert: agent-browser can drive that Chromium as the runtime
+# user, headless. Its daemon leaves pid/socket sidecars in ~/.agent-browser,
+# so wipe them in the SAME RUN. A stale pid file would confuse the runtime
+# daemon lookup on first use.
+USER worker
+RUN agent-browser open about:blank \
+    && agent-browser screenshot /tmp/agent-browser-smoke.png \
+    && head -c 8 /tmp/agent-browser-smoke.png | grep -q PNG \
+    && agent-browser close \
+    && rm -rf /tmp/agent-browser-smoke.png /home/worker/.agent-browser
+USER root
 
 # Install the context-mode plugins for Claude + Codex (build-time cache).
 # These are the ONLY marketplace plugins — they ship the ctx_* HOOKS, which a
@@ -572,13 +613,6 @@ RUN claude plugin marketplace add mksglu/claude-context-mode || true \
     && codex plugin marketplace add mksglu/context-mode || true \
     && codex plugin add context-mode@context-mode || true \
     && rm -rf /home/worker/.bun/install/cache
-
-# qa-use skill (full image only — the qa-use CLI isn't present in slim).
-# Picked up by the leaf-stage mirror into the other harness skill trees.
-ARG SKILLS_CLI_VERSION
-RUN npx -y skills@${SKILLS_CLI_VERSION} add desplega-ai/qa-use@v2.19.0 --skill qa-use -g -a claude-code -y \
-    && test -e /home/worker/.claude/skills/qa-use/SKILL.md \
-    && rm -rf /home/worker/.npm
 
 USER root
 

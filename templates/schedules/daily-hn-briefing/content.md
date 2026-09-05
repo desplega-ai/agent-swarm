@@ -22,7 +22,7 @@ Goal: Daily Hacker News briefing — scrape HN using browser automation, email t
 
 Instructions:
 
-1. Use qa-use browser commands (e.g., `/qa-use:explore`) to scrape the following HN pages **ONE AT A TIME, STRICTLY SEQUENTIAL**.
+1. Use the `agent-browser` CLI (load its guide with `agent-browser skills get core`; see the `agent-browser` skill) to scrape the following HN pages **ONE AT A TIME, STRICTLY SEQUENTIAL**.
 
    **CRITICAL — DO NOT PARALLELIZE.** Do NOT fan out parallel browser sessions, do NOT launch multiple Browser Use SDK flows concurrently, do NOT batch the URLs into a single multi-target call. Browser-heavy runs can cross the heartbeat-stale watchdog threshold when several pages are scraped in parallel. Strict serial execution is required.
 
@@ -86,7 +86,7 @@ Instructions:
 7. Call `store-progress` when done with the formatted briefing as output.
 
 IMPORTANT:
-- Use qa-use browser automation to browse HN, don't use web search
+- Use agent-browser to browse HN, don't use web search
 - **Scrape URLs SERIALLY (one at a time) and call `store-progress` between every URL** — never parallelize, never fan-out. This prevents heartbeat-stale auto-fails.
 - Only include stories from the last ~24 hours
 - ALWAYS include the post date on each story — this is required

@@ -26,8 +26,8 @@ worker-base              minimal apt set + bun + ALL four harness CLIs +
 ├─ worker-slim (target)  worker-base + leaf block. CI + E2E image.
 └─ worker-full-base      + dev toolchain, glab, Playwright libs + chromium,
                          postgres/redis servers, /opt/global-deps-full
-                         (qa-use, sentry-cli, localtunnel, claude-bridge),
-                         context-mode claude+codex PLUGINS, qa-use skill
+                         (agent-browser, playwright, sentry-cli, localtunnel,
+                         claude-bridge), context-mode claude+codex PLUGINS
    └─ worker-full        worker-full-base + leaf block. Default; MUST stay the
       (target, LAST)     last stage so untargeted builds produce it.
 ```
@@ -40,9 +40,8 @@ Placement rules:
 
 ## Skills: `npx skills`, not plugin marketplaces
 
-Only the CLI-coupled `agent-fs` skill (worker-base) and `qa-use` skill
-(worker-full-base) are installed by pinned
-`npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` runs,
+Only the CLI-coupled `agent-fs` skill (worker-base) is installed by a pinned
+`npx skills add <owner/repo>@<tag> --skill <name> -g -a claude-code -y` run,
 then mirrored into the pi/codex/opencode/.agents trees by the leaf block. The
 general skill catalog, including vendored ai-toolbox skills, is DB-seeded from
 `templates/skills/`. The ONLY remaining marketplace plugins are context-mode
@@ -98,7 +97,7 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 # Override HOME + redirect caches inline, then clean them in the SAME RUN:
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     sh -c 'cd /opt/global-deps && npm install --no-audit --no-fund \
-      && qa-use install-deps' \
+      && playwright install chromium' \
     && rm -rf /tmp/npm-cache /root/.npm /root/.cache
 ```
 
