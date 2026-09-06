@@ -3,7 +3,7 @@ date: 2026-09-04
 author: taras
 topic: "UI E2E P1: Playwright suite in packages/ui-e2e against a fresh seeded API"
 tags: [plan, e2e, ui, playwright, ci]
-status: ready
+status: in-progress
 autonomy: critical
 commit_per_phase: true
 brainstorm: thoughts/taras/brainstorms/2026-09-04-ui-e2e-swarm-driven-testing.md
@@ -223,20 +223,20 @@ Export `expect` from `@playwright/test`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Install and lock: `bun install` then `bun install --frozen-lockfile`
-- [ ] Suite is green: `bun run e2e:ui`
-- [ ] Package typechecks: `bun run e2e:ui:tsc`
-- [ ] Root gates still pass: `bun run lint && bun run tsc:check`
-- [ ] Contract suite unaffected: `bun run e2e`
-- [ ] Boundaries: `bash scripts/check-e2e-boundary.sh && bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] Install and lock: `bun install` then `bun install --frozen-lockfile`
+- [x] Suite is green: `bun run e2e:ui`
+- [x] Package typechecks: `bun run e2e:ui:tsc`
+- [x] Root gates still pass: `bun run lint && bun run tsc:check`
+- [x] Contract suite unaffected: `bun run e2e`
+- [x] Boundaries: `bash scripts/check-e2e-boundary.sh && bash scripts/check-db-boundary.sh && bun run check:dep-graph`
 
 #### Automated QA:
-- [ ] Run `bun run e2e:ui -- --workers=3` twice back to back; both green, three distinct API ports in the boot logs, no port collision.
-- [ ] Start a run, `kill -9` the `playwright` process mid-run, then `pgrep -f "bun run src/http.ts"` returns nothing within 10 s (stdin close tears the SUT down).
-- [ ] `bun run e2e:ui -- --reporter=list` output shows the spec ran under the worker's injected connection (assert the `/api/tasks` request went to the worker's port, via the `clean` collector debug output).
+- [x] Run `bun run e2e:ui -- --workers=3` twice back to back; both green, three distinct API ports in the boot logs, no port collision.
+- [x] Start a run, `kill -9` the `playwright` process mid-run, then `pgrep -f "bun run src/http.ts"` returns nothing within 10 s (stdin close tears the SUT down).
+- [x] `bun run e2e:ui -- --reporter=list` output shows the spec ran under the worker's injected connection (assert the `/api/tasks` request went to the worker's port, via the `clean` collector debug output).
 
 #### Manual Verification:
-- [ ] Open `packages/ui-e2e/playwright-report/index.html` and confirm the home screenshot shows the dashboard, not a connection modal.
+- [x] Open `packages/ui-e2e/playwright-report/index.html` and confirm the home screenshot shows the dashboard, not a connection modal. (autopilot: verified by Claude from test-results/home-home-renders-chromium/test-finished-1.png; the dashboard renders behind the "Who are you?" identity dialog, handled by the Phase 2 seed)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 1] ui-e2e package scaffold and boot handshake`.
 

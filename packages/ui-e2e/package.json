@@ -1,0 +1,16 @@
+{
+  "name": "@agent-swarm/ui-e2e",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "tsc": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.boot.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.20.1"
+  }
+}
