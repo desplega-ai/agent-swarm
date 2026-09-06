@@ -91,3 +91,7 @@ e2e-summary.md
 packages/ui-e2e/test-results/
 packages/ui-e2e/playwright-report/
 packages/ui-e2e/blob-report/
+packages/ui-e2e/all-blob-reports/
+packages/ui-e2e/all-results/
+packages/ui-e2e/images.json
+packages/ui-e2e/comment.md

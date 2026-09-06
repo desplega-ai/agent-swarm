@@ -8,7 +8,9 @@ export default defineConfig({
   timeout: 60_000,
   grepInvert: process.env.E2E_API_URL ? /@local/ : undefined,
   globalSetup: "./global-setup.ts",
-  reporter: process.env.CI ? [["blob"]] : [["list"], ["html", { open: "never" }]],
+  reporter: process.env.CI
+    ? [["blob"], ["./reporter/summary.ts"]]
+    : [["list"], ["html", { open: "never" }], ["./reporter/summary.ts"]],
   use: {
     trace: "on-first-retry",
     screenshot: "on",

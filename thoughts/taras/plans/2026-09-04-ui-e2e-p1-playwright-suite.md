@@ -420,10 +420,10 @@ Create a dedicated agent-fs user for CI (editor on the e2e drive) and add reposi
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Reporter unit check: `bun run e2e:ui -- --grep "smoke /"` then `test -s packages/ui-e2e/test-results/summary.json && jq '.results | length' packages/ui-e2e/test-results/summary.json`
-- [ ] Comment builder: `node --experimental-strip-types packages/ui-e2e/reporter/comment.ts --summaries packages/ui-e2e/test-results --images /dev/null --run-url https://example --report-artifact x --out /tmp/c.md && head -1 /tmp/c.md | grep -q 'ui-e2e'`
-- [ ] Workflow syntax: `bunx actionlint .github/workflows/ui-e2e.yml .github/workflows/merge-gate.yml` (skip if actionlint is unavailable; then rely on the PR run)
-- [ ] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
+- [x] Reporter unit check: `bun run e2e:ui -- --grep "smoke /"` then `test -s packages/ui-e2e/test-results/summary.json && jq '.results | length' packages/ui-e2e/test-results/summary.json`
+- [x] Comment builder: `node --experimental-strip-types packages/ui-e2e/reporter/comment.ts --summaries packages/ui-e2e/test-results --images /dev/null --run-url https://example --report-artifact x --out /tmp/c.md && head -1 /tmp/c.md | grep -q 'ui-e2e'`
+- [x] Workflow syntax: `bunx actionlint .github/workflows/ui-e2e.yml .github/workflows/merge-gate.yml` (skip if actionlint is unavailable; then rely on the PR run) (`ui-e2e.yml` is clean; `merge-gate.yml` carries 12 pre-existing ShellCheck diagnostics that this branch did not add)
+- [x] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
 - [ ] Push the branch, open the PR, and both `ui-e2e` jobs and `ui-lint` complete: `gh run list --workflow ui-e2e.yml --branch <branch> --limit 1` shows `completed`
 
 #### Automated QA:
