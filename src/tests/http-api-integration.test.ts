@@ -103,6 +103,11 @@ beforeAll(async () => {
       DATABASE_PATH: TEST_DB_PATH,
       API_KEY: TEST_API_KEY,
       AGENT_FS_LOCAL_DIR: TEST_FS_DIR,
+      // Worker containers expose agent-fs credentials. Clear the remote
+      // provider selectors so this integration suite uses its isolated dir.
+      AGENT_FS_API_URL: "",
+      API_AGENT_FS_API_KEY: "",
+      AGENT_FS_API_KEY: "",
       CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,memory",
       // Disable optional integrations
       SLACK_BOT_TOKEN: "",

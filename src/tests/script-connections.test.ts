@@ -19,6 +19,9 @@ import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { typecheckScript } from "../be/scripts/typecheck";
 import { runScript } from "../scripts-runtime/loader";
 import { registerScriptConnectionsTool } from "../tools/script-connections";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const createdBindingIds: string[] = [];
 const createdConnectionIds: string[] = [];
@@ -553,6 +556,8 @@ describe("script connections", () => {
       markMigrationApplied(database, "137_memory_retrieval_composite_index.sql");
       // 140 rebuilds approval_requests, which this migration-112-only fixture does not create.
       markMigrationApplied(database, "140_approval_request_cancelled_status.sql");
+      // 143 backfills pricing, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "143_backfill_gpt_6_astra_pricing.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
@@ -1174,7 +1179,7 @@ describe("script connections", () => {
     createdBindingIds.push(bindingRow!.id);
   });
 
-  test("ctx.api runtime emits plain fetch with credential placeholders", async () => {
+  skip("ctx.api runtime emits plain fetch with credential placeholders", async () => {
     let observed: { url: string; authorization: string | null } | null = null;
     const server = Bun.serve({
       port: 0,

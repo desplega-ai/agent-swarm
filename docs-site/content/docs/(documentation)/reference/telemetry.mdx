@@ -12,7 +12,7 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | Event | When it fires | Properties |
 |---|---|---|
 | `server.started` | API server boots | — |
-| `task.created` | A new task is created | source, tags, hasParent, priority |
+| `task.created` | A new task is created | source, hasParent, has_repo, priority |
 | `task.started` | A task is assigned to an agent | source, agentId |
 | `task.claimed` | An agent auto-claims a task from the pool | source, agentId |
 | `task.completed` | A task finishes successfully | agentId, durationMs |
@@ -25,6 +25,7 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `session.failure` | A provider session ends with an error | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
 | `schedule.executed` | A schedule run completes | scheduleType, triggeredWorkflows, wasRecovered |
 | `schedule.error` | A schedule run errors | scheduleType, triggeredWorkflows, wasRecovered, consecutiveErrors |
+| `integration.connected` | An integration is connected | type, provider?, first_of_type |
 | `workflow.created` | A workflow definition is created | workflowId, nodeCount, source (when known) |
 | `workflow.deleted` | A workflow definition is deleted | workflowId, source (when known) |
 | `workflow.started` / `workflow.completed` / `workflow.failed` | Workflow lifecycle transitions | runId, workflowId, durationMs, executor metadata |

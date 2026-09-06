@@ -913,6 +913,12 @@ if [ "${SWARM_DEP_REDIS_ENABLED:-false}" = "true" ]; then
 fi
 
 WORKER_BOOTSTRAP="/tmp/agent-swarm-worker-entrypoint.sh"
+# Remove a stale copy from a previous start of this container first. The file is
+# chowned to `worker` below, and /tmp is a sticky world-writable directory, so on
+# hosts with fs.protected_regular=2 (Ubuntu 24.04 default, not namespaced) even
+# root cannot O_CREAT-open it again: the restart loops on "Permission denied".
+# Unlink is allowed, so regenerate from scratch on every start.
+rm -f "$WORKER_BOOTSTRAP"
 cat > "$WORKER_BOOTSTRAP" <<'EOF'
 #!/bin/bash
 set -e

@@ -7,13 +7,12 @@ import {
   SCRIPT_SDK_RESPONSE_LIMIT_BYTES,
 } from "../scripts-runtime/response-limit";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 
 const savedEnv = { ...process.env };
 const originalFetch = globalThis.fetch;
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
-// The pre-push hook sets this only when its file-backed Bun sandbox probe exits
-// 134 under the shared UID's RLIMIT_NPROC. CI leaves it unset and runs these tests.
-const spawnTest = test.skipIf(process.env.SWARM_SKIP_SANDBOX_SPAWN_TESTS === "1");
+const spawnTest = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 beforeEach(() => {
   process.env.AGENT_SWARM_API_KEY = "runtime-test-secret-1234567890";
@@ -312,6 +311,7 @@ describe("runScript", () => {
         "SWARM_SCRIPT_ERROR_FILE",
         "SWARM_SCRIPT_RESULT_FILE",
         "SWARM_SCRIPT_SOURCE_FILE",
+        "SWARM_SCRIPT_STARTED_FILE",
         "SWARM_SCRIPT_TMPDIR",
         "TMPDIR",
       ],

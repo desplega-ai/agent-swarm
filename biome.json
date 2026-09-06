@@ -9,6 +9,7 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
+      "!!docs-site/.next",
       "!src/be/seed-scripts/catalog",
       "!src/be/modelsdev-cache.json",
       "!src/providers/modelsdev-reasoning.json",

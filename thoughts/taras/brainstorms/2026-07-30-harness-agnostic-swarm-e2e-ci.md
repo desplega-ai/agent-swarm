@@ -3,10 +3,10 @@ date: 2026-07-30T00:00:00+02:00
 author: Taras
 topic: "Harness-agnostic E2E / API tests for the swarm in CI"
 tags: [brainstorm, e2e, ci, api-tests, black-box]
-status: parked
+status: in-progress
 exploration_type: idea
-last_updated: 2026-07-30
-last_updated_by: Taras
+last_updated: 2026-09-03
+last_updated_by: Claude
 ---
 
 # Harness-agnostic E2E / API tests for the swarm in CI — Brainstorm
@@ -153,3 +153,4 @@ This also means the custom runner needs structured JSON output as a first-class 
 ## Next Steps
 
 - **Parked** (2026-07-30). When picking this up: go straight to `/desplega:create-plan` with this doc as input — open questions are resolved, only plan-time details remain (exact leg model IDs, results payload schema stub).
+- **MVP built 2026-09-03** (branch `feat/blackbox-e2e-mvp`): `bun run e2e` under `scripts/e2e/` boots the API on a free port, runs six deterministic HTTP/MCP scenarios, computes OpenAPI route + MCP tool coverage from the running server, and runs optional `--harness claude,codex,pi` legs by spawning the worker as a plain process (no Docker). CI: `e2e-contract` job in the merge gate, `nightly-e2e.yml` inside the public `worker:slim` image. Deviations from the plan above: runner lives in `scripts/e2e/` (not an `apps/e2e/` workspace member, to avoid Dockerfile/lockfile coupling), results are step-summary + artifact (no swarm-script sink yet), the existing `bun test` HTTP integration suite stays as-is. Leg models: claude `claude-haiku-4-5-20251001`, codex `gpt-5.6-luna`, pi `openrouter/deepseek/deepseek-v4-flash`. Nightly needs `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` repo secrets.

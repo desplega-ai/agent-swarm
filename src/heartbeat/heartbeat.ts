@@ -601,7 +601,15 @@ const BOOT_EPOCH_SKEW_MS = 5_000;
 
 /**
  * Aggressive sweep that runs once after server restart.
- * Ignores age thresholds — any in_progress task with no active session is auto-failed.
+ * Ignores age thresholds: any in_progress task claimed before this boot that has
+ * no active session is auto-failed.
+ * A task whose `lastUpdatedAt` is at or after the boot epoch (minus skew) is
+ * skipped outright: `claimTask` / `startTask` stamp that column at the
+ * in_progress transition and the API is the sole DB writer, so a post-boot value
+ * proves the claim (or a live worker's write) happened after this process
+ * started. It cannot be a pre-boot orphan. Workers register their active session
+ * only after the provider spawn returns, which can exceed the 5s sweep delay
+ * (opencode cold start), so this check is what keeps a freshly claimed task alive.
  * A session is only considered "live" if it heartbeated AFTER the current API boot
  * (concurrency-safe: workers with multiple tasks keep fresh heartbeats on live ones).
  * Creates exactly one retry task per failed task via parentTaskId.
@@ -638,6 +646,19 @@ export async function runRebootSweep(): Promise<void> {
           `[Heartbeat] Reboot sweep: skipping task ${task.id} — in_progress with no agentId`,
         );
         continue;
+      }
+
+      if (bootEpoch !== null) {
+        // Claimed at or after this boot (see the doc comment above): not a
+        // pre-boot orphan. The regular stalled-task sweep still covers it if
+        // it goes quiet later.
+        const lastUpdated = new Date(task.lastUpdatedAt).getTime();
+        if (Number.isFinite(lastUpdated) && lastUpdated >= bootEpoch - BOOT_EPOCH_SKEW_MS) {
+          console.log(
+            `[Heartbeat] Reboot sweep: skipping task ${task.id.slice(0, 8)}: claimed after boot (lastUpdatedAt=${task.lastUpdatedAt})`,
+          );
+          continue;
+        }
       }
 
       const session = await getActiveSessionForTask(task.id);

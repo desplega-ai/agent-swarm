@@ -12,6 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
+| ACP (generic) | `acp` | `ACPAdapter` | Spawns any [Agent Client Protocol](https://agentclientprotocol.com) agent named by `ACP_TARGET_COMMAND`; stdio ndjson via `@agentclientprotocol/sdk`. No swarm-side *model-provider* credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness; `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker, so point it only at a binary you trust |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -52,6 +53,7 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
 | `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
 | `codex` | No | Yes (harness-side) | No in-process channel exists (`@openai/codex-sdk` drives `codex exec` with stdin closed; native `turn/steer` is app-server-only — issue #1034). The codex-hook delivers instead. See below. |
+| `acp` | No | No | ACP has one in-flight `session/prompt` and no queue primitive; `session/cancel` is a full abort, not an interrupt. Advertises `[]`. |
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
 

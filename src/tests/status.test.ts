@@ -86,6 +86,7 @@ const ENV_KEYS_TO_RESET = [
   "ANTHROPIC_API_KEY",
   "CLAUDE_CODE_OAUTH_TOKEN",
   "OPENAI_API_KEY",
+  "EMBEDDING_API_KEY",
   "OPENROUTER_API_KEY",
   "CODEX_OAUTH",
   "DEVIN_API_KEY",
@@ -205,7 +206,7 @@ function getMilestone(payload: Awaited<ReturnType<typeof buildStatusPayload>>, i
 describe("setup milestones", () => {
   test("all unverified on a clean swarm", async () => {
     const payload = await buildStatusPayload();
-    expect(payload.setup).toHaveLength(7);
+    expect(payload.setup).toHaveLength(8);
     for (const m of payload.setup) {
       expect(m.state).toBe("unverified");
     }
@@ -217,6 +218,26 @@ describe("setup milestones", () => {
 
     const payload = await buildStatusPayload();
     expect(getMilestone(payload, "harness").state).toBe("configured");
+  });
+
+  test("embeddings: configured with either supported key and otherwise shows a non-blocking hint", async () => {
+    const missing = getMilestone(await buildStatusPayload(), "embeddings");
+    expect(missing).toEqual({
+      id: "embeddings",
+      label: "Memory search",
+      state: "unverified",
+      hint: "Memory search is off. Set OPENAI_API_KEY (or EMBEDDING_API_KEY) on the API server to enable it; it is cheap.",
+    });
+
+    process.env.OPENAI_API_KEY = "openai-embedding-key";
+    expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
+
+    process.env.EMBEDDING_API_KEY = "";
+    expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("unverified");
+
+    process.env.EMBEDDING_API_KEY = "dedicated-embedding-key";
+    delete process.env.OPENAI_API_KEY;
+    expect(getMilestone(await buildStatusPayload(), "embeddings").state).toBe("configured");
   });
 
   test("harness flips to `verified` when a worker's recent live test passed", async () => {
@@ -876,6 +897,15 @@ describe("computeHealth (Phase 2)", () => {
       { id: "jira", label: "Jira", state: "unverified" },
       { id: "workers", label: "Workers", state: "verified" },
       { id: "first_task", label: "First task", state: "unverified" },
+    ];
+    expect(computeHealth(synthetic)).toBe("ok");
+  });
+
+  test("an unverified embedding key never blocks boot or degrades health", () => {
+    const synthetic: SetupMilestone[] = [
+      { id: "harness", label: "Harness", state: "verified" },
+      { id: "embeddings", label: "Memory search", state: "unverified" },
+      { id: "workers", label: "Workers", state: "verified" },
     ];
     expect(computeHealth(synthetic)).toBe("ok");
   });

@@ -62,8 +62,8 @@ Jira webhook registration requires `MCP_BASE_URL` to be HTTPS — point at ngrok
 Both providers store `cloudId`/`siteUrl`/`webhookIds` in `oauth_apps.metadata`. v1 is single-workspace per install (first OAuth connect picks the cloudId).
 
 Full guides:
-- [docs-site/.../guides/jira-integration.mdx](../docs-site/content/docs/(documentation)/guides/jira-integration.mdx)
-- [docs-site/.../guides/linear-integration.mdx](../docs-site/content/docs/(documentation)/guides/linear-integration.mdx)
+- [docs-site/.../integrations/jira.mdx](../docs-site/content/docs/(documentation)/integrations/jira.mdx)
+- [docs-site/.../integrations/linear.mdx](../docs-site/content/docs/(documentation)/integrations/linear.mdx)
 
 OAuth token refresh behavior and local smoke testing: [runbooks/oauth-tokens.md](./oauth-tokens.md).
 

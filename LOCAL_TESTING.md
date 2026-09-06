@@ -5,6 +5,7 @@ Reference doc for everything Claude (or any agent) needs to test Agent Swarm loc
 Quick index:
 
 - [Unit tests](#unit-tests)
+- [Black-box E2E](#black-box-e2e-bun-run-e2e)
 - [E2E with Docker](#e2e-with-docker) — full flow lives in the `swarm-local-e2e` skill
 - [Docker entrypoint changes](#docker-entrypoint-changes)
 - [MCP tool testing over HTTP](#mcp-tool-testing-over-http)
@@ -26,7 +27,7 @@ bun run test:root -- --parallel=4 --shard=1/2                                   
 
 `--parallel=N` runs each test file in its own worker process (it implies `--isolate`), so files cannot see each other's module mocks, globals, or leaked handles. `--changed=<ref>` selects test files whose import graph touches files changed since `<ref>`; always pass the **merge-base**, not `origin/main` itself, or every upstream commit counts as a change (0 files on a docs-only branch, ~20 files for a leaf tool edit). `--shard=N/M` splits files by count; CI adds `--timings=<file>` entries restored from the actions cache (per-file durations written by the previous green run's `--update-timings`, merged by the `save-timings` job; the `restore-timings` job resolves the snapshot once and both shards download the same artifact, so they always split the same file list) so the split is by total time. Nothing is committed; the first run after a cache wipe splits by count. Locally you can do the same with `--update-timings --timings=/tmp/timings.json`.
 
-Before selecting tests, `scripts/pre-push-tests.sh` runs a file-backed Bun process through the production sandbox limits. When the probe exits 134, the hook sets `SWARM_SKIP_SANDBOX_SPAWN_TESTS=1` and skips only spawn-dependent tests in `scripts-runtime`, `script-workflows-runtime-e2e`, `scripts-mcp-e2e`, `sandboxed-process`, `scripts-runtime-identity`, and `slack-read-boundaries`; all other affected tests still run. `RLIMIT_NPROC` is enforced per UID, so the sandbox's 512-process ceiling can prevent Bun 1.4.0 from starting when host-wide swarm thread usage for the worker UID is already high. CI does not set the variable and runs every sandbox test.
+Before selecting tests, `scripts/pre-push-tests.sh` runs a file-backed Bun process through the production sandbox limits. When the probe exits 134, the hook sets `SWARM_SKIP_SANDBOX_SPAWN_TESTS=1` and skips only spawn-dependent tests in `scripts-runtime`, `script-workflows-runtime-e2e`, `scripts-mcp-e2e`, `sandboxed-process`, `scripts-runtime-identity`, and `slack-read-boundaries`; all other affected tests still run. `RLIMIT_NPROC` is enforced per UID, so even the sandbox's 4096-process ceiling can prevent Bun 1.4.0 from starting when host-wide swarm thread usage for the worker UID is already high. At runtime, an exit 134 before user code starts is classified as `capacity_exceeded` and retried twice with bounded backoff before it reaches the caller. CI does not set the skip variable and runs every sandbox test.
 
 Conventions:
 
@@ -43,6 +44,103 @@ Two RBAC suites spawn the **real** server as a subprocess (exception to the mini
 
 - `bun run test:root -- src/tests/rbac-wire-e2e.test.ts` — gate matrix over a real MCP handshake + HTTP, plus audit-trail fidelity. Runs in the default root test command (CI).
 - `RBAC_LIFECYCLE_E2E=1 bun run test:root -- src/tests/rbac-lifecycle-e2e.test.ts` — audit lifecycle (burst flush, SIGTERM drain, kill-switch, retention purge, boot-race, stdio). Env-gated, ~20s, multiple server boots; run on demand / pre-release. Skipped without the flag.
+
+## Black-box E2E (bun run e2e)
+
+`bun run e2e` starts the real API on a free port with a fresh SQLite database.
+It runs deterministic HTTP and MCP scenarios with simulated agents. It does not use Docker or an LLM.
+The runner discovers route and MCP tool coverage from the running server.
+It writes `./e2e-results.json` by default.
+
+Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
+so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
+Scenarios drive that Slack workspace through `ctx.slack`.
+The Slack scenarios are `slack-mention`, `slack-follow-up`, and `slack-failed-task`.
+They cover a mention, a thread follow-up, and a failed task outcome.
+`ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
+
+```bash
+bun run e2e
+bun run e2e --list
+bun run e2e --only health,auth
+bun run e2e --only slack-mention
+bun run e2e --skip workflow-script-node
+bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
+bun run e2e --min-route-coverage 4 --min-tool-coverage 3
+bun run e2e --keep
+```
+
+### Harness legs (`--harness`)
+
+A harness leg registers a worker agent, creates one task, and boots a real worker process for one provider.
+The task runs in a workspace directory under the leg's temporary HOME, never in the repository checkout.
+Defaults: claude `claude-sonnet-5`, codex `gpt-5.6-luna`, pi and opencode `openrouter/deepseek/deepseek-v4-flash`.
+Override with `E2E_MODEL_<PROVIDER>`. Each leg needs its provider credential in the environment.
+
+```bash
+bun run e2e --only health --harness claude
+bun run e2e --only health --harness claude,pi --harness-attempts 2
+E2E_MODEL_CLAUDE=claude-haiku-4-5 bun run e2e --only health --harness claude
+```
+
+When the runner is root and `gosu` exists (the nightly container job), the worker starts as `gosu worker env HOME=<temp HOME> ...`.
+gosu resets HOME to `/home/worker`, which would hide the seeded auth.json and skills; file-based credentials such as the
+chatgpt-mode codex auth.json then fail with `401 Missing bearer or basic authentication in header`.
+
+`--harness-attempts N` runs a failed leg again, N attempts in total. Every attempt lands in the JSON
+result with its duration, its cost, and the last 60 lines of the worker log on failure. After the task
+turns terminal the leg polls `/api/session-costs` for up to 15 seconds (`E2E_COST_TIMEOUT_MS`) and records
+the USD total, token counts, and `costSource`. A passing task with no cost row is reported as `no record`.
+Log tails and error messages pass through `scripts/e2e/redact.ts` (exact credential values from the
+environment plus common token shapes) before they enter the result file or the console.
+
+### Nightly E2E workflow
+
+`.github/workflows/nightly-e2e.yml` runs the contract scenarios once on plain Ubuntu, then one harness
+leg per provider inside the `worker:slim` image, then a `report` job that merges every result file with
+`scripts/e2e/nightly-report.ts` into one step summary and the `nightly-e2e-report` artifact. The report
+lists cost per leg, the cost trend over earlier runs, warnings (retries, missing cost rows, an expiring
+Codex OAuth blob), and the worker log tail of every failed attempt. While the nightly fails, one sticky
+issue (body starts with `<!-- nightly-e2e -->`) stays open; the first green run closes it. The issue body
+omits the log tails, and the uploaded log files are redacted copies, because both are public.
+
+Rebuild a report locally from downloaded artifacts:
+
+```bash
+gh run download <run-id> -p 'nightly-e2e-*' -D /tmp/nightly/results
+bun scripts/e2e/nightly-report.ts --results /tmp/nightly/results --out /tmp/nightly/summary.md --json /tmp/nightly/report.json
+```
+
+Use repeatable `--sut-env KEY=VALUE` flags to override environment variables for the spawned API server.
+Use `--visuals <dir>` to retain the Slack journal and write its `manifest.json` file.
+Render the journal with `bun run e2e:visuals <dir>`.
+
+Run both Slack rendering profiles locally:
+
+```bash
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --visuals /tmp/vis/legacy
+env -u ANTHROPIC_API_KEY bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --sut-env SLACK_RENDER_V2=true --visuals /tmp/vis/v2
+```
+
+Then render both profiles:
+
+```bash
+bun run e2e:visuals /tmp/vis/legacy && bun run e2e:visuals /tmp/vis/v2
+```
+
+Use `--harness claude,codex,pi,opencode` to add real worker legs after the contract layer.
+Claude needs `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+Codex needs `CODEX_OAUTH` or `OPENAI_API_KEY`. Pi needs `OPENROUTER_API_KEY` or `ANTHROPIC_API_KEY`.
+Opencode needs `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+Override models with `E2E_MODEL_CLAUDE`, `E2E_MODEL_CODEX`, `E2E_MODEL_PI`, or `E2E_MODEL_OPENCODE`.
+Create a Codex blob with `bun scripts/e2e/codex-oauth-blob.ts /path/to/.codex/auth.json | gh secret set E2E_CODEX_OAUTH`.
+Use a dedicated Codex login for that blob. CI refresh rotates the token and can break a main login.
+The blob goes stale after its first refresh, about ten days after issue.
+Set `E2E_HARNESS_TIMEOUT_MS` to change the five-minute harness timeout.
+
+The same command runs locally, in GitHub Actions, and inside a swarm worker container.
+Coverage only includes traffic sent through the runner's recording client.
+Worker traffic from harness legs does not increase the MVP coverage numbers.
 
 ## E2E with Docker
 
@@ -151,7 +249,8 @@ Required headers on every call:
 
 ## Dashboard UI
 
-Defaults: UI on `APP_URL` (port 5274), API on `http://localhost:3013` (overridable via `VITE_API_URL`).
+Defaults: UI on `APP_URL` (port 5274), API proxy on `http://localhost:3013`. Set
+`VITE_PROXY_TARGET` to use another development API. See `apps/ui/README.md` for fixed deployments.
 
 ```bash
 cd apps/ui && bun run dev   # port 5274
@@ -160,13 +259,27 @@ cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 
 ### When you need to verify a UI change
 
-Use the `qa-use` tool family:
+Use `agent-browser` (never `qa-use` unless explicitly asked):
 
-- `/qa-use:explore <url>` — quick walkthrough, AI-powered element discovery
-- `/qa-use:verify` — verify a defined feature
-- `/qa-use:test-run` — run existing E2E tests
+```bash
+agent-browser skills get core                 # version-matched usage guide, once per session
+agent-browser open http://localhost:5274/tasks
+agent-browser snapshot                        # accessibility tree with @eN refs
+agent-browser click @e12                      # act on refs from the snapshot
+agent-browser screenshot /tmp/ui-tasks.png
+agent-browser close
+```
 
-**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include a `qa-use` session with screenshots of the change running locally. Merge-gate enforces this.
+To share a screenshot (PR body, review comment, Slack), upload it to agent-fs and paste the signed URL:
+
+```bash
+agent-fs write qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --file /tmp/ui-tasks.png -m "<what it shows>"
+agent-fs signed-url qa/agent-swarm/$(date +%F)-<topic>/ui-tasks.png --json   # 24h default, --expires-in up to 7d
+```
+
+`agent-fs write --file` (or piped stdin) is the binary-safe path (CLI >= 0.7.1). `--content` is text-only and mangles PNGs.
+
+**PR requirement**: any PR touching `apps/ui/` or `apps/templates-ui/` must include `agent-browser` screenshots of the change running locally, embedded as `![caption](<signed-url>)`. This is a reviewer convention. No job in `.github/workflows/merge-gate.yml` checks it.
 
 ### Port-conflict resolution
 
@@ -175,7 +288,8 @@ lsof -i :5274          # what's on the UI port
 lsof -i :3013          # what's on the API port
 ```
 
-If another worktree holds the port, either stop it or pick alternates and update `APP_URL` / `VITE_API_URL` accordingly.
+If another worktree holds the port, stop it or pick alternates. Update `APP_URL` and
+`VITE_PROXY_TARGET` accordingly.
 
 ## Port-conflict resolution
 

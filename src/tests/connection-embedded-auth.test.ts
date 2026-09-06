@@ -18,6 +18,9 @@ import {
 import { buildScriptCredentialBindings } from "../be/script-credential-broker";
 import { runScript } from "../scripts-runtime/loader";
 import { clearVolatileSecretsForTesting, scrubSecrets } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const resources = { memoryMb: 2048, cpuTimeSec: 20, maxStdoutBytes: 1_048_576 };
 const createdConnectionIds: string[] = [];
@@ -670,7 +673,7 @@ describe("embedded connection auth", () => {
     );
   });
 
-  test("sandbox e2e: ctx.api substitutes the embedded secret toward the allowed host", async () => {
+  skip("sandbox e2e: ctx.api substitutes the embedded secret toward the allowed host", async () => {
     let observedAuth: string | null = null;
     const server = Bun.serve({
       port: 0,

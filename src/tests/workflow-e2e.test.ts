@@ -21,6 +21,9 @@ import { ExecutorRegistry } from "../workflows/executors/registry";
 import { SwarmScriptExecutor } from "../workflows/executors/swarm-script";
 import { setupWorkflowResumeListener } from "../workflows/resume";
 import { interpolate } from "../workflows/template";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const spawnDescribe = describe.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-workflow-e2e.sqlite";
 const API_KEY = "test-workflow-e2e-key-1234567890";
@@ -133,7 +136,7 @@ beforeEach(async () => {
   await client.run("DELETE FROM workflows");
 });
 
-describe("workflow e2e swarm-script", () => {
+spawnDescribe("workflow e2e swarm-script", () => {
   test("swarm-script full workflow run executes through the engine", async () => {
     await saveScript(
       "square",

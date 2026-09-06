@@ -123,4 +123,4 @@ CI uses `bun install --frozen-lockfile`. A single root install now covers `apps/
 - **`docs-site/`** deploys via Vercel — `pnpm build` in `docs-site/` must pass. See [docs-site/CLAUDE.md](../docs-site/CLAUDE.md).
 - **`apps/templates-ui/`** — same Vercel pattern.
 
-Frontend-touching PRs additionally need a `qa-use` session with screenshots — see [testing.md](./testing.md).
+Frontend-touching PRs additionally need `agent-browser` screenshots uploaded to agent-fs (reviewer convention, not a CI job). See [testing.md](./testing.md).

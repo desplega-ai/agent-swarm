@@ -40,6 +40,9 @@ import { InProcessEventBus } from "../workflows/event-bus";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
 import { ExecutorRegistry } from "../workflows/executors/registry";
 import { interpolate } from "../workflows/template";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-schedule-target-type.sqlite";
 const API_KEY = "test-schedule-target-type-key-1234567890";
@@ -315,7 +318,7 @@ describe("dispatchScheduleTarget — workflow target", () => {
 });
 
 describe("dispatchScheduleTarget — script target", () => {
-  test("runs the catalog script directly with no agent/task created", async () => {
+  skip("runs the catalog script directly with no agent/task created", async () => {
     await saveGlobalScript(
       "schedule-target-type-echo",
       `export default async (args) => ({ received: args });`,
@@ -334,7 +337,7 @@ describe("dispatchScheduleTarget — script target", () => {
     expect(result.task).toBeUndefined();
   }, 15_000);
 
-  test("scheduled script runs receive ctx.api and ctx.mcp connections", async () => {
+  skip("scheduled script runs receive ctx.api and ctx.mcp connections", async () => {
     const { upsertScriptConnection } = await import("../be/script-connections");
     await upsertScriptConnection({
       slug: "schedgql",
@@ -394,7 +397,7 @@ describe("dispatchScheduleTarget — script target", () => {
     await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("not found");
   });
 
-  test("propagates a non-zero exit as a thrown error", async () => {
+  skip("propagates a non-zero exit as a thrown error", async () => {
     await saveGlobalScript(
       "schedule-target-type-throws",
       `export default async () => { throw new Error("boom"); };`,

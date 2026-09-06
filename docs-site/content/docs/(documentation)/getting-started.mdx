@@ -5,7 +5,7 @@ description: Install Agent Swarm, configure your first lead and worker agents, a
 
 This guide walks you through setting up a fully operational Agent Swarm with a lead agent and workers.
 
-> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), but you can also use **pi-mono** for access to other model backends. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
+> Agent Swarm supports multiple AI providers via the **harness** system. The default is **Claude Code** (recommended), with Codex, opencode, pi-mono, Devin, Claude Managed Agents, and ACP-compatible agents also supported. See the [Harness Configuration](/docs/guides/harness-configuration) guide for details.
 
 ## Prerequisites
 
@@ -140,7 +140,7 @@ Once your swarm is running, you can verify it's working:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3013` | API server port |
-| `HARNESS_PROVIDER` | `claude` | AI provider: `claude` or `pi`. See [Harness Configuration](/docs/guides/harness-configuration) |
+| `HARNESS_PROVIDER` | `claude` | AI provider: `claude`, `codex`, `opencode`, `pi`, `devin`, `claude-managed`, or `acp`. See [Harness Configuration](/docs/guides/harness-configuration) |
 | `AGENT_ID` | Auto-generated | Stable UUID for task resume |
 | `AGENT_NAME` | Auto-generated | Display name for the agent |
 | `AGENT_ROLE` | `worker` | Role: `worker` or `lead` |
@@ -150,11 +150,11 @@ For the complete list, see [Environment Variables](/docs/reference/environment-v
 
 ## Next Steps
 
-- [Harness Configuration](/docs/guides/harness-configuration) — Configure Claude Code, pi-mono, or a mixed swarm
+- [Harness Configuration](/docs/guides/harness-configuration) — Configure any supported harness provider or a mixed swarm
 - [Browse Templates](https://templates.agent-swarm.dev) — Explore and preview agent templates
 - [Architecture Overview](/docs/architecture/overview) — Understand the system design
 - [Task Lifecycle](/docs/concepts/task-lifecycle) — Learn how tasks flow through the swarm
 - [Deployment Guide](/docs/guides/deployment) — Production deployment options
-- [AgentMail Integration](/docs/guides/agentmail-integration) — Give agents their own email inboxes
+- [AgentMail Integration](/docs/integrations/agentmail) — Give agents their own email inboxes
 - [Linear Integration](/docs/integrations/linear) — Bidirectional ticket tracking with Linear
 - [Contributing](/docs/contributing) — Learn how to contribute code, templates, and docs

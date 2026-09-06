@@ -4,7 +4,7 @@ import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
 import { configureDbResolver } from "../prompts/resolver";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
-import { telemetry } from "../telemetry";
+import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
 import type {
   ActiveSession,
   Agent,
@@ -4797,6 +4797,19 @@ export async function createTaskExtended(
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
   let requestedByUserIdInherited = false;
+  // True only when `options.routingAffinity` ends up populated purely via
+  // the plain parent-fallback inherit below (child declared no affinity of
+  // its own, the parent wasn't lead-only, AND the parent's affinity actually
+  // carries a `sourceAgentId`/`role` identity — the shape only
+  // `buildRoutingAffinityFromAgent` produces). That shape is PROVENANCE — a
+  // record of where the continuation came from — not a requirement any
+  // caller declared. It must never gate the direct-assignment/offer
+  // enforcement further down; only an explicit caller-declared requirement
+  // (`send-task`/`task-action`'s `{ leadOnly, capabilities }`, which never
+  // carries `sourceAgentId`/`role`), or a lead-only ratchet, does. See #1276
+  // (3c857542) for the ratchet this must NOT weaken, and the Superagent P1
+  // finding on #1340 for why `leadOnly` alone isn't a sufficient gate.
+  let routingAffinityIsInheritedProvenance = false;
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   // `status: "draft"` wins over offeredTo/agentId — a draft task keeps its
@@ -4961,6 +4974,26 @@ export async function createTaskExtended(
         // requiredCapabilities and therefore built a fresh affinity object).
         if (!options.routingAffinity) {
           options.routingAffinity = parent.routingAffinity;
+          // A non-lead-only parent's affinity, inherited here only because
+          // the child supplied nothing of its own, is provenance — not a
+          // requirement — ONLY when it actually IS a provenance snapshot.
+          // `buildRoutingAffinityFromAgent` (session-resume) always stamps
+          // `sourceAgentId` and `role` together; neither `send-task` nor
+          // `task-action`'s `requiredCapabilities`/`leadOnly` requirement
+          // ever exposes either field to a caller (see their zod schemas —
+          // both build `{ leadOnly, capabilities }` only). So a caller can
+          // declare a non-lead-only capability requirement (`leadOnly:
+          // false, capabilities: [...]`) with neither `sourceAgentId` nor
+          // `role` set, and that must keep gating direct assignment/offer on
+          // a continuation exactly as it did on the parent — see the
+          // Superagent P1 finding on PR #1340 (inherited-affinity
+          // provenance-vs-requirement confusion). Gate on the presence of
+          // either identity field, not on `leadOnly` alone. A lead-only
+          // parent's affinity is always a requirement (the ratchet), so it's
+          // excluded below regardless.
+          routingAffinityIsInheritedProvenance =
+            !parent.routingAffinity.leadOnly &&
+            (!!parent.routingAffinity.sourceAgentId || !!parent.routingAffinity.role);
         } else if (parent.routingAffinity.leadOnly) {
           // Child-supplied affinity may add requirements, but never remove an
           // authorization-affecting requirement inherited from a Lead-only
@@ -5061,8 +5094,15 @@ export async function createTaskExtended(
   // Direct assignment and offers bypass the pool claim gate, so enforce the
   // complete structured affinity here. This is after parent inheritance so
   // continuations cannot shed a Lead-only boundary or its capabilities.
+  // Exception: an affinity that is pure inherited PROVENANCE (see
+  // `routingAffinityIsInheritedProvenance` above) describes where this
+  // continuation came from, not a requirement anyone declared for it — an
+  // explicit direct assignment/offer is the caller overriding routing, and
+  // provenance must not veto that override. A caller-declared requirement
+  // (explicit `leadOnly`/`capabilities`, or a lead-only ratchet) still gates
+  // as before.
   const targetAgentId = options.agentId ?? options.offeredTo;
-  if (options.routingAffinity && targetAgentId) {
+  if (options.routingAffinity && targetAgentId && !routingAffinityIsInheritedProvenance) {
     const target = await getAgentById(targetAgentId);
     if (!target || !isAgentEligibleForTask(target, { routingAffinity: options.routingAffinity })) {
       try {
@@ -5201,6 +5241,7 @@ export async function createTaskExtended(
       source: row.source,
       ...taskContextForTelemetry(rowToAgentTask(row)),
       hasParent: !!row.parentTaskId,
+      has_repo: !!row.vcsRepo,
       priority: row.priority,
     },
     (task) => task !== null,
@@ -8733,6 +8774,20 @@ export async function upsertSwarmConfig(data: {
   }
 
   return config;
+}
+
+/** Emit a built-in integration only once for this persisted installation. */
+export async function emitBuiltInIntegrationConnectedOnce(
+  provider: "github" | "slack",
+): Promise<void> {
+  try {
+    const key = `telemetry.integration.${provider}.emitted`;
+    if ((await getSwarmConfigs({ scope: "global", key })).length > 0) return;
+    if (!emitIntegrationConnected(_resolveIntegrationType(provider), provider, true)) return;
+    await upsertSwarmConfig({ scope: "global", key, value: "true" });
+  } catch {
+    // Telemetry must never break integration startup.
+  }
 }
 
 /**
@@ -12712,11 +12767,16 @@ export async function searchSkills(
   limit = 20,
   includeContent = true,
 ): Promise<Skill[]> {
-  const term = `%${query}%`;
+  const tokens = query.split(/\s+/).filter(Boolean);
   const columns = includeContent === false ? SKILL_SLIM_COLUMNS : "*";
+  const searchClauses = tokens.map(() => "(name LIKE ? OR description LIKE ? OR content LIKE ?)");
+  const params = tokens.flatMap((token) => {
+    const term = `%${token}%`;
+    return [term, term, term];
+  });
   const rows = await getDbClient().query<SkillRow>(
-    `SELECT ${columns} FROM skills WHERE (name LIKE ? OR description LIKE ?) AND isEnabled = 1 ORDER BY name ASC LIMIT ?`,
-    [term, term, limit],
+    `SELECT ${columns} FROM skills WHERE ${[...searchClauses, "isEnabled = 1"].join(" AND ")} ORDER BY name ASC LIMIT ?`,
+    [...params, limit],
   );
   return rows.map(rowToSkill);
 }
@@ -12931,6 +12991,18 @@ export async function createMcpServer(data: McpServerInsert): Promise<McpServer>
 
   if (!row) throw new Error("Failed to create MCP server");
   return rowToMcpServer(row);
+}
+
+/** Shared by HTTP and MCP-tool creation paths so each new server emits once. */
+export async function emitMcpServerConnectedTelemetry(): Promise<void> {
+  try {
+    const row = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM mcp_servers",
+    );
+    emitIntegrationConnected("other", undefined, row?.count === 1);
+  } catch {
+    // Telemetry must never break MCP server creation.
+  }
 }
 
 export async function updateMcpServer(

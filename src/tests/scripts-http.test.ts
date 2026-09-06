@@ -10,6 +10,9 @@ import { handleCore } from "../http/core";
 import { handleScripts } from "../http/scripts";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
+import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
+
+const skip = test.skipIf(SKIP_SANDBOX_SPAWN_TESTS);
 
 const TEST_DB_PATH = "./test-scripts-http.sqlite";
 const API_KEY = "test-scripts-http-key-1234567890";
@@ -309,7 +312,7 @@ describe("/api/scripts HTTP", () => {
     expect((await res.json()).version).toBe(1);
   });
 
-  test("inline script throws and run response carries structured runtimeError", async () => {
+  skip("inline script throws and run response carries structured runtimeError", async () => {
     const res = await dispatch("/api/scripts/run", {
       method: "POST",
       agentId: workerId,
@@ -462,7 +465,7 @@ describe("/api/scripts HTTP", () => {
     expect(JSON.parse(event!.data).isPromotion).toBe(true);
   });
 
-  test("failed promotion typecheck does not clear scratch flag", async () => {
+  skip("failed promotion typecheck does not clear scratch flag", async () => {
     const inline = await dispatch("/api/scripts/run", {
       method: "POST",
       agentId: workerId,
@@ -484,7 +487,7 @@ describe("/api/scripts HTTP", () => {
     );
   });
 
-  test("run named scripts and inline scripts, auto-saving only successful inline source", async () => {
+  skip("run named scripts and inline scripts, auto-saving only successful inline source", async () => {
     await upsert({ name: "named-runner", source: validSource(4) });
     const named = await dispatch("/api/scripts/run", {
       method: "POST",

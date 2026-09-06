@@ -10,14 +10,22 @@ const packageJson = JSON.parse(
   version?: string;
 };
 
+/** Plausible site script id of the hosted dashboard (app.agent-swarm.dev). */
+const DEFAULT_PLAUSIBLE_SCRIPT_ID = "aDF5FACknjhykIUMd6n_a";
+
 /**
  * Plausible analytics, injected into index.html at build time only when
  * `VITE_PLAUSIBLE_ANALYTICS=1` (or `true`) is set. Our Vercel production
  * project sets it; self-hosted and local builds ship with no analytics script.
+ * `VITE_PLAUSIBLE_SCRIPT_ID` picks the Plausible site (the `pa-<id>.js` part
+ * of the snippet) so a second deployment, such as the public demo, reports to
+ * its own site instead of the hosted dashboard's.
  */
 function plausibleAnalytics(): Plugin {
   const flag = (process.env.VITE_PLAUSIBLE_ANALYTICS ?? "").trim().toLowerCase();
   const enabled = flag === "1" || flag === "true";
+  const scriptId =
+    (process.env.VITE_PLAUSIBLE_SCRIPT_ID ?? "").trim() || DEFAULT_PLAUSIBLE_SCRIPT_ID;
   return {
     name: "plausible-analytics",
     transformIndexHtml() {
@@ -25,7 +33,7 @@ function plausibleAnalytics(): Plugin {
       return [
         {
           tag: "script",
-          attrs: { async: true, src: "https://plausible.io/js/pa-aDF5FACknjhykIUMd6n_a.js" },
+          attrs: { async: true, src: `https://plausible.io/js/pa-${scriptId}.js` },
           injectTo: "head",
         },
         {

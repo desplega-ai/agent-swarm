@@ -1,4 +1,4 @@
-import { UserRound } from "lucide-react";
+import { LockKeyhole, UserRound } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { useCurrentUser } from "@/contexts/current-user-context";
@@ -12,7 +12,7 @@ import { WelcomeCard } from "@/pages/config/components/welcome-card";
  * surface (the WelcomeCard fallback below is a safety net).
  */
 export default function ConnectionsPage() {
-  const { isConfigured } = useConfig();
+  const { connectionLocked, isConfigured } = useConfig();
   const { locked, user } = useCurrentUser();
 
   if (!isConfigured) {
@@ -22,6 +22,14 @@ export default function ConnectionsPage() {
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-6">
       <PageHeader title="Connections" />
+      {connectionLocked ? (
+        <Alert>
+          <LockKeyhole className="h-4 w-4" />
+          <AlertDescription>
+            Connection details are set by this UI deployment. They cannot be changed here.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {locked && user ? (
         <Alert>
           <UserRound className="h-4 w-4" />
@@ -29,13 +37,13 @@ export default function ConnectionsPage() {
             {/* Single <p>: AlertDescription is a grid, so bare inline children
                 each land on their own row. */}
             <p>
-              You are logged in with the credentials of <strong>{user.name}</strong> — this
-              connection is bound to their user token and the identity cannot be switched.
+              You are acting as <strong>{user.name}</strong>. This connection fixes that identity,
+              so it cannot be switched.
             </p>
           </AlertDescription>
         </Alert>
       ) : null}
-      <ConnectionsSection />
+      <ConnectionsSection readOnly={connectionLocked} />
     </div>
   );
 }

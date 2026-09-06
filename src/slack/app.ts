@@ -1,5 +1,5 @@
 import { App, LogLevel } from "@slack/bolt";
-import { ensureSlackRenderV2Activation } from "../be/db";
+import { emitBuiltInIntegrationConnectedOnce, ensureSlackRenderV2Activation } from "../be/db";
 import { getSlackSocketModeBlockReason, SLACK_DEV_SOCKET_MODE_OPT_IN } from "./socket-mode-guard";
 import { startTaskWatcher, stopTaskWatcher } from "./watcher";
 
@@ -78,6 +78,7 @@ export async function startSlackApp(): Promise<void> {
     if (isSlackRenderV2Enabled()) await ensureSlackRenderV2Activation();
     await app.start();
     console.log("[Slack] Bot connected via Socket Mode");
+    await emitBuiltInIntegrationConnectedOnce("slack");
 
     // Start watching for task completions
     await startTaskWatcher();

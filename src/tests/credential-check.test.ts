@@ -637,6 +637,10 @@ describe("checkProviderCredentials dispatcher", () => {
         )
       ).ready,
     ).toBe(true);
+
+    const acpStatus = await checkProviderCredentials("acp", {});
+    expect(acpStatus.ready).toBe(true);
+    expect(acpStatus.satisfiedBy).toBe("sdk-delegated");
   });
 
   test("throws on unknown provider", async () => {
@@ -692,6 +696,8 @@ describe("REQUIRED_CRED_VARS_BY_PROVIDER", () => {
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p]).toBeDefined();
       expect(REQUIRED_CRED_VARS_BY_PROVIDER[p].length).toBeGreaterThan(0);
     }
+    // acp is credential-free by design: the target process owns its own auth.
+    expect(REQUIRED_CRED_VARS_BY_PROVIDER.acp).toEqual([]);
   });
 });
 

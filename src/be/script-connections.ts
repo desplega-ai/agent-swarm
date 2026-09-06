@@ -385,7 +385,7 @@ export async function getCredentialBindingById(
   return row ? bindingFromRow(row) : null;
 }
 
-async function findCredentialBindingByIdentity(data: {
+export async function findCredentialBindingByIdentity(data: {
   configKey: string;
   scope: ScriptConnectionScope;
   scopeId: string | null;
@@ -552,16 +552,18 @@ export async function disableCredentialBinding(
 // scriptStdlibTypesWithGeneratedApis — a default-parameter expression cannot
 // contain an await, so listScriptConnections (and everything that only reads
 // through it) must stay synchronous.
-export function listScriptConnections(context?: {
+type ScriptConnectionListContext = {
   agentId?: string;
   repoId?: string;
   kind?: ScriptConnectionKind;
   includeDisabled?: boolean;
   allScopes?: boolean;
-}): ScriptConnectionRecord[] {
-  const rows = getDb()
-    .prepare<ConnectionRow, []>("SELECT * FROM script_connections ORDER BY slug ASC")
-    .all();
+};
+
+function filterScriptConnections(
+  rows: ConnectionRow[],
+  context?: ScriptConnectionListContext,
+): ScriptConnectionRecord[] {
   return rows
     .map(connectionFromRow)
     .filter((connection) => !context?.kind || connection.kind === context.kind)
@@ -572,6 +574,24 @@ export function listScriptConnections(context?: {
         context.allScopes === true ||
         applies(connection.scope, connection.scopeId, context),
     );
+}
+
+export function listScriptConnections(
+  context?: ScriptConnectionListContext,
+): ScriptConnectionRecord[] {
+  const rows = getDb()
+    .prepare<ConnectionRow, []>("SELECT * FROM script_connections ORDER BY slug ASC")
+    .all();
+  return filterScriptConnections(rows, context);
+}
+
+export async function listScriptConnectionsAsync(
+  context?: ScriptConnectionListContext,
+): Promise<ScriptConnectionRecord[]> {
+  const rows = await getDbClient().query<ConnectionRow>(
+    "SELECT * FROM script_connections ORDER BY slug ASC",
+  );
+  return filterScriptConnections(rows, context);
 }
 
 export async function getScriptConnectionById(id: string): Promise<ScriptConnectionRecord | null> {

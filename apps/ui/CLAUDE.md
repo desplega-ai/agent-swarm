@@ -288,8 +288,8 @@ A handful of detail pages are exempt because their identity is an editor or spli
 
 <important if="you are preparing a PR that touches ui/, or running automated UI tests against ui">
 
-## qa-use & PR screenshot requirement
+## agent-browser & PR screenshot requirement
 
-Use `qa-use` for browser automation: `/qa-use:test-run`, `/qa-use:verify`, `/qa-use:explore`. Any PR touching `ui/` MUST include a `qa-use` session with screenshots of the changes running locally — enforced by the merge gate. Port-conflict handling: [../LOCAL_TESTING.md § Dashboard UI](../LOCAL_TESTING.md#dashboard-ui).
+Use `agent-browser` for browser automation (`agent-browser open <url>`, `snapshot`, `screenshot <path>`). Never `qa-use` unless explicitly asked. Any PR touching `ui/` MUST include screenshots of the changes running locally, uploaded to agent-fs with the signed URL in the PR body. This is a reviewer convention; no CI job enforces it. Recipe: [../LOCAL_TESTING.md § When you need to verify a UI change](../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [../LOCAL_TESTING.md § Dashboard UI](../LOCAL_TESTING.md#dashboard-ui).
 
 </important>

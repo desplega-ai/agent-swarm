@@ -152,7 +152,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Chat with the swarm from Slack — assign tasks, get alerts, follow-up in threads.",
     category: "comm",
     iconKey: "message-square",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/slack-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/slack",
     disableKey: "SLACK_DISABLE",
     restartRequired: true,
     fields: [
@@ -299,7 +299,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to issues/PRs, run CI, open PRs from agents. Defaults to PAT mode; App mode available under Advanced.",
     category: "issues",
     iconKey: "github",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/github-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/github",
     disableKey: "GITHUB_DISABLE",
     restartRequired: true,
     fields: [
@@ -392,7 +392,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "React to GitLab issues/MRs and push commits from agents. Supports self-hosted instances.",
     category: "issues",
     iconKey: "git-merge",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/gitlab-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/gitlab",
     disableKey: "GITLAB_DISABLE",
     restartRequired: true,
     fields: [
@@ -499,7 +499,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       "Sync Jira Cloud issues to tasks via OAuth 3LO. Inbound on assignee→bot or @-mention; outbound lifecycle comments back to the issue.",
     category: "issues",
     iconKey: "square-check-big",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/jira-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/jira",
     disableKey: "JIRA_DISABLE",
     restartRequired: true,
     specialFlow: "jira-oauth",
@@ -589,7 +589,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Give agents access to Sentry issues and project info via the Sentry CLI.",
     category: "observability",
     iconKey: "activity",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/sentry-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/sentry",
     fields: [
       {
         key: "SENTRY_AUTH_TOKEN",
@@ -618,7 +618,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     description: "Receive email and reply from agents. Useful for customer-support-like flows.",
     category: "email",
     iconKey: "mail",
-    docsUrl: "https://docs.agent-swarm.dev/docs/guides/agentmail-integration",
+    docsUrl: "https://docs.agent-swarm.dev/docs/integrations/agentmail",
     disableKey: "AGENTMAIL_DISABLE",
     restartRequired: true,
     recommendedSkills: [

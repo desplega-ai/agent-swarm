@@ -166,7 +166,15 @@ const scriptRunResponseSchema = z.object({
   stderr: z.string(),
   exitCode: z.number(),
   error: z
-    .enum(["timeout", "oom", "killed", "import_violation", "eval_error", "executor_error"])
+    .enum([
+      "timeout",
+      "oom",
+      "killed",
+      "import_violation",
+      "eval_error",
+      "executor_error",
+      "capacity_exceeded",
+    ])
     .optional(),
   runtimeError: z
     .object({

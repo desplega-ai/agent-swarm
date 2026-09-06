@@ -8,7 +8,12 @@ import { ensure, initialize } from "@desplega.ai/business-use";
 import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { getEnabledCapabilities, hasCapability } from "@/server";
 import { initAgentMail } from "../agentmail";
-import { closeDb, getSwarmConfigs, upsertSwarmConfig } from "../be/db";
+import {
+  closeDb,
+  emitBuiltInIntegrationConnectedOnce,
+  getSwarmConfigs,
+  upsertSwarmConfig,
+} from "../be/db";
 import { startDbRetention, stopDbRetention } from "../be/db-retention";
 import {
   enqueueAuditRow,
@@ -621,6 +626,9 @@ httpServer
       { generateIfMissing: true },
     );
     telemetry.server("started", { port });
+    if (process.env.GITHUB_TOKEN) {
+      await emitBuiltInIntegrationConnectedOnce("github");
+    }
 
     // Start Slack bot (if configured)
     await startSlackApp();

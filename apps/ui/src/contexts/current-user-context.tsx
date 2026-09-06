@@ -28,6 +28,10 @@
  * Older servers (no /api/whoami) land in `needs-pick` with the picker
  * suppressed: the tab simply has no client-side identity claim, while the
  * server keeps attributing writes from the token.
+ *
+ * A build-time `VITE_USER_ID` also locks the identity. The provider resolves
+ * that ID against the user directory and never reads or writes the picker
+ * value in localStorage.
  */
 
 import {
@@ -46,6 +50,7 @@ import type { User } from "@/api/types";
 import { useConfig } from "@/hooks/use-config";
 import { deriveStorageKey } from "@/hooks/use-dismissible-card-key";
 import { isUserTokenApiKey } from "@/lib/config";
+import { uiDeploymentConfig } from "@/lib/deployment-config";
 
 const CARD_KEY = "current-user";
 
@@ -58,11 +63,8 @@ export interface CurrentUserContextValue {
   setUserId: (id: string) => void;
   clearUser: () => void;
   /**
-   * The tab authenticates with a user-bound `aswt_` token (DES-771). Switching
-   * is blocked — `setUserId`/`clearUser` are no-ops and the switcher/identity
-   * modal must not render — while whoami is pending, erroring, or resolved to
-   * a user. The single unlock is whoami answering `kind: "operator"` (an
-   * operator key that merely starts with `aswt_`).
+   * Switching is blocked by a deployment user or user-bound token.
+   * `setUserId` and `clearUser` become no-ops while locked.
    */
   locked: boolean;
 }
@@ -93,10 +95,12 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   // token (`aswt_`-prefixed) is not user-bound and keeps the picker flow.
   const tokenBound = isUserTokenApiKey(config.apiKey);
   const whoamiQuery = useWhoami(tokenBound);
-  const locked = tokenBound && whoamiQuery.data?.kind !== "operator";
+  const tokenLocked = tokenBound && whoamiQuery.data?.kind !== "operator";
+  const deploymentUserId = uiDeploymentConfig.userId;
+  const locked = Boolean(deploymentUserId) || tokenLocked;
 
-  // Locked tabs never need the full user directory — skip the poll.
-  const usersQuery = useUsers({ enabled: !locked });
+  // A deployment user still needs the directory so the UI can resolve its name.
+  const usersQuery = useUsers({ enabled: Boolean(deploymentUserId) || !tokenLocked });
   const [storedUserId, setStoredUserId] = useState<string | null>(() =>
     readStoredUserId(storageKey),
   );
@@ -121,7 +125,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 
   const setUserId = useCallback(
     (id: string) => {
-      if (locked) return; // Token-bound identity — switching is blocked.
+      if (locked) return;
       try {
         localStorage.setItem(storageKey, id);
       } catch {
@@ -186,11 +190,16 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   // or a failing/retrying whoami they land in `needs-pick` with the picker
   // suppressed via `locked`.
   const { state, user } = useMemo<{ state: CurrentUserState; user: User | null }>(() => {
-    if (locked) {
+    if (tokenLocked) {
       if (whoamiQuery.isPending) return { state: "pending", user: null };
       const tokenUser = whoamiQuery.data?.kind === "user" ? (whoamiQuery.data.user ?? null) : null;
       if (tokenUser) return { state: "ready", user: tokenUser };
       return { state: "needs-pick", user: null };
+    }
+    if (deploymentUserId) {
+      if (usersQuery.isLoading) return { state: "pending", user: null };
+      const match = (usersQuery.data ?? []).find((candidate) => candidate.id === deploymentUserId);
+      return match ? { state: "ready", user: match } : { state: "needs-pick", user: null };
     }
     if (usersQuery.isLoading) return { state: "pending", user: null };
     const users = usersQuery.data ?? [];
@@ -199,7 +208,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     if (!match) return { state: "needs-pick", user: null };
     return { state: "ready", user: match };
   }, [
-    locked,
+    tokenLocked,
     whoamiQuery.isPending,
     whoamiQuery.data,
     usersQuery.isLoading,

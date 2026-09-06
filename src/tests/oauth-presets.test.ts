@@ -85,9 +85,9 @@ afterAll(async () => {
 describe("oauth presets — pure data", () => {
   test("exposes the expected curated preset ids", () => {
     expect(listOAuthPresetIds().sort()).toEqual(
-      ["github", "google", "jira", "linear", "notion", "slack"].sort(),
+      ["github", "google", "jira", "linear", "microsoft", "notion", "slack"].sort(),
     );
-    expect(listOAuthPresets()).toHaveLength(6);
+    expect(listOAuthPresets()).toHaveLength(7);
   });
 
   test("every preset carries endpoints, setup hints, and SSRF-safe URLs", () => {
@@ -124,6 +124,18 @@ describe("oauth presets — pure data", () => {
 
     const slack = getOAuthPreset("slack");
     expect(slack?.scopeSeparator).toBe(",");
+
+    const microsoft = getOAuthPreset("microsoft");
+    expect(microsoft?.authorizeUrl).toContain("/common/oauth2/v2.0/authorize");
+    expect(microsoft?.tokenUrl).toContain("/common/oauth2/v2.0/token");
+    expect(microsoft?.scopes).toContain("offline_access");
+    expect(microsoft?.scopes).toContain("ChannelMessage.Send");
+    expect(microsoft?.scopes).toContain("Mail.Read");
+    expect(microsoft?.scopes).toContain("Mail.Send");
+    expect(microsoft?.scopeSeparator).toBe(" ");
+    expect(microsoft?.tokenAuthStyle).toBe("body");
+    expect(microsoft?.tokenBodyFormat).toBe("form");
+    expect(microsoft?.requiresRefreshTokenRotation).toBeUndefined();
   });
 
   test("hydration marks curated-prefill and lets explicit fields win", () => {
@@ -183,15 +195,15 @@ describe("oauth presets — pure data", () => {
 });
 
 describe("oauth presets — HTTP", () => {
-  test("GET /api/oauth-presets lists all six presets with hints", async () => {
+  test("GET /api/oauth-presets lists all seven presets with hints", async () => {
     const res = await dispatch("/api/oauth-presets");
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       presets: Array<{ id: string; authorizeUrl: string; setupHints: string[] }>;
     };
-    expect(body.presets).toHaveLength(6);
+    expect(body.presets).toHaveLength(7);
     expect(body.presets.map((p) => p.id).sort()).toEqual(
-      ["github", "google", "jira", "linear", "notion", "slack"].sort(),
+      ["github", "google", "jira", "linear", "microsoft", "notion", "slack"].sort(),
     );
     for (const preset of body.presets) {
       expect(preset.authorizeUrl.startsWith("https://")).toBe(true);

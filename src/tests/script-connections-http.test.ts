@@ -973,15 +973,16 @@ describe("/api/script-connections HTTP", () => {
       partial: boolean;
     };
     expect(body.partial).toBe(false);
-    expect(body.entries.slice(0, 5).map((entry) => entry.slug)).toEqual([
+    expect(body.entries.slice(0, 6).map((entry) => entry.slug)).toEqual([
       "github",
       "slack",
       "linear",
       "jira",
       "gmail",
+      "microsoft-graph",
     ]);
-    expect(body.entries.slice(0, 5).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
-    expect(body.entries.slice(5)).toEqual([
+    expect(body.entries.slice(0, 6).every((entry) => entry.feeds.includes("blessed"))).toBe(true);
+    expect(body.entries.slice(6)).toEqual([
       {
         id: "stripe",
         kind: "openapi",

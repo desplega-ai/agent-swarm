@@ -15,7 +15,11 @@ import {
   updateAgentProfile,
 } from "../be/db";
 import { codeLevelTriage } from "../heartbeat/heartbeat";
+import { createPoolStarvationDecisionTask } from "../tasks/worker-follow-up";
 import type { RoutingAffinity } from "../types";
+// Side-effect import: registers task lifecycle templates (incl.
+// task.pool.starved.decision), mirroring heartbeat-reroute-decision.test.ts.
+import "../tools/templates";
 
 const TEST_DB_PATH = "./test-pool-affinity.sqlite";
 
@@ -323,6 +327,89 @@ describe("Pool Affinity", () => {
       expect(child.routingAffinity?.capabilities).toEqual(["merge", "typescript"]);
       expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
+
+    test("a child of a task whose affinity is inherited provenance (not a declared requirement) can be direct-assigned to a worker lacking the parent's capabilities", async () => {
+      const originalWorker = await createAgent({
+        name: "provenance-original-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(originalWorker.id, {
+        role: "Implementation Engineer / Coder",
+        capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+      });
+      const differentWorker = await createAgent({
+        name: "provenance-different-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(differentWorker.id, { role: "researcher", capabilities: [] });
+
+      // Parent's routingAffinity is a snapshot of the ORIGINAL agent
+      // (sourceAgentId/role/capabilities) — provenance, not a caller-declared
+      // requirement. No `leadOnly`.
+      const parent = await createTaskExtended("Original session", {
+        agentId: originalWorker.id,
+        routingAffinity: affinity({
+          sourceAgentId: originalWorker.id,
+          role: "Implementation Engineer / Coder",
+          capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+        }),
+      });
+
+      // The child declares no routingAffinity of its own, so it falls back to
+      // inheriting the parent's — but a direct assignment to a DIFFERENT
+      // agent lacking that capability list must succeed: the inherited blob
+      // is provenance, not an authorization requirement (#1276's ratchet is
+      // for declared requirements and lead-only parents only).
+      const child = await createTaskExtended("Continue with someone else", {
+        parentTaskId: parent.id,
+        agentId: differentWorker.id,
+      });
+      expect(child.agentId).toBe(differentWorker.id);
+      expect(child.routingAffinity).toMatchObject({ sourceAgentId: originalWorker.id });
+    });
+
+    test("Superagent P1: a caller-declared (non-lead-only) capability requirement inherited by a continuation still gates direct assignment — it is not reclassified as provenance", async () => {
+      // Parent's routingAffinity is a CALLER-DECLARED requirement (the same
+      // shape `send-task`/`task-action` build from `requiredCapabilities`):
+      // no `sourceAgentId`, no `role` — unlike `buildRoutingAffinityFromAgent`
+      // provenance, which always stamps both. This is the exact shape the
+      // Superagent security review flagged as being silently reclassified as
+      // provenance and exempted from the direct-assignment/offer gate.
+      const parent = await createTaskExtended("Needs a rare capability", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["rare-capability"] }),
+      });
+
+      // Even an agent that DOES hold the required capability is ineligible
+      // here: a capability-only affinity (no `role`) is — by the documented
+      // "no fail-open" contract above (`isAgentEligibleForTask`) — only ever
+      // claimable by its own `sourceAgentId`, which a caller-declared
+      // requirement never has. The point of this test is that the gate stays
+      // ACTIVE on the continuation (throws), not that this specific agent is
+      // the reason it's rejected.
+      const capableWorker = await createAgent({
+        name: "capable-but-not-source-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(capableWorker.id, {
+        role: "coder",
+        capabilities: ["rare-capability"],
+      });
+
+      // The child declares no routingAffinity of its own, so it falls back to
+      // inheriting the parent's caller-declared requirement. Before the fix,
+      // `routingAffinityIsInheritedProvenance` was derived from `!leadOnly`
+      // alone, so this collapsed to "provenance" and the direct-assignment
+      // gate below was skipped entirely — silently dropping the requirement.
+      await expect(
+        createTaskExtended("Continue the rare-capability work", {
+          parentTaskId: parent.id,
+          agentId: capableWorker.id,
+        }),
+      ).rejects.toThrow("Task routing affinity does not authorize assignment or offer");
+    });
   });
 
   // ==========================================================================
@@ -518,6 +605,77 @@ describe("Pool Affinity", () => {
       expect(findings.autoAssigned[0]!.taskId).toBe(eligibleTask.id);
       expect(findings.autoAssigned[0]!.agentId).toBe(coder.id);
       expect((await getTaskById(eligibleTask.id))?.agentId).toBe(coder.id);
+    });
+  });
+
+  // ==========================================================================
+  // Pool-starvation escalation (createPoolStarvationDecisionTask) — the ONLY
+  // path a capability-only (no-role) affinity task can ever get an owner, per
+  // isAgentEligibleForTask's "no fail-open" contract. Pre-existing bug (not
+  // introduced by, and not fixed by, PR #1340): this function force-assigns a
+  // "reroute-decision" task to the Lead with no explicit routingAffinity, so
+  // it plain-fallback-inherited `original`'s own affinity — and the
+  // direct-assignment gate then evaluated that inherited affinity against the
+  // LEAD, who satisfies neither `sourceAgentId` nor `role` on a caller-declared
+  // capability requirement. The escalation is a deliberate system override,
+  // not a continuation of the original's requirements, so it must assert its
+  // own authorization instead.
+  // ==========================================================================
+
+  describe("createPoolStarvationDecisionTask", () => {
+    test("original task has a caller-declared capability-only affinity (no role/sourceAgentId) → escalation to Lead does not throw", async () => {
+      const lead = await createAgent({ name: "starvation-lead", isLead: true, status: "idle" });
+      // Exact shape send-task/task-action's requiredCapabilities build: no
+      // role, no sourceAgentId — zero registered agents (including the Lead)
+      // can ever satisfy this per isAgentEligibleForTask's "no fail-open" rule.
+      const original = await createTaskExtended("Needs a rare capability nobody online has", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["rare-capability"] }),
+      });
+      expect(isAgentEligibleForTask(lead, original)).toBe(false);
+
+      const result = await createPoolStarvationDecisionTask({ original });
+
+      expect(result.kind).toBe("created");
+      if (result.kind !== "created") throw new Error("expected created");
+      expect(result.task.agentId).toBe(lead.id);
+      expect(result.task.taskType).toBe("reroute-decision");
+      expect(result.task.parentTaskId).toBe(original.id);
+      expect(result.task.status).toBe("pending");
+    });
+
+    test("idempotent: a second call does not create a duplicate decision", async () => {
+      await createAgent({ name: "starvation-lead-dup", isLead: true, status: "idle" });
+      const original = await createTaskExtended("Duplicate-guard capability task", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["another-rare-capability"] }),
+      });
+
+      const first = await createPoolStarvationDecisionTask({ original });
+      expect(first.kind).toBe("created");
+
+      const second = await createPoolStarvationDecisionTask({ original });
+      expect(second.kind).toBe("skipped");
+      if (second.kind === "skipped") expect(second.reason).toBe("duplicate_exists");
+    });
+
+    test("end-to-end via the heartbeat sweep: a starved capability-only task is escalated, not left throwing", async () => {
+      const lead = await createAgent({ name: "starvation-lead-e2e", isLead: true, status: "idle" });
+      const starved = await createTaskExtended("Starved rare-capability task", {
+        routingAffinity: affinity({ leadOnly: false, capabilities: ["e2e-rare-capability"] }),
+      });
+      // Age past POOL_AFFINITY_ESCALATION_MIN (default 15 min) so
+      // getStaleUnassignedAffinityTasks picks it up as a candidate.
+      const old = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      await getDbClient().run("UPDATE agent_tasks SET createdAt = ? WHERE id = ?", [
+        old,
+        starved.id,
+      ]);
+
+      const findings = await codeLevelTriage();
+
+      expect(findings.escalatedReroutes.length).toBe(1);
+      expect(findings.escalatedReroutes[0]!.originalTaskId).toBe(starved.id);
+      const decisionId = findings.escalatedReroutes[0]!.decisionTaskId;
+      expect((await getTaskById(decisionId))!.agentId).toBe(lead.id);
     });
   });
 });

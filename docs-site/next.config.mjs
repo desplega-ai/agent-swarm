@@ -6,6 +6,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const withMDX = createMDX();
 
+const legacyIntegrationRedirects = [
+  ["linear-integration", "linear"],
+  ["slack-integration", "slack"],
+  ["github-integration", "github"],
+  ["gitlab-integration", "gitlab"],
+  ["agentmail-integration", "agentmail"],
+  ["sentry-integration", "sentry"],
+  ["jira-integration", "jira"],
+].flatMap(([oldSlug, newSlug]) =>
+  ["", ".md", ".mdx"].map((extension) => ({
+    source: `/docs/guides/${oldSlug}${extension}`,
+    destination: `/docs/integrations/${newSlug}${extension}`,
+    statusCode: 301,
+  })),
+);
+
 /** @type {import('next').NextConfig} */
 const config = {
   reactStrictMode: true,
@@ -14,6 +30,7 @@ const config = {
   },
   async redirects() {
     return [
+      ...legacyIntegrationRedirects,
       {
         source: "/docs/api-reference/workflowevents",
         destination: "/docs/api-reference/workflows",
