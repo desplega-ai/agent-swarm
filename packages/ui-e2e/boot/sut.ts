@@ -1,4 +1,6 @@
+import { Database } from "bun:sqlite";
 import { startSut, stopSut } from "../../../scripts/e2e/sut.ts";
+import { seed } from "./seed";
 
 function parseExtraEnv(args: string[]): Record<string, string> {
   const extraEnv: Record<string, string> = {};
@@ -21,10 +23,37 @@ function parseExtraEnv(args: string[]): Record<string, string> {
 }
 
 async function main(): Promise<void> {
-  const sut = await startSut(false, {}, parseExtraEnv(Bun.argv.slice(2)));
+  const keep = Boolean(process.env.E2E_KEEP);
+  const extraEnv = parseExtraEnv(Bun.argv.slice(2));
+  const sut = await startSut(keep, {}, { HEARTBEAT_DISABLE: "true", ...extraEnv });
+  const manifestPath = `${sut.dbPath}.seed.json`;
+  try {
+    const db = new Database(sut.dbPath);
+    // The API holds the same WAL file; wait for its write lock instead of failing on SQLITE_BUSY.
+    db.exec("PRAGMA busy_timeout = 5000");
+    let manifest: Awaited<ReturnType<typeof seed>>;
+    try {
+      manifest = await seed({ apiUrl: sut.baseUrl, apiKey: sut.apiKey, db });
+    } finally {
+      db.close();
+    }
+    await Bun.write(manifestPath, JSON.stringify(manifest));
+  } catch (error) {
+    await stopSut(sut, keep);
+    if (!keep)
+      await Bun.file(manifestPath)
+        .delete()
+        .catch(() => {});
+    throw error;
+  }
   let stopPromise: Promise<void> | undefined;
   const stopOnce = () => {
-    stopPromise ??= stopSut(sut, false);
+    stopPromise ??= stopSut(sut, keep).finally(async () => {
+      if (!keep)
+        await Bun.file(manifestPath)
+          .delete()
+          .catch(() => {});
+    });
     return stopPromise;
   };
   const stopForSignal = () => {
@@ -37,7 +66,7 @@ async function main(): Promise<void> {
   process.once("SIGINT", stopForSignal);
 
   process.stdout.write(
-    `${JSON.stringify({ apiUrl: sut.baseUrl, apiKey: sut.apiKey, dbPath: sut.dbPath })}\n`,
+    `${JSON.stringify({ apiUrl: sut.baseUrl, apiKey: sut.apiKey, dbPath: sut.dbPath, manifestPath })}\n`,
   );
 
   // The parent owns stdin. EOF is the teardown handshake when the worker exits.
