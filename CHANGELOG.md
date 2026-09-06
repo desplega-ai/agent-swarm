@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.140.0] - 2026-09-06
+
+### Added
+- **Self-hosted installs show a one-time admin feedback popup** (#1331) that posts straight from the browser to a configurable feedback endpoint, with no swarm-side route or storage.
+
 ### Changed
 - **Worker browser automation moves from `qa-use` to `agent-browser`** (#1352). The full worker image installs `agent-browser` 0.36.0 next to a direct `playwright` 1.58.0 pin and points it at the existing Playwright Chromium, so the image still ships one browser. The `qa-use` CLI and its baked skill are gone. A new seeded `agent-browser` skill covers the snapshot, act, screenshot loop, the agent-fs upload recipe, and the manual fallback on the slim image, and the seeded `qa` skill now defaults to it (pristine seeded copies update at the next boot; operator-edited copies are preserved as usual).
+- **Worker harness pins move to the current weekly releases** (#1359) for Claude Code, pi, Codex, and OpenCode, with matching package dependencies.
+
+### Fixed
+- **Agent start-up scripts stay readable after a container restart** (#1360), so workers that ship a setup script no longer crash-loop on `Permission denied` until they are recreated.
 
 ## [1.139.0] - 2026-09-05
 
