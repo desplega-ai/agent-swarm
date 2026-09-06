@@ -157,50 +157,48 @@ function formatDuration(durationMs: number): string {
   return `${(durationMs / 1_000).toFixed(1)} s`;
 }
 
+const ATTENTION = new Set(["failed", "timedOut", "interrupted", "flaky"]);
+const COUNT_ORDER = ["failed", "timedOut", "interrupted", "flaky", "passed", "skipped"] as const;
+
+// One project only, so the leading project segment carries no information in the table.
+function specLabel(specId: string): string {
+  return specId.replace(/^[^>]+ > /, "");
+}
+
+function tableRows(results: FinalResult[]): string[] {
+  return [
+    "| spec | status | duration | retries |",
+    "|---|---:|---:|---:|",
+    ...results.map(
+      ({ result, retries, displayStatus }) =>
+        `| ${escapeTable(specLabel(result.specId))} | ${displayStatus} | ${formatDuration(result.durationMs)} | ${retries} |`,
+    ),
+  ];
+}
+
 function renderComment(
   results: FinalResult[],
   images: ImageEntry[],
   options: Options,
-  passedLimit: number,
+  collapsedLimit: number,
 ): string {
-  const counts = {
-    passed: 0,
-    failed: 0,
-    flaky: 0,
-    skipped: 0,
-    timedOut: 0,
-    interrupted: 0,
-  };
+  const counts = new Map<string, number>();
   for (const result of results) {
-    if (result.displayStatus in counts) {
-      counts[result.displayStatus as keyof typeof counts] += 1;
-    }
+    counts.set(result.displayStatus, (counts.get(result.displayStatus) ?? 0) + 1);
   }
+  const headline = COUNT_ORDER.filter((status) => counts.get(status))
+    .map((status) => `${counts.get(status)} ${status}`)
+    .join(", ");
 
-  const nonPassed = results.filter((result) => result.displayStatus !== "passed");
-  const passed = results.filter((result) => result.displayStatus === "passed");
-  const visibleResults = [...nonPassed, ...passed.slice(0, passedLimit)];
-  const omittedPassed = passed.length - Math.min(passed.length, passedLimit);
-  const lines = [
-    "<!-- ui-e2e -->",
-    "## UI E2E",
-    "",
-    `passed: ${counts.passed} | failed: ${counts.failed} | flaky: ${counts.flaky} | skipped: ${counts.skipped} | timedOut: ${counts.timedOut} | interrupted: ${counts.interrupted}`,
-    "",
-    "| spec | status | duration | retries |",
-    "|---|---:|---:|---:|",
-    ...visibleResults.map(
-      ({ result, retries, displayStatus }) =>
-        `| ${escapeTable(result.specId)} | ${displayStatus} | ${formatDuration(result.durationMs)} | ${retries} |`,
-    ),
-  ];
+  // Only rows that need attention stay visible. Passed and skipped rows are collapsed.
+  const attention = results.filter((result) => ATTENTION.has(result.displayStatus));
+  const rest = results.filter((result) => !ATTENTION.has(result.displayStatus));
+  const lines = ["<!-- ui-e2e -->", "## UI E2E", "", `**${headline || "no results"}**`];
 
-  if (omittedPassed > 0) lines.push("", `${omittedPassed} passed rows omitted.`);
+  if (attention.length > 0) lines.push("", ...tableRows(attention));
 
-  for (const { result, displayStatus } of nonPassed) {
-    if (!result.error || !["failed", "timedOut", "interrupted"].includes(displayStatus)) {
-      continue;
-    }
+  for (const { result, displayStatus } of attention) {
+    if (!result.error || displayStatus === "flaky") continue;
     lines.push(
       "",
       "<details>",
@@ -209,6 +207,20 @@ function renderComment(
       `<pre>${escapeHtml(result.error.slice(0, 2_000))}</pre>`,
       "</details>",
     );
+  }
+
+  if (rest.length > 0) {
+    const visible = rest.slice(0, collapsedLimit);
+    const omitted = rest.length - visible.length;
+    lines.push(
+      "",
+      "<details>",
+      `<summary>${rest.length} passed or skipped</summary>`,
+      "",
+      ...tableRows(visible),
+    );
+    if (omitted > 0) lines.push("", `${omitted} rows omitted.`);
+    lines.push("</details>");
   }
 
   if (images.length > 0) {
@@ -220,21 +232,19 @@ function renderComment(
 
   lines.push(
     "",
-    `Run: [GitHub Actions](${options.runUrl})`,
-    `HTML report artifact: \`${escapeTable(options.reportArtifact)}\``,
+    `Run: [GitHub Actions](${options.runUrl}) | HTML report artifact: \`${escapeTable(options.reportArtifact)}\``,
     "",
   );
   return lines.join("\n");
 }
 
 function buildComment(results: FinalResult[], images: ImageEntry[], options: Options): string {
-  const passedCount = results.filter((result) => result.displayStatus === "passed").length;
-  let passedLimit = passedCount;
-  let body = renderComment(results, images, options, passedLimit);
-  if (body.length > MAX_COMMENT_LENGTH) body = renderComment(results, [], options, passedLimit);
-  while (body.length > MAX_COMMENT_LENGTH && passedLimit > 0) {
-    passedLimit -= 1;
-    body = renderComment(results, [], options, passedLimit);
+  let collapsedLimit = results.filter((result) => !ATTENTION.has(result.displayStatus)).length;
+  let body = renderComment(results, images, options, collapsedLimit);
+  if (body.length > MAX_COMMENT_LENGTH) body = renderComment(results, [], options, collapsedLimit);
+  while (body.length > MAX_COMMENT_LENGTH && collapsedLimit > 0) {
+    collapsedLimit -= 1;
+    body = renderComment(results, [], options, collapsedLimit);
   }
   if (body.length > MAX_COMMENT_LENGTH) {
     const suffix = "\n\n_Comment truncated to fit the GitHub limit._\n";
