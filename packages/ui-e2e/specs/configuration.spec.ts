@@ -6,7 +6,8 @@ interface ConfigRow {
   value: string;
 }
 
-test("configuration flips STEERING_ENABLED and persists it", async ({ page, api, clean }) => {
+test("configuration flips STEERING_ENABLED and persists it", async ({ page, api, clean, seed }) => {
+  test.skip(!seed, "remote run without seed");
   await page.goto("/settings/configuration");
 
   const steering = page.getByRole("switch", { name: "Enable steering" });

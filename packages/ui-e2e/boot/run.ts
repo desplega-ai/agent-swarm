@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { assertAllowedTarget, readTarget } from "./policy";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const repoRoot = resolve(packageRoot, "../..");
@@ -25,6 +26,16 @@ async function run(command: string[], cwd: string, env = process.env): Promise<n
 }
 
 async function main(): Promise<void> {
+  const target = readTarget(process.env);
+  if (target.mode === "remote") {
+    assertAllowedTarget(target.apiUrl);
+    console.log(
+      `[ui-e2e] target: remote api=${new URL(target.apiUrl).host} ui=${target.uiUrl ?? "static build"} seed=${target.seed}`,
+    );
+  } else {
+    console.log("[ui-e2e] target: local");
+  }
+
   let noBuild = false;
   const passthrough: string[] = [];
   for (const argument of Bun.argv.slice(2)) {

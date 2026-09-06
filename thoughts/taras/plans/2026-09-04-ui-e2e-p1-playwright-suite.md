@@ -370,17 +370,17 @@ The same suite runs against an already-running API selected by env, with seeding
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Local mode unchanged: `bun run e2e:ui`
-- [ ] Remote against a second local API: in one shell `PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts`; in another `E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey E2E_REMOTE_SEED=1 bun run e2e:ui` is green.
-- [ ] Remote without seed: `E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey bun run e2e:ui` passes with the flow specs and id routes reported as skipped.
-- [ ] Prod refused: `E2E_API_URL=https://api.desplega.agent-swarm.dev E2E_API_KEY=x bun run e2e:ui; test $? -ne 0`
-- [ ] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
+- [x] Local mode unchanged: `bun run e2e:ui`
+- [x] Remote against a second local API: in one shell `PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts`; in another `E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey E2E_REMOTE_SEED=1 bun run e2e:ui` is green.
+- [x] Remote without seed: `E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey bun run e2e:ui` passes with the flow specs and id routes reported as skipped.
+- [x] Prod refused: `E2E_API_URL=https://api.desplega.agent-swarm.dev E2E_API_KEY=x bun run e2e:ui; test $? -ne 0`
+- [x] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
 
 #### Automated QA:
-- [ ] Run the remote seeded command twice; the second run creates no duplicate `e2e-*` agents or tasks (`curl -s -H "Authorization: Bearer remotekey" http://127.0.0.1:3999/api/agents | jq '[.agents[] | select(.name | startswith("e2e-"))] | length'` is 3).
+- [x] Run the remote seeded command twice; the second run creates no duplicate `e2e-*` agents or tasks (`curl -s -H "Authorization: Bearer remotekey" http://127.0.0.1:3999/api/agents | jq '[.agents[] | select(.name | startswith("e2e-"))] | length'` is 3).
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 4] remote target mode`.
 

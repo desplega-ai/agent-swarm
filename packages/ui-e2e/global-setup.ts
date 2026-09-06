@@ -1,6 +1,10 @@
-import { readFile, stat } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFile, stat, unlink } from "node:fs/promises";
 import { createServer } from "node:http";
-import { extname, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { extname, join, resolve, sep } from "node:path";
+import { assertAllowedTarget, readTarget } from "./boot/policy";
 
 const contentTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -14,8 +18,37 @@ const contentTypes: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-export default async function globalSetup(): Promise<(() => Promise<void>) | undefined> {
-  if (process.env.E2E_UI_URL) return;
+export default async function globalSetup(): Promise<() => Promise<void>> {
+  const cleanups: (() => Promise<void>)[] = [];
+  const teardown = async () => {
+    for (const cleanup of cleanups.reverse()) await cleanup();
+  };
+  const target = readTarget(process.env);
+  if (target.mode === "remote") {
+    assertAllowedTarget(target.apiUrl);
+    // Read by the clean fixture: a prestarted remote API cannot list the random
+    // static UI origin in its CSP frame-ancestors.
+    if (!target.uiUrl) process.env.E2E_REMOTE_STATIC_UI = "1";
+    if (target.seed) {
+      const manifestPath = join(tmpdir(), `agent-swarm-ui-e2e-${randomUUID()}.json`);
+      const result = spawnSync(
+        "bun",
+        ["boot/seed-cli.ts", target.apiUrl, target.apiKey, manifestPath],
+        {
+          cwd: resolve(import.meta.dirname),
+          stdio: "inherit",
+        },
+      );
+      if (result.error) throw result.error;
+      if (result.status !== 0) {
+        throw new Error(`Remote seed failed with exit code ${result.status ?? "unknown"}`);
+      }
+      process.env.E2E_REMOTE_MANIFEST = manifestPath;
+      cleanups.push(() => unlink(manifestPath).catch(() => undefined));
+    }
+  }
+
+  if (process.env.E2E_UI_URL) return teardown;
 
   const distDir = resolve(import.meta.dirname, "../../apps/ui/dist");
   const indexPath = resolve(distDir, "index.html");
@@ -62,9 +95,11 @@ export default async function globalSetup(): Promise<(() => Promise<void>) | und
   }
   process.env.E2E_UI_URL = `http://127.0.0.1:${address.port}`;
 
-  return async () => {
-    await new Promise<void>((resolveClose, reject) => {
-      server.close((error) => (error ? reject(error) : resolveClose()));
-    });
-  };
+  cleanups.push(
+    () =>
+      new Promise<void>((resolveClose, reject) => {
+        server.close((error) => (error ? reject(error) : resolveClose()));
+      }),
+  );
+  return teardown;
 }
