@@ -147,6 +147,22 @@ function validateFloatRange(
 }
 
 const VALIDATED_KEYS: Record<string, ConfigValidator> = {
+  FEEDBACK_ENDPOINT: (value) => {
+    if (typeof value !== "string") {
+      return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
+    }
+
+    try {
+      const endpoint = new URL(value.trim());
+      const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+      if (endpoint.protocol === "https:") return null;
+      if (endpoint.protocol === "http:" && loopbackHosts.has(endpoint.hostname)) return null;
+    } catch {
+      // Fall through to the shared validation error.
+    }
+
+    return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;

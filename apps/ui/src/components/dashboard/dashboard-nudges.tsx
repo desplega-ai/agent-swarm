@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/contexts/current-user-context";
 import { useDismissibleCard } from "@/hooks/use-dismissible-card";
+import { isAdminLike } from "@/lib/user-role";
 import { cn } from "@/lib/utils";
 
 const CURRENT_VERSION = __APP_VERSION__;
@@ -20,7 +21,7 @@ export function DashboardNudges() {
   const upgradeCard = useDismissibleCard(`dashboard-upgrade:${CURRENT_VERSION}`);
   const orgNameCard = useDismissibleCard("dashboard-org-name");
 
-  if (user?.role !== "admin") return null;
+  if (!isAdminLike(user)) return null;
 
   const orgName = configs?.find((config) => config.key === ORG_NAME_KEY)?.value.trim();
   const showUpgrade =
