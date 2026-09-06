@@ -471,15 +471,15 @@ Rebase the branch onto `main` first. The frontend convention wording in `CLAUDE.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Rebased and clean: `git fetch origin && git rebase origin/main && bun install --frozen-lockfile`
-- [ ] Docs link check for the new section anchor: `grep -n "## UI E2E (bun run e2e:ui)" LOCAL_TESTING.md && grep -n "e2e:ui" CLAUDE.md runbooks/ci.md runbooks/testing.md apps/ui/CLAUDE.md`
-- [ ] Full local gate after rebase: `bun run lint && bun run tsc:check && bun run e2e:ui:tsc && bun run e2e && bun run e2e:ui`
+- [x] Rebased and clean: `git fetch origin && git rebase origin/main && bun install --frozen-lockfile`
+- [x] Docs link check for the new section anchor: `grep -n "## UI E2E (bun run e2e:ui)" LOCAL_TESTING.md && grep -n "e2e:ui" CLAUDE.md runbooks/ci.md runbooks/testing.md apps/ui/CLAUDE.md`
+- [x] Full local gate after rebase: `bun run lint && bun run tsc:check && bun run e2e:ui:tsc && bun run e2e && bun run e2e:ui`
 
 #### Automated QA:
-- [ ] Follow the new `LOCAL_TESTING.md` section literally in a clean shell and confirm every command runs as written.
+- [x] Follow the new `LOCAL_TESTING.md` section literally in a clean shell and confirm every command runs as written. (autopilot: ran the build, `--no-build`, `--grep @smoke`, the single-route grep, `E2E_DEBUG=1`, `E2E_KEEP=1`, and the remote-mode block; `--headed` and `--ui` need a display and were not run)
 
 #### Manual Verification:
-- [ ] Read the diff of the four docs once for tone and for the STE rules (short sentences, no em dashes).
+- [x] Read the diff of the four docs once for tone and for the STE rules (short sentences, no em dashes). (autopilot: Claude wrote and re-read the docs diff; no em dashes, short sentences)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 6] ui-e2e docs`.
 
@@ -522,6 +522,8 @@ gh pr view --json comments --jq '.comments[] | select(.body | startswith("<!-- u
   - `/chat` is not in the sidebar and calls `/api/channels`, which no API route serves. Listed in `routes.ts` with a `skip` reason.
   - The page detail preview needs the UI origin on the API's CSP `frame-ancestors`; the worker fixture passes `--sut-env APP_URL=<E2E_UI_URL>`.
   - A fresh dashboard blocks on the identity dialog until `localStorage["swarm:v1:<apiUrl>:current-user"]` names an existing user; the seed creates `e2e-user` and the storageState sets the key.
+  - After the Phase 6 rebase, main's self-hosted admin feedback dialog (#1331) opened on every page because the seed has a failed task, and it aria-hides the app. The storageState now also writes a freshly dismissed `swarm:feedback-popup:v1:<apiUrl>:<userId>` state (30-day cooldown).
+  - `bun test` at the root globbed `packages/ui-e2e/specs/*.spec.ts` and `@playwright/test` threw on the Jest-like runner; `bunfig.toml` `pathIgnorePatterns` now excludes the package.
 - **References**:
   - Brainstorm: `thoughts/taras/brainstorms/2026-09-04-ui-e2e-swarm-driven-testing.md`
   - Prod swarm task `065bfdb9-fdf7-4a24-8acd-90f0cccb0f4d`, PR #1349 (tracker, changes requested)
