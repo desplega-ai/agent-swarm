@@ -43,6 +43,6 @@ A first run of the same task on the same worker (`7220a961-4d16-4c46-ae65-41a8fc
 
 | | before (main) | after (branch) |
 |---|---|---|
-| `agent-swarm-worker` full | 4,302,660,082 B (4.30 GB) | 4,300,367,177 B (4.30 GB) after the review-driven single-arch prune; 4,312,828,585 B on the build the E2E ran against |
+| `agent-swarm-worker` full | 4,302,660,082 B (4.30 GB) | 4,302,038,816 B (4.30 GB) with agent-browser 0.36.0 and the single-arch prune; 4,312,828,585 B on the 0.31.1 build the E2E ran against |
 
-Inside the after image: `/usr/local/bin/agent-browser` (0.31.1), no `qa-use`, `/opt/playwright/chromium -> /opt/playwright/chromium-1208/chrome-linux/chrome`, `AGENT_BROWSER_EXECUTABLE_PATH` and `AGENT_BROWSER_ARGS` set, `node_modules/agent-browser` 11 MB (only the `TARGETARCH` Linux binary kept; the E2E build still carried both Linux binaries, 23 MB), no `~/.claude/skills/qa-use`, runtime smoke as `worker` produces a PNG.
+Inside the after image: `/usr/local/bin/agent-browser` (0.36.0 after the bump; the E2E ran on 0.31.1), no `qa-use`, `/opt/playwright/chromium -> /opt/playwright/chromium-1208/chrome-linux/chrome`, `AGENT_BROWSER_EXECUTABLE_PATH` and `AGENT_BROWSER_ARGS` set, `node_modules/agent-browser` 11 MB (only the `TARGETARCH` Linux binary kept; the E2E build still carried both Linux binaries, 23 MB), no `~/.claude/skills/qa-use`, runtime smoke as `worker` produces a PNG.
