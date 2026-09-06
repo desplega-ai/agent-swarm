@@ -65,7 +65,7 @@ The single source of truth the UI leans on for "what does this swarm look like, 
       "action_url": "/integrations",
       "provider": "claude"
     },
-    // … 6 more milestones
+    // … 7 more milestones
   ],
   "activity": {
     "agents_online": 3,
@@ -83,11 +83,12 @@ The full schema (Zod-validated) is in `src/http/status.ts`. See the auto-generat
 
 ### Setup milestones
 
-Seven milestones in fixed order. Each carries a `state`: `unverified` (not even configured), `configured` (env present but never live-tested), or `verified` (live-tested OR DB-backed proof).
+Eight milestones in fixed order. Each carries a `state`: `unverified` (not even configured), `configured` (env present but never live-tested), or `verified` (live-tested OR DB-backed proof).
 
 | Milestone | `configured` rule | `verified` rule |
 |---|---|---|
 | `harness` | `HARNESS_PROVIDER` set + matching cred env present | A successful `POST /status/test-connection` within `SWARM_VERIFY_TTL_MS` |
+| `embeddings` | `OPENAI_API_KEY` or `EMBEDDING_API_KEY` set | (No live verification; this optional milestone never degrades system health) |
 | `slack` | `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN` + `!SLACK_DISABLE` | Same (Socket Mode connection state not exposed today) |
 | `github` | `GITHUB_WEBHOOK_SECRET` + `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` | Same (App installations validated JIT) |
 | `linear` | Row in `oauth_tokens(provider='linear')` | Same. Hint mentions the keepalive caveat — refresh-failure tracking is a future migration; check `#swarm-alerts` for keepalive errors. |

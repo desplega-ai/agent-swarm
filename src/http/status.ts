@@ -38,6 +38,7 @@ export type SetupMilestoneState = z.infer<typeof SetupMilestoneStateSchema>;
 
 export const SetupMilestoneIdSchema = z.enum([
   "harness",
+  "embeddings",
   "slack",
   "github",
   "linear",
@@ -350,6 +351,26 @@ async function harnessMilestone(): Promise<SetupMilestone> {
   };
 }
 
+function embeddingsMilestone(): SetupMilestone {
+  // Keep this precedence identical to OpenAIEmbeddingProvider: an explicitly
+  // empty EMBEDDING_API_KEY disables the OPENAI_API_KEY fallback.
+  const embeddingKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
+  if (embeddingKey) {
+    return {
+      id: "embeddings",
+      label: "Memory search",
+      state: "configured",
+    };
+  }
+
+  return {
+    id: "embeddings",
+    label: "Memory search",
+    state: "unverified",
+    hint: "Memory search is off. Set OPENAI_API_KEY (or EMBEDDING_API_KEY) on the API server to enable it; it is cheap.",
+  };
+}
+
 function slackMilestone(): SetupMilestone {
   const bot = process.env.SLACK_BOT_TOKEN;
   const app = process.env.SLACK_APP_TOKEN;
@@ -517,6 +538,7 @@ async function firstTaskMilestone(): Promise<SetupMilestone> {
 async function buildSetup(): Promise<SetupMilestone[]> {
   return [
     await harnessMilestone(),
+    embeddingsMilestone(),
     slackMilestone(),
     githubMilestone(),
     await linearMilestone(),
@@ -610,7 +632,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 8 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

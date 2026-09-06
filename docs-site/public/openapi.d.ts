@@ -14776,7 +14776,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 7 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 8 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
          */
         get: {
             parameters: {
@@ -14805,7 +14805,7 @@ export interface paths {
                             };
                             setup: {
                                 /** @enum {string} */
-                                id: "harness" | "slack" | "github" | "linear" | "jira" | "workers" | "first_task";
+                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "workers" | "first_task";
                                 label: string;
                                 /** @enum {string} */
                                 state: "unverified" | "configured" | "verified";

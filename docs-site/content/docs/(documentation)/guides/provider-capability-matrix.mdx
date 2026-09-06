@@ -1,0 +1,25 @@
+---
+title: Provider Capability Matrix
+description: What each install-time LLM provider supports, and which optional keys unlock missing features
+---
+
+The provider you choose during onboarding selects the worker harness and its model credentials. Some server-side features use a separate internal LLM or embedding credential, so a worker can run successfully while those features remain off. Without an embedding key, keyword-based full-text memory search still works, but semantic and hybrid ranking do not.
+
+| Install choice | Memory search | Session summaries + memory rating | Workflow LLM nodes (`raw-llm` / `validate`) | Task steering | Session-end profile sync | Skills directory | MCP wiring | Structured output | Reasoning effort | Spend tracking | Rate-limit handling | Model-tier mapping |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Claude Code | Semantic/hybrid search with `OPENAI_API_KEY` or `EMBEDDING_API_KEY` | Yes; LLM rating when enabled | Needs `OPENAI_API_KEY` or `OPENROUTER_API_KEY`; Claude-only credentials are not supported | Queue at turn boundaries | Yes | Native, `~/.claude/skills` | Yes | Yes | Model-dependent | Yes | Structured reset times | Yes |
+| OpenAI / Codex | Semantic/hybrid search with `OPENAI_API_KEY` or `EMBEDDING_API_KEY` | Yes; LLM rating when enabled | Yes with `OPENAI_API_KEY` | Queue via managed Codex hooks | Yes | Inline resolver, `~/.codex/skills` | Yes | Yes | Model-dependent; Codex also supports `max` on capable models | Yes | Structured API limits and credits cooldown | Yes |
+| OpenRouter via pi | Semantic/hybrid search with `OPENAI_API_KEY` or `EMBEDDING_API_KEY` | Yes; LLM rating when enabled | Yes | Live `steer` and queued follow-up | Yes | Native, `~/.pi/agent/skills` | Yes | Yes | Model-dependent | Yes | Flat five-minute cooldown | Yes |
+| AWS Bedrock via pi **(alpha)** | Semantic/hybrid search with `OPENAI_API_KEY` or `EMBEDDING_API_KEY` | No with Bedrock credentials alone | No with Bedrock credentials alone | Live `steer` and queued follow-up | Yes | Native, `~/.pi/agent/skills` | Yes | Yes | Model-dependent via pi | No; Bedrock models are unpriced | pi retries; AWS throttles get actionable retry guidance, but no runner credential cooldown | No built-in mapping; pi defaults point to OpenRouter models |
+
+## How to unlock missing features
+
+- **Semantic memory search, every provider:** set `OPENAI_API_KEY` or the dedicated `EMBEDDING_API_KEY` on the API server.
+- **Workflow LLM nodes with Claude-only or Bedrock-only credentials:** set `OPENAI_API_KEY` or `OPENROUTER_API_KEY` on the API server.
+- **Bedrock session summaries and memory rating:** set `OPENAI_API_KEY` or `OPENROUTER_API_KEY` for the internal AI credential chain. Native Bedrock support is not available yet.
+- **Bedrock model tiers:** set `MODEL_TIER_SMOL`, `MODEL_TIER_REGULAR`, `MODEL_TIER_SMART`, and `MODEL_TIER_ULTRA`, or provide the same mappings through `MODEL_TIER_MAP`, using reachable `amazon-bedrock/...` model IDs.
+- **Bedrock spend tracking and runner credential cooldowns:** no environment variable unlocks these today; they remain alpha limitations.
+
+Alpha: session summaries, memory rating, spend tracking and model tiers may be missing on Bedrock.
+
+For provider credentials and model selection, see [Harness Configuration](/docs/guides/harness-configuration). For implementation details behind this matrix, see [Adding a Harness Provider](/docs/guides/harness-providers).

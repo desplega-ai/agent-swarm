@@ -96,10 +96,10 @@ jobs:
 
       # The artifact is readable by anyone with read access to this public repository, so the
       # copies are redacted: the provider credential this leg holds, plus common token shapes.
+      # The container job runs `sh -e`, not bash: keep this POSIX (no pipefail).
       - name: Collect redacted logs
         if: always()
         run: |
-          set -euo pipefail
           mkdir -p out/logs
           ls /tmp/e2e-*.log >/dev/null 2>&1 || exit 0
           bun scripts/e2e/redact.ts --out out/logs /tmp/e2e-*.log

@@ -2288,6 +2288,7 @@ export type SetupMilestoneState = "unverified" | "configured" | "verified";
 
 export type MilestoneId =
   | "harness"
+  | "embeddings"
   | "slack"
   | "github"
   | "linear"

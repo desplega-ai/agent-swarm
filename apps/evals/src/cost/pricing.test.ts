@@ -2,17 +2,37 @@ import { describe, expect, test } from "bun:test";
 import type { TokenTotals } from "../types.ts";
 import { listOpenrouterModels, lookupModelCost, type PricedModel, priceUsage } from "./pricing.ts";
 
+interface SnapshotModel {
+  cost?: { input?: number; output?: number };
+}
+
+interface ModelsDevSnapshot {
+  openrouter: { models: Record<string, SnapshotModel> };
+}
+
+const snapshot = Bun.file(
+  new URL("../../../../src/be/modelsdev-cache.json", import.meta.url),
+).json() as Promise<ModelsDevSnapshot>;
+
+async function openrouterSnapshotModel(id: string): Promise<SnapshotModel> {
+  const model = (await snapshot).openrouter.models[id];
+  if (!model) throw new Error(`Missing ${id} from the committed openrouter snapshot`);
+  return model;
+}
+
 describe("lookupModelCost", () => {
   test("pi: openrouter-prefixed id resolves in the openrouter section", async () => {
     const m = await lookupModelCost("pi", "openrouter/deepseek/deepseek-v4-flash");
     expect(m).not.toBeNull();
     expect(m?.id).toBe("deepseek/deepseek-v4-flash");
-    expect(m?.inputPerM).toBe(0.0882);
+    const snapshotModel = await openrouterSnapshotModel("deepseek/deepseek-v4-flash");
+    expect(m?.inputPerM).toBe(snapshotModel.cost?.input);
   });
 
   test("opencode: bare openrouter id resolves directly", async () => {
     const m = await lookupModelCost("opencode", "deepseek/deepseek-v4-flash");
-    expect(m?.inputPerM).toBe(0.0882);
+    const snapshotModel = await openrouterSnapshotModel("deepseek/deepseek-v4-flash");
+    expect(m?.inputPerM).toBe(snapshotModel.cost?.input);
   });
 
   test("claude: date-suffixed id resolves via date-strip", async () => {
@@ -26,7 +46,7 @@ describe("lookupModelCost", () => {
     const haiku = await lookupModelCost("claude", "haiku");
     expect(haiku?.id).toBe("claude-haiku-4-5");
     const fable = await lookupModelCost("claude", "fable");
-    expect(fable?.id).toBe("claude-fable-5");
+    expect(fable?.id).toBe("claude-fable-5-1");
   });
 
   test("unknown shortnames still return null", async () => {
@@ -87,8 +107,9 @@ describe("listOpenrouterModels", () => {
     const models = await listOpenrouterModels();
     expect(models.length).toBeGreaterThan(100);
     const pro = models.find((m) => m.id === "deepseek/deepseek-v4-pro");
-    expect(pro?.inputPerM).toBe(0.435);
-    expect(pro?.outputPerM).toBe(0.87);
+    const snapshotModel = await openrouterSnapshotModel("deepseek/deepseek-v4-pro");
+    expect(pro?.inputPerM).toBe(snapshotModel.cost?.input);
+    expect(pro?.outputPerM).toBe(snapshotModel.cost?.output);
     const names = models.map((m) => m.name);
     expect([...names].sort((a, b) => a.localeCompare(b))).toEqual(names);
   });
