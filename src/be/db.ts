@@ -1520,6 +1520,44 @@ export async function createTask(
   return rowToAgentTask(row);
 }
 
+/**
+ * In-process dedup for `task_dispatch_rejected_affinity` logging in
+ * `getPendingTaskForAgent` below — that function runs on every poll tick for
+ * every agent with a directly-assigned pending task, so an unresolved skip
+ * (e.g. a corrupt/misassigned legacy row) would otherwise write one log row
+ * per poll forever. Keyed by taskId; per-process, like `alarmActive` in
+ * `queue-stall-alarm.ts` — an API restart re-arms it, which is fine since the
+ * point is "don't spam," not "log exactly once ever."
+ */
+const AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+const lastAffinityDispatchSkipLoggedAt = new Map<string, number>();
+
+async function logAffinityDispatchSkip(
+  agent: Pick<Agent, "id" | "isLead" | "role">,
+  task: Pick<AgentTask, "id" | "routingAffinity" | "routingAffinityInvalid">,
+): Promise<void> {
+  const now = Date.now();
+  const lastLoggedAt = lastAffinityDispatchSkipLoggedAt.get(task.id);
+  if (lastLoggedAt !== undefined && now - lastLoggedAt < AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS) {
+    return;
+  }
+  lastAffinityDispatchSkipLoggedAt.set(task.id, now);
+  try {
+    await createLogEntry({
+      eventType: "task_dispatch_rejected_affinity",
+      agentId: agent.id,
+      taskId: task.id,
+      metadata: {
+        agentRole: agent.role ?? null,
+        requiredRole: task.routingAffinity?.role ?? null,
+        leadOnly: task.routingAffinity?.leadOnly === true,
+        agentIsLead: agent.isLead ?? false,
+        routingAffinityInvalid: task.routingAffinityInvalid === true,
+      },
+    });
+  } catch {}
+}
+
 export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -1530,11 +1568,34 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
   const agent = await getAgentById(agentId);
   if (!agent) return null;
 
-  // A persisted legacy task may already be pending on an unauthorized agent.
-  // Do not dispatch it merely because it bypassed creation-time checks.
   for (const row of rows) {
     const task = rowToAgentTask(row);
-    if (!isAgentEligibleForTask(agent, task)) continue;
+    // `task.agentId` (the WHERE clause above) is a direct-assignment decision
+    // already made by the task's creator — `createTaskExtended` enforces a
+    // caller-declared requirement at creation time (see
+    // `routingAffinityIsInheritedProvenance` there). Re-running the FULL
+    // role/capability match here re-litigates that decision using metadata
+    // that may be pure inherited PROVENANCE (e.g. a Lead-routed
+    // worker-completion follow-up that inherits the finishing worker's
+    // role/capabilities as lineage, not a requirement anyone declared) —
+    // which permanently stalls dispatch to the agent the task is already
+    // pinned to (the #1276-regression this fixes; see PR body). Mirror the
+    // convention `acceptTask`/`claimOfferedTask` already use for an
+    // established offer: only `leadOnly` (a real authorization boundary) and
+    // `routingAffinityInvalid` (quarantined corrupt data) still veto a
+    // directly-assigned task. Pool-claim paths (`claimTask`,
+    // `assignUnassignedTaskPending`) are untouched and keep the full gate —
+    // they are deciding "who gets this" from the pool, not redispatching an
+    // assignment that was already authorized (or, for provenance, never a
+    // requirement) at creation time.
+    if (task.routingAffinityInvalid) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
+    }
+    if (task.routingAffinity?.leadOnly && !isAgentEligibleForTask(agent, task)) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
+    }
     const { ready } = await checkDependencies(task.id);
     if (ready) return task;
   }

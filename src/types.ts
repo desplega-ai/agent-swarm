@@ -1319,6 +1319,7 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_rejected",
   "task_claimed",
   "task_claim_rejected_affinity",
+  "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
   "task_released",
