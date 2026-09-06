@@ -1,6 +1,6 @@
 /**
  * Codex API-addressable models, verified from https://developers.openai.com/api/docs/models
- * and https://developers.openai.com/api/docs/deprecations as of 2026-07-10.
+ * and https://developers.openai.com/api/docs/deprecations as of 2026-09-05.
  *
  * NOTE: `gpt-5.3-codex-spark` is intentionally excluded. It is a ChatGPT Pro
  * research preview and is NOT API-addressable via the Codex SDK at launch.
@@ -19,6 +19,7 @@ import modelsDevCache from "../be/modelsdev-cache.json";
  * SDK, so new OpenAI models work without a code change.
  */
 export const CODEX_MODELS = [
+  "gpt-6-astra", // most capable model for complex reasoning, coding, and agentic work
   "gpt-5.6-sol", // frontier GPT-5.6 tier for complex reasoning/coding
   "gpt-5.6-terra", // balanced GPT-5.6 tier
   "gpt-5.6-luna", // fast/cheap GPT-5.6 tier for high-volume workloads
@@ -81,6 +82,7 @@ const MODELSDEV_OPENAI_MODELS =
   ).openai?.models ?? {};
 
 const FALLBACK_CODEX_MODEL_CONTEXT_WINDOWS: Record<CodexModel, number> = {
+  "gpt-6-astra": 1_050_000,
   "gpt-5.6-sol": 1_050_000,
   "gpt-5.6-terra": 1_050_000,
   "gpt-5.6-luna": 1_050_000,
@@ -146,10 +148,15 @@ export interface CodexModelPricing {
  * table unreachable when both agree.
  */
 export const FALLBACK_CODEX_MODEL_PRICING: Record<CodexModel, CodexModelPricing> = {
+  "gpt-6-astra": {
+    inputPerMillion: 10.0,
+    cachedInputPerMillion: 1.0,
+    outputPerMillion: 50.0,
+  },
   "gpt-5.6-sol": {
-    inputPerMillion: 5.0,
-    cachedInputPerMillion: 0.5,
-    outputPerMillion: 30.0,
+    inputPerMillion: 4.0,
+    cachedInputPerMillion: 0.4,
+    outputPerMillion: 20.0,
   },
   "gpt-5.6-terra": {
     inputPerMillion: 2.0,

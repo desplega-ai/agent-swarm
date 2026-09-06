@@ -44,6 +44,7 @@ export type SetupMilestoneState = z.infer<typeof SetupMilestoneStateSchema>;
 
 export const SetupMilestoneIdSchema = z.enum([
   "harness",
+  "embeddings",
   "slack",
   "github",
   "linear",
@@ -383,6 +384,26 @@ async function harnessMilestone(): Promise<SetupMilestone> {
   };
 }
 
+function embeddingsMilestone(): SetupMilestone {
+  // Keep this precedence identical to OpenAIEmbeddingProvider: an explicitly
+  // empty EMBEDDING_API_KEY disables the OPENAI_API_KEY fallback.
+  const embeddingKey = process.env.EMBEDDING_API_KEY ?? process.env.OPENAI_API_KEY;
+  if (embeddingKey) {
+    return {
+      id: "embeddings",
+      label: "Memory search",
+      state: "configured",
+    };
+  }
+
+  return {
+    id: "embeddings",
+    label: "Memory search",
+    state: "unverified",
+    hint: "Memory search is off. Set OPENAI_API_KEY (or EMBEDDING_API_KEY) on the API server to enable it; it is cheap.",
+  };
+}
+
 function slackMilestone(state: AutomationSetupStates["slack"]): SetupMilestone {
   const disable = process.env.SLACK_DISABLE;
   const disabled = disable === "true" || disable === "1";
@@ -564,6 +585,7 @@ export async function buildSetup(
   automationSetup ??= await getAutomationSetupStates();
   return [
     await harnessMilestone(),
+    embeddingsMilestone(),
     slackMilestone(automationSetup.slack),
     githubMilestone(automationSetup.github),
     linearMilestone(automationSetup.linear),
@@ -668,7 +690,7 @@ const getStatus = route({
   pattern: ["status"],
   summary: "Identity + setup readiness + live activity for the swarm dashboard",
   description:
-    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h.",
+    "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
   tags: ["Status"],
   responses: {
     200: { description: "Status payload", schema: StatusResponseSchema },

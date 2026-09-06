@@ -560,6 +560,8 @@ describe("script connections", () => {
       // this migration-112-only fixture creates.
       markMigrationApplied(database, "141_scheduled_task_automation_preflight.sql");
       markMigrationApplied(database, "142_workflow_automation_preflight.sql");
+      // 143 backfills pricing, which this migration-112-only fixture does not create.
+      markMigrationApplied(database, "143_backfill_gpt_6_astra_pricing.sql");
 
       const id = crypto.randomUUID();
       const now = new Date().toISOString();

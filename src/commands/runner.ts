@@ -752,12 +752,31 @@ export async function fetchResolvedEnv(
   return { env, credentialSelections, resolvedProvider, scriptsOnlyConfigValue };
 }
 
-async function ensureAgentFsCredentials(
+/**
+ * Ask the API to provision this agent's agent-fs credentials.
+ *
+ * Returns true when the API reached a verdict: the agent-scoped
+ * `AGENT_FS_API_KEY` row (plus the global `AGENT_FS_DEFAULT_*` rows) now
+ * exist, or agent-fs is not configured for this deployment
+ * (`enabled: false`). Both outcomes are terminal, so a retry cannot help.
+ *
+ * Returns false when the attempt reached no verdict (HTTP error, network
+ * failure, or no agent identity yet). The common case is a brand-new
+ * `AGENT_ID` against a fresh API database: this call runs before
+ * `registerAgent` (the boot `fetchResolvedEnv` right after it resolves the
+ * provider that registration needs), so the agent row does not exist yet and
+ * the route answers `500 Agent not found`. Nothing gets written, and every
+ * later `agent-fs` call in that container fails with "Not logged in".
+ * {@link provisionAgentFsAfterRegistration} retries once after registration.
+ *
+ * Never throws: provisioning is best-effort and must not wedge boot.
+ */
+export async function ensureAgentFsCredentials(
   apiUrl: string,
   apiKey: string,
   agentId: string,
-): Promise<void> {
-  if (!apiUrl || !apiKey || !agentId || agentId === "unknown") return;
+): Promise<boolean> {
+  if (!apiUrl || !apiKey || !agentId || agentId === "unknown") return false;
 
   try {
     const response = await fetch(`${apiUrl}/api/fs/agent-credentials`, {
@@ -777,7 +796,7 @@ async function ensureAgentFsCredentials(
           `[agent-fs] credential provisioning skipped: HTTP ${response.status}${text ? ` ${text}` : ""}`,
         ),
       );
-      return;
+      return false;
     }
     const result = (await response.json().catch(() => ({}))) as {
       enabled?: boolean;
@@ -788,9 +807,54 @@ async function ensureAgentFsCredentials(
         `[agent-fs] ${result.created ? "created" : "confirmed"} agent-scoped credentials`,
       );
     }
+    return true;
   } catch (error) {
     console.warn(scrubSecrets(`[agent-fs] credential provisioning skipped: ${error}`));
+    return false;
   }
+}
+
+/**
+ * Second and final agent-fs provisioning attempt, run right after the boot
+ * registration succeeds.
+ *
+ * `alreadyProvisioned` carries the result of the pre-registration attempt.
+ * When it is true this is a no-op. When it is false the agent row exists by
+ * now, so the same request that failed with `500 Agent not found` can
+ * succeed. One retry, no polling loop: registration is the only precondition
+ * the first attempt was missing.
+ *
+ * On success the resolved env is fetched again and re-applied, because the
+ * boot snapshot was taken before provisioning wrote its rows. Only the
+ * live-apply allowlist (`RELOADABLE_ENV_KEYS`, which carries
+ * `AGENT_FS_SHARED_ORG_ID`) is mutated. The harness does not depend on this
+ * refresh: every task spawn re-resolves the env, so the first task already
+ * receives `AGENT_FS_API_KEY`, `AGENT_FS_DEFAULT_ORG_ID`, and
+ * `AGENT_FS_DEFAULT_DRIVE_ID` once the rows exist.
+ *
+ * Never throws. Returns whether credentials are settled.
+ */
+export async function provisionAgentFsAfterRegistration(opts: {
+  apiUrl: string;
+  apiKey: string;
+  agentId: string;
+  alreadyProvisioned: boolean;
+}): Promise<boolean> {
+  if (opts.alreadyProvisioned) return true;
+
+  const provisioned = await ensureAgentFsCredentials(opts.apiUrl, opts.apiKey, opts.agentId);
+  if (!provisioned) return false;
+
+  try {
+    const refreshed = await fetchResolvedEnv(opts.apiUrl, opts.apiKey, opts.agentId);
+    const changed = applyResolvedEnvToProcessEnv(refreshed.env);
+    if (changed.length > 0) {
+      console.log(`[agent-fs] Applied resolved swarm config after retry: ${changed.join(", ")}`);
+    }
+  } catch (error) {
+    console.warn(scrubSecrets(`[agent-fs] post-provisioning env refresh skipped: ${error}`));
+  }
+  return true;
 }
 
 /**
@@ -2648,8 +2712,8 @@ export async function buildRequesterProfilePrompt(
   return result.skipped ? "" : result.text.trim();
 }
 
-/** Register agent via HTTP API */
-async function registerAgent(opts: {
+/** Register agent via HTTP API. Exported so tests can exercise the real boot ordering. */
+export async function registerAgent(opts: {
   apiUrl: string;
   apiKey: string;
   agentId: string;
@@ -4474,8 +4538,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
   // boot-fetch failure it stays at the default. Reconciled live thereafter by
   // `applySwarmConfigDrift`.
   let bootCooldownMs = resolveCodexCreditsExhaustedCooldownMs(undefined);
+  // Tracks whether agent-fs credentials are settled. A brand-new AGENT_ID has
+  // no agent row yet at this point, so this first attempt gets
+  // `500 Agent not found` and returns false. The retry runs right after
+  // registration below.
+  let agentFsProvisioned = false;
   try {
-    await ensureAgentFsCredentials(apiUrl, apiKey, agentId);
+    agentFsProvisioned = await ensureAgentFsCredentials(apiUrl, apiKey, agentId);
     const bootEnv = await fetchResolvedEnv(apiUrl, apiKey, agentId);
     bootProvider = bootEnv.resolvedProvider;
     resolvedScriptsOnly = resolveScriptsOnlyMode({
@@ -4939,6 +5008,16 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     console.error(`[${role}] Failed to register: ${error}`);
     process.exit(1);
   }
+
+  // The agent row exists now, so a first attempt that failed with
+  // `500 Agent not found` can succeed. Still best-effort: a failure here only
+  // means agent-fs stays unavailable, it must not stop the worker.
+  await provisionAgentFsAfterRegistration({
+    apiUrl,
+    apiKey,
+    agentId,
+    alreadyProvisioned: agentFsProvisioned,
+  });
 
   // Block until harness credentials are present in env. This loop replaces
   // the old bash-level fail-fast in `docker-entrypoint.sh` — the worker is

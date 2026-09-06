@@ -164,17 +164,31 @@ describe("native-only executor behavior", () => {
   // override a 134 exit code even though our own kill path can never produce
   // 134. That precedence is now fixed, so the assertion below no longer depends
   // on winning a timing race.
-  test("SIGABRT raised by user code is not classified capacity_exceeded", async () => {
-    const output = await new NativeScriptExecutor().run(
-      input({
-        resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
-        source: "export default async () => { process.abort(); };",
-      }),
-    );
-    expect(output.exitCode).toBe(134);
-    expect(output.error).not.toBe("capacity_exceeded");
-    expect(output.error).toBe("eval_error");
-  });
+  // Explicit test timeout: these two tests each spawn a REAL bun subprocess and
+  // give the script itself a 5s wallClockMs budget, but CI runs the suite with a
+  // global `--timeout 10000` and `--parallel=4`, leaving only ~5s for spawn +
+  // interpreter startup. That margin is not enough on a saturated runner: on
+  // 2d1a1801 the top-level variant below took 8653ms — it passed, with 1.3s to
+  // spare — and any extra load in the same shard pushed it over 10s. The budget
+  // is scheduling headroom only; every assertion still has to hold, so raising
+  // it weakens nothing.
+  const SANDBOX_SPAWN_TIMEOUT_MS = 30_000;
+
+  test(
+    "SIGABRT raised by user code is not classified capacity_exceeded",
+    async () => {
+      const output = await new NativeScriptExecutor().run(
+        input({
+          resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
+          source: "export default async () => { process.abort(); };",
+        }),
+      );
+      expect(output.exitCode).toBe(134);
+      expect(output.error).not.toBe("capacity_exceeded");
+      expect(output.error).toBe("eval_error");
+    },
+    SANDBOX_SPAWN_TIMEOUT_MS,
+  );
 
   // PR #1326 review finding (comment 3932610586): the sentinel is written
   // immediately before `eval-harness.ts` dynamic-imports the user module, and
@@ -188,19 +202,23 @@ describe("native-only executor behavior", () => {
   // misclassified `capacity_exceeded`, `runScript` in loader.ts would
   // transparently retry and the side effect would replay.
   // See the wallClockMs comment on the test above — same fix applies here.
-  test("SIGABRT during top-level module evaluation (after import starts) is not classified capacity_exceeded", async () => {
-    const output = await new NativeScriptExecutor().run(
-      input({
-        resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
-        source:
-          "console.log('TOP_LEVEL_SIDE_EFFECT'); process.abort(); export default async () => {};",
-      }),
-    );
-    expect(output.stdout).toContain("TOP_LEVEL_SIDE_EFFECT");
-    expect(output.exitCode).toBe(134);
-    expect(output.error).not.toBe("capacity_exceeded");
-    expect(output.error).toBe("eval_error");
-  });
+  test(
+    "SIGABRT during top-level module evaluation (after import starts) is not classified capacity_exceeded",
+    async () => {
+      const output = await new NativeScriptExecutor().run(
+        input({
+          resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
+          source:
+            "console.log('TOP_LEVEL_SIDE_EFFECT'); process.abort(); export default async () => {};",
+        }),
+      );
+      expect(output.stdout).toContain("TOP_LEVEL_SIDE_EFFECT");
+      expect(output.exitCode).toBe(134);
+      expect(output.error).not.toBe("capacity_exceeded");
+      expect(output.error).toBe("eval_error");
+    },
+    SANDBOX_SPAWN_TIMEOUT_MS,
+  );
 });
 
 describe("classifyExit", () => {

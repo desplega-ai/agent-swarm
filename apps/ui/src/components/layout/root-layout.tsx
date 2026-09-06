@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { StatusProvider } from "@/app/status-context";
+import { FeedbackDialog } from "@/components/feedback/feedback-dialog";
 import { CommandMenu } from "@/components/shared/command-menu";
 import { ErrorBoundary } from "@/components/shared/error-boundary";
 import { HiveLoadingScreen } from "@/components/shared/hive-loading-screen";
@@ -62,6 +63,7 @@ export function RootLayout() {
         <CommandMenu />
         <NameConnectionModal />
         <LeadCredentialDialog key={config.apiUrl} />
+        <FeedbackDialog key={`feedback:${config.apiUrl}`} />
       </StatusProvider>
     </ConfigGuard>
   );
