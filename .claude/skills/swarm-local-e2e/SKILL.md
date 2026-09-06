@@ -67,7 +67,7 @@ bun run start:http &
 bun run docker:build:worker:slim
 ```
 
-This builds `agent-swarm-worker:slim` from the current code — the slim target is faster and sufficient for E2E (all four harnesses included). Use `bun run docker:build:worker` + `agent-swarm-worker:latest` instead only when the test needs playwright/qa-use, local postgres/redis, or glab. **Rebuild after every code change.**
+This builds `agent-swarm-worker:slim` from the current code — the slim target is faster and sufficient for E2E (all four harnesses included). Use `bun run docker:build:worker` + `agent-swarm-worker:latest` instead only when the test needs playwright/agent-browser, local postgres/redis, or glab. **Rebuild after every code change.**
 
 ## Step 4: Start Lead Container
 

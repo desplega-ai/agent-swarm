@@ -6,8 +6,8 @@
  *   1. **Seeded** — `templates/skills/<name>/{config.json,content.md,files/}`
  *      with `runAllSeedersCandidate: true`. Embedded into the API binary at build
  *      time, written to the DB at boot, synced to every harness skill tree.
- *   2. **Baked** — a pinned `npx skills add` in `Dockerfile.worker` (agent-fs,
- *      qa-use), the image-copied `plugin/pi-skills/<name>/` (pi tree), or
+ *   2. **Baked** — a pinned `npx skills add` in `Dockerfile.worker` (agent-fs),
+ *      the image-copied `plugin/pi-skills/<name>/` (pi tree), or
  *      `plugin/commands/<name>.md` (converted to Codex skills at image build).
  *      `plugin/skills/` is retired — seeded templates replaced it.
  *   3. **Remote-installed on demand** — a `SKILL.md` at a path the integrations
