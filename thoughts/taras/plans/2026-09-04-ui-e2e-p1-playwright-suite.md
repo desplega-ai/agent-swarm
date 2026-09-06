@@ -3,7 +3,7 @@ date: 2026-09-04
 author: taras
 topic: "UI E2E P1: Playwright suite in packages/ui-e2e against a fresh seeded API"
 tags: [plan, e2e, ui, playwright, ci]
-status: in-progress
+status: completed
 autonomy: critical
 commit_per_phase: true
 brainstorm: thoughts/taras/brainstorms/2026-09-04-ui-e2e-swarm-driven-testing.md
@@ -424,15 +424,15 @@ Create a dedicated agent-fs user for CI (editor on the e2e drive) and add reposi
 - [x] Comment builder: `node --experimental-strip-types packages/ui-e2e/reporter/comment.ts --summaries packages/ui-e2e/test-results --images /dev/null --run-url https://example --report-artifact x --out /tmp/c.md && head -1 /tmp/c.md | grep -q 'ui-e2e'`
 - [x] Workflow syntax: `bunx actionlint .github/workflows/ui-e2e.yml .github/workflows/merge-gate.yml` (skip if actionlint is unavailable; then rely on the PR run) (`ui-e2e.yml` is clean; `merge-gate.yml` carries 12 pre-existing ShellCheck diagnostics that this branch did not add)
 - [x] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
-- [ ] Push the branch, open the PR, and both `ui-e2e` jobs and `ui-lint` complete: `gh run list --workflow ui-e2e.yml --branch <branch> --limit 1` shows `completed`
+- [x] Push the branch, open the PR, and both `ui-e2e` jobs and `ui-lint` complete: `gh run list --workflow ui-e2e.yml --branch <branch> --limit 1` shows `completed` (PR #1364: run 34063025070 on the pre-rebase push, run 34063837597 green after the rebase; `ui-lint` green on both)
 
 #### Automated QA:
-- [ ] `gh pr view <n> --json comments --jq '.comments[] | select(.body | startswith("<!-- ui-e2e -->")) | .id'` returns exactly one id after two pushes.
-- [ ] `gh run download <run-id> -n ui-e2e-html-report -D /tmp/rep && test -f /tmp/rep/index.html`
-- [ ] With `agent-browser`, open the PR comment and screenshot it; the image count in the comment matches `images.json` from the run log.
+- [x] `gh pr view <n> --json comments --jq '.comments[] | select(.body | startswith("<!-- ui-e2e -->")) | .id'` returns exactly one id after two pushes. (one id, `IC_kwDOQr3Tmc8AAAABS42Z9w`, after two pushes)
+- [x] `gh run download <run-id> -n ui-e2e-html-report -D /tmp/rep && test -f /tmp/rep/index.html`
+- [x] With `agent-browser`, open the PR comment and screenshot it; the image count in the comment matches `images.json` from the run log. (autopilot: screenshot at `/tmp/ui-e2e-p1/pr-1364-comment.png`, zero images in both, the `E2E_AGENT_FS_*` secrets are absent)
 
 #### Manual Verification:
-- [ ] The screenshots render inline in the PR comment (camo plus the agent-fs attachment disposition is the unconfirmed part). If they show as broken images, switch `publish-images.sh` to `gh pr comment --attach` and record the outcome in the plan Appendix.
+- [ ] The screenshots render inline in the PR comment (camo plus the agent-fs attachment disposition is the unconfirmed part). If they show as broken images, switch `publish-images.sh` to `gh pr comment --attach` and record the outcome in the plan Appendix. (blocked: the `E2E_AGENT_FS_*` repository secrets do not exist, so no run has published images yet; verify after the secrets land)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 5] ui-e2e workflow, reporters, sticky comment`.
 
