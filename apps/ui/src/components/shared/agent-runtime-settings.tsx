@@ -41,6 +41,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import {
   findModelOption,
   HARNESS_LABEL,
+  harnessSupportsModelSelection,
   isLocalHarness,
   type LiveBedrockStatus,
   LOCAL_HARNESSES,
@@ -102,6 +103,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [model, setModel] = useState("");
   const [customMode, setCustomMode] = useState(false);
   const [effort, setEffort] = useState<EffortValue>("");
+  const modelSelectionEnabled = harnessSupportsModelSelection(harness);
 
   const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
     () =>
@@ -151,7 +153,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     );
     setHarness(initialHarness);
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
-    setEffort(configuredEffort(configs));
+    setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
   }, [syncKey, configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
 
   // Clears `effort` whenever it ends up unsupported by the (possibly new)
@@ -178,22 +180,25 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveCatalog,
     );
     setHarness(nextHarness);
+    if (!harnessSupportsModelSelection(nextHarness)) setEffort("");
     const nextModel = findModelOption(model, nextGroups)
       ? model
       : pickDefaultModelForHarness(nextHarness, nextGroups);
     if (nextModel !== model) setModel(nextModel);
-    clearEffortIfUnsupported(findModelOption(nextModel, nextGroups));
+    if (harnessSupportsModelSelection(nextHarness)) {
+      clearEffortIfUnsupported(findModelOption(nextModel, nextGroups));
+    }
   }
 
   function save() {
-    if (!model.trim()) return;
+    if (modelSelectionEnabled && !model.trim()) return;
     updateRuntime.mutate(
       {
         id: agent.id,
         harnessProvider: harness,
-        model: model.trim(),
-        allowCustomModel: customMode && !modelOption,
-        reasoningEffort: effort || null,
+        model: modelSelectionEnabled ? model.trim() : null,
+        allowCustomModel: modelSelectionEnabled && customMode && !modelOption,
+        reasoningEffort: modelSelectionEnabled ? effort || null : null,
       },
       {
         onSuccess: () => toast.success("Runtime settings updated"),
@@ -241,19 +246,21 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           </Select>
         </div>
 
-        <div className="min-w-[260px] flex-1 space-y-1.5">
-          <Label>Model</Label>
-          {customMode ? (
-            <Input value={model} onChange={(event) => changeModel(event.target.value)} />
-          ) : (
-            <ModelCombobox
-              value={model}
-              onChange={changeModel}
-              groups={groups}
-              selected={modelOption}
-            />
-          )}
-        </div>
+        {modelSelectionEnabled ? (
+          <div className="min-w-[260px] flex-1 space-y-1.5">
+            <Label>Model</Label>
+            {customMode ? (
+              <Input value={model} onChange={(event) => changeModel(event.target.value)} />
+            ) : (
+              <ModelCombobox
+                value={model}
+                onChange={changeModel}
+                groups={groups}
+                selected={modelOption}
+              />
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="space-y-1.5">
@@ -261,19 +268,23 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <ReasoningEffortToggle
           value={effort}
           onChange={setEffort}
-          levels={modelOption?.reasoningLevels}
+          levels={modelSelectionEnabled ? modelOption?.reasoningLevels : []}
           modelLabel={modelOption?.label ?? null}
         />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Switch checked={customMode} onCheckedChange={setCustomMode} />
-          Allow unsupported/custom model
-        </label>
+        {modelSelectionEnabled ? (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={customMode} onCheckedChange={setCustomMode} />
+            Allow unsupported/custom model
+          </label>
+        ) : null}
         <Button
           onClick={save}
-          disabled={updateRuntime.isPending || !model.trim() || disabledChoice}
+          disabled={
+            updateRuntime.isPending || (modelSelectionEnabled && (!model.trim() || disabledChoice))
+          }
         >
           <Save className="h-4 w-4" />
           Save

@@ -2337,7 +2337,7 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "opencode";
+                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp";
                         model?: string | null;
                         /** @default false */
                         allow_custom_model?: boolean;

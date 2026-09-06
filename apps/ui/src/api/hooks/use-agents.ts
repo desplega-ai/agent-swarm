@@ -100,8 +100,8 @@ export function useUpdateAgentRuntime() {
   return useMutation({
     mutationFn: (data: {
       id: string;
-      harnessProvider: "claude" | "codex" | "pi" | "opencode";
-      model: string;
+      harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+      model: string | null;
       allowCustomModel?: boolean;
       reasoningEffort?: ReasoningEffortLevel | null;
     }) => api.updateAgentRuntime(data),

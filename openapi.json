@@ -9023,7 +9023,8 @@
                       "claude",
                       "codex",
                       "pi",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "model": {
