@@ -322,17 +322,17 @@ Three specs cover task list to detail to session logs, the configuration round-t
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Flows are green: `bun run e2e:ui -- specs/tasks.spec.ts specs/configuration.spec.ts specs/pages.spec.ts`
-- [ ] Whole suite is green: `bun run e2e:ui`
-- [ ] Package typechecks: `bun run e2e:ui:tsc`
-- [ ] Root gates: `bun run lint && bun run tsc:check`
+- [x] Flows are green: `bun run e2e:ui -- specs/tasks.spec.ts specs/configuration.spec.ts specs/pages.spec.ts`
+- [x] Whole suite is green: `bun run e2e:ui`
+- [x] Package typechecks: `bun run e2e:ui:tsc`
+- [x] Root gates: `bun run lint && bun run tsc:check`
 
 #### Automated QA:
-- [ ] Run the suite with `--repeat-each=3`; zero flakes reported in the HTML report.
-- [ ] Inspect the configuration spec trace (`--trace on`) and confirm the `PUT /api/config?includeSecrets=true` request body has `key: "STEERING_ENABLED"`.
+- [x] Run the suite with `--repeat-each=3`; zero flakes reported in the HTML report.
+- [x] Inspect the configuration spec trace (`--trace on`) and confirm the `PUT /api/config?includeSecrets=true` request body has `key: "STEERING_ENABLED"`.
 
 #### Manual Verification:
-- [ ] Watch `bun run e2e:ui -- --headed specs/pages.spec.ts` once and confirm the public page opens in a second window without the dashboard chrome.
+- [x] Watch `bun run e2e:ui -- --headed specs/pages.spec.ts` once and confirm the public page opens in a second window without the dashboard chrome. (autopilot: verified by Claude from the attached `public-page.png`: bare page body, no dashboard chrome. The "Session Logs" tab only exists below the lg breakpoint, so the tab click runs in a 900px-wide second test)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 3] tasks, configuration, pages flows`.
 
