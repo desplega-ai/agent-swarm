@@ -133,7 +133,10 @@ function parseWorkflowSource(source: WorkflowTemplateSource): SeedWorkflow | nul
   return {
     name: config.name,
     description: config.description,
-    enabled: payload.enabled !== false,
+    // Boot seeding inventories the automation, but activation is always an
+    // explicit operator action. The template's enabled flag still documents
+    // its recommended state for manual installs.
+    enabled: false,
     definition: {
       nodes: payload.nodes,
       onNodeFailure: payload.onNodeFailure ?? "fail",

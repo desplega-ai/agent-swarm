@@ -54,6 +54,7 @@ describe("workflows seeder", () => {
     const workflows = loadSeedWorkflows();
     expect(workflows).toHaveLength(5);
     expect(workflows.find((workflow) => workflow.name === "autopilot")).toMatchObject({
+      enabled: false,
       requiredParams: ["REPO_URL"],
       requires: ["github"],
     });
@@ -70,7 +71,7 @@ describe("workflows seeder", () => {
     expect(first).toMatchObject({ created: 1, failed: [] });
     expect(await getWorkflow()).toMatchObject({
       name: "test-seeded-workflow",
-      enabled: true,
+      enabled: false,
       params: {},
       requiredParams: ["REPO_URL"],
       requires: ["github"],
@@ -78,6 +79,24 @@ describe("workflows seeder", () => {
 
     const second = await runSeeder(seeder, { quiet: true });
     expect(second).toMatchObject({ skippedUnchanged: 1, updated: 0, failed: [] });
+  });
+
+  test("preserves a workflow enabled by the operator", async () => {
+    await runSeeder(createWorkflowsSeeder([workflowSource()]), { quiet: true });
+    const seeded = await getWorkflow();
+    await updateWorkflow(seeded!.id, { enabled: true });
+
+    const result = await runSeeder(createWorkflowsSeeder([workflowSource("Source update.")]), {
+      quiet: true,
+    });
+    expect(result.skippedUserModified).toBe(1);
+    expect(await getWorkflow()).toMatchObject({
+      enabled: true,
+      definition: {
+        nodes: [{ id: "work", type: "agent-task", config: { template: "Do the work." } }],
+        onNodeFailure: "fail",
+      },
+    });
   });
 
   test("preserves a workflow edited by the operator", async () => {

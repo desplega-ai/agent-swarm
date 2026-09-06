@@ -55,6 +55,7 @@ describe("schedules seeder", () => {
     expect(schedules).toHaveLength(4);
     expect(schedules.find((schedule) => schedule.name === "daily-status-report")).toMatchObject({
       cronExpression: "15 2 * * *",
+      enabled: false,
       requiredParams: [],
       requires: [],
     });
@@ -71,6 +72,8 @@ describe("schedules seeder", () => {
     expect(await getScheduledTaskByName("test-seeded-schedule")).toMatchObject({
       targetType: "agent-task",
       cronExpression: "0 9 * * *",
+      enabled: false,
+      nextRunAt: undefined,
       params: {},
       requiredParams: ["REPO_URL"],
       requires: ["github"],
@@ -81,17 +84,17 @@ describe("schedules seeder", () => {
     expect(second).toMatchObject({ skippedUnchanged: 1, updated: 0, failed: [] });
   });
 
-  test("preserves a schedule disabled by the operator", async () => {
+  test("preserves a schedule enabled by the operator", async () => {
     await runSeeder(createSchedulesSeeder([scheduleSource()]), { quiet: true });
     const seeded = await getScheduledTaskByName("test-seeded-schedule");
-    await updateScheduledTask(seeded!.id, { enabled: false });
+    await updateScheduledTask(seeded!.id, { enabled: true });
 
     const result = await runSeeder(createSchedulesSeeder([scheduleSource("30 9 * * *")]), {
       quiet: true,
     });
     expect(result.skippedUserModified).toBe(1);
     expect(await getScheduledTaskByName("test-seeded-schedule")).toMatchObject({
-      enabled: false,
+      enabled: true,
       cronExpression: "0 9 * * *",
     });
   });

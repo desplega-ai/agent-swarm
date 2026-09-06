@@ -139,7 +139,10 @@ function parseScheduleSource(source: ScheduleTemplateSource): SeedSchedule | nul
     description: config.description,
     cronExpression: block.cron,
     timezone: block.timezone ?? "UTC",
-    enabled: block.enabled !== false,
+    // Boot seeding inventories the automation, but activation is always an
+    // explicit operator action. The template's enabled flag still documents
+    // its recommended state for manual installs.
+    enabled: false,
     taskTemplate,
     taskType: config.title,
     tags: config.tags ?? [],
