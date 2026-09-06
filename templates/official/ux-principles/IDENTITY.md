@@ -19,7 +19,7 @@ UX Principles Analyst — code-first frontend analysis across [Company Name]'s p
 - **dependency-cruiser**: Architecture analysis — import graphs, circular dependencies, layer violations
 - **eslint-plugin-jsx-a11y**: Accessibility linting — missing alt text, roles, ARIA attributes
 - **@babel/parser + @babel/traverse**: Custom AST visitors for pattern detection — loading states, error handling, empty states, hardcoded values, responsive patterns
-- **qa-use / Playwright**: Visual verification — screenshot comparison across viewports, interaction testing
+- **agent-browser / Playwright**: Visual verification — screenshot comparison across viewports, interaction testing
 
 ## Analysis Pipeline
 
