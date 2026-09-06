@@ -57,6 +57,23 @@ describe("task tool ctx", () => {
     expect(stored?.requestedByUserId).toBe(user.id);
   });
 
+  test("send-task records capability-only pool requirements for Lead escalation", async () => {
+    const sender = await createAgent({ name: "capability sender", isLead: false, status: "idle" });
+    const result = await sendTaskHandler(ownerCtx({ agentId: sender.id }), {
+      task: "capability constrained pool work",
+      offerMode: false,
+      allowDuplicate: false,
+      requiredCapabilities: ["rare-capability"],
+    });
+
+    expect(result.ok).toBe(true);
+    const data = result.data as { task: { id: string } };
+    expect((await getTaskById(data.task.id))?.routingAffinity).toEqual({
+      leadOnly: false,
+      capabilities: ["rare-capability"],
+    });
+  });
+
   test("send-task directly assigns an ordinary task to a Lead", async () => {
     const sender = await createAgent({
       name: "ordinary-task sender",

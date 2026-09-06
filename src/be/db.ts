@@ -4857,6 +4857,14 @@ export async function createTaskExtended(
   // coerce: a bad shape throws before anything reaches the INSERT; absent
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
+  if (
+    options.inheritParentRoutingAffinity === false &&
+    options.routingAffinity?.leadOnly !== true
+  ) {
+    throw new Error(
+      "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
+    );
+  }
   let requestedByUserIdInherited = false;
   // True only when `options.routingAffinity` ends up populated purely via
   // the plain parent-fallback inherit below (child declared no affinity of
@@ -5023,12 +5031,12 @@ export async function createTaskExtended(
       if (parent.followUpConfig && !options.followUpConfig) {
         options.followUpConfig = parent.followUpConfig;
       }
-      if (parent.routingAffinityInvalid) {
+      if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {
         // Never let a corrupt parent affinity create an apparently untagged
         // continuation. This is a fail-closed quarantine, including recovery.
         throw new Error(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
       }
-      if (parent.routingAffinity) {
+      if (parent.routingAffinity && options.inheritParentRoutingAffinity !== false) {
         // Privilege cannot be shed by a continuation. A child can narrow or
         // replace ordinary routing provenance, but a Lead-only parent always
         // stamps Lead-only onto the child (including callers that supplied
