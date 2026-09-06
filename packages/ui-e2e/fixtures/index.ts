@@ -192,6 +192,18 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
               name: `swarm:v1:${swarm.apiUrl}:current-user`,
               value: swarm.manifest.user.id,
             },
+            {
+              // The self-hosted feedback dialog opens for an admin-like user as soon as a
+              // failed task exists (the seed has one) and it aria-hides the whole app.
+              // A fresh dismissal keeps it closed for 30 days.
+              name: `swarm:feedback-popup:v1:${swarm.apiUrl}:${swarm.manifest.user.id}`,
+              value: JSON.stringify({
+                version: 1,
+                lastSubmittedAt: null,
+                lastDismissedAt: new Date().toISOString(),
+                submissionCount: 0,
+              }),
+            },
           ]
         : []),
     ];
