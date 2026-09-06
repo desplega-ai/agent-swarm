@@ -210,7 +210,10 @@ describe("ensureOpenRouterModelsOverride (pi)", () => {
         modelsPath: join(dir, "models.json"),
       });
       const model = runtime.getModel("openrouter", "anthropic/claude-sonnet-5");
-      expect(model?.baseUrl).toBe(DEFAULT_OPENROUTER_BASE_URL);
+      // pi-ai 0.85.1 stores the Anthropic-flavored OpenRouter root without /v1:
+      // dist/api/anthropic-messages.js:730-734 passes it to the Anthropic SDK,
+      // whose resources/messages/messages.mjs:31 appends /v1/messages.
+      expect(model?.baseUrl).toBe("https://openrouter.ai/api");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
