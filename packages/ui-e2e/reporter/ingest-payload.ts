@@ -27,11 +27,13 @@ export interface RunContext {
   ciUrl?: string;
 }
 
+// orgId and driveId are optional: the tracker falls back to its UI_E2E_AGENT_FS_* config when a
+// payload omits them, and an empty string would defeat that fallback.
 export interface ArtifactRecord {
   kind: "screenshot" | "trace" | "video" | "report" | "log";
   path: string;
-  orgId: string;
-  driveId: string;
+  orgId?: string;
+  driveId?: string;
   specId: string | null;
   sizeBytes: number;
   shardIndex: number;
@@ -59,8 +61,8 @@ export interface IngestPayload {
         kind: ArtifactRecord["kind"];
         storage: "agent-fs";
         path: string;
-        orgId: string;
-        driveId: string;
+        orgId?: string;
+        driveId?: string;
         specId: string | null;
         sizeBytes: number;
       }
@@ -145,8 +147,8 @@ export function buildShardPayload(
       kind: artifact.kind,
       storage: "agent-fs" as const,
       path: artifact.path,
-      orgId: artifact.orgId,
-      driveId: artifact.driveId,
+      ...(artifact.orgId ? { orgId: artifact.orgId } : {}),
+      ...(artifact.driveId ? { driveId: artifact.driveId } : {}),
       specId: artifact.specId,
       sizeBytes: artifact.sizeBytes,
     }));

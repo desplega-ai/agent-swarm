@@ -123,15 +123,15 @@ async function runPool<T>(
 
 function artifactOutput(
   item: UploadItem,
-  orgId: string,
-  driveId: string,
+  orgId: string | undefined,
+  driveId: string | undefined,
   dryRun = false,
 ): ArtifactOutput {
   return {
     kind: item.kind,
     path: item.remotePath,
-    orgId,
-    driveId,
+    ...(orgId ? { orgId } : {}),
+    ...(driveId ? { driveId } : {}),
     specId: item.specId,
     sizeBytes: statSync(item.localPath).size,
     shardIndex: item.shardIndex,
@@ -152,7 +152,7 @@ async function main(): Promise<void> {
   if (options.dryRun) {
     await writeJson(
       options.artifactsOut,
-      plan.items.map((item) => artifactOutput(item, orgId ?? "", driveId ?? "", true)),
+      plan.items.map((item) => artifactOutput(item, orgId, driveId, true)),
     );
     await writeJson(
       options.imagesOut,

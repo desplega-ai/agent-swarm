@@ -265,23 +265,25 @@ Push with `ANTHROPIC_API_KEY= git push -u origin ui-e2e-p2`, open the PR with th
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Install script idempotent: run `install-tracker.ts` twice against the local API; second run prints the same ids, `GET /api/scripts?scope=global` shows exactly three `ui-e2e-*` scripts, `GET /api/scripts/{id}/apis` shows one endpoint, `GET /api/schedules` shows one `ui-e2e-sweep` and one `ui-e2e-prune`
-- [ ] Real ingest accepted: both POSTs print `HTTP 200 ok=true`; `jq '.run.shardTotal' /tmp/ui-e2e-p2/payloads/shard-2.json` is `2`
-- [ ] Rows match: `runGroups` 1 row with `status == "passed"`, `runs` 2 rows, `results` row count equals `jq '[.results|length]|add' shard-1.json shard-2.json`, `artifacts` rows equal the plan entries plus 2
-- [ ] Incident opened and closed by the two follow-up posts (`incidents` rows: 1, `status` goes `open` then `closed`, `occurrences` 1)
-- [ ] Retry keeps two `runs` rows and `attempt == 2` on shard 1
-- [ ] Page resolved: `GET /api/pages/resolve?slug=ui-e2e` returns `authMode: "authed"` and a `version >= 2`
-- [ ] Root gates before push: `bun run lint && bun run tsc:check && bun run e2e:ui:tsc && bun run test:root -- src/tests/ui-e2e-ingest-payload.test.ts src/tests/ui-e2e-publish-plan.test.ts && bun run e2e`
+- [x] (verified 2026-09-07 with `/tmp/ui-e2e-p2/verify-install.sh`: two runs, same endpoint id, three scripts, one endpoint, two schedules) Install script idempotent: run `install-tracker.ts` twice against the local API; second run prints the same ids, `GET /api/scripts?scope=global` shows exactly three `ui-e2e-*` scripts, `GET /api/scripts/{id}/apis` shows one endpoint, `GET /api/schedules` shows one `ui-e2e-sweep` and one `ui-e2e-prune`
+- [x] (shard 1: HTTP 200 ok=true 292 ms, shard 2: HTTP 200 ok=true 79 ms, shardTotal 2) Real ingest accepted: both POSTs print `HTTP 200 ok=true`; `jq '.run.shardTotal' /tmp/ui-e2e-p2/payloads/shard-2.json` is `2`
+- [x] (runGroups pr-9999: status passed, shardsReported 2, 38 pass / 17 skip; runs 2; results 55 = 53 + 2; artifacts 59 = 57 plan entries + 2 github report rows) Rows match: `runGroups` 1 row with `status == "passed"`, `runs` 2 rows, `results` row count equals `jq '[.results|length]|add' shard-1.json shard-2.json`, `artifacts` rows equal the plan entries plus 2
+- [x] (one incident, open with occurrences 1 and triageStatus dispatched, `ui-e2e-incident-triage` created once, a workflow run plus an unassigned task dispatched; closed after the all-passed post) Incident opened and closed by the two follow-up posts (`incidents` rows: 1, `status` goes `open` then `closed`, `occurrences` 1)
+- [x] (runs stayed at 2, shard 1 attempt 2, results and artifacts counts unchanged) Retry keeps two `runs` rows and `attempt == 2` on shard 1
+- [x] Page resolved: `GET /api/pages/resolve?slug=ui-e2e` returns `authMode: "authed"` (that route carries no `version`; `GET /api/pages/{id}/versions` showed 2 snapshots, so the page was regenerated)
+- [x] Root gates before push: `bun run lint && bun run tsc:check && bun run e2e:ui:tsc && bun run test:root -- src/tests/ui-e2e-ingest-payload.test.ts src/tests/ui-e2e-publish-plan.test.ts && bun run e2e`
 - [ ] PR open and workflow complete: `gh pr create` then `gh run list --workflow ui-e2e.yml --branch ui-e2e-p2 --limit 1` shows `completed`
 
 #### Automated QA:
 - [ ] CI publish step log shows `Published N artifacts` with N > 0 and `agent-fs --org c5c27280-f28a-48e6-b1b4-1ae23bef7844 --drive a8dc7a37-9fab-4ab6-9e55-67a5d5e74d35 tree e2e/desplega-ai__agent-swarm/pr-<n>/<sha> --json` lists `1/` and `2/` with `summary.json` in each
 - [ ] CI ingest step log shows the skip notice (secrets absent) and the job stays green; `gh run download <id> -n ui-e2e-ingest-payloads` yields `shard-1.json` and `shard-2.json` with `run.trigger == "pr"` and `run.prNumber == <n>`
 - [ ] Sticky comment still renders images (`gh pr view <n> --json comments --jq '.comments[] | select(.body | startswith("<!-- ui-e2e -->")) | .body' | grep -c '!\['` > 0)
-- [ ] `agent-browser` screenshot of the tracker page shows the `pr-<n>` section with two shard rows and the incident section from step 7
+- [x] `agent-browser` screenshot of the tracker page shows the `pr-<n>` section with two shard rows and the incident section from step 7 (actual rendering: one row per run group with a `2/2` shards cell, `/tmp/ui-e2e-p2/e2e/tracker-page.png`; the incident is visible in `/tmp/ui-e2e-p2/e2e/tracker-page-incident.png`, captured with the incident re-opened because step 7 closes it before step 9; `authed` pages accept only the `page_session` cookie from `POST /api/pages/{id}/launch`)
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
+
+Findings from the proof (2026-09-07): the dry-run publisher wrote `orgId: ""` when the agent-fs env was unset, which defeated the template's `??` config fallback and rendered every viewer link as `none`; `orgId` and `driveId` are now optional and omitted when empty (fixed in this phase, unit-tested). The two CI shards are imbalanced (shard 1 holds the 53-route smoke file, shard 2 two tests) because Playwright shards by file with `fullyParallel: false`; left as a derail note. The template renders the GitHub report link once per shard until a re-ingest dedups it (cosmetic, agent-work side).
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 3] local tracker install script and E2E evidence` (the commit holds only repo changes made during the proof, such as fixture tweaks; the install script stays in `/tmp` and is quoted in the PR body).
 
@@ -437,6 +439,8 @@ gh workflow run ui-e2e.yml --ref ui-e2e-p2 && gh run watch
   - The template's `AGENT_FS_LIVE_URL` default (`https://live.agent-fs.dev`) may not serve files from `agent-fs-taras.fly.dev`. The install task asks the lead to check one link; the working host becomes the swarm config value.
   - Deploys on `main` restart the swarm; `1.141.0` retries reboot-killed tasks but still loses their context. A "deploy window" note belongs in `runbooks/heartbeat-crash-recovery.md` or the release runbook.
   - Old uploads under `e2e/agent-swarm/pr-1364/` (P1 prefix) will never match the template prune. Delete by hand once the prune works.
+  - CI shard balance: `specs/smoke.spec.ts` holds 53 of 55 tests and Playwright shards by file while `fullyParallel` is false, so shard 2 runs two tests. Consider `fullyParallel: true` (each worker already owns a seeded API) or splitting the smoke file.
+  - Tracker page shows the GitHub report link once per shard until a re-ingest dedups it (template cosmetic).
   - Template README step 5 overstates the install result: the bundled ingest creates `ui-e2e-incident-triage` on the first authoritative failure and `ui-e2e-promote-finding` on the first finding (`scripts/ui-e2e-ingest.ts:740-745, 816-821`), so a passed synthetic ingest creates neither. The install check is "no duplicates", not "exactly one each". Fix the README in `agent-work`.
   - Local install verification (2026-09-07, `/tmp/ui-e2e-p2/verify-install.sh`): two runs idempotent, endpoint 401 without bearer and 200 `ok: true` with it, `UI_E2E_INGEST_BEARER` stored masked. The scripts runtime needs `MCP_BASE_URL` on the API's own port.
 - **References**:

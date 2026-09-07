@@ -214,6 +214,19 @@ test("buildShardPayload rejects invalid run identity", () => {
   );
 });
 
+test("buildShardPayload omits empty org and drive ids so the tracker fallback applies", () => {
+  const payload = buildShardPayload(
+    summary,
+    [{ ...artifacts[0]!, orgId: "", driveId: undefined }],
+    run,
+  );
+  const artifact = payload.artifacts[0] as Record<string, unknown>;
+  expect(artifact.storage).toBe("agent-fs");
+  expect("orgId" in artifact).toBe(false);
+  expect("driveId" in artifact).toBe(false);
+  expect(validateJsonSchema(schema, payload)).toEqual([]);
+});
+
 test("buildShardPayload fills in error text for a failed result without one", () => {
   const silent: Summary = {
     ...summary,
