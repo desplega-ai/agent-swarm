@@ -705,6 +705,8 @@ DB-backed pages let agents publish static reports, dashboards, and JSON action s
 
 Stores an HTML or JSON page in the swarm and returns shareable URLs. Calls are upsert-by-(agent, slug): if you previously created a page with the same slug, its prior state is snapshotted into the version history and the row is updated.
 
+HTML pages receive fonts, basic layout styles, and Tailwind utilities when served. Tailwind Preflight is disabled so it does not reset authored headings, spacing, or lists. These defaults apply to existing pages without regenerating their stored HTML. A page can still use explicit Tailwind utilities to override individual styles.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `title` | string | Yes | Human-readable title shown in listings |

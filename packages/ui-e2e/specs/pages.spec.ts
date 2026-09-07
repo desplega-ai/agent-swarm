@@ -32,11 +32,105 @@ test("pages list opens the public page and its share URL", async ({
     await publicPage.screenshot({ path: screenshot });
     await testInfo.attach("public-page", { path: screenshot, contentType: "image/png" });
 
-    const authed = await anonymous.request.get(seed!.pages.authed.apiUrl);
+    // Use this worker's API, as the public-page check above does.
+    const authed = await anonymous.request.get(`${swarm.apiUrl}/p/${seed!.pages.authed.id}`);
     expect(authed.status()).toBe(401);
   } finally {
     await anonymous.close();
   }
 
   await clean.assertClean();
+});
+
+test("public page preserves authored styles after Tailwind loads", async ({
+  browser,
+  page,
+  seed,
+  swarm,
+}) => {
+  test.skip(!seed, "remote run without seed");
+  const createResponse = await page.request.post(`${swarm.apiUrl}/api/pages`, {
+    headers: {
+      Authorization: `Bearer ${swarm.apiKey}`,
+      "X-Agent-ID": seed!.agents.lead,
+    },
+    data: {
+      title: "e2e authored styles",
+      slug: `e2e-authored-styles-${crypto.randomUUID()}`,
+      contentType: "text/html",
+      authMode: "public",
+      body: `<!doctype html>
+<html>
+  <head>
+    <style>
+      body { max-width: 800px; margin: 32px auto; }
+      h1 { font-size: 42px; font-weight: 800; }
+      h2 { margin: 17px 0 19px; }
+      p { margin: 11px 0 13px; }
+      ul { list-style-type: square; }
+      a { color: rgb(120, 60, 180); text-decoration: underline; }
+    </style>
+  </head>
+  <body>
+    <h1>Authored heading</h1>
+    <h2>Authored section</h2>
+    <p>Authored paragraph</p>
+    <ul><li>Visible marker</li></ul>
+    <a href="#target">Authored link</a>
+    <div id="tailwind-box" class="flex border-4 border-blue-500">Tailwind utility box</div>
+  </body>
+</html>`,
+    },
+  });
+  expect(createResponse.status()).toBe(201);
+  const created = (await createResponse.json()) as { id: string };
+
+  try {
+    const anonymous = await browser.newContext();
+    try {
+      const publicPage = await anonymous.newPage();
+      await publicPage.goto(`${swarm.apiUrl}/p/${created.id}`);
+
+      const utilityBox = publicPage.locator("#tailwind-box");
+      await expect(utilityBox).toHaveCSS("display", "flex");
+      await expect(utilityBox).toHaveCSS("border-top-width", "4px");
+      await expect(utilityBox).toHaveCSS("border-top-style", "solid");
+
+      const styles = await publicPage.evaluate(() => {
+        const read = (selector: string) => getComputedStyle(document.querySelector(selector)!);
+        const heading = read("h1");
+        const section = read("h2");
+        const paragraph = read("p");
+        const list = read("ul");
+        const link = read("a");
+        const body = getComputedStyle(document.body);
+        return {
+          heading: { fontSize: heading.fontSize, fontWeight: heading.fontWeight },
+          section: { marginTop: section.marginTop, marginBottom: section.marginBottom },
+          paragraph: { marginTop: paragraph.marginTop, marginBottom: paragraph.marginBottom },
+          listStyleType: list.listStyleType,
+          bodyMargin: { top: body.marginTop, bottom: body.marginBottom },
+          centered: Number.parseFloat(body.marginLeft) > 0 && body.marginLeft === body.marginRight,
+          link: { color: link.color, textDecorationLine: link.textDecorationLine },
+        };
+      });
+
+      expect(styles).toEqual({
+        heading: { fontSize: "42px", fontWeight: "800" },
+        section: { marginTop: "17px", marginBottom: "19px" },
+        paragraph: { marginTop: "11px", marginBottom: "13px" },
+        listStyleType: "square",
+        bodyMargin: { top: "32px", bottom: "32px" },
+        centered: true,
+        link: { color: "rgb(120, 60, 180)", textDecorationLine: "underline" },
+      });
+    } finally {
+      await anonymous.close();
+    }
+  } finally {
+    const removed = await page.request.delete(`${swarm.apiUrl}/api/pages/${created.id}`, {
+      headers: { Authorization: `Bearer ${swarm.apiKey}` },
+    });
+    expect(removed.status()).toBe(204);
+  }
 });
