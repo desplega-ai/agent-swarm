@@ -828,8 +828,6 @@ async function recordSlackDelivery(
     data: {
       taskId: task.id,
       kind,
-      channelId: outcome.channelId,
-      permalink: outcome.permalink ?? null,
     },
   });
 }
