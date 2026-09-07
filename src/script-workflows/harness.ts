@@ -1,4 +1,6 @@
-import { buildWorkflowCtx } from "./workflow-ctx";
+import { createConnection, type Socket } from "node:net";
+import { type CapabilityClient, createCapabilityClient } from "./capability-bridge";
+import { buildGuestWorkflowCtx } from "./guest-ctx";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -6,103 +8,83 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-/**
- * The bearer travels over stdin, not an env var (see executor.ts) — this
- * process dynamically `import()`s the user's module into itself below, so
- * anything left in `process.env` would be directly readable by
- * attacker-influenced script content via a bracket-notation env lookup.
- */
-async function readApiKeyFromStdin(): Promise<string> {
-  const text = await new Response(Bun.stdin.stream()).text();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error("Malformed stdin config payload (expected JSON)");
-  }
-  const apiKey = (parsed as { apiKey?: unknown } | null)?.apiKey;
-  if (typeof apiKey !== "string" || !apiKey) {
-    throw new Error("Missing apiKey on stdin config payload");
-  }
-  return apiKey;
+function stringifyResult(value: unknown): string {
+  return JSON.stringify(value ?? null);
 }
 
-async function postStatus(
-  runId: string,
-  baseUrl: string,
-  agentId: string,
-  apiKey: string,
-  body: Record<string, unknown>,
-): Promise<void> {
-  const res = await fetch(`${baseUrl}/api/internal/script-runs/${runId}/status`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "X-Agent-ID": agentId,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+function connectCapabilityClient(
+  socketPath: string,
+  token: string,
+): { client: CapabilityClient; connected: Promise<void>; socket: Socket } {
+  const socket = createConnection(socketPath);
+  socket.setEncoding("utf8");
+  const connected = new Promise<void>((resolve, reject) => {
+    socket.once("connect", () => {
+      socket.write(`${JSON.stringify({ type: "hello", token })}\n`);
+      resolve();
+    });
+    socket.once("error", reject);
   });
-  if (!res.ok) {
-    throw new Error(`status callback failed with ${res.status}: ${await res.text()}`);
-  }
+  const client = createCapabilityClient((message) => {
+    if (socket.destroyed) throw new Error("Workflow capability host disconnected");
+    socket.write(`${message}\n`);
+  });
+  let buffered = "";
+  socket.on("data", (chunk) => {
+    buffered += chunk;
+    for (;;) {
+      const newline = buffered.indexOf("\n");
+      if (newline < 0) break;
+      const message = buffered.slice(0, newline);
+      buffered = buffered.slice(newline + 1);
+      if (message) client.handleMessage(message);
+    }
+  });
+  socket.on("close", () => client.disconnect(new Error("Workflow capability host disconnected")));
+  socket.on("error", (error) => client.disconnect(error));
+  return { client, connected, socket };
 }
 
-const runId = requiredEnv("SCRIPT_RUN_ID");
-const agentId = requiredEnv("SCRIPT_RUN_AGENT_ID");
-const apiKey = await readApiKeyFromStdin();
-const baseUrl = requiredEnv("MCP_BASE_URL").replace(/\/$/, "");
-const sourceFile = requiredEnv("SCRIPT_RUN_SOURCE_FILE");
-const argsFile = requiredEnv("SCRIPT_RUN_ARGS_FILE");
-// Subdirectory, not the tmpdir itself: the executor spawns this harness with
-// cwd = tmpdir, and Bun (>= 1.3.12) snapshots the cwd listing at startup — a
-// file written into cwd after launch is invisible to the module resolver. See
-// the same fix in src/scripts-runtime/eval-harness.ts.
-const userModulePath = `${requiredEnv("SCRIPT_RUN_TMPDIR")}/user-module/user-script.ts`;
-
-const heartbeat = setInterval(() => {
-  fetch(`${baseUrl}/api/internal/script-runs/${runId}/heartbeat`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "X-Agent-ID": agentId,
-    },
-  }).catch(() => {});
-}, 10_000);
-heartbeat.unref?.();
-
-let drainInFlightSteps: ((graceMs?: number) => Promise<void>) | undefined;
-
-try {
-  const source = await Bun.file(sourceFile).text();
+async function run(): Promise<void> {
+  const sourceFile = requiredEnv("SCRIPT_RUN_SOURCE_FILE");
+  const argsFile = requiredEnv("SCRIPT_RUN_ARGS_FILE");
+  const resultFile = requiredEnv("SCRIPT_RUN_RESULT_FILE");
+  const errorFile = requiredEnv("SCRIPT_RUN_ERROR_FILE");
+  const userModulePath = `${requiredEnv("SCRIPT_RUN_TMPDIR")}/user-module/user-script.ts`;
   const args = JSON.parse(await Bun.file(argsFile).text());
-  await Bun.write(userModulePath, source);
-  const mod = await import(userModulePath);
-  if (typeof mod.default !== "function") {
-    throw new Error("Script workflow must export a default function");
+  const connection = connectCapabilityClient(
+    requiredEnv("SCRIPT_RUN_CAPABILITY_SOCKET"),
+    requiredEnv("SCRIPT_RUN_CAPABILITY_TOKEN"),
+  );
+
+  try {
+    await connection.connected;
+    const source = await Bun.file(sourceFile).text();
+    await Bun.write(userModulePath, source);
+    const mod = await import(userModulePath);
+    if (typeof mod.default !== "function") {
+      throw new Error("Script workflow must export a default function");
+    }
+    const ctx = buildGuestWorkflowCtx({
+      runId: requiredEnv("SCRIPT_RUN_ID"),
+      agentId: requiredEnv("SCRIPT_RUN_AGENT_ID"),
+      args,
+      invokeTool: connection.client.invokeTool,
+    });
+    const output = await mod.default(args, ctx);
+    await Bun.write(resultFile, stringifyResult(output));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(error instanceof Error ? error.stack || message : message);
+    await Bun.write(errorFile, JSON.stringify({ message })).catch(() => {});
+    process.exitCode = 1;
+  } finally {
+    connection.client.disconnect(new Error("Workflow capability guest completed"));
+    // Nothing remains in flight after the user function settles. Destroy the
+    // local transport synchronously so Bun's --no-orphans shutdown does not
+    // race a half-closed Unix socket and abort the otherwise clean guest.
+    connection.socket.destroy();
   }
-  const built = buildWorkflowCtx({ runId, agentId, apiKey, baseUrl, args });
-  drainInFlightSteps = built.drainInFlightSteps;
-  const output = await mod.default(args, built.ctx);
-  await postStatus(runId, baseUrl, agentId, apiKey, {
-    status: "completed",
-    output: output ?? null,
-  });
-  process.exit(0);
-} catch (err) {
-  // A rejection here can happen while Promise.all siblings of the failing
-  // step are still in flight (Promise.all rejects as soon as ANY member
-  // does, without waiting for the rest). Give them a bounded chance to
-  // finish their own journal write before this process exits — otherwise
-  // their work is silently orphaned even though the underlying agent task
-  // may have already completed server-side.
-  await drainInFlightSteps?.().catch(() => {});
-  console.error(err instanceof Error ? err.stack || err.message : String(err));
-  await postStatus(runId, baseUrl, agentId, apiKey, {
-    status: "failed",
-    error: err instanceof Error ? err.message : String(err),
-  });
-  process.exit(1);
-} finally {
-  clearInterval(heartbeat);
 }
+
+await run();

@@ -63,30 +63,6 @@ function buildCtxWithBaseline(runId: string) {
   });
 }
 
-// Env vars the harness passes to a real subprocess (see executor.ts) so
-// ctx.step.agentTask can compute the shared run-level wall-clock deadline.
-// Wraps the whole async body — runWallDeadlineMs() reads process.env fresh
-// on every call, so the env must stay set for the full duration, not just
-// while building ctx.
-async function withRunWallEnv<T>(
-  startedAt: string,
-  maxWallMs: number,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const savedStarted = process.env.SCRIPT_RUN_STARTED_AT;
-  const savedMaxWall = process.env.SCRIPT_RUN_MAX_WALL_MS;
-  process.env.SCRIPT_RUN_STARTED_AT = startedAt;
-  process.env.SCRIPT_RUN_MAX_WALL_MS = String(maxWallMs);
-  try {
-    return await fn();
-  } finally {
-    if (savedStarted === undefined) delete process.env.SCRIPT_RUN_STARTED_AT;
-    else process.env.SCRIPT_RUN_STARTED_AT = savedStarted;
-    if (savedMaxWall === undefined) delete process.env.SCRIPT_RUN_MAX_WALL_MS;
-    else process.env.SCRIPT_RUN_MAX_WALL_MS = savedMaxWall;
-  }
-}
-
 function sleepReal(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -389,13 +365,19 @@ describe("workflow-ctx: ctx.step.agentTask under Promise.all concurrency", () =>
       // Run "started" 950ms ago with a 1000ms total wall budget — ~50ms of
       // shared budget left, no matter how many steps are racing for it.
       const startedAt = new Date(Date.now() - 950).toISOString();
-      const settled = await withRunWallEnv(startedAt, 1000, async () => {
-        const { ctx } = buildCtxWithBaseline("run-wall");
-        return Promise.allSettled([
-          ctx.step.agentTask("wall-a", { task: "a", timeoutMs: 60 * 60 * 1000 }), // huge per-step budget
-          ctx.step.agentTask("wall-b", { task: "b" }), // default 2h per-step budget
-        ]);
+      const { ctx } = buildWorkflowCtx({
+        runId: "run-wall",
+        agentId: "agent-1",
+        apiKey: "key",
+        baseUrl: "http://localhost:9999",
+        args: {},
+        runStartedAt: startedAt,
+        runMaxWallMs: 1000,
       });
+      const settled = await Promise.allSettled([
+        ctx.step.agentTask("wall-a", { task: "a", timeoutMs: 60 * 60 * 1000 }), // huge per-step budget
+        ctx.step.agentTask("wall-b", { task: "b" }), // default 2h per-step budget
+      ]);
 
       // Both clamp to the SAME shared run deadline (~50ms out), not their
       // own (much larger) per-step timeoutMs, and not that budget /2.
