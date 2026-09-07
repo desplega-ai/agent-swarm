@@ -12,6 +12,104 @@ export async function registerLead(ctx: ScenarioContext, name: string): Promise<
   return leadId;
 }
 
+export async function registerWorker(ctx: ScenarioContext, name: string): Promise<string> {
+  const response = await ctx.api("POST", "/api/agents", {
+    body: { name, role: "worker", status: "online" },
+  });
+  expectStatus(response, [201], `register ${name}`);
+  const workerId = asRecord(response.json).id;
+  expect(typeof workerId === "string", `Registered agent ${name} has no id`);
+  return workerId;
+}
+
+/**
+ * Flips the delegated-delivery flags on for the rest of this run (plan
+ * section 3.4): `SLACK_RENDER_V2` + `SLACK_RENDER_V2_DELEGATION` via the
+ * config API, the same path an operator uses from the dashboard, and a short
+ * settle window so a closure's deferred conclusion lands well inside a
+ * scenario's poll timeouts. Global config, not per-scenario — call this only
+ * from scenarios that run last, after any legacy-renderer coverage.
+ */
+export async function enableSlackDelegation(ctx: ScenarioContext): Promise<void> {
+  for (const [key, value] of [
+    ["SLACK_RENDER_V2", "true"],
+    ["SLACK_RENDER_V2_DELEGATION", "true"],
+    ["SLACK_CONCLUSION_SETTLE_SEC", "2"],
+  ] as const) {
+    expectStatus(
+      await ctx.api("PUT", "/api/config", {
+        body: { scope: "global", scopeId: null, key, value, isSecret: false },
+      }),
+      [200],
+      `enable ${key} for delegation e2e`,
+    );
+  }
+  // The config auto-reload that flips process.env is debounced ~250ms;
+  // confirm the watcher actually saw it (recorded as delegation_activated_at)
+  // before any scenario creates the tasks that depend on it.
+  const activated = await pollUntil(() => {
+    const row = ctx.db.get<{ delegation_activated_at: string | null }>(
+      "SELECT delegation_activated_at FROM slack_render_v2_state WHERE id = 1",
+    );
+    return row?.delegation_activated_at != null;
+  }, 15_000);
+  expect(activated, "Slack render v2 delegation never activated within 15 seconds");
+}
+
+/**
+ * A non-lead agent finishing a task auto-spawns a "worker task follow-up"
+ * review task for the lead (`createWorkerTaskFollowUp` in
+ * `src/tasks/worker-follow-up.ts`) — unrelated to Slack delegation, it fires
+ * for any worker completion. That follow-up inherits the child's Slack
+ * thread and is itself a member of the ask's closure (`buildAskClosure` only
+ * excludes `source === "slack"` members), so it must also go terminal before
+ * the ask's conclusion can settle. Call this after finishing a delegated
+ * child so the closure isn't left open forever.
+ */
+export async function settleWorkerFollowUp(
+  ctx: ScenarioContext,
+  leadId: string,
+  childTaskId: string,
+): Promise<void> {
+  let followUpId: string | undefined;
+  const found = await pollUntil(async () => {
+    const response = await ctx.api("GET", `/api/tasks?agentId=${leadId}&fields=full&limit=50`);
+    expectStatus(response, [200], `list lead tasks while resolving follow-up for ${childTaskId}`);
+    const tasks = asRecord(response.json).tasks;
+    expect(Array.isArray(tasks), `Task list for lead ${leadId} has no tasks array`);
+    const match = tasks
+      .map(asRecord)
+      .find((row) => row.parentTaskId === childTaskId && row.taskType === "follow-up");
+    if (match) followUpId = String(match.id);
+    return followUpId !== undefined;
+  }, 15_000);
+  expect(
+    found && followUpId,
+    `No worker-completion follow-up for child ${childTaskId} within 15 seconds`,
+  );
+  await claim(ctx, leadId, followUpId as string);
+  await finish(ctx, leadId, followUpId as string, {
+    status: "completed",
+    output: "Reviewed the delegated result — looks good.",
+  });
+}
+
+/** Creates a delegated child task under `parentTaskId`, inheriting the parent's Slack thread. */
+export async function createChildTask(
+  ctx: ScenarioContext,
+  parentTaskId: string,
+  workerId: string,
+  task: string,
+): Promise<string> {
+  const response = await ctx.api("POST", "/api/tasks", {
+    body: { task, agentId: workerId, parentTaskId, source: "api" },
+  });
+  expectStatus(response, [201], `create delegated child under ${parentTaskId}`);
+  const childId = asRecord(response.json).id;
+  expect(typeof childId === "string", `Delegated child under ${parentTaskId} has no id`);
+  return String(childId);
+}
+
 export async function ask(
   ctx: ScenarioContext,
   text: string,
