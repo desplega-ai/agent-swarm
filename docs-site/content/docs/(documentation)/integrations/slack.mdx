@@ -130,6 +130,17 @@ Terminal task output is automatically delivered through the thread's outcome car
 
 Tree, outcome, and explicit agent message timestamps are persisted in `slack_messages`, so the renderer can reuse messages after a restart.
 
+### Delegated-Result Delivery and the Deferred Conclusion Card
+
+Set `SLACK_RENDER_V2_DELEGATION=true` (requires `SLACK_RENDER_V2=true`) to opt in to a lifecycle built around each ask's **closure**: the ask task plus every delegated task, transitive child, follow-up task, resume task, and reroute-decision task reachable from it in the same thread.
+
+- **Tree glyphs.** Each task line shows one state glyph — queued 🕒, blocked ⛔, starting ▶️, running 🔄, stalled ⚠️, paused ⏸️, done ✅, failed ❌, cancelled 🚫, superseded ↪️ — recomputed on every tick. The thread header summarizes the closure as working, stalled, done, done with failures, or concluded with unfinished work. Glyphs ship under `SLACK_RENDER_V2` alone; they do not require the delegation flag.
+- **Child result cards.** A terminal delegated task (`completed` or `failed`, not a `follow-up` or `reroute-decision` control-plane task) gets its own card in the thread once its output has nowhere else to go — capped at 3 new cards per thread per tick and 10 per ask closure. A child that already delivered its answer with `slack-reply` does not get a duplicate card; children past the cap appear as a one-line digest in the conclusion card instead.
+- **Deferred conclusion card.** The ask's own outcome card does not post while its closure is open. It posts once every closure member is terminal and the closure has been quiet for `SLACK_CONCLUSION_SETTLE_SEC` seconds, or once the closure has been idle for `SLACK_CONCLUSION_TIMEOUT_MIN` minutes, whichever comes first. A settled conclusion lists each child's result under a Results section; a timed-out conclusion is marked "Concluded with unfinished work" and links every still-open member. Cards remain immutable once finalized — the deferral changes only when the card is written, not the immutability contract.
+- **Reaction gate.** The trigger message's checkmark reaction now flips only when the ask's conclusion card finalizes, not when the ask's own task completes. Outcome mapping: any failed closure member → `x`; a timed-out closure → `warning`; otherwise → `white_check_mark`. A closure where every member is cancelled and none failed still resolves to `white_check_mark` — a cancellation is not a failure.
+- **In-flight threads.** The first tick with the flag on stamps `delegation_activated_at`. An ask created before that stamp keeps the pre-delegation behavior: its own outcome card, no child cards, and the reaction gate keyed to its own completion. An ask created after the stamp gets the new lifecycle. One thread can carry both kinds of ask at once.
+- **Rollback.** Set `SLACK_RENDER_V2_DELEGATION=false`. The next tick reverts every closure to the pre-delegation gate; any ask that was deferred while the flag was on finalizes immediately under the old rule, so no thread is left stranded.
+
 ### Opt In to the Renderer
 
 Leave `SLACK_RENDER_V2` unset or set it to `false` to use the default legacy per-task assignment/progress/completion renderer. Set `SLACK_RENDER_V2=true` to preview the new task tree and streamed outcome cards without changing the deployment.
