@@ -170,8 +170,10 @@ describe("native-only executor behavior", () => {
   // top-level variant below took 8653ms, and PR #1371 measured both variants at
   // ~5.29s after the 5s watchdog fired and its 250ms process-group escalation
   // replaced the pending self-abort with SIGKILL (137). The explicit 30s test
-  // timeout below allows this larger script budget. It is scheduling headroom
-  // only; every exit-code and classification assertion still has to hold.
+  // timeout below allows this larger script budget. This is scheduling
+  // headroom so the test measures self-abort classification instead of racing
+  // framework teardown; every exit-code and classification assertion remains
+  // strict.
   const SANDBOX_SPAWN_TIMEOUT_MS = 30_000;
   const SANDBOX_SCRIPT_WALL_CLOCK_MS = 20_000;
 

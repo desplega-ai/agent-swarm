@@ -42,14 +42,15 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
  *
  * 134 is checked before `timedOut`/`killed` below, and wins unconditionally.
  * Both of our own termination paths (the wall-clock watchdog and an external
- * `input.signal` abort) start process-group teardown with SIGTERM (exit 143),
- * never SIGABRT (134, signal 6). So an observed 134 can only be the process's
- * own abort; it did not come from us. Under CI load the watchdog can still
- * fire in the same window as a genuine self-abort (`setTimeout` is a
- * macrotask racing `proc.exited`'s
- * resolution), which flips `timedOut` true even though the process had
- * already exited on its own — trusting that flag over the exit code
- * misclassifies a real `capacity_exceeded`/`eval_error` as `timeout`.
+ * `input.signal` abort) start process-group teardown with SIGTERM (exit 143)
+ * and escalate survivors to SIGKILL (exit 137) after a short grace period.
+ * Neither path can produce SIGABRT (134, signal 6), so an observed 134 can
+ * only be the process's own abort. Under load, teardown can race a self-abort
+ * that has started but whose exit has not been recorded yet; if SIGKILL wins,
+ * Bun observes 137 and a watchdog-triggered run is classified `timeout`
+ * instead of `eval_error`. Once Bun records 134, this branch preserves it
+ * even if the watchdog callback also flips `timedOut` before `proc.exited`
+ * resolves.
  */
 const SANDBOX_CAPACITY_EXIT_CODE = 134;
 
