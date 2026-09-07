@@ -48,6 +48,7 @@ const { AgentRuntimeSettings, configuredAcpCommand, configuredAcpInvocation } = 
 );
 const { HarnessCell } = await import("./harness-cell");
 const { HarnessIcon } = await import("./harness-icon");
+const { modelGroupsForAcpTarget } = await import("../../lib/agent-runtime-models");
 
 describe("AgentRuntimeSettings", () => {
   const acpAgent = {
@@ -96,6 +97,17 @@ describe("AgentRuntimeSettings", () => {
     expect(html).toContain("opencode/big-pickle");
     expect(html).not.toContain(">Command<");
     expect(html).not.toContain("Environment keys");
+  });
+
+  test("offers models.dev suggestions for OpenCode but not unknown custom targets", () => {
+    const opencodeGroups = modelGroupsForAcpTarget("opencode");
+
+    expect(
+      opencodeGroups
+        .flatMap((group) => group.models)
+        .some((model) => model.id === "opencode/big-pickle"),
+    ).toBe(true);
+    expect(modelGroupsForAcpTarget("custom")).toEqual([]);
   });
 
   test("hydrates the legacy custom command alias", () => {

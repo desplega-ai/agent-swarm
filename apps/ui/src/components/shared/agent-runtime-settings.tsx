@@ -57,6 +57,7 @@ import {
   type LocalHarnessProvider,
   type ModelGroup,
   type ModelOption,
+  modelGroupsForAcpTarget,
   modelGroupsForHarness,
   pickDefaultModelForHarness,
 } from "@/lib/agent-runtime-models";
@@ -209,6 +210,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     [harness, configs, envPresenceQuery.data, liveBedrockStatus, liveCatalog],
   );
   const modelOption = findModelOption(model, groups);
+  const acpModelGroups = useMemo(
+    () => modelGroupsForAcpTarget(acpTarget, liveCatalog),
+    [acpTarget, liveCatalog],
+  );
+  const acpModelOption = findModelOption(model, acpModelGroups);
   const latestModel = agent.credStatus?.latestModel ?? null;
 
   // Re-syncs the editable fields from PERSISTED settings only when those
@@ -402,16 +408,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="acp-model">Model</Label>
-              <Input
-                id="acp-model"
+              <Label>Model</Label>
+              <ModelCombobox
                 value={model}
-                onChange={(event) => setModel(event.target.value)}
+                onChange={setModel}
+                groups={acpModelGroups}
+                selected={acpModelOption}
                 placeholder="Use target default"
+                creatable
               />
               <p className="text-xs text-muted-foreground">
-                Applied through ACP when the target advertises a model option, with the preset
-                fallback otherwise.
+                Choose a known model or enter any model ID. Applied through ACP when the target
+                advertises a model option, with the preset fallback otherwise.
               </p>
             </div>
           </div>
@@ -808,13 +816,39 @@ interface ModelComboboxProps {
   onChange: (next: string) => void;
   groups: ModelGroup[];
   selected: ModelOption | null;
+  placeholder?: string;
+  creatable?: boolean;
 }
 
-function ModelCombobox({ value, onChange, groups, selected }: ModelComboboxProps) {
+function ModelCombobox({
+  value,
+  onChange,
+  groups,
+  selected,
+  placeholder = "Select model",
+  creatable = false,
+}: ModelComboboxProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const customValue = search.trim();
+  const exactMatch = groups.some((group) =>
+    group.models.some((option) => option.id === customValue),
+  );
+
+  function choose(nextValue: string) {
+    onChange(nextValue);
+    setSearch("");
+    setOpen(false);
+  }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setSearch("");
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           variant="outline"
@@ -824,7 +858,7 @@ function ModelCombobox({ value, onChange, groups, selected }: ModelComboboxProps
         >
           <span className="flex min-w-0 flex-1 items-center gap-2">
             {selected ? <ProviderIcon provider={selected.providerId} className="h-4 w-4" /> : null}
-            <span className="truncate">{selected ? selected.label : value || "Select model"}</span>
+            <span className="truncate">{selected ? selected.label : value || placeholder}</span>
           </span>
           <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -839,9 +873,24 @@ function ModelCombobox({ value, onChange, groups, selected }: ModelComboboxProps
             return tokens.every((t) => haystack.includes(t)) ? 1 : 0;
           }}
         >
-          <CommandInput placeholder="Search models..." />
+          <CommandInput
+            value={search}
+            onValueChange={setSearch}
+            placeholder={creatable ? "Search or enter a model ID..." : "Search models..."}
+          />
           <CommandList className="max-h-72">
-            <CommandEmpty>No models match.</CommandEmpty>
+            <CommandEmpty>
+              {creatable ? "Type a model ID to use it." : "No models match."}
+            </CommandEmpty>
+            {creatable && customValue && !exactMatch ? (
+              <CommandGroup heading="Custom">
+                <CommandItem value={customValue} onSelect={() => choose(customValue)}>
+                  <span className="truncate">
+                    Use <span className="font-mono">{customValue}</span>
+                  </span>
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
             {groups.map((group) => (
               <CommandGroup
                 key={group.provider}
@@ -864,10 +913,7 @@ function ModelCombobox({ value, onChange, groups, selected }: ModelComboboxProps
                     key={option.id}
                     value={`${option.label} ${option.id} ${option.provider}`}
                     disabled={!group.enabled}
-                    onSelect={() => {
-                      onChange(option.id);
-                      setOpen(false);
-                    }}
+                    onSelect={() => choose(option.id)}
                   >
                     <Check
                       className={cn("h-4 w-4", value === option.id ? "opacity-100" : "opacity-0")}

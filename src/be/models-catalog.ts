@@ -5,8 +5,8 @@ import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./
  *
  * The pricing-refresh loop (`src/be/pricing-refresh.ts`) already fetches the
  * full models.dev payload at boot and every 12h. This module keeps a slim
- * in-memory projection of that payload — only the providers the four local
- * harnesses' pickers can reach, and only the fields the picker reads — and
+ * in-memory projection of that payload — only the providers the local
+ * harnesses and known ACP targets can reach, and only the fields the picker reads — and
  * serves it through `GET /api/models-catalog` (`src/http/models-catalog.ts`).
  *
  * Until the first successful fetch (or if models.dev is unreachable), the
@@ -15,12 +15,13 @@ import { loadModelsDevCache, type ModelsDevCache, type ModelsDevModel } from "./
  * same snapshot as its own fallback while the request is in flight.
  */
 
-/** Mirrors `SNAPSHOT_ORDER` + `BEDROCK_SNAPSHOT_ID` in `apps/ui/src/lib/agent-runtime-models.ts`. */
+/** Mirrors the provider groups used by the direct harness and ACP model pickers. */
 export const CATALOG_PROVIDER_IDS = [
   "openrouter",
   "anthropic",
   "openai",
   "amazon-bedrock",
+  "opencode",
 ] as const;
 
 export type CatalogProviderId = (typeof CATALOG_PROVIDER_IDS)[number];
