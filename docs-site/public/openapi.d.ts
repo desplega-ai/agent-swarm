@@ -2343,6 +2343,17 @@ export interface paths {
                         allow_custom_model?: boolean;
                         /** @enum {string|null} */
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+                        acp?: {
+                            /** @enum {string} */
+                            target: "opencode" | "custom";
+                            command?: string | null;
+                            args?: string[];
+                            envKeys?: string[];
+                            modelEnvKey?: string | null;
+                            options?: {
+                                [key: string]: string | boolean;
+                            };
+                        };
                     };
                 };
             };
@@ -2829,6 +2840,7 @@ export interface paths {
                         missing?: string[] | null;
                         cred_status?: components["schemas"]["AgentCredStatus"] | null;
                         latest_model?: components["schemas"]["AgentLatestModel"];
+                        acp?: components["schemas"]["AgentAcpStatus"];
                     };
                 };
             };
@@ -19859,6 +19871,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
         AgentCredStatusLiveTest: {
@@ -19895,6 +19908,42 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentAcpStatus: {
+            /** @enum {string} */
+            target: "opencode" | "custom";
+            configOptions: ({
+                /** @enum {string} */
+                type: "select";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: string;
+                options: ({
+                    value: string;
+                    name: string;
+                    description?: string | null;
+                } | {
+                    group: string;
+                    name: string;
+                    options: {
+                        value: string;
+                        name: string;
+                        description?: string | null;
+                    }[];
+                })[];
+            } | {
+                /** @enum {string} */
+                type: "boolean";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: boolean;
+            })[];
+            reportedAt: number;
         } | null;
         Agent: {
             id: string;

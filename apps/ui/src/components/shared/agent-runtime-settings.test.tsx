@@ -26,6 +26,7 @@ mock.module("@/api/types", () => import("../../api/types"));
 mock.module("@/components/shared/harness-icon", () => import("./harness-icon"));
 mock.module("@/components/shared/provider-icon", () => import("./provider-icon"));
 mock.module("@/components/shared/reasoning-effort-icon", () => import("./reasoning-effort-icon"));
+mock.module("@/components/ui/alert-callout", () => import("../ui/alert-callout"));
 mock.module("@/components/ui/button", () => import("../ui/button"));
 mock.module("@/components/ui/command", () => import("../ui/command"));
 mock.module("@/components/ui/dialog", () => import("../ui/dialog"));
@@ -42,7 +43,9 @@ mock.module("@/lib/cost-format", () => import("../../lib/cost-format"));
 mock.module("@/lib/utils", () => import("../../lib/utils"));
 
 const { TooltipProvider } = await import("../ui/tooltip");
-const { AgentRuntimeSettings, configuredAcpCommand } = await import("./agent-runtime-settings");
+const { AgentRuntimeSettings, configuredAcpCommand, configuredAcpInvocation } = await import(
+  "./agent-runtime-settings"
+);
 const { HarnessCell } = await import("./harness-cell");
 const { HarnessIcon } = await import("./harness-icon");
 
@@ -99,6 +102,22 @@ describe("AgentRuntimeSettings", () => {
     expect(configuredAcpCommand([{ key: "ACP_COMMAND", value: "legacy-acp-agent" }])).toBe(
       "legacy-acp-agent",
     );
+  });
+
+  test("normalizes a legacy inline command so saving keeps its arguments", () => {
+    expect(configuredAcpInvocation([{ key: "ACP_COMMAND", value: "opencode acp" }])).toEqual({
+      command: "opencode",
+      args: ["acp"],
+    });
+  });
+
+  test("normalizes whitespace legacy arguments using the runtime parser semantics", () => {
+    expect(
+      configuredAcpInvocation([
+        { key: "ACP_TARGET_COMMAND", value: "custom-agent" },
+        { key: "ACP_TARGET_ARGS", value: "--acp --verbose" },
+      ]),
+    ).toEqual({ command: "custom-agent", args: ["--acp", "--verbose"] });
   });
 
   test("distinguishes an empty advertisement from no ACP report", () => {

@@ -23,6 +23,7 @@ import {
   REASONING_EFFORT_LABEL,
   ReasoningEffortIcon,
 } from "@/components/shared/reasoning-effort-icon";
+import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -102,13 +103,29 @@ export function configuredAcpCommand(
 function configuredStringList(
   configs: { key: string; value: string }[] | undefined,
   key: string,
+  fallbackSeparator: RegExp,
 ): string[] {
+  const raw = configuredValue(configs, key).trim();
+  if (!raw) return [];
   try {
-    const value = JSON.parse(configuredValue(configs, key));
-    return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
+    const value = JSON.parse(raw);
+    if (Array.isArray(value) && value.every((entry) => typeof entry === "string")) return value;
   } catch {
-    return [];
+    // Fall through to the runtime-compatible legacy representation.
   }
+  return raw.split(fallbackSeparator).filter(Boolean);
+}
+
+export function configuredAcpInvocation(configs: { key: string; value: string }[] | undefined): {
+  command: string;
+  args: string[];
+} {
+  const command = configuredAcpCommand(configs).trim();
+  const args = configuredStringList(configs, "ACP_TARGET_ARGS", /\s+/);
+  if (!command || args.length > 0) return { command, args };
+
+  const [executable = "", ...inlineArgs] = command.split(/\s+/).filter(Boolean);
+  return { command: executable, args: inlineArgs };
 }
 
 function lines(value: string): string[] {
@@ -156,14 +173,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const [acpTarget, setAcpTarget] = useState<AcpTarget>(
     configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"),
   );
-  const [acpCommand, setAcpCommand] = useState(() =>
-    configuredValue(configs, "ACP_TARGET_COMMAND"),
-  );
-  const [acpArgs, setAcpArgs] = useState(() =>
-    configuredStringList(configs, "ACP_TARGET_ARGS").join("\n"),
-  );
+  const [acpCommand, setAcpCommand] = useState(() => configuredAcpInvocation(configs).command);
+  const [acpArgs, setAcpArgs] = useState(() => configuredAcpInvocation(configs).args.join("\n"));
   const [acpEnvKeys, setAcpEnvKeys] = useState(() =>
-    configuredStringList(configs, "ACP_TARGET_ENV_KEYS").join("\n"),
+    configuredStringList(configs, "ACP_TARGET_ENV_KEYS", /\s*,\s*/).join("\n"),
   );
   const [acpModelEnvKey, setAcpModelEnvKey] = useState(() =>
     configuredValue(configs, "ACP_MODEL_ENV_KEY"),
@@ -232,9 +245,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
     setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
-    setAcpCommand(configuredAcpCommand(configs));
-    setAcpArgs(configuredStringList(configs, "ACP_TARGET_ARGS").join("\n"));
-    setAcpEnvKeys(configuredStringList(configs, "ACP_TARGET_ENV_KEYS").join("\n"));
+    const invocation = configuredAcpInvocation(configs);
+    setAcpCommand(invocation.command);
+    setAcpArgs(invocation.args.join("\n"));
+    setAcpEnvKeys(configuredStringList(configs, "ACP_TARGET_ENV_KEYS", /\s*,\s*/).join("\n"));
     setAcpModelEnvKey(configuredValue(configs, "ACP_MODEL_ENV_KEY"));
   }, [syncKey, configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
 
@@ -364,13 +378,12 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       {acpSelected ? (
         <div className="space-y-3 rounded-md border border-border p-3">
           {!acpGate.supported ? (
-            <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
-              <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-info-strong" />
+            <AlertCallout tone="info" icon={ArrowUpCircle}>
               <p className="text-muted-foreground">
                 ACP target configuration requires API{" "}
                 <span className="font-mono">≥ {ACP_RUNTIME_EDIT_MIN_VERSION}</span>.
               </p>
-            </div>
+            </AlertCallout>
           ) : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">

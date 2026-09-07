@@ -545,6 +545,9 @@
           },
           "bedrock": {
             "$ref": "#/components/schemas/AgentBedrockStatus"
+          },
+          "acp": {
+            "$ref": "#/components/schemas/AgentAcpStatus"
           }
         },
         "required": [
@@ -690,6 +693,182 @@
           "region",
           "probedAt",
           "ready"
+        ]
+      },
+      "AgentAcpStatus": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "opencode",
+              "custom"
+            ]
+          },
+          "configOptions": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "select"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "name"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "group": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "name"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "group",
+                              "name",
+                              "options"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "boolean"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue"
+                  ]
+                }
+              ]
+            }
+          },
+          "reportedAt": {
+            "type": "number"
+          }
+        },
+        "default": null,
+        "required": [
+          "target",
+          "configOptions",
+          "reportedAt"
         ]
       },
       "Agent": {
@@ -9053,6 +9232,61 @@
                       "max",
                       null
                     ]
+                  },
+                  "acp": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "opencode",
+                          "custom"
+                        ]
+                      },
+                      "command": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        }
+                      },
+                      "modelEnvKey": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "options": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "target"
+                    ]
                   }
                 },
                 "required": [
@@ -9802,6 +10036,9 @@
                   },
                   "latest_model": {
                     "$ref": "#/components/schemas/AgentLatestModel"
+                  },
+                  "acp": {
+                    "$ref": "#/components/schemas/AgentAcpStatus"
                   }
                 }
               }
