@@ -272,12 +272,12 @@ Push with `ANTHROPIC_API_KEY= git push -u origin ui-e2e-p2`, open the PR with th
 - [x] (runs stayed at 2, shard 1 attempt 2, results and artifacts counts unchanged) Retry keeps two `runs` rows and `attempt == 2` on shard 1
 - [x] Page resolved: `GET /api/pages/resolve?slug=ui-e2e` returns `authMode: "authed"` (that route carries no `version`; `GET /api/pages/{id}/versions` showed 2 snapshots, so the page was regenerated)
 - [x] Root gates before push: `bun run lint && bun run tsc:check && bun run e2e:ui:tsc && bun run test:root -- src/tests/ui-e2e-ingest-payload.test.ts src/tests/ui-e2e-publish-plan.test.ts && bun run e2e`
-- [ ] PR open and workflow complete: `gh pr create` then `gh run list --workflow ui-e2e.yml --branch ui-e2e-p2 --limit 1` shows `completed`
+- [x] (PR #1373, run 34144525684: test (1), test (2), report all success) PR open and workflow complete: `gh pr create` then `gh run list --workflow ui-e2e.yml --branch ui-e2e-p2 --limit 1` shows `completed`
 
 #### Automated QA:
-- [ ] CI publish step log shows `Published N artifacts` with N > 0 and `agent-fs --org c5c27280-f28a-48e6-b1b4-1ae23bef7844 --drive a8dc7a37-9fab-4ab6-9e55-67a5d5e74d35 tree e2e/desplega-ai__agent-swarm/pr-<n>/<sha> --json` lists `1/` and `2/` with `summary.json` in each
-- [ ] CI ingest step log shows the skip notice (secrets absent) and the job stays green; `gh run download <id> -n ui-e2e-ingest-payloads` yields `shard-1.json` and `shard-2.json` with `run.trigger == "pr"` and `run.prNumber == <n>`
-- [ ] Sticky comment still renders images (`gh pr view <n> --json comments --jq '.comments[] | select(.body | startswith("<!-- ui-e2e -->")) | .body' | grep -c '!\['` > 0)
+- [x] (`Published 57 artifacts, 24 images.`; tree shows `pr-1373/78d4ad89…/1/` with 54 files and `/2/` with 3 files, `summary.json` in each) CI publish step log shows `Published N artifacts` with N > 0 and `agent-fs --org c5c27280-f28a-48e6-b1b4-1ae23bef7844 --drive a8dc7a37-9fab-4ab6-9e55-67a5d5e74d35 tree e2e/desplega-ai__agent-swarm/pr-<n>/<sha> --json` lists `1/` and `2/` with `summary.json` in each
+- [x] (`ingest skipped: UI_E2E_INGEST_URL or UI_E2E_INGEST_BEARER is not set`, job green; payloads: shard 1 trigger pr, prNumber 1373, 53 results, 55 artifacts; shard 2 2 results, 4 artifacts. Found and fixed: `run.ciUrl` lacked the repository segment) CI ingest step log shows the skip notice (secrets absent) and the job stays green; `gh run download <id> -n ui-e2e-ingest-payloads` yields `shard-1.json` and `shard-2.json` with `run.trigger == "pr"` and `run.prNumber == <n>`
+- [x] (one marker comment, 24 image links) Sticky comment still renders images (`gh pr view <n> --json comments --jq '.comments[] | select(.body | startswith("<!-- ui-e2e -->")) | .body' | grep -c '!\['` > 0)
 - [x] `agent-browser` screenshot of the tracker page shows the `pr-<n>` section with two shard rows and the incident section from step 7 (actual rendering: one row per run group with a `2/2` shards cell, `/tmp/ui-e2e-p2/e2e/tracker-page.png`; the incident is visible in `/tmp/ui-e2e-p2/e2e/tracker-page-incident.png`, captured with the incident re-opened because step 7 closes it before step 9; `authed` pages accept only the `page_session` cookie from `POST /api/pages/{id}/launch`)
 
 #### Manual Verification:

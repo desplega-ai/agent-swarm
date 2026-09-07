@@ -62,17 +62,18 @@ function readArtifacts(path: string): ArtifactRecord[] {
 }
 
 function runContext(): RunContext {
+  const repo = process.env.GITHUB_REPOSITORY ?? "";
   const prNumber = process.env.UI_E2E_PR_NUMBER;
   const serverUrl = process.env.GITHUB_SERVER_URL;
   const runId = process.env.GITHUB_RUN_ID;
   return {
-    repo: process.env.GITHUB_REPOSITORY ?? "",
+    repo,
     ref: process.env.UI_E2E_REF ?? "",
     sha: process.env.UI_E2E_SHA ?? "",
     prNumber: prNumber ? Number(prNumber) : null,
     trigger: (process.env.UI_E2E_TRIGGER ?? "") as RunContext["trigger"],
     runner: "ci",
-    ...(serverUrl && runId ? { ciUrl: `${serverUrl}/actions/runs/${runId}` } : {}),
+    ...(serverUrl && runId ? { ciUrl: `${serverUrl}/${repo}/actions/runs/${runId}` } : {}),
   };
 }
 
