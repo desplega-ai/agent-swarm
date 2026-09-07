@@ -345,11 +345,11 @@ For full provider design rationale (why we don't `agents.create` at runtime, the
 
 `acp` drives any agent that speaks the [Agent Client Protocol](https://agentclientprotocol.com) — an open, editor-agnostic JSON-RPC protocol for driving coding agents over stdio. If your agent already has an ACP server mode (or you build one), you can run it as a swarm worker with no adapter code of your own. See the protocol's own [Get started → Agents](https://agentclientprotocol.com/get-started/agents) guide for what it takes for an agent to speak ACP.
 
-Scope today is deliberately minimal: **one target** (`custom`, driven entirely by env vars below), no named target profiles, no Docker image wiring beyond the generic worker image, no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
+The dashboard offers a curated **OpenCode** preset and a free-form **Custom** target. ACP has no live steering (see the steering table in [Adding a Harness Provider](/docs/guides/harness-providers#live-task-steering) — ACP exposes a single in-flight `session/prompt` and the only interrupt is a full `session/cancel`).
 
 ### How it works
 
-The `ACPAdapter` spawns `ACP_TARGET_COMMAND` as a subprocess and speaks ndjson ACP over its stdio using [`@agentclientprotocol/sdk`](https://www.npmjs.com/package/@agentclientprotocol/sdk)'s `ClientSideConnection`. On session start it calls `initialize` then `newSession`, passing the swarm MCP server (`{apiUrl}/mcp`, over HTTP with the standard `Authorization` / `X-Agent-ID` / `X-Source-Task-Id` headers) plus every other MCP server installed on the agent, translated into ACP's `McpServer` shape. Session notifications (`session/update`) are translated into the swarm's normalized `ProviderEvent` stream the same way every other provider's events are.
+The `ACPAdapter` spawns the selected target as a subprocess and speaks ndjson ACP over its stdio using [`@agentclientprotocol/sdk`](https://www.npmjs.com/package/@agentclientprotocol/sdk)'s `ClientSideConnection`. On session start it calls `initialize` then `newSession`, passing the swarm MCP server (`{apiUrl}/mcp`, over HTTP with the standard `Authorization` / `X-Agent-ID` / `X-Source-Task-Id` headers) plus every other MCP server installed on the agent, translated into ACP's `McpServer` shape. It reads the returned `configOptions` and applies configured knobs with `session/set_config_option` before the first prompt. Missing or rejected options use the preset fallback and do not fail the session. Sanitized advertised options are reported to the dashboard. Session notifications (`session/update`) are translated into the swarm's normalized `ProviderEvent` stream the same way every other provider's events are.
 
 Because the target process owns its own model credentials, `acp` reports `ready: true` with no required env vars from the swarm's credential-wait gate, and its cost rows settle at `costSource: "unpriced"` — the swarm has no visibility into what the target agent is billed for a turn.
 
@@ -358,11 +358,15 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
-| `ACP_TARGET_COMMAND` | Yes | — | Executable to spawn as the ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
+| `ACP_TARGET` | No | `custom` | `opencode` for the curated OpenCode preset, or `custom` for an operator-supplied command |
+| `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
+| `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
+| `ACP_MODEL_ENV_KEY` | No | — | Custom target environment variable that receives `MODEL_OVERRIDE` when the ACP `model` option is unavailable |
+| `ACP_CONFIG_OPTIONS` | No | `{}` | JSON object of additional string or boolean ACP option values to apply when advertised |
 | `ACP_SYSTEM_PROMPT_PATH` | No | — | Where to write the composed system prompt before spawning, for targets that read their prompt from a file instead of an ACP field. Relative paths resolve against the task `cwd`; absolute paths are used as-is |
 
-`ACP_TARGET` itself is reserved for future named target profiles; it must be unset or `"custom"` today — any other value fails session creation with `Unsupported ACP target`.
+Use the dashboard runtime editor when possible. It updates the harness, `MODEL_OVERRIDE`, and ACP fields atomically. Selecting ACP from another harness defaults to OpenCode; existing ACP agents with no `ACP_TARGET` stay custom for backward compatibility.
 
 ### Example targets
 
@@ -374,11 +378,11 @@ Any ACP-speaking agent works. A few starting points:
 
     ```bash
     HARNESS_PROVIDER=acp
-    ACP_TARGET_COMMAND=opencode
-    ACP_TARGET_ARGS=["acp"]
+    ACP_TARGET=opencode
+    MODEL_OVERRIDE=opencode/big-pickle
     ```
 
-    opencode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the usual provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.) — configure those the same way you would for [`HARNESS_PROVIDER=opencode`](#opencode).
+    The adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` option. It also merges the model into `OPENCODE_CONFIG_CONTENT` before spawn as a fallback. OpenCode resolves its own model credentials from `~/.local/share/opencode/auth.json` or the preset's allowlisted provider env vars (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, etc.).
   </Tab>
   <Tab value="claude-code-acp">
     Zed's [`claude-code-acp`](https://github.com/zed-industries/claude-code-acp) bridges Claude Code to ACP:

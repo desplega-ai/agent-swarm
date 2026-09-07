@@ -32,6 +32,49 @@ export type ModelTier = "smol" | "regular" | "smart" | "ultra";
 export const REASONING_EFFORT_LEVELS = ["off", "low", "medium", "high", "xhigh", "max"] as const;
 export type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number];
 
+export type AcpTarget = "opencode" | "custom";
+
+export interface AcpRuntimeConfig {
+  target: AcpTarget;
+  command?: string | null;
+  args?: string[];
+  envKeys?: string[];
+  modelEnvKey?: string | null;
+  options?: Record<string, string | boolean>;
+}
+
+export type AcpSessionConfigOption =
+  | {
+      type: "select";
+      id: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+      currentValue: string;
+      options: Array<
+        | { value: string; name: string; description?: string | null }
+        | {
+            group: string;
+            name: string;
+            options: Array<{ value: string; name: string; description?: string | null }>;
+          }
+      >;
+    }
+  | {
+      type: "boolean";
+      id: string;
+      name: string;
+      description?: string | null;
+      category?: string | null;
+      currentValue: boolean;
+    };
+
+export interface AgentAcpStatus {
+  target: AcpTarget;
+  configOptions: AcpSessionConfigOption[];
+  reportedAt: number;
+}
+
 /** Mirrors `AgentAvatarSchema` (backend `src/types.ts`). Discriminated union so
  * future avatar types (emoji, image, ...) can be added with no migration —
  * server validates shape only; the UI owns the icon catalog + fallback. */
@@ -133,6 +176,8 @@ export interface AgentCredStatus {
   reportKind?: "boot" | "post_task";
   /** Pi-mono Bedrock enumeration block. Null when not in Bedrock mode. */
   bedrock?: AgentBedrockStatus | null;
+  /** ACP session options most recently advertised by the target. */
+  acp?: AgentAcpStatus | null;
 }
 
 export interface AgentLatestModel {

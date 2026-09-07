@@ -6,9 +6,11 @@ import {
   PROTOCOL_VERSION,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
+  type SessionConfigOption,
   type SessionNotification,
 } from "@agentclientprotocol/sdk";
 import pkg from "../../package.json";
+import type { AcpSessionConfigOption } from "../types";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { translateAcpSessionNotification } from "./acp-swarm-events";
@@ -61,13 +63,14 @@ class ACPSession implements ProviderSession {
     private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">,
     private readonly config: ProviderSessionConfig,
     sessionId: string,
+    providerMeta?: Record<string, unknown>,
   ) {
     this.sessionId = sessionId;
     this.completionPromise = new Promise((resolve) => {
       this.completionResolve = resolve;
     });
     void this.consumeStderr();
-    this.emit({ type: "session_init", sessionId, provider: "acp" });
+    this.emit({ type: "session_init", sessionId, provider: "acp", providerMeta });
     void this.runPrompt();
   }
 
@@ -220,7 +223,7 @@ export class ACPAdapter implements ProviderAdapter {
       await connection.initialize({
         protocolVersion: PROTOCOL_VERSION,
         clientInfo: { name: "agent-swarm", version: pkg.version },
-        clientCapabilities: {},
+        clientCapabilities: { session: { configOptions: { boolean: {} } } },
       });
       const installedServers = await fetchInstalledMcpServers(
         config.apiUrl,
@@ -250,7 +253,16 @@ export class ACPAdapter implements ProviderAdapter {
           ...toAcpMcpServers(installedServers),
         ],
       });
-      session = new ACPSession(connection, proc, config, newSession.sessionId);
+      const configOptions = await applyConfiguredOptions(
+        connection,
+        newSession.sessionId,
+        newSession.configOptions ?? [],
+        target.configuredOptions(config),
+      );
+      session = new ACPSession(connection, proc, config, newSession.sessionId, {
+        target: target.target,
+        configOptions: sanitizeAcpConfigOptions(configOptions),
+      });
       return session;
     } catch (err) {
       proc.kill();
@@ -265,6 +277,85 @@ export class ACPAdapter implements ProviderAdapter {
   formatCommand(commandName: string): string {
     return `/${commandName}`;
   }
+}
+
+export async function applyConfiguredOptions(
+  connection: Pick<ClientSideConnection, "setSessionConfigOption">,
+  sessionId: string,
+  advertised: SessionConfigOption[],
+  configured: Record<string, string | boolean>,
+): Promise<SessionConfigOption[]> {
+  let current = advertised;
+  for (const [configId, value] of Object.entries(configured)) {
+    const option = current.find((entry) => entry.id === configId);
+    if (!option) {
+      console.warn(
+        `\x1b[33m[acp]\x1b[0m Config option "${configId}" was not advertised; using target fallback`,
+      );
+      continue;
+    }
+    if (option.type === "boolean" && typeof value !== "boolean") {
+      console.warn(
+        `\x1b[33m[acp]\x1b[0m Config option "${configId}" expects a boolean; using target fallback`,
+      );
+      continue;
+    }
+    if (option.type === "select" && typeof value !== "string") {
+      console.warn(
+        `\x1b[33m[acp]\x1b[0m Config option "${configId}" expects a string; using target fallback`,
+      );
+      continue;
+    }
+    try {
+      const response =
+        typeof value === "boolean"
+          ? await connection.setSessionConfigOption({
+              sessionId,
+              configId,
+              type: "boolean",
+              value,
+            })
+          : await connection.setSessionConfigOption({ sessionId, configId, value });
+      current = response.configOptions;
+    } catch (err) {
+      console.warn(
+        `\x1b[33m[acp]\x1b[0m Failed to set config option "${configId}"; using target fallback: ${scrubSecrets(formatError(err))}`,
+      );
+    }
+  }
+  return current;
+}
+
+export function sanitizeAcpConfigOptions(options: SessionConfigOption[]): AcpSessionConfigOption[] {
+  return options.map((option) => {
+    const common = {
+      id: option.id,
+      name: option.name,
+      description: option.description,
+      category: option.category,
+    };
+    if (option.type === "boolean") {
+      return { ...common, type: "boolean" as const, currentValue: option.currentValue };
+    }
+    return {
+      ...common,
+      type: "select" as const,
+      currentValue: option.currentValue,
+      options: option.options.map((entry) =>
+        "group" in entry
+          ? {
+              group: entry.group,
+              name: entry.name,
+              options: entry.options.map(({ value, name, description }) => ({
+                value,
+                name,
+                description,
+              })),
+            }
+          : { value: entry.value, name: entry.name, description: entry.description },
+      ),
+    };
+  });
 }
 
 /**

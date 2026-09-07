@@ -152,10 +152,9 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "devin",
     ultra: "devin",
   },
-  // A generic ACP target owns its own model selection — the swarm never sends
-  // one over the wire. Empty strings resolve to `{ source: "none" }`, while
-  // `MODEL_TIER_*` / `MODEL_TIER_MAP` env overrides still apply for targets
-  // that do accept a model.
+  // ACP has no portable tier-to-model mapping. Operators may set an explicit
+  // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
+  // config option with a target-specific startup fallback.
   acp: {
     smol: "",
     regular: "",
@@ -1170,6 +1169,50 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+const AcpSessionConfigSelectValueSchema = z.object({
+  value: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+});
+
+const AcpSessionConfigSelectGroupSchema = z.object({
+  group: z.string(),
+  name: z.string(),
+  options: z.array(AcpSessionConfigSelectValueSchema),
+});
+
+export const AcpSessionConfigOptionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("select"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.string(),
+    options: z.array(
+      z.union([AcpSessionConfigSelectValueSchema, AcpSessionConfigSelectGroupSchema]),
+    ),
+  }),
+  z.object({
+    type: z.literal("boolean"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.boolean(),
+  }),
+]);
+export type AcpSessionConfigOption = z.infer<typeof AcpSessionConfigOptionSchema>;
+
+export const AgentAcpStatusSchema = z
+  .object({
+    target: z.enum(["opencode", "custom"]),
+    configOptions: z.array(AcpSessionConfigOptionSchema),
+    reportedAt: z.number(),
+  })
+  .openapi("AgentAcpStatus");
+export type AgentAcpStatus = z.infer<typeof AgentAcpStatusSchema>;
+
 export const AgentCredStatusSchema = z
   .object({
     ready: z.boolean(),
@@ -1185,6 +1228,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** ACP options advertised by the most recently created session. */
+    acp: AgentAcpStatusSchema.nullable().default(null),
   })
   .openapi("AgentCredStatus");
 export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;

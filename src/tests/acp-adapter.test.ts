@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createProviderAdapter } from "../providers";
-import { ACPAdapter, toAcpMcpServers } from "../providers/acp-adapter";
+import {
+  ACPAdapter,
+  applyConfiguredOptions,
+  sanitizeAcpConfigOptions,
+  toAcpMcpServers,
+} from "../providers/acp-adapter";
 import { AcpTargetResolutionError, resolveAcpTarget } from "../providers/acp-targets";
 import type { ProviderEvent, ProviderSessionConfig } from "../providers/types";
 
@@ -72,6 +77,7 @@ import {
 class FakeAgent {
   constructor(connection) {
     this.connection = connection;
+    this.configured = {};
   }
 
   async initialize() {
@@ -82,10 +88,53 @@ class FakeAgent {
     if (!params.mcpServers.some((server) => server.name === "swarm" && server.type === "http")) {
       throw new Error("missing swarm MCP server");
     }
-    return { sessionId: "acp-session-1" };
+    return {
+      sessionId: "acp-session-1",
+      configOptions: [
+        {
+          type: "select",
+          id: "model",
+          name: "Model",
+          currentValue: "default-model",
+          options: [{ value: "fake-model", name: "Fake model" }],
+        },
+        {
+          type: "select",
+          id: "thought",
+          name: "Thought level",
+          currentValue: "low",
+          options: [{ value: "high", name: "High" }],
+        },
+      ],
+    };
+  }
+
+  async setSessionConfigOption(params) {
+    this.configured[params.configId] = params.value;
+    return {
+      configOptions: [
+        {
+          type: "select",
+          id: "model",
+          name: "Model",
+          currentValue: this.configured.model ?? "default-model",
+          options: [{ value: "fake-model", name: "Fake model" }],
+        },
+        {
+          type: "select",
+          id: "thought",
+          name: "Thought level",
+          currentValue: this.configured.thought ?? "low",
+          options: [{ value: "high", name: "High" }],
+        },
+      ],
+    };
   }
 
   async prompt(params) {
+    if (this.configured.model !== "fake-model" || this.configured.thought !== "high") {
+      throw new Error("config options were not applied before prompt");
+    }
     await this.connection.sessionUpdate({
       sessionId: params.sessionId,
       update: {
@@ -135,6 +184,7 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
           HOME: process.env.HOME ?? "",
           ACP_TARGET_COMMAND: "bun",
           ACP_TARGET_ARGS: JSON.stringify([agentPath]),
+          ACP_CONFIG_OPTIONS: JSON.stringify({ thought: "high" }),
         },
       }),
     );
@@ -150,10 +200,114 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       isError: false,
     });
     expect(events.some((event) => event.type === "session_init")).toBe(true);
+    expect(events.find((event) => event.type === "session_init")).toMatchObject({
+      providerMeta: {
+        target: "custom",
+        configOptions: [
+          { id: "model", currentValue: "fake-model" },
+          { id: "thought", currentValue: "high" },
+        ],
+      },
+    });
     expect(events.some((event) => event.type === "message" && event.content === "done")).toBe(true);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+  });
+
+  test("OpenCode preset supplies command, credentials, and a model environment fallback", () => {
+    const target = resolveAcpTarget(
+      baseConfig({
+        model: "opencode/model",
+        env: {
+          PATH: "/bin",
+          HOME: "/home/test",
+          ACP_TARGET: "opencode",
+          OPENAI_API_KEY: "test-key",
+          OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark" }),
+        },
+      }),
+    );
+
+    expect(target.command(baseConfig())).toEqual(["opencode", "acp"]);
+    expect(
+      target.env(
+        baseConfig({
+          model: "opencode/model",
+          env: {
+            PATH: "/bin",
+            HOME: "/home/test",
+            ACP_TARGET: "opencode",
+            OPENAI_API_KEY: "test-key",
+            OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark" }),
+          },
+        }),
+      ),
+    ).toMatchObject({
+      OPENAI_API_KEY: "test-key",
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "dark", model: "opencode/model" }),
+    });
+  });
+
+  test("custom target passes through only explicitly named env and supports a model env fallback", () => {
+    const config = baseConfig({
+      model: "custom-model",
+      env: {
+        PATH: "/bin",
+        HOME: "/home/test",
+        ACP_TARGET_COMMAND: "agent",
+        ACP_TARGET_ENV_KEYS: JSON.stringify(["ALLOWED_TOKEN"]),
+        ACP_MODEL_ENV_KEY: "AGENT_MODEL",
+        ALLOWED_TOKEN: "allowed",
+        BLOCKED_TOKEN: "blocked",
+      },
+    });
+    const env = resolveAcpTarget(config).env(config);
+
+    expect(env.ALLOWED_TOKEN).toBe("allowed");
+    expect(env.BLOCKED_TOKEN).toBeUndefined();
+    expect(env.AGENT_MODEL).toBe("custom-model");
+  });
+
+  test("configured options are nonfatal when absent or rejected", async () => {
+    const advertised = [
+      {
+        type: "select" as const,
+        id: "model",
+        name: "Model",
+        currentValue: "default",
+        options: [{ value: "configured", name: "Configured" }],
+      },
+    ];
+    const calls: string[] = [];
+    const connection = {
+      async setSessionConfigOption(params: { configId: string }) {
+        calls.push(params.configId);
+        throw new Error("unsupported value");
+      },
+    };
+
+    expect(
+      await applyConfiguredOptions(connection as never, "session-1", advertised, {
+        missing: "value",
+        model: "configured",
+      }),
+    ).toEqual(advertised);
+    expect(calls).toEqual(["model"]);
+  });
+
+  test("sanitizes arbitrary ACP metadata before dashboard persistence", () => {
+    expect(
+      sanitizeAcpConfigOptions([
+        {
+          type: "boolean",
+          id: "flag",
+          name: "Flag",
+          currentValue: true,
+          _meta: { secret: "not persisted" },
+        },
+      ]),
+    ).toEqual([{ type: "boolean", id: "flag", name: "Flag", currentValue: true }]);
   });
 
   test("toAcpMcpServers converts installed stdio and http/sse servers to ACP's array shape", () => {

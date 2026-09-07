@@ -35,15 +35,22 @@ describe("respondToApprovalRequest", () => {
 });
 
 describe("updateAgentRuntime", () => {
-  test("sends ACP with a null model and no reasoning override", async () => {
+  test("sends ACP target configuration with its model knob", async () => {
     globalThis.fetch = async (url, init) => {
       expect(url).toBe("https://api.example.test/api/agents/agent-acp/runtime");
       expect(init?.method).toBe("PATCH");
       expect(JSON.parse(String(init?.body))).toEqual({
         harness_provider: "acp",
-        model: null,
+        model: "custom/model",
         allow_custom_model: false,
         reasoning_effort: null,
+        acp: {
+          target: "custom",
+          command: "custom-agent",
+          args: ["--acp"],
+          envKeys: ["CUSTOM_API_KEY"],
+          modelEnvKey: "CUSTOM_MODEL",
+        },
       });
       return Response.json({ id: "agent-acp" });
     };
@@ -51,8 +58,15 @@ describe("updateAgentRuntime", () => {
     await api.updateAgentRuntime({
       id: "agent-acp",
       harnessProvider: "acp",
-      model: null,
+      model: "custom/model",
       reasoningEffort: null,
+      acp: {
+        target: "custom",
+        command: "custom-agent",
+        args: ["--acp"],
+        envKeys: ["CUSTOM_API_KEY"],
+        modelEnvKey: "CUSTOM_MODEL",
+      },
     });
   });
 });

@@ -7,7 +7,13 @@ import { useResolvedConfigs } from "@/api/hooks/use-config-api";
 import { useFeatureGate } from "@/api/hooks/use-feature-gate";
 import { useEnvPresence } from "@/api/hooks/use-integrations-meta";
 import { useModelsCatalog } from "@/api/hooks/use-models-catalog";
-import { type Agent, REASONING_EFFORT_LEVELS, type ReasoningEffortLevel } from "@/api/types";
+import {
+  type AcpSessionConfigOption,
+  type AcpTarget,
+  type Agent,
+  REASONING_EFFORT_LEVELS,
+  type ReasoningEffortLevel,
+} from "@/api/types";
 import { HarnessIcon } from "@/components/shared/harness-icon";
 import { ProviderIcon } from "@/components/shared/provider-icon";
 import {
@@ -37,7 +43,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ACP_TARGET_CATALOG } from "@/lib/acp-target-catalog";
 import {
   findModelOption,
   HARNESS_LABEL,
@@ -57,6 +65,7 @@ import { cn } from "@/lib/utils";
 type EffortValue = ReasoningEffortLevel | "";
 
 const RUNTIME_EDIT_MIN_VERSION = "1.77.2";
+const ACP_RUNTIME_EDIT_MIN_VERSION = "1.142.0";
 
 const CREDENTIAL_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -75,6 +84,46 @@ function configuredEffort(configs: { key: string; value: string }[] | undefined)
   return (REASONING_EFFORT_LEVELS as readonly string[]).includes(raw ?? "")
     ? (raw as ReasoningEffortLevel)
     : "";
+}
+
+function configuredValue(
+  configs: { key: string; value: string }[] | undefined,
+  key: string,
+): string {
+  return configs?.find((config) => config.key === key)?.value ?? "";
+}
+
+export function configuredAcpCommand(
+  configs: { key: string; value: string }[] | undefined,
+): string {
+  return configuredValue(configs, "ACP_TARGET_COMMAND") || configuredValue(configs, "ACP_COMMAND");
+}
+
+function configuredStringList(
+  configs: { key: string; value: string }[] | undefined,
+  key: string,
+): string[] {
+  try {
+    const value = JSON.parse(configuredValue(configs, key));
+    return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : [];
+  } catch {
+    return [];
+  }
+}
+
+function lines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function configuredAcpTarget(
+  configs: { key: string; value: string }[] | undefined,
+  fallback: AcpTarget,
+): AcpTarget {
+  const target = configuredValue(configs, "ACP_TARGET");
+  return target === "opencode" || target === "custom" ? target : fallback;
 }
 
 /** Nearest supported level by canonical-order distance — used to make the grey-out tooltip suggest an alternative without hardcoding any model name. */
@@ -97,13 +146,30 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   const envPresenceQuery = useEnvPresence(CREDENTIAL_KEYS);
   const updateRuntime = useUpdateAgentRuntime();
   const gate = useFeatureGate(RUNTIME_EDIT_MIN_VERSION);
+  const acpGate = useFeatureGate(ACP_RUNTIME_EDIT_MIN_VERSION);
 
   const configs = configsQuery.data ?? [];
   const [harness, setHarness] = useState<LocalHarnessProvider>(initialHarness);
-  const [model, setModel] = useState("");
+  const [model, setModel] = useState(() => configuredModel(configs));
   const [customMode, setCustomMode] = useState(false);
   const [effort, setEffort] = useState<EffortValue>("");
+  const [acpTarget, setAcpTarget] = useState<AcpTarget>(
+    configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"),
+  );
+  const [acpCommand, setAcpCommand] = useState(() =>
+    configuredValue(configs, "ACP_TARGET_COMMAND"),
+  );
+  const [acpArgs, setAcpArgs] = useState(() =>
+    configuredStringList(configs, "ACP_TARGET_ARGS").join("\n"),
+  );
+  const [acpEnvKeys, setAcpEnvKeys] = useState(() =>
+    configuredStringList(configs, "ACP_TARGET_ENV_KEYS").join("\n"),
+  );
+  const [acpModelEnvKey, setAcpModelEnvKey] = useState(() =>
+    configuredValue(configs, "ACP_MODEL_ENV_KEY"),
+  );
   const modelSelectionEnabled = harnessSupportsModelSelection(harness);
+  const acpSelected = harness === "acp";
 
   const liveBedrockStatus = useMemo<LiveBedrockStatus | null>(
     () =>
@@ -138,7 +204,18 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
   // list because the default-model pick reads them, but their arrival must not
   // reinitialize the form and discard in-progress edits — hence the syncKey
   // guard.
-  const syncKey = `${agent.id}|${initialHarness}|${configuredModel(configs)}|${configuredEffort(configs)}`;
+  const syncKey = [
+    agent.id,
+    initialHarness,
+    configuredModel(configs),
+    configuredEffort(configs),
+    configuredValue(configs, "ACP_TARGET"),
+    configuredValue(configs, "ACP_TARGET_COMMAND"),
+    configuredValue(configs, "ACP_COMMAND"),
+    configuredValue(configs, "ACP_TARGET_ARGS"),
+    configuredValue(configs, "ACP_TARGET_ENV_KEYS"),
+    configuredValue(configs, "ACP_MODEL_ENV_KEY"),
+  ].join("|");
   const lastSyncKey = useRef<string | null>(null);
   useEffect(() => {
     if (lastSyncKey.current === syncKey) return;
@@ -154,6 +231,11 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
     setHarness(initialHarness);
     setModel(nextModel || pickDefaultModelForHarness(initialHarness, nextGroups));
     setEffort(harnessSupportsModelSelection(initialHarness) ? configuredEffort(configs) : "");
+    setAcpTarget(configuredAcpTarget(configs, initialHarness === "acp" ? "custom" : "opencode"));
+    setAcpCommand(configuredAcpCommand(configs));
+    setAcpArgs(configuredStringList(configs, "ACP_TARGET_ARGS").join("\n"));
+    setAcpEnvKeys(configuredStringList(configs, "ACP_TARGET_ENV_KEYS").join("\n"));
+    setAcpModelEnvKey(configuredValue(configs, "ACP_MODEL_ENV_KEY"));
   }, [syncKey, configs, initialHarness, envPresenceQuery.data, liveBedrockStatus, liveCatalog]);
 
   // Clears `effort` whenever it ends up unsupported by the (possibly new)
@@ -180,6 +262,7 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
       liveCatalog,
     );
     setHarness(nextHarness);
+    if (nextHarness === "acp" && harness !== "acp") setAcpTarget("opencode");
     if (!harnessSupportsModelSelection(nextHarness)) setEffort("");
     const nextModel = findModelOption(model, nextGroups)
       ? model
@@ -192,13 +275,28 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
 
   function save() {
     if (modelSelectionEnabled && !model.trim()) return;
+    if (acpSelected && acpTarget === "custom" && !acpCommand.trim()) return;
     updateRuntime.mutate(
       {
         id: agent.id,
         harnessProvider: harness,
-        model: modelSelectionEnabled ? model.trim() : null,
+        model: modelSelectionEnabled || acpSelected ? model.trim() || null : null,
         allowCustomModel: modelSelectionEnabled && customMode && !modelOption,
         reasoningEffort: modelSelectionEnabled ? effort || null : null,
+        ...(acpSelected
+          ? {
+              acp:
+                acpTarget === "custom"
+                  ? {
+                      target: acpTarget,
+                      command: acpCommand.trim() || null,
+                      args: lines(acpArgs),
+                      envKeys: lines(acpEnvKeys),
+                      modelEnvKey: acpModelEnvKey.trim() || null,
+                    }
+                  : { target: acpTarget },
+            }
+          : {}),
       },
       {
         onSuccess: () => toast.success("Runtime settings updated"),
@@ -263,15 +361,107 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         ) : null}
       </div>
 
-      <div className="space-y-1.5">
-        <Label>Reasoning effort</Label>
-        <ReasoningEffortToggle
-          value={effort}
-          onChange={setEffort}
-          levels={modelSelectionEnabled ? modelOption?.reasoningLevels : []}
-          modelLabel={modelOption?.label ?? null}
-        />
-      </div>
+      {acpSelected ? (
+        <div className="space-y-3 rounded-md border border-border p-3">
+          {!acpGate.supported ? (
+            <div className="flex items-start gap-2 rounded-md border border-status-info/30 bg-status-info/5 p-3 text-xs">
+              <ArrowUpCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-info-strong" />
+              <p className="text-muted-foreground">
+                ACP target configuration requires API{" "}
+                <span className="font-mono">≥ {ACP_RUNTIME_EDIT_MIN_VERSION}</span>.
+              </p>
+            </div>
+          ) : null}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>ACP preset</Label>
+              <Select value={acpTarget} onValueChange={(value) => setAcpTarget(value as AcpTarget)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACP_TARGET_CATALOG.map((target) => (
+                    <SelectItem key={target.id} value={target.id}>
+                      {target.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="acp-model">Model</Label>
+              <Input
+                id="acp-model"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder="Use target default"
+              />
+              <p className="text-xs text-muted-foreground">
+                Applied through ACP when the target advertises a model option, with the preset
+                fallback otherwise.
+              </p>
+            </div>
+          </div>
+
+          {acpTarget === "custom" ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="acp-command">Command</Label>
+                <Input
+                  id="acp-command"
+                  value={acpCommand}
+                  onChange={(event) => setAcpCommand(event.target.value)}
+                  placeholder="path/to/acp-agent"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="acp-args">Arguments</Label>
+                <Textarea
+                  id="acp-args"
+                  value={acpArgs}
+                  onChange={(event) => setAcpArgs(event.target.value)}
+                  placeholder={"One argument per line"}
+                  className="min-h-24 font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="acp-env-keys">Environment keys</Label>
+                <Textarea
+                  id="acp-env-keys"
+                  value={acpEnvKeys}
+                  onChange={(event) => setAcpEnvKeys(event.target.value)}
+                  placeholder={"One config or environment key per line"}
+                  className="min-h-24 font-mono text-xs"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="acp-model-env-key">Model fallback environment key</Label>
+                <Input
+                  id="acp-model-env-key"
+                  value={acpModelEnvKey}
+                  onChange={(event) => setAcpModelEnvKey(event.target.value)}
+                  placeholder="Optional"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <AcpAdvertisedOptions options={agent.credStatus?.acp?.configOptions} />
+        </div>
+      ) : null}
+
+      {modelSelectionEnabled ? (
+        <div className="space-y-1.5">
+          <Label>Reasoning effort</Label>
+          <ReasoningEffortToggle
+            value={effort}
+            onChange={setEffort}
+            levels={modelOption?.reasoningLevels}
+            modelLabel={modelOption?.label ?? null}
+          />
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         {modelSelectionEnabled ? (
@@ -283,7 +473,10 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <Button
           onClick={save}
           disabled={
-            updateRuntime.isPending || (modelSelectionEnabled && (!model.trim() || disabledChoice))
+            updateRuntime.isPending ||
+            (acpSelected && !acpGate.supported) ||
+            (modelSelectionEnabled && (!model.trim() || disabledChoice)) ||
+            (acpSelected && acpTarget === "custom" && !acpCommand.trim())
           }
         >
           <Save className="h-4 w-4" />
@@ -305,23 +498,27 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
         <span>
           Last used: <code>{latestModel?.model ?? "not reported"}</code>
         </span>
-        <span className="flex items-center gap-1.5">
-          Effort:{" "}
-          <ReasoningEffortIcon level={effort || undefined} className="text-muted-foreground" />{" "}
-          <code>{effort ? REASONING_EFFORT_LABEL[effort] : AUTO_LABEL}</code>
-        </span>
-        <span className="flex items-center gap-1.5">
-          Last effort:{" "}
-          <ReasoningEffortIcon
-            level={latestModel?.reasoningEffort}
-            className="text-muted-foreground"
-          />{" "}
-          <code>
-            {latestModel?.reasoningEffort
-              ? REASONING_EFFORT_LABEL[latestModel.reasoningEffort]
-              : "not reported"}
-          </code>
-        </span>
+        {modelSelectionEnabled ? (
+          <>
+            <span className="flex items-center gap-1.5">
+              Effort:{" "}
+              <ReasoningEffortIcon level={effort || undefined} className="text-muted-foreground" />{" "}
+              <code>{effort ? REASONING_EFFORT_LABEL[effort] : AUTO_LABEL}</code>
+            </span>
+            <span className="flex items-center gap-1.5">
+              Last effort:{" "}
+              <ReasoningEffortIcon
+                level={latestModel?.reasoningEffort}
+                className="text-muted-foreground"
+              />{" "}
+              <code>
+                {latestModel?.reasoningEffort
+                  ? REASONING_EFFORT_LABEL[latestModel.reasoningEffort]
+                  : "not reported"}
+              </code>
+            </span>
+          </>
+        ) : null}
       </div>
 
       {modelOption?.cost ? (
@@ -339,6 +536,52 @@ export function AgentRuntimeSettings({ agent }: { agent: Agent }) {
           provider billing.
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function AcpAdvertisedOptions({ options }: { options: AcpSessionConfigOption[] | undefined }) {
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      <div>
+        <p className="text-sm font-medium">Advertised options</p>
+        <p className="text-xs text-muted-foreground">
+          Options reported by the most recent ACP session.
+        </p>
+      </div>
+      {options === undefined ? (
+        <p className="text-xs text-muted-foreground">Not reported yet.</p>
+      ) : options.length === 0 ? (
+        <p className="text-xs text-muted-foreground">This target advertised no options.</p>
+      ) : (
+        <div className="space-y-2">
+          {options.map((option) => {
+            const choices =
+              option.type === "select"
+                ? option.options.flatMap((entry) =>
+                    "group" in entry ? entry.options.map((item) => item.name) : [entry.name],
+                  )
+                : [];
+            return (
+              <div key={option.id} className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">{option.name}</span>
+                  <code>{String(option.currentValue)}</code>
+                </div>
+                <p className="mt-0.5 text-muted-foreground">
+                  <code>{option.id}</code> · {option.category ?? option.type}
+                </p>
+                {option.description ? (
+                  <p className="mt-1 text-muted-foreground">{option.description}</p>
+                ) : null}
+                {choices.length > 0 ? (
+                  <p className="mt-1 text-muted-foreground">Available: {choices.join(", ")}</p>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 # Harness providers runbook
 
-Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, future).
+Operational rules for editing or adding harness providers (claude, codex, opencode, pi, devin, acp, future).
 
 ## Supported providers
 
@@ -12,7 +12,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
 | Claude Managed | `claude-managed` | `ClaudeManagedAdapter` | Anthropic managed sandbox; SSE relay |
-| ACP (generic) | `acp` | `ACPAdapter` | Spawns any [Agent Client Protocol](https://agentclientprotocol.com) agent named by `ACP_TARGET_COMMAND`; stdio ndjson via `@agentclientprotocol/sdk`. No swarm-side *model-provider* credential — the target owns its own model auth. It does receive the worker's swarm API key as the swarm MCP bearer, same as every other spawned harness; `ACP_TARGET_COMMAND` is operator-configured and runs in the worker container as the worker, so point it only at a binary you trust |
+| ACP | `acp` | `ACPAdapter` | Curated `opencode` preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command. Session knobs such as model use `session/set_config_option` when advertised, with target-specific startup fallbacks. No swarm-side *model-provider* credential — the target owns its own model auth. The target receives the worker's swarm API key as the swarm MCP bearer, so point custom targets only at binaries you trust |
 
 ## `HARNESS_PROVIDER` resolution + live re-assignment
 
@@ -30,6 +30,16 @@ Operators flip a worker's provider in either of two ways:
 The worker reconciles within ~10s (one poll cycle). In-flight task sessions stay on the old adapter; new spawns pick up the new one. Failures during swap (invalid value, adapter init error) log and stay on the current provider — never wedge the worker. Implementation: `src/utils/harness-provider.ts` + the `lastHarnessReconcileAt` block in `src/commands/runner.ts`'s poll loop.
 
 Invalid `HARNESS_PROVIDER` values are rejected at write time (HTTP 400 from `PUT /api/config` or the MCP `set-config` tool) — see `validateConfigValue` in `src/be/swarm-config-guard.ts`.
+
+### ACP target configuration
+
+The dashboard runtime editor is the preferred configuration path. Selecting ACP on a non-ACP agent starts with the OpenCode preset; an older ACP agent with no `ACP_TARGET` row remains `custom` for backward compatibility. The editor writes the harness, model, and ACP target fields in one `PATCH /api/agents/{id}/runtime` transaction.
+
+OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODEL_OVERRIDE` through ACP's advertised `model` config option. It also injects the model into `OPENCODE_CONFIG_CONTENT` before spawn, because the process environment cannot be changed after `session/new`; that startup value is the fallback when the target omits or rejects the protocol option. Missing or rejected options are logged and do not fail the session.
+
+Custom targets use `ACP_TARGET_COMMAND` plus JSON-array `ACP_TARGET_ARGS`. `ACP_TARGET_ENV_KEYS` is a JSON array of environment/config keys explicitly allowed into the child process; the adapter never forwards the complete resolved environment. `ACP_MODEL_ENV_KEY` optionally maps `MODEL_OVERRIDE` into a target-specific environment variable as its model fallback. `ACP_CONFIG_OPTIONS` is a JSON object of additional string or boolean ACP option values.
+
+The latest sanitized `configOptions` advertised by a target are stored in the agent's credential-status telemetry and shown read-only in the dashboard. No report means no ACP session has reported options yet; an empty list means a session explicitly advertised none.
 
 The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS_PROVIDER` when exporting config to env. Baking it would shadow swarm_config deletes with the stale value persisted in `process.env`.
 

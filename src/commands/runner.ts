@@ -84,6 +84,7 @@ import {
   buildLatestModelReport,
   isBedrockSdkMode,
   isCredCheckDisabled,
+  reportAcpStatus,
   reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
@@ -3539,6 +3540,7 @@ async function spawnProviderProcess(
   let providerSessionId = session.sessionId;
   let pendingHarnessVariant: string | undefined;
   let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
     string,
@@ -3604,6 +3606,18 @@ async function spawnProviderProcess(
             "agentswarm.provider.name": event.provider,
             "agentswarm.provider.meta_preview": telemetryPreview(event.providerMeta),
           });
+          if (
+            event.provider === "acp" &&
+            (event.providerMeta?.target === "opencode" ||
+              event.providerMeta?.target === "custom") &&
+            Array.isArray(event.providerMeta.configOptions)
+          ) {
+            acpStatusReport = reportAcpStatus(opts.apiUrl, opts.apiKey, opts.agentId, {
+              target: event.providerMeta.target,
+              configOptions: event.providerMeta.configOptions,
+              reportedAt: Date.now(),
+            }).catch((err) => console.warn(`[runner] Failed to report ACP options: ${err}`));
+          }
           if (realTaskId) {
             saveProviderSessionId(
               opts.apiUrl,
@@ -3927,6 +3941,9 @@ async function spawnProviderProcess(
         // Stop event flush timer and do a final flush
         clearInterval(eventFlushTimer);
         await flushEvents();
+        // Keep the agent-level ACP option snapshot ordered before the poll
+        // loop can publish a post-task credential snapshot for a harness swap.
+        await acpStatusReport;
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {

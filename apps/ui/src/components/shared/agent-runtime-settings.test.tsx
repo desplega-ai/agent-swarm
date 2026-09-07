@@ -1,15 +1,20 @@
-import { describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent } from "../../api/types";
 
 mock.module("@/api/hooks/use-agents", () => ({
   useUpdateAgentRuntime: () => ({ mutate: () => {}, isPending: false }),
 }));
+let resolvedConfigs: Array<{ key: string; value: string }> = [];
 mock.module("@/api/hooks/use-config-api", () => ({
-  useResolvedConfigs: () => ({ data: [] }),
+  useResolvedConfigs: () => ({ data: resolvedConfigs }),
 }));
 mock.module("@/api/hooks/use-feature-gate", () => ({
-  useFeatureGate: () => ({ supported: true, currentVersion: "1.140.0", requiredVersion: "1.77.2" }),
+  useFeatureGate: (requiredVersion: string) => ({
+    supported: true,
+    currentVersion: "1.142.0",
+    requiredVersion,
+  }),
 }));
 mock.module("@/api/hooks/use-integrations-meta", () => ({
   useEnvPresence: () => ({ data: {} }),
@@ -29,38 +34,141 @@ mock.module("@/components/ui/label", () => import("../ui/label"));
 mock.module("@/components/ui/popover", () => import("../ui/popover"));
 mock.module("@/components/ui/select", () => import("../ui/select"));
 mock.module("@/components/ui/switch", () => import("../ui/switch"));
+mock.module("@/components/ui/textarea", () => import("../ui/textarea"));
 mock.module("@/components/ui/tooltip", () => import("../ui/tooltip"));
+mock.module("@/lib/acp-target-catalog", () => import("../../lib/acp-target-catalog"));
 mock.module("@/lib/agent-runtime-models", () => import("../../lib/agent-runtime-models"));
 mock.module("@/lib/cost-format", () => import("../../lib/cost-format"));
 mock.module("@/lib/utils", () => import("../../lib/utils"));
 
 const { TooltipProvider } = await import("../ui/tooltip");
-const { AgentRuntimeSettings } = await import("./agent-runtime-settings");
+const { AgentRuntimeSettings, configuredAcpCommand } = await import("./agent-runtime-settings");
 const { HarnessCell } = await import("./harness-cell");
 const { HarnessIcon } = await import("./harness-icon");
 
 describe("AgentRuntimeSettings", () => {
-  test("hides model controls for ACP", () => {
-    const agent = {
-      id: "agent-acp",
-      name: "ACP worker",
-      isLead: false,
-      status: "idle",
-      harnessProvider: "acp",
-      createdAt: "2026-09-06T00:00:00.000Z",
-      lastUpdatedAt: "2026-09-06T00:00:00.000Z",
-    } satisfies Agent;
+  const acpAgent = {
+    id: "agent-acp",
+    name: "ACP worker",
+    isLead: false,
+    status: "idle",
+    harnessProvider: "acp",
+    createdAt: "2026-09-06T00:00:00.000Z",
+    lastUpdatedAt: "2026-09-06T00:00:00.000Z",
+  } satisfies Agent;
 
+  beforeEach(() => {
+    resolvedConfigs = [];
+  });
+
+  test("defaults an existing unconfigured ACP agent to the custom target", () => {
     const html = renderToStaticMarkup(
       <TooltipProvider>
-        <AgentRuntimeSettings agent={agent} />
+        <AgentRuntimeSettings agent={acpAgent} />
       </TooltipProvider>,
     );
 
-    expect(html).toContain("Harness");
-    expect(html).not.toContain(">Model<");
-    expect(html).not.toContain("Allow unsupported/custom model");
-    expect(html).toContain("Save");
+    expect(html).toContain("ACP preset");
+    expect(html).toContain(">Model<");
+    expect(html).toContain(">Command<");
+    expect(html).toContain("Arguments");
+    expect(html).toContain("Environment keys");
+    expect(html).toContain("Model fallback environment key");
+    expect(html).toContain("Not reported yet.");
+    expect(html).not.toContain("Reasoning effort");
+  });
+
+  test("hydrates the OpenCode preset and hides custom target fields", () => {
+    resolvedConfigs = [
+      { key: "ACP_TARGET", value: "opencode" },
+      { key: "MODEL_OVERRIDE", value: "opencode/big-pickle" },
+    ];
+
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings agent={acpAgent} />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("opencode/big-pickle");
+    expect(html).not.toContain(">Command<");
+    expect(html).not.toContain("Environment keys");
+  });
+
+  test("hydrates the legacy custom command alias", () => {
+    expect(configuredAcpCommand([{ key: "ACP_COMMAND", value: "legacy-acp-agent" }])).toBe(
+      "legacy-acp-agent",
+    );
+  });
+
+  test("distinguishes an empty advertisement from no ACP report", () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings
+          agent={{
+            ...acpAgent,
+            credStatus: {
+              ready: true,
+              missing: [],
+              reportedAt: Date.now(),
+              acp: { target: "opencode", configOptions: [], reportedAt: Date.now() },
+            },
+          }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("This target advertised no options.");
+    expect(html).not.toContain("Not reported yet.");
+  });
+
+  test("renders advertised select and boolean options", () => {
+    const html = renderToStaticMarkup(
+      <TooltipProvider>
+        <AgentRuntimeSettings
+          agent={{
+            ...acpAgent,
+            credStatus: {
+              ready: true,
+              missing: [],
+              reportedAt: Date.now(),
+              acp: {
+                target: "opencode",
+                reportedAt: Date.now(),
+                configOptions: [
+                  {
+                    type: "select",
+                    id: "model",
+                    name: "Model",
+                    category: "model",
+                    currentValue: "opencode/big-pickle",
+                    options: [
+                      { value: "opencode/big-pickle", name: "Big Pickle" },
+                      {
+                        group: "anthropic",
+                        name: "Anthropic",
+                        options: [{ value: "anthropic/sonnet", name: "Sonnet" }],
+                      },
+                    ],
+                  },
+                  {
+                    type: "boolean",
+                    id: "autoupdate",
+                    name: "Auto-update",
+                    currentValue: true,
+                  },
+                ],
+              },
+            },
+          }}
+        />
+      </TooltipProvider>,
+    );
+
+    expect(html).toContain("opencode/big-pickle");
+    expect(html).toContain("Available: Big Pickle, Sonnet");
+    expect(html).toContain("Auto-update");
+    expect(html).toContain("autoupdate");
   });
 });
 

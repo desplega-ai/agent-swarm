@@ -24,7 +24,13 @@ import { checkCodexCredentials } from "../providers/codex-adapter";
 import { checkDevinCredentials } from "../providers/devin-adapter";
 import { checkOpencodeCredentials } from "../providers/opencode-adapter";
 import type { CredCheckOptions, CredStatus } from "../providers/types";
-import type { AgentCredStatus, AgentLatestModel, ProviderName, ReasoningEffort } from "../types";
+import type {
+  AgentAcpStatus,
+  AgentCredStatus,
+  AgentLatestModel,
+  ProviderName,
+  ReasoningEffort,
+} from "../types";
 import { getOpenRouterBaseUrl } from "../utils/openrouter-base-url";
 import { scrubSecrets } from "../utils/secret-scrubber";
 
@@ -454,6 +460,7 @@ export async function buildCredStatusReport(
     reportedAt: Date.now(),
     reportKind: kind,
     bedrock,
+    acp: null,
   };
 }
 
@@ -540,6 +547,27 @@ export async function reportLatestModel(
     });
   } catch (err) {
     console.warn(`[latest-model] POST failed (non-fatal): ${err}`);
+  }
+}
+
+export async function reportAcpStatus(
+  apiUrl: string,
+  apiKey: string,
+  agentId: string,
+  acp: AgentAcpStatus,
+): Promise<void> {
+  try {
+    await fetch(`${apiUrl}/api/agents/${encodeURIComponent(agentId)}/credential-status`, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Agent-ID": agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ acp }),
+    });
+  } catch (err) {
+    console.warn(`[acp-status] POST failed (non-fatal): ${err}`);
   }
 }
 
