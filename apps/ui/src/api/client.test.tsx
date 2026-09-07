@@ -34,6 +34,29 @@ describe("respondToApprovalRequest", () => {
   });
 });
 
+describe("updateAgentRuntime", () => {
+  test("sends ACP with a null model and no reasoning override", async () => {
+    globalThis.fetch = async (url, init) => {
+      expect(url).toBe("https://api.example.test/api/agents/agent-acp/runtime");
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        harness_provider: "acp",
+        model: null,
+        allow_custom_model: false,
+        reasoning_effort: null,
+      });
+      return Response.json({ id: "agent-acp" });
+    };
+
+    await api.updateAgentRuntime({
+      id: "agent-acp",
+      harnessProvider: "acp",
+      model: null,
+      reasoningEffort: null,
+    });
+  });
+});
+
 describe("submitFeedback", () => {
   const input = {
     submission_id: "attempt-stable-across-retries",

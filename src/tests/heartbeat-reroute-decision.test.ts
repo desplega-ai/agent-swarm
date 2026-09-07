@@ -217,6 +217,47 @@ describe("Heartbeat — reroute-decision fallback (DES-523)", () => {
     expect((await getTaskById(original.id))!.agentId).toBe(agent.id);
   });
 
+  test("reroute decision uses its own Lead authorization instead of the original work requirements", async () => {
+    const originalLead = await createAgent({
+      name: "original-capable-lead",
+      isLead: true,
+      status: "idle",
+    });
+    await getDbClient().run("UPDATE agents SET capabilities = ? WHERE id = ?", [
+      JSON.stringify(["merge"]),
+      originalLead.id,
+    ]);
+    const original = await createTaskExtended("Privileged work", {
+      agentId: originalLead.id,
+      routingAffinity: { leadOnly: true, capabilities: ["merge"] },
+    });
+    const staleResume = await createTaskExtended("Stale privileged resume", {
+      agentId: originalLead.id,
+      parentTaskId: original.id,
+      taskType: "resume",
+      tags: [`${RESUME_GENERATION_TAG_PREFIX}1`, CRASH_RECOVERY_PIN_TAG],
+    });
+
+    await getDbClient().run("UPDATE agents SET status = 'offline' WHERE id = ?", [originalLead.id]);
+    const replacementLead = await createAgent({
+      name: "replacement-lead",
+      isLead: true,
+      status: "idle",
+    });
+
+    const result = await createRerouteDecisionTask({
+      original,
+      staleResume,
+      reason: "crash_recovery",
+      maxGenerations: maxResumeGenerations(),
+    });
+
+    expect(result.kind).toBe("created");
+    if (result.kind !== "created") throw new Error("expected created");
+    expect(result.task.agentId).toBe(replacementLead.id);
+    expect(result.task.routingAffinity).toEqual({ leadOnly: true, capabilities: [] });
+  });
+
   test("idempotent: a second call does not create a duplicate decision", async () => {
     await createAgent({ name: "lead", isLead: true, status: "busy" });
     const { original, r1 } = await seedPinnedCrash("coder-dup");

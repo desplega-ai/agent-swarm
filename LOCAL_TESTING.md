@@ -142,6 +142,74 @@ The same command runs locally, in GitHub Actions, and inside a swarm worker cont
 Coverage only includes traffic sent through the runner's recording client.
 Worker traffic from harness legs does not increase the MVP coverage numbers.
 
+## UI E2E (bun run e2e:ui)
+
+`bun run e2e:ui` drives the dashboard in headless Chromium with Playwright (`packages/ui-e2e`).
+It builds `apps/ui` once with no deployment config, serves `apps/ui/dist` from a static server on a free port,
+and boots one fresh API per Playwright worker (`scripts/e2e/sut.ts` through `packages/ui-e2e/boot/sut.ts`).
+Each API gets a temp SQLite file and the seed from `packages/ui-e2e/boot/seed.ts`:
+three agents, eight tasks across every status, session logs, a cost row, two pages, one memory, and the `e2e-user` identity.
+The browser context starts with the connection, the identity, and a dismissed feedback dialog in `localStorage`, so no dialog blocks the dashboard.
+Specs live in `packages/ui-e2e/specs/`: a route smoke over every sidebar route (`smoke.spec.ts` + `routes.ts`) and three flows (`tasks`, `configuration`, `pages`).
+Every test fails on a browser console error or an `/api` response with status 400 or higher.
+
+Requirements: Node 22 or newer on `PATH` (Playwright runs under Node) and the Chromium build for the pinned `@playwright/test`
+(`cd packages/ui-e2e && npx playwright install chromium`, once per machine).
+
+```bash
+bun run e2e:ui                                   # build the UI, then run everything
+bun run e2e:ui -- --no-build                     # reuse apps/ui/dist
+bun run e2e:ui -- --grep @smoke                  # the route smoke only
+bun run e2e:ui -- --grep "smoke /tasks @smoke$"  # one route (the tag is part of the grep text)
+bun run e2e:ui -- --headed specs/pages.spec.ts   # watch one spec
+bun run e2e:ui -- --ui                           # Playwright UI mode
+bun run e2e:ui -- --no-build --repeat-each=3 specs/tasks.spec.ts
+E2E_DEBUG=1 bun run e2e:ui -- --no-build         # print the worker API port and every /api response
+E2E_KEEP=1 bun run e2e:ui -- --no-build          # keep /tmp/e2e-*.sqlite, its log, and <db>.seed.json
+bun run e2e:ui:tsc                               # typecheck the package (Node and Bun halves)
+```
+
+Reports: `packages/ui-e2e/playwright-report/index.html` (open it with `cd packages/ui-e2e && npx playwright show-report`),
+per-test screenshots and traces under `packages/ui-e2e/test-results/`, and `packages/ui-e2e/test-results/summary.json`
+(the file CI turns into the PR comment).
+
+### Remote mode
+
+Set `E2E_API_URL` and `E2E_API_KEY` to skip the per-worker boot and target a running API.
+The static UI build still serves the dashboard unless `E2E_UI_URL` points at a deployed one.
+
+| Variable | Effect |
+|---|---|
+| `E2E_API_URL` | Target API. Production hosts (`api.desplega.agent-swarm.dev`, `cloud.agent-swarm.dev`) are refused before anything starts. |
+| `E2E_API_KEY` | Bearer for that API. Required with `E2E_API_URL`. |
+| `E2E_UI_URL` | Deployed dashboard to drive instead of the static build. Its origin must be on the API's `APP_URL` for the page preview iframe. |
+| `E2E_REMOTE_SEED=1` | Run the seed once against the remote API (idempotent, every name `e2e-` prefixed). Without it, seeded specs and id routes are skipped. |
+| `E2E_DEBUG=1` | Log the worker API and every `/api` response. |
+| `E2E_KEEP=1` | Local mode only: keep the DB, the log, and the seed manifest. |
+
+Specs tagged `@local` (none today) run only in local mode. They are for assertions on escape-hatch state such as stalled tasks.
+
+```bash
+PORT=3999 DATABASE_PATH=/tmp/e2e-remote.sqlite AGENT_SWARM_API_KEY=remotekey NODE_ENV=test \
+  GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts &
+E2E_API_URL=http://127.0.0.1:3999 E2E_API_KEY=remotekey E2E_REMOTE_SEED=1 bun run e2e:ui
+```
+
+### Adding a route or a spec
+
+- Route smoke: add `{ path, name, needs? }` to `packages/ui-e2e/specs/routes.ts`. `needs` picks the seeded id (`agent`, `task`, `page`). Use `skip: "<reason>"` when no seed entity exists yet, so the gap stays visible in the report.
+- Flow spec: import `test` and `expect` from `../fixtures`. Fixtures: `page` (dashboard with connection and identity), `seed` (the manifest, `null` in an unseeded remote run, so guard with `test.skip(!seed, ...)`), `api` (bearer fetch), `swarm` (`apiUrl`, `apiKey`), `clean.assertClean()`.
+- Selectors: roles and text (`getByRole`, `getByText`). The tasks, pages, and settings pages carry no `data-testid`.
+- Seed data: extend `packages/ui-e2e/boot/seed.ts` and the `SeedManifest` type in `boot/manifest.ts`. Keep every name `e2e-` prefixed and every step idempotent.
+
+Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/README.md`.
+
+### CI
+
+`.github/workflows/ui-e2e.yml` runs the suite in two shards on pull requests that touch the UI, the API, or the package, and on pushes to `main`.
+It is informational: it is not a required check. It merges the shard reports into the `ui-e2e-html-report` artifact and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results.
+Screenshot links in the comment need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only.
+
 ## E2E with Docker
 
 Use the **`swarm-local-e2e` skill** — it owns the full flow (start API, build image, start lead + worker, create tasks, verify registration, check session logs, cleanup). Invoke it when:
@@ -256,6 +324,8 @@ Defaults: UI on `APP_URL` (port 5274), API proxy on `http://localhost:3013`. Set
 cd apps/ui && bun run dev   # port 5274
 cd apps/ui && bun run dev --port 5275   # if 5274 is taken
 ```
+
+Automated browser coverage lives in [UI E2E (bun run e2e:ui)](#ui-e2e-bun-run-e2eui).
 
 ### When you need to verify a UI change
 

@@ -10,6 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
+| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`; push → `main` | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
@@ -31,13 +32,13 @@ CI detects what changed and runs the matching jobs:
 | **Raw matchRoute check** | `! grep -rn 'matchRoute(' src/http/ --include='*.ts' \| grep -v 'route-def.ts' \| grep -v 'utils.ts'` | Used `matchRoute` directly instead of the `route()` factory |
 | **Docker Build (Dockerfile + Dockerfile.worker slim target + apps/evals/Dockerfile)** | `docker build -f Dockerfile . && docker build -f Dockerfile.worker --target worker-slim . && docker build -f apps/evals/Dockerfile .` | Broken multi-stage build, missing file in the worker context, evals image drifting from the root workspace lockfile. NOTE: the PR gate builds only the worker's `worker-slim` target (fast); `worker-full` is only built on merge by `docker-and-deploy.yml` — if you touched full-only stages (`worker-full-base` / `worker-full`), build the full target locally before merging. The api + worker-slim legs also report uncompressed image sizes to the **ci-metrics** swarm script (sticky "Docker image sizes" PR comment diffing vs main; baseline refreshed by `docker-and-deploy.yml`'s `report-metrics` job; contract doc: `agent-fs cat docs/ci-metrics.md`; secret: `SWARM_CI_METRICS_TOKEN`). Reporting is `continue-on-error` — it can never block the gate |
 
-### When `apps/ui/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
+### When `apps/ui/` or `packages/ui-e2e/` changed (or root `bun.lock` / `package.json` / `bunfig.toml`)
 
 ui's dependency tree resolves from the **root** lockfile since the workspace migration, so root dep changes also trigger this job.
 
 | Job | Local equivalent (run from `apps/ui/`) |
 |---|---|
-| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b` |
+| **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
 

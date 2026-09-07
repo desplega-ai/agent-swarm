@@ -219,7 +219,14 @@ export interface AgentTask {
   supportedSteerModes?: SteerMode[];
 }
 
-export type ProviderName = "claude" | "codex" | "pi" | "devin" | "claude-managed" | "opencode";
+export type ProviderName =
+  | "claude"
+  | "codex"
+  | "pi"
+  | "devin"
+  | "claude-managed"
+  | "opencode"
+  | "acp";
 export type DevinProviderMeta = {
   sessionUrl: string;
   maxAcuLimit?: number;

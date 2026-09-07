@@ -19,7 +19,8 @@ function isProviderName(value: string | undefined): value is ProviderName {
     value === "pi" ||
     value === "devin" ||
     value === "claude-managed" ||
-    value === "opencode"
+    value === "opencode" ||
+    value === "acp"
   );
 }
 

@@ -11,6 +11,7 @@ const HARNESS_LABEL: Record<string, string> = {
   devin: "Devin",
   opencode: "Opencode",
   pi: "Pi-Mono",
+  acp: "ACP",
 };
 
 type CredHealth = "verified" | "configured" | "blocked" | "untested" | "unreported";

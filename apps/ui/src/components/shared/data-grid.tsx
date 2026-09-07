@@ -1,5 +1,6 @@
 import {
   type CellKeyDownEvent,
+  CellStyleModule,
   ClientSideRowModelModule,
   type ColDef,
   ColumnAutoSizeModule,
@@ -22,6 +23,7 @@ import { useSearchParams } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 ModuleRegistry.registerModules([
+  CellStyleModule,
   ClientSideRowModelModule,
   PaginationModule,
   TextFilterModule,

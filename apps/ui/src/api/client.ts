@@ -311,8 +311,8 @@ class ApiClient {
 
   async updateAgentRuntime(data: {
     id: string;
-    harnessProvider: "claude" | "codex" | "pi" | "opencode";
-    model: string;
+    harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
+    model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
     reasoningEffort?: ReasoningEffortLevel | null;

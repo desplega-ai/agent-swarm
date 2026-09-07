@@ -13,7 +13,7 @@ import {
 } from "../be/db";
 import { repointTrackerSyncBySwarmId } from "../be/db-queries/tracker";
 import { resolveTemplate } from "../prompts/resolver";
-import type { Agent, AgentTask, ResumeReason, TaskAttachment } from "../types";
+import type { Agent, AgentTask, ResumeReason, RoutingAffinity, TaskAttachment } from "../types";
 import { isEnvFlagEnabled } from "../utils/env-flag";
 import { taskAttachmentDisplayUrl } from "../utils/task-attachment-links";
 // Side-effect import: registers task lifecycle templates in the in-memory registry.
@@ -554,6 +554,8 @@ export async function createRerouteDecisionTask(args: {
     // make store-progress reject the Lead's completion and strand the decision
     // (blocking further escalation via the duplicate-decision guard) — DES-523.
     inheritParentOutputSchema: false,
+    inheritParentRoutingAffinity: false,
+    routingAffinity: leadControlPlaneRoutingAffinity(),
   });
 
   return { kind: "created", task: created };
@@ -563,6 +565,16 @@ export async function createRerouteDecisionTask(args: {
 export type CreatePoolStarvationDecisionResult =
   | { kind: "created"; task: AgentTask }
   | { kind: "skipped"; reason: "lead_not_found" | "duplicate_exists" };
+
+/**
+ * Control-plane decisions are new Lead-owned work, not continuations of the
+ * requirements that made the original task unroutable. Give both reroute
+ * producers the same explicit authorization so parent affinity cannot veto
+ * dispatch to a replacement Lead.
+ */
+function leadControlPlaneRoutingAffinity(): RoutingAffinity {
+  return { leadOnly: true, capabilities: [] };
+}
 
 /**
  * Hand the Lead a re-delegation DECISION task for a pooled, affinity-tagged
@@ -618,6 +630,7 @@ export async function createPoolStarvationDecisionTask(args: {
     // Same rationale as createRerouteDecisionTask: don't hold the Lead's
     // re-delegation decision to the original work's output contract.
     inheritParentOutputSchema: false,
+    inheritParentRoutingAffinity: false,
     // Explicit authorization, not an inherited-affinity side effect. Without
     // this, a plain parent-fallback inherit would carry `original`'s own
     // routing affinity onto this direct assignment, and createTaskExtended's
@@ -633,7 +646,7 @@ export async function createPoolStarvationDecisionTask(args: {
     // deliberate system override, not a continuation of the original's
     // requirements, so it asserts its own authorization instead of
     // depending on how `original`'s affinity happens to be shaped.
-    routingAffinity: { leadOnly: true, capabilities: [] },
+    routingAffinity: leadControlPlaneRoutingAffinity(),
   });
 
   return { kind: "created", task: created };

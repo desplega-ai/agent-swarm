@@ -292,4 +292,8 @@ A handful of detail pages are exempt because their identity is an editor or spli
 
 Use `agent-browser` for browser automation (`agent-browser open <url>`, `snapshot`, `screenshot <path>`). Never `qa-use` unless explicitly asked. Any PR touching `ui/` MUST include screenshots of the changes running locally, uploaded to agent-fs with the signed URL in the PR body. This is a reviewer convention; no CI job enforces it. Recipe: [../LOCAL_TESTING.md § When you need to verify a UI change](../LOCAL_TESTING.md#when-you-need-to-verify-a-ui-change). Port-conflict handling: [../LOCAL_TESTING.md § Dashboard UI](../LOCAL_TESTING.md#dashboard-ui).
 
+## UI E2E
+
+`bun run e2e:ui` (repo root) runs the Playwright suite in `packages/ui-e2e` against a seeded API per worker. Package layout, fixtures, and the seed manifest: [../../packages/ui-e2e/README.md](../../packages/ui-e2e/README.md). Selectors use roles, accessible names, and link or row text (`getByRole`, `getByText`). Tasks, Pages, and Settings carry no `data-testid`; add one only on purpose, never as a shortcut. When a change moves a sidebar route or renames a control, update `packages/ui-e2e/specs/routes.ts` or the flow spec in the same PR.
+
 </important>

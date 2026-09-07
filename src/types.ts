@@ -733,6 +733,11 @@ export const CreateTaskOptionsSchema = z.object({
    * contract on completion (which would block the control task — DES-523).
    */
   inheritParentOutputSchema: z.boolean().optional(),
+  /**
+   * Skip parent routing requirements only for a child with its own explicit
+   * Lead-only control-plane authorization.
+   */
+  inheritParentRoutingAffinity: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),
@@ -746,8 +751,8 @@ export const CreateTaskOptionsSchema = z.object({
    * Routing-affinity snapshot gating task authorization (see
    * `isAgentEligibleForTask`). `leadOnly: true` is an explicit, structured
    * constraint: only an agent with `isLead` may be assigned, offered, claim,
-   * or recover this task. It is never inferred from task text. Inherited from the parent (via `parentTaskId`)
-   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
+   * or recover this task. It is never inferred from task text. Inherited from
+   * the parent unless a control-plane child explicitly opts out.
    */
   routingAffinity: RoutingAffinitySchema.optional(),
 });

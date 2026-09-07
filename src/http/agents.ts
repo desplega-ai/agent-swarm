@@ -170,7 +170,7 @@ const setAgentHarnessProviderRoute = route({
   },
 });
 
-const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode"]);
+const LocalHarnessProviderSchema = z.enum(["claude", "codex", "pi", "opencode", "acp"]);
 
 const updateAgentRuntimeRoute = route({
   method: "patch",
@@ -837,8 +837,11 @@ export async function handleAgentsRest(
                 key: "MODEL_OVERRIDE",
               })
             )[0]?.value ?? "");
-      const capability = reasoningCapability(harness_provider, modelForValidation ?? "");
-      if (!capability.levels.includes(reasoning_effort)) {
+      const allowedLevels =
+        harness_provider === "acp"
+          ? []
+          : reasoningCapability(harness_provider, modelForValidation ?? "").levels;
+      if (!allowedLevels.includes(reasoning_effort)) {
         json(
           res,
           {
@@ -846,7 +849,7 @@ export async function handleAgentsRest(
             harness: harness_provider,
             model: modelForValidation || null,
             level: reasoning_effort,
-            allowed: capability.levels,
+            allowed: allowedLevels,
           },
           400,
         );

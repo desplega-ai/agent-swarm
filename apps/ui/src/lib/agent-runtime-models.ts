@@ -19,7 +19,7 @@ const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
   "max",
 ];
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode";
+export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp";
 
 export interface ModelOption {
   id: string;
@@ -180,7 +180,7 @@ function reasoningLevelsFromCache(
   return levels.length > 0 ? levels : undefined;
 }
 
-export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode"];
+export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode", "acp"];
 
 export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   claude: "Claude",
@@ -189,7 +189,12 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   devin: "Devin",
   opencode: "Opencode",
   pi: "Pi-Mono",
+  acp: "ACP",
 };
+
+export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
+  return harness !== "acp";
+}
 
 const ANTHROPIC_META = {
   provider: "Anthropic",
@@ -287,6 +292,7 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   codex: "gpt-5.6-terra",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
+  acp: "",
 };
 
 function hasConfigKey(configs: SwarmConfig[] | undefined, key: string): boolean {
@@ -334,6 +340,8 @@ export function modelGroupsForHarness(
   liveBedrockStatus?: LiveBedrockStatus | null,
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
+  if (harness === "acp") return [];
+
   const providerCache = (providerId: SnapshotProviderId): CachedProvider | undefined =>
     liveCatalog?.[providerId] ?? CACHE[providerId];
 
@@ -559,5 +567,11 @@ export function pickDefaultModelForHarness(
 export function isLocalHarness(
   value: ProviderName | string | null | undefined,
 ): value is LocalHarnessProvider {
-  return value === "claude" || value === "codex" || value === "pi" || value === "opencode";
+  return (
+    value === "claude" ||
+    value === "codex" ||
+    value === "pi" ||
+    value === "opencode" ||
+    value === "acp"
+  );
 }

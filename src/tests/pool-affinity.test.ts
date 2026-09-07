@@ -329,6 +329,21 @@ describe("Pool Affinity", () => {
       expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
 
+    test("the parent-affinity opt-out requires explicit Lead-only control-plane authorization", async () => {
+      const parent = await createTaskExtended("parent", {
+        routingAffinity: affinity({ role: "coder" }),
+      });
+
+      await expect(
+        createTaskExtended("unsafe control child", {
+          parentTaskId: parent.id,
+          inheritParentRoutingAffinity: false,
+        }),
+      ).rejects.toThrow(
+        "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity",
+      );
+    });
+
     test("a child of a task whose affinity is inherited provenance (not a declared requirement) can be direct-assigned to a worker lacking the parent's capabilities", async () => {
       const originalWorker = await createAgent({
         name: "provenance-original-worker",

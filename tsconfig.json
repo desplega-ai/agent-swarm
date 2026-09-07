@@ -35,6 +35,7 @@
   },
   "exclude": [
     "apps",
+    "packages",
     "node_modules",
     "dist",
     "scripts",
