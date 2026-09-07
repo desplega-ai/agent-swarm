@@ -89,6 +89,6 @@ Specs tagged `@local` run only in local mode. None exist yet; the tag is for ass
 
 ## Hooks for the next phases
 
-- `summary.json` is the payload the tracker ingest (P2) reads.
+- `summary.json` is the payload the tracker ingest (P2) reads. `reporter/ui-e2e-ingest.v1.schema.json` is a verbatim copy of the tracker's frozen v1 contract (`desplega-ai/agent-work`, `workflows/ui-e2e-tracker/schema/`); do not edit it here.
 - The fixture name `ai` is reserved for `pw.ai` (P4, `DES-782`).
 - The swarm exploratory runner (P3) reuses `boot/sut.ts` and the seed inside a worker.

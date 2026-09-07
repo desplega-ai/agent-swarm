@@ -3,7 +3,7 @@ date: 2026-09-07
 author: taras
 topic: "UI E2E P2: tracker wiring. agent-fs artifacts, ingest to the swarm script endpoint, tracker install"
 tags: [plan, e2e, ui, playwright, ci, tracker, agent-fs, scripts]
-status: ready
+status: in-progress
 autonomy: autopilot
 commit_per_phase: true
 brainstorm: thoughts/taras/brainstorms/2026-09-04-ui-e2e-swarm-driven-testing.md
@@ -156,21 +156,21 @@ Decisions from the design check-in (2026-09-07):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit test green: `bun run test:root -- src/tests/ui-e2e-ingest-payload.test.ts`
-- [ ] Package typechecks: `bun run e2e:ui:tsc`
-- [ ] Root gates: `bun run lint && bun run tsc:check`
-- [ ] Promise and boundary checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh && bun run check:dep-graph`
-- [ ] Summary v2 written: `bun run e2e:ui -- --no-build --grep "^home"` then `jq '.results[0] | has("titlePath") and has("attachments")' packages/ui-e2e/test-results/summary.json` prints `true`
-- [ ] Dry run produces a payload: `node --experimental-strip-types packages/ui-e2e/reporter/ingest.ts --summaries packages/ui-e2e/test-results --artifacts /nonexistent.json --out /tmp/ui-e2e-p2/payloads --dry-run` with `GITHUB_REPOSITORY=desplega-ai/agent-swarm UI_E2E_TRIGGER=manual UI_E2E_SHA=$(git rev-parse HEAD) UI_E2E_REF=ui-e2e-p2`, then `jq '.run.trigger, (.results | length)' /tmp/ui-e2e-p2/payloads/shard-1.json`
-- [ ] Skip path: same command without `--dry-run` and without `UI_E2E_INGEST_URL` exits 0 and prints the skip notice
-- [ ] Comment builder unchanged: `node --experimental-strip-types packages/ui-e2e/reporter/comment.ts --summaries packages/ui-e2e/test-results --images /dev/null --run-url https://example --report-artifact x --out /tmp/ui-e2e-p2/c.md && head -1 /tmp/ui-e2e-p2/c.md | grep -q 'ui-e2e'`; with `--tracker-url https://example/p/x` the last lines contain `Tracker`
+- [x] Unit test green: `bun run test:root -- src/tests/ui-e2e-ingest-payload.test.ts`
+- [x] Package typechecks: `bun run e2e:ui:tsc`
+- [x] Root gates: `bun run lint && bun run tsc:check`
+- [x] Promise and boundary checks: `bun scripts/check-floating-promises.ts && bun scripts/check-promise-sinks.ts && bash scripts/check-db-boundary.sh && bun run check:dep-graph`
+- [x] Summary v2 written: `bun run e2e:ui -- --no-build --grep "^home"` then `jq '.results[0] | has("titlePath") and has("attachments")' packages/ui-e2e/test-results/summary.json` prints `true`
+- [x] Dry run produces a payload: `node --experimental-strip-types packages/ui-e2e/reporter/ingest.ts --summaries packages/ui-e2e/test-results --artifacts /nonexistent.json --out /tmp/ui-e2e-p2/payloads --dry-run` with `GITHUB_REPOSITORY=desplega-ai/agent-swarm UI_E2E_TRIGGER=manual UI_E2E_SHA=$(git rev-parse HEAD) UI_E2E_REF=ui-e2e-p2`, then `jq '.run.trigger, (.results | length)' /tmp/ui-e2e-p2/payloads/shard-1.json`
+- [x] Skip path: same command without `--dry-run` and without `UI_E2E_INGEST_URL` exits 0 and prints the skip notice
+- [x] Comment builder unchanged: `node --experimental-strip-types packages/ui-e2e/reporter/comment.ts --summaries packages/ui-e2e/test-results --images /dev/null --run-url https://example --report-artifact x --out /tmp/ui-e2e-p2/c.md && head -1 /tmp/ui-e2e-p2/c.md | grep -q 'ui-e2e'`; with `--tracker-url https://example/p/x` the last lines contain `Tracker`
 
 #### Automated QA:
-- [ ] Reject path: start a throwaway `node -e` HTTP server on a free port that answers `200 {"ok":false,"error":{"type":"args_validation","message":"x"}}`; run `ingest.ts` against it with a dummy bearer; exit code is 1 and the output contains `ok=false` and never the bearer string.
-- [ ] Full-suite summary: `bun run e2e:ui -- --no-build` then the dry-run payload has one result per spec in `packages/ui-e2e/specs/` (`jq '.results | length'` equals the number of `test(` calls across the specs, 40 with the current routes), every `specId` starts with `specs/`, and no status outside `passed|failed|skipped|flaky`.
+- [x] Reject path: start a throwaway `node -e` HTTP server on a free port that answers `200 {"ok":false,"error":{"type":"args_validation","message":"x"}}`; run `ingest.ts` against it with a dummy bearer; exit code is 1 and the output contains `ok=false` and never the bearer string.
+- [x] Full-suite summary: `bun run e2e:ui -- --no-build` then the dry-run payload has one result per spec in `packages/ui-e2e/specs/` (`jq '.results | length'` equals the number of `test(` calls across the specs, 40 with the current routes) (actual: 55 results, the route list has more entries than estimated), every `specId` starts with `specs/`, and no status outside `passed|failed|skipped|flaky`.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 1] ui-e2e ingest payload and CLI`.
 
@@ -246,7 +246,7 @@ The template is installed into a local API with a reusable Bun script, a real ru
 
 #### 2. Local proof
 **Steps** (recorded in the plan's Manual E2E and executed here):
-1. Boot a local API on a free port with a temp DB: `PORT=$(bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{data(){}}});console.log(s.port);s.stop()') DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite AGENT_SWARM_API_KEY=localkey GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts` (background, log to `/tmp/ui-e2e-p2/api.log`).
+1. Boot a local API on a free port with a temp DB: `PORT=$(bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{data(){}}});console.log(s.port);s.stop()')` then `PORT=$PORT MCP_BASE_URL=http://127.0.0.1:$PORT DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite AGENT_SWARM_API_KEY=localkey API_KEY=localkey GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true bun --no-env-file run src/http.ts` (background, log to `/tmp/ui-e2e-p2/api.log`). `MCP_BASE_URL` must point at the same port: the scripts runtime calls back into the API through it and defaults to `localhost:3013`. `--no-env-file` keeps a repo `.env` from overriding the port.
 2. Create the lead: `POST /api/agents { name: "p2-lead", isLead: true }`.
 3. Run `install-tracker.ts` with `STORE_BEARER_CONFIG=1`, `UI_E2E_AGENT_FS_ORG_ID=c5c27280-…`, `UI_E2E_AGENT_FS_DRIVE_ID=a8dc7a37-…`.
 4. Produce two shard summaries: `bun run e2e:ui -- --no-build --shard=1/2` and `--shard=2/2`, copying `test-results` into `/tmp/ui-e2e-p2/all-results/ui-e2e-results-{1,2}` between runs.
@@ -396,8 +396,9 @@ GITHUB_REPOSITORY=desplega-ai/agent-swarm UI_E2E_TRIGGER=manual UI_E2E_SHA=$(git
 jq '.run, (.results | length), (.artifacts | length)' /tmp/ui-e2e-p2/payloads/shard-1.json
 
 # 4. Local API with the template installed, real ingest
-PORT=3998 DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite AGENT_SWARM_API_KEY=localkey NODE_ENV=test \
-  GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true bun run src/http.ts > /tmp/ui-e2e-p2/api.log 2>&1 &
+PORT=3998 MCP_BASE_URL=http://127.0.0.1:3998 DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite AGENT_SWARM_API_KEY=localkey API_KEY=localkey \
+  GITHUB_DISABLE=true LINEAR_DISABLE=true JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true \
+  bun --no-env-file run src/http.ts > /tmp/ui-e2e-p2/api.log 2>&1 &
 LEAD=$(curl -s -X POST http://127.0.0.1:3998/api/agents -H 'Authorization: Bearer localkey' -H 'Content-Type: application/json' -d '{"name":"p2-lead","isLead":true}' | jq -r .id)
 SWARM_API_URL=http://127.0.0.1:3998 SWARM_API_KEY=localkey LEAD_AGENT_ID=$LEAD STORE_BEARER_CONFIG=1 BEARER_OUT=/tmp/ui-e2e-p2/bearer \
   UI_E2E_AGENT_FS_ORG_ID=c5c27280-f28a-48e6-b1b4-1ae23bef7844 UI_E2E_AGENT_FS_DRIVE_ID=a8dc7a37-9fab-4ab6-9e55-67a5d5e74d35 \
@@ -434,6 +435,8 @@ gh workflow run ui-e2e.yml --ref ui-e2e-p2 && gh run watch
   - The template's `AGENT_FS_LIVE_URL` default (`https://live.agent-fs.dev`) may not serve files from `agent-fs-taras.fly.dev`. The install task asks the lead to check one link; the working host becomes the swarm config value.
   - Deploys on `main` restart the swarm; `1.141.0` retries reboot-killed tasks but still loses their context. A "deploy window" note belongs in `runbooks/heartbeat-crash-recovery.md` or the release runbook.
   - Old uploads under `e2e/agent-swarm/pr-1364/` (P1 prefix) will never match the template prune. Delete by hand once the prune works.
+  - Template README step 5 overstates the install result: the bundled ingest creates `ui-e2e-incident-triage` on the first authoritative failure and `ui-e2e-promote-finding` on the first finding (`scripts/ui-e2e-ingest.ts:740-745, 816-821`), so a passed synthetic ingest creates neither. The install check is "no duplicates", not "exactly one each". Fix the README in `agent-work`.
+  - Local install verification (2026-09-07, `/tmp/ui-e2e-p2/verify-install.sh`): two runs idempotent, endpoint 401 without bearer and 200 `ok: true` with it, `UI_E2E_INGEST_BEARER` stored masked. The scripts runtime needs `MCP_BASE_URL` on the API's own port.
 - **References**:
   - Brainstorm: `thoughts/taras/brainstorms/2026-09-04-ui-e2e-swarm-driven-testing.md`
   - P1 plan: `thoughts/taras/plans/2026-09-04-ui-e2e-p1-playwright-suite.md`
