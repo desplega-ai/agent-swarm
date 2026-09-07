@@ -2337,12 +2337,23 @@ export interface paths {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        harness_provider: "claude" | "codex" | "pi" | "opencode";
+                        harness_provider: "claude" | "codex" | "pi" | "opencode" | "acp";
                         model?: string | null;
                         /** @default false */
                         allow_custom_model?: boolean;
                         /** @enum {string|null} */
                         reasoning_effort?: "off" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+                        acp?: {
+                            /** @enum {string} */
+                            target: "opencode" | "custom";
+                            command?: string | null;
+                            args?: string[];
+                            envKeys?: string[];
+                            modelEnvKey?: string | null;
+                            options?: {
+                                [key: string]: string | boolean;
+                            };
+                        };
                     };
                 };
             };
@@ -2829,6 +2840,7 @@ export interface paths {
                         missing?: string[] | null;
                         cred_status?: components["schemas"]["AgentCredStatus"] | null;
                         latest_model?: components["schemas"]["AgentLatestModel"];
+                        acp?: components["schemas"]["AgentAcpStatus"];
                     };
                 };
             };
@@ -11008,6 +11020,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11065,6 +11082,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11117,6 +11139,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         };
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         delayMs?: number;
                         runAt?: string;
                     };
@@ -11178,6 +11205,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11291,6 +11323,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -11404,6 +11441,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11463,6 +11505,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                     };
                 };
             };
@@ -11522,6 +11569,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -11640,6 +11692,11 @@ export interface paths {
                         scriptArgs?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                     };
                 };
             };
@@ -11699,6 +11756,11 @@ export interface paths {
                             scriptArgs?: {
                                 [key: string]: unknown;
                             };
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             /** Format: date-time */
                             createdAt: string;
                             /** Format: date-time */
@@ -14683,6 +14745,11 @@ export interface paths {
                                 scriptArgs?: {
                                     [key: string]: unknown;
                                 };
+                                params?: {
+                                    [key: string]: unknown;
+                                };
+                                requiredParams?: string[];
+                                requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                                 /** Format: date-time */
                                 createdAt: string;
                                 /** Format: date-time */
@@ -14776,7 +14843,7 @@ export interface paths {
         };
         /**
          * Identity + setup readiness + live activity for the swarm dashboard
-         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 8 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
+         * @description Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.
          */
         get: {
             parameters: {
@@ -14805,7 +14872,7 @@ export interface paths {
                             };
                             setup: {
                                 /** @enum {string} */
-                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "workers" | "first_task";
+                                id: "harness" | "embeddings" | "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs" | "workers" | "first_task";
                                 label: string;
                                 /** @enum {string} */
                                 state: "unverified" | "configured" | "verified";
@@ -14834,6 +14901,31 @@ export interface paths {
                                     [key: string]: unknown;
                                 };
                             };
+                            automations: {
+                                id: string;
+                                name: string;
+                                /** @enum {string} */
+                                kind: "schedule" | "workflow";
+                                /** @enum {string} */
+                                state: "running" | "needs_setup";
+                                missing: {
+                                    params: string[];
+                                    integrations: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
+                                };
+                                fixes: ({
+                                    /** @enum {string} */
+                                    type: "param";
+                                    key: string;
+                                    url: string;
+                                } | {
+                                    /** @enum {string} */
+                                    type: "integration";
+                                    /** @enum {string} */
+                                    key: "slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs";
+                                    url: string;
+                                })[];
+                                fixUrl: string;
+                            }[];
                             /** @enum {string} */
                             health: "ok" | "degraded" | "broken";
                         };
@@ -18629,6 +18721,11 @@ export interface paths {
                             name: string;
                             description?: string;
                             enabled: boolean;
+                            params?: {
+                                [key: string]: unknown;
+                            };
+                            requiredParams?: string[];
+                            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                             dir?: string;
                             vcsRepo?: string;
                             createdByAgentId?: string;
@@ -18709,6 +18806,11 @@ export interface paths {
                             type: "schedule";
                             /** Format: uuid */
                             scheduleId: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "event";
+                            /** @enum {string} */
+                            eventName: "slack.message";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -18721,6 +18823,11 @@ export interface paths {
                         triggerSchema?: {
                             [key: string]: unknown;
                         };
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         dir?: string;
                         vcsRepo?: string;
                     };
@@ -18861,6 +18968,11 @@ export interface paths {
                             type: "schedule";
                             /** Format: uuid */
                             scheduleId: string;
+                        } | {
+                            /** @enum {string} */
+                            type: "event";
+                            /** @enum {string} */
+                            eventName: "slack.message";
                         })[];
                         cooldown?: {
                             hours?: number;
@@ -18873,6 +18985,11 @@ export interface paths {
                         triggerSchema?: {
                             [key: string]: unknown;
                         } | null;
+                        params?: {
+                            [key: string]: unknown;
+                        };
+                        requiredParams?: string[];
+                        requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
                         dir?: string | null;
                         vcsRepo?: string | null;
                         enabled?: boolean;
@@ -19859,6 +19976,7 @@ export interface components {
              */
             reportKind: "boot" | "post_task";
             bedrock?: components["schemas"]["AgentBedrockStatus"];
+            acp?: components["schemas"]["AgentAcpStatus"];
         };
         /** @default null */
         AgentCredStatusLiveTest: {
@@ -19895,6 +20013,42 @@ export interface components {
                 name: string;
             }[];
             error?: string;
+        } | null;
+        /** @default null */
+        AgentAcpStatus: {
+            /** @enum {string} */
+            target: "opencode" | "custom";
+            configOptions: ({
+                /** @enum {string} */
+                type: "select";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: string;
+                options: ({
+                    value: string;
+                    name: string;
+                    description?: string | null;
+                } | {
+                    group: string;
+                    name: string;
+                    options: {
+                        value: string;
+                        name: string;
+                        description?: string | null;
+                    }[];
+                })[];
+            } | {
+                /** @enum {string} */
+                type: "boolean";
+                id: string;
+                name: string;
+                description?: string | null;
+                category?: string | null;
+                currentValue: boolean;
+            })[];
+            reportedAt: number;
         } | null;
         Agent: {
             id: string;
@@ -20569,7 +20723,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
+            eventType: "agent_joined" | "agent_status_change" | "agent_left" | "task_created" | "task_status_change" | "task_progress" | "task_steering" | "task_offered" | "task_accepted" | "task_rejected" | "task_claimed" | "task_claim_rejected_affinity" | "task_dispatch_rejected_affinity" | "task_authorization_rejected" | "task_recovery_authorization" | "task_released" | "channel_message" | "service_registered" | "service_unregistered" | "service_status_change" | "budget.upserted" | "budget.deleted" | "pricing.inserted" | "pricing.deleted" | "pricing.refresh" | "pricing.refresh.failed" | "task_superseded";
             agentId?: string;
             taskId?: string;
             oldValue?: string;
@@ -20816,6 +20970,11 @@ export interface components {
                 type: "schedule";
                 /** Format: uuid */
                 scheduleId: string;
+            } | {
+                /** @enum {string} */
+                type: "event";
+                /** @enum {string} */
+                eventName: "slack.message";
             })[];
             cooldown?: {
                 hours?: number;
@@ -20828,6 +20987,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             };
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
             dir?: string;
             vcsRepo?: string;
             createdByAgentId?: string;
@@ -20891,6 +21055,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             } | null;
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
         };
         WorkflowRun: {
             /** Format: uuid */
@@ -20995,6 +21164,11 @@ export interface components {
                 type: "schedule";
                 /** Format: uuid */
                 scheduleId: string;
+            } | {
+                /** @enum {string} */
+                type: "event";
+                /** @enum {string} */
+                eventName: "slack.message";
             })[];
             cooldown?: {
                 hours?: number;
@@ -21007,6 +21181,11 @@ export interface components {
             triggerSchema?: {
                 [key: string]: unknown;
             };
+            params?: {
+                [key: string]: unknown;
+            };
+            requiredParams?: string[];
+            requires?: ("slack" | "github" | "linear" | "jira" | "gsc" | "agentmail" | "agentfs")[];
             dir?: string;
             vcsRepo?: string;
             enabled: boolean;

@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "pr-review-status-sweep",
+  "displayName": "PR Review Status Sweep",
+  "slug": "pr-review-status-sweep",
+  "title": "PR Review Status Sweep",
+  "description": "Find actionable pull-request review items without auto-merging or pushing.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["REPO_URL"],
+  "requires": ["github"],
+  "runAllSeedersCandidate": true,
+  "tags": ["github", "reviews", "triage"]
+}

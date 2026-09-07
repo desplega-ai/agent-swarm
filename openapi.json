@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Agent Swarm API",
-    "version": "1.140.0",
+    "version": "1.141.0",
     "description": "Multi-agent orchestration API for Claude Code, Codex, and Gemini CLI. Enables task distribution, agent communication, and service discovery.\n\nMCP tools are documented separately in [MCP.md](./MCP.md)."
   },
   "servers": [
@@ -545,6 +545,9 @@
           },
           "bedrock": {
             "$ref": "#/components/schemas/AgentBedrockStatus"
+          },
+          "acp": {
+            "$ref": "#/components/schemas/AgentAcpStatus"
           }
         },
         "required": [
@@ -690,6 +693,182 @@
           "region",
           "probedAt",
           "ready"
+        ]
+      },
+      "AgentAcpStatus": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "opencode",
+              "custom"
+            ]
+          },
+          "configOptions": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "select"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "string"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "value": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "value",
+                              "name"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "group": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "description": {
+                                      "type": [
+                                        "string",
+                                        "null"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "value",
+                                    "name"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "group",
+                              "name",
+                              "options"
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue",
+                    "options"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "boolean"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "currentValue": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "id",
+                    "name",
+                    "currentValue"
+                  ]
+                }
+              ]
+            }
+          },
+          "reportedAt": {
+            "type": "number"
+          }
+        },
+        "default": null,
+        "required": [
+          "target",
+          "configOptions",
+          "reportedAt"
         ]
       },
       "Agent": {
@@ -3419,6 +3598,7 @@
               "task_rejected",
               "task_claimed",
               "task_claim_rejected_affinity",
+              "task_dispatch_rejected_affinity",
               "task_authorization_rejected",
               "task_recovery_authorization",
               "task_released",
@@ -4096,6 +4276,27 @@
                     "type",
                     "scheduleId"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "event"
+                      ]
+                    },
+                    "eventName": {
+                      "type": "string",
+                      "enum": [
+                        "slack.message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "eventName"
+                  ]
                 }
               ]
             },
@@ -4139,6 +4340,31 @@
           "triggerSchema": {
             "type": "object",
             "additionalProperties": {}
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           },
           "dir": {
             "type": "string",
@@ -4311,6 +4537,31 @@
             ],
             "additionalProperties": {},
             "description": "Optional JSON-Schema describing the expected trigger payload shape. Pass an object to set/replace; pass null to clear; omit to leave unchanged. Validator subset: type, required, properties, enum, const, items. Other JSON-Schema keywords are silently ignored."
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           }
         }
       },
@@ -4606,6 +4857,27 @@
                     "type",
                     "scheduleId"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "event"
+                      ]
+                    },
+                    "eventName": {
+                      "type": "string",
+                      "enum": [
+                        "slack.message"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "eventName"
+                  ]
                 }
               ]
             }
@@ -4648,6 +4920,31 @@
           "triggerSchema": {
             "type": "object",
             "additionalProperties": {}
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "requiredParams": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "slack",
+                "github",
+                "linear",
+                "jira",
+                "gsc",
+                "agentmail",
+                "agentfs"
+              ]
+            }
           },
           "dir": {
             "type": "string",
@@ -9023,7 +9320,8 @@
                       "claude",
                       "codex",
                       "pi",
-                      "opencode"
+                      "opencode",
+                      "acp"
                     ]
                   },
                   "model": {
@@ -9050,6 +9348,61 @@
                       "xhigh",
                       "max",
                       null
+                    ]
+                  },
+                  "acp": {
+                    "type": "object",
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "enum": [
+                          "opencode",
+                          "custom"
+                        ]
+                      },
+                      "command": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "minLength": 1
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "envKeys": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                        }
+                      },
+                      "modelEnvKey": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                      },
+                      "options": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "boolean"
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": [
+                      "target"
                     ]
                   }
                 },
@@ -9800,6 +10153,9 @@
                   },
                   "latest_model": {
                     "$ref": "#/components/schemas/AgentLatestModel"
+                  },
+                  "acp": {
+                    "$ref": "#/components/schemas/AgentAcpStatus"
                   }
                 }
               }
@@ -24013,6 +24369,31 @@
                     "type": "object",
                     "additionalProperties": {}
                   },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
+                  },
                   "delayMs": {
                     "type": "integer"
                   },
@@ -24153,6 +24534,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -24483,6 +24889,31 @@
                                 "type": "object",
                                 "additionalProperties": {}
                               },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              },
                               "createdAt": {
                                 "type": "string",
                                 "format": "date-time"
@@ -24638,6 +25069,31 @@
                               "scriptArgs": {
                                 "type": "object",
                                 "additionalProperties": {}
+                              },
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "requiredParams": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "requires": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
                               },
                               "createdAt": {
                                 "type": "string",
@@ -24837,6 +25293,31 @@
                         "scriptArgs": {
                           "type": "object",
                           "additionalProperties": {}
+                        },
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "requiredParams": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "requires": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "slack",
+                              "github",
+                              "linear",
+                              "jira",
+                              "gsc",
+                              "agentmail",
+                              "agentfs"
+                            ]
+                          }
                         },
                         "createdAt": {
                           "type": "string",
@@ -25052,6 +25533,31 @@
                       "type": "object",
                       "additionalProperties": {}
                     },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -25225,6 +25731,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   }
                 }
               }
@@ -25360,6 +25891,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -25555,6 +26111,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   }
                 }
               }
@@ -25690,6 +26271,31 @@
                     "scriptArgs": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "requiredParams": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "requires": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "slack",
+                          "github",
+                          "linear",
+                          "jira",
+                          "gsc",
+                          "agentmail",
+                          "agentfs"
+                        ]
+                      }
                     },
                     "createdAt": {
                       "type": "string",
@@ -37302,6 +37908,31 @@
                             "type": "object",
                             "additionalProperties": {}
                           },
+                          "params": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "requiredParams": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requires": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "slack",
+                                "github",
+                                "linear",
+                                "jira",
+                                "gsc",
+                                "agentmail",
+                                "agentfs"
+                              ]
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -37509,7 +38140,7 @@
     "/status": {
       "get": {
         "summary": "Identity + setup readiness + live activity for the swarm dashboard",
-        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; the 8 setup milestones each emit `unverified | configured | verified`; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
+        "description": "Single source of truth consumed by the UI home page. Identity comes from SWARM_* envs; setup milestones each emit `unverified | configured | verified`; automations report `running | needs_setup` from the same runtime preflight used at dispatch; activity counts agents alive in the last 5 min and tasks created in the last 24h; agent_fs reports whether AGENT_FS_API_URL is set.",
         "tags": [
           "Status"
         ],
@@ -37587,6 +38218,9 @@
                               "github",
                               "linear",
                               "jira",
+                              "gsc",
+                              "agentmail",
+                              "agentfs",
                               "workers",
                               "first_task"
                             ]
@@ -37714,6 +38348,136 @@
                         "capabilities"
                       ]
                     },
+                    "automations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "schedule",
+                              "workflow"
+                            ]
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "running",
+                              "needs_setup"
+                            ]
+                          },
+                          "missing": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "integrations": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "slack",
+                                    "github",
+                                    "linear",
+                                    "jira",
+                                    "gsc",
+                                    "agentmail",
+                                    "agentfs"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "params",
+                              "integrations"
+                            ]
+                          },
+                          "fixes": {
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "param"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": [
+                                        "integration"
+                                      ]
+                                    },
+                                    "key": {
+                                      "type": "string",
+                                      "enum": [
+                                        "slack",
+                                        "github",
+                                        "linear",
+                                        "jira",
+                                        "gsc",
+                                        "agentmail",
+                                        "agentfs"
+                                      ]
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "key",
+                                    "url"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "fixUrl": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "state",
+                          "missing",
+                          "fixes",
+                          "fixUrl"
+                        ]
+                      }
+                    },
                     "health": {
                       "type": "string",
                       "enum": [
@@ -37728,6 +38492,7 @@
                     "setup",
                     "activity",
                     "agent_fs",
+                    "automations",
                     "health"
                   ]
                 }
@@ -43835,6 +44600,31 @@
                           "enabled": {
                             "type": "boolean"
                           },
+                          "params": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "requiredParams": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "requires": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "slack",
+                                "github",
+                                "linear",
+                                "jira",
+                                "gsc",
+                                "agentmail",
+                                "agentfs"
+                              ]
+                            }
+                          },
                           "dir": {
                             "type": "string",
                             "minLength": 1
@@ -44057,6 +44847,27 @@
                             "type",
                             "scheduleId"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "event"
+                              ]
+                            },
+                            "eventName": {
+                              "type": "string",
+                              "enum": [
+                                "slack.message"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "eventName"
+                          ]
                         }
                       ]
                     }
@@ -44099,6 +44910,31 @@
                   "triggerSchema": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   },
                   "dir": {
                     "type": "string",
@@ -44368,6 +45204,27 @@
                             "type",
                             "scheduleId"
                           ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": [
+                                "event"
+                              ]
+                            },
+                            "eventName": {
+                              "type": "string",
+                              "enum": [
+                                "slack.message"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "eventName"
+                          ]
                         }
                       ]
                     }
@@ -44419,6 +45276,31 @@
                       "null"
                     ],
                     "additionalProperties": {}
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "requiredParams": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "requires": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "slack",
+                        "github",
+                        "linear",
+                        "jira",
+                        "gsc",
+                        "agentmail",
+                        "agentfs"
+                      ]
+                    }
                   },
                   "dir": {
                     "type": [

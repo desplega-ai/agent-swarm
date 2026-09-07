@@ -7,6 +7,13 @@ import { fileURLToPath } from "node:url";
 import { SCRIPT_SDK_RESPONSE_LIMIT_BYTES } from "../scripts-runtime/response-limit";
 import type { ScriptRun } from "../types";
 import {
+  detachedProcessGroup,
+  forceTerminateProcessGroup,
+  registerProcessGroup,
+  signalProcessGroup,
+  terminateProcessGroup,
+} from "../utils/process-group";
+import {
   buildSandboxedCommand,
   readStreamCapped,
   sandboxSpawnEnv,
@@ -32,7 +39,7 @@ export type ScriptExecutionHandle = {
   tmpdir: string;
   startedAtMs: number;
   exited: Promise<ScriptExecutionResult>;
-  terminate(signal?: NodeJS.Signals): void;
+  terminate(signal?: NodeJS.Signals): Promise<void>;
   cleanup(): Promise<void>;
 };
 
@@ -45,7 +52,7 @@ export type StartScriptExecutionInput = {
 export interface ScriptExecutor {
   start(input: StartScriptExecutionInput): Promise<ScriptExecutionHandle>;
   isRunning(pid: number): boolean;
-  terminatePid(pid: number, signal?: NodeJS.Signals): void;
+  terminatePid(pid: number, signal?: NodeJS.Signals): Promise<void>;
 }
 
 export function getScriptWorkflowHarnessPath(): string {
@@ -360,13 +367,22 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     };
 
     try {
-      proc = Bun.spawn(buildSandboxedCommand(["bun", "run", harnessPath], harnessEnv), {
-        cwd: tmpdir,
-        env: sandboxSpawnEnv(harnessEnv),
-        stdin: "ignore",
-        stdout: "ignore",
-        stderr: "pipe",
-      });
+      proc = registerProcessGroup(
+        Bun.spawn(buildSandboxedCommand(["bun", "run", harnessPath], harnessEnv), {
+          cwd: tmpdir,
+          detached: detachedProcessGroup,
+          // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
+          // — the sandboxed command's `env -i` prelude scrubs the child down
+          // to `harnessEnv` above, so no secret rides on this outer env
+          // either. On win32 there is no such prelude, so `sandboxSpawnEnv`
+          // passes `harnessEnv` through directly instead — see
+          // `buildSandboxedCommand`'s win32 doc comment.
+          env: sandboxSpawnEnv(harnessEnv),
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "pipe",
+        }),
+      );
     } catch (error) {
       for (const socket of sockets) socket.destroy();
       await closeServer(server);
@@ -389,6 +405,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     const spawned = proc;
     const exited = spawned.exited.then(async (processExitCode) => {
       clearInterval(heartbeat);
+      await terminateProcessGroup(spawned.pid);
       let stderr = await stderrPromise;
       try {
         if (protocolFailure) throw protocolFailure;
@@ -427,9 +444,11 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       tmpdir,
       startedAtMs: Date.now(),
       exited,
-      terminate: (signal = "SIGTERM") => {
+      terminate: async (signal = "SIGTERM") => {
         built.abortInFlightSteps();
-        spawned.kill(signal);
+        if (signal === "SIGTERM") await terminateProcessGroup(spawned.pid);
+        else if (signal === "SIGKILL") forceTerminateProcessGroup(spawned.pid);
+        else signalProcessGroup(spawned.pid, signal);
       },
       cleanup: async () => {
         clearInterval(heartbeat);
@@ -450,8 +469,10 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     }
   }
 
-  terminatePid(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
-    process.kill(pid, signal);
+  async terminatePid(pid: number, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+    if (signal === "SIGTERM") await terminateProcessGroup(pid);
+    else if (signal === "SIGKILL") forceTerminateProcessGroup(pid);
+    else signalProcessGroup(pid, signal);
   }
 }
 

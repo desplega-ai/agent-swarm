@@ -24,4 +24,6 @@ preload = ["./src/tests/preload.ts"]
 # bare `bun test` at the repo root doesn't glob apps/evals/**/*.test.ts and fail to resolve
 # evals-only deps. (Positional filters like `bun test src` are substring matches and
 # would also match `apps/evals/src`, so this ignore is the correct mechanism.)
-pathIgnorePatterns = ["apps/evals/**"]
+# packages/ui-e2e holds Playwright specs (*.spec.ts). Bun's test globber would load
+# them and @playwright/test throws when it detects a Jest-like runner.
+pathIgnorePatterns = ["apps/evals/**", "packages/ui-e2e/**"]

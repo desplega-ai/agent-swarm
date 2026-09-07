@@ -152,10 +152,9 @@ export const DEFAULT_MODEL_TIER_MAP: Record<ProviderName, Record<ModelTier, stri
     smart: "devin",
     ultra: "devin",
   },
-  // A generic ACP target owns its own model selection — the swarm never sends
-  // one over the wire. Empty strings resolve to `{ source: "none" }`, while
-  // `MODEL_TIER_*` / `MODEL_TIER_MAP` env overrides still apply for targets
-  // that do accept a model.
+  // ACP has no portable tier-to-model mapping. Operators may set an explicit
+  // MODEL_OVERRIDE, which the adapter applies through an advertised `model`
+  // config option with a target-specific startup fallback.
   acp: {
     smol: "",
     regular: "",
@@ -733,6 +732,11 @@ export const CreateTaskOptionsSchema = z.object({
    * contract on completion (which would block the control task — DES-523).
    */
   inheritParentOutputSchema: z.boolean().optional(),
+  /**
+   * Skip parent routing requirements only for a child with its own explicit
+   * Lead-only control-plane authorization.
+   */
+  inheritParentRoutingAffinity: z.boolean().optional(),
   followUpConfig: FollowUpConfigSchema.optional(),
   requestedByUserId: z.string().optional(),
   contextKey: z.string().optional(),
@@ -746,8 +750,8 @@ export const CreateTaskOptionsSchema = z.object({
    * Routing-affinity snapshot gating task authorization (see
    * `isAgentEligibleForTask`). `leadOnly: true` is an explicit, structured
    * constraint: only an agent with `isLead` may be assigned, offered, claim,
-   * or recover this task. It is never inferred from task text. Inherited from the parent (via `parentTaskId`)
-   * when not explicitly set — same treatment as `vcsRepo`/`contextKey`.
+   * or recover this task. It is never inferred from task text. Inherited from
+   * the parent unless a control-plane child explicitly opts out.
    */
   routingAffinity: RoutingAffinitySchema.optional(),
 });
@@ -1165,6 +1169,50 @@ export const AgentBedrockStatusSchema = z
   .openapi("AgentBedrockStatus");
 export type AgentBedrockStatus = z.infer<typeof AgentBedrockStatusSchema>;
 
+const AcpSessionConfigSelectValueSchema = z.object({
+  value: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+});
+
+const AcpSessionConfigSelectGroupSchema = z.object({
+  group: z.string(),
+  name: z.string(),
+  options: z.array(AcpSessionConfigSelectValueSchema),
+});
+
+export const AcpSessionConfigOptionSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("select"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.string(),
+    options: z.array(
+      z.union([AcpSessionConfigSelectValueSchema, AcpSessionConfigSelectGroupSchema]),
+    ),
+  }),
+  z.object({
+    type: z.literal("boolean"),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    currentValue: z.boolean(),
+  }),
+]);
+export type AcpSessionConfigOption = z.infer<typeof AcpSessionConfigOptionSchema>;
+
+export const AgentAcpStatusSchema = z
+  .object({
+    target: z.enum(["opencode", "custom"]),
+    configOptions: z.array(AcpSessionConfigOptionSchema),
+    reportedAt: z.number(),
+  })
+  .openapi("AgentAcpStatus");
+export type AgentAcpStatus = z.infer<typeof AgentAcpStatusSchema>;
+
 export const AgentCredStatusSchema = z
   .object({
     ready: z.boolean(),
@@ -1180,6 +1228,8 @@ export const AgentCredStatusSchema = z
     reportKind: z.enum(["boot", "post_task"]).default("boot"),
     /** Pi-mono Bedrock enumeration block — null when not in Bedrock mode. */
     bedrock: AgentBedrockStatusSchema.nullable().default(null),
+    /** ACP options advertised by the most recently created session. */
+    acp: AgentAcpStatusSchema.nullable().default(null),
   })
   .openapi("AgentCredStatus");
 export type AgentCredStatus = z.infer<typeof AgentCredStatusSchema>;
@@ -1319,6 +1369,7 @@ export const AgentLogEventTypeSchema = z.enum([
   "task_rejected",
   "task_claimed",
   "task_claim_rejected_affinity",
+  "task_dispatch_rejected_affinity",
   "task_authorization_rejected",
   "task_recovery_authorization",
   "task_released",
@@ -1520,6 +1571,17 @@ export type SwarmEvent = z.infer<typeof SwarmEventSchema>;
 // Scheduled Task Types
 // ============================================================================
 
+export const AutomationIntegrationIdSchema = z.enum([
+  "slack",
+  "github",
+  "linear",
+  "jira",
+  "gsc",
+  "agentmail",
+  "agentfs",
+]);
+export type AutomationIntegrationId = z.infer<typeof AutomationIntegrationIdSchema>;
+
 export const ScheduledTaskTargetTypeSchema = z.enum(["agent-task", "workflow", "script"]);
 export type ScheduledTaskTargetType = z.infer<typeof ScheduledTaskTargetTypeSchema>;
 
@@ -1551,6 +1613,9 @@ export const ScheduledTaskSchema = z
     workflowId: z.uuid().optional(),
     scriptName: z.string().optional(),
     scriptArgs: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     createdAt: z.iso.datetime(),
     lastUpdatedAt: z.iso.datetime(),
     createdBy: z.string().optional(),
@@ -1949,6 +2014,9 @@ export const WorkflowPatchSchema = z
           "Validator subset: type, required, properties, enum, const, items. " +
           "Other JSON-Schema keywords are silently ignored.",
       ),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
   })
   .openapi("WorkflowPatch");
 export type WorkflowPatch = z.infer<typeof WorkflowPatchSchema>;
@@ -2019,6 +2087,10 @@ export const TriggerConfigSchema = z
       type: z.literal("schedule"),
       scheduleId: z.string().uuid(),
     }),
+    z.object({
+      type: z.literal("event"),
+      eventName: z.literal("slack.message"),
+    }),
   ])
   .superRefine((trigger, ctx) => {
     if (trigger.type === "webhook" && trigger.verification && !trigger.hmacSecret) {
@@ -2086,6 +2158,9 @@ export const WorkflowSnapshotSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     enabled: z.boolean(),
@@ -2107,6 +2182,9 @@ export const WorkflowSchema = z
     cooldown: CooldownConfigSchema.optional(),
     input: z.record(z.string(), InputValueSchema).optional(),
     triggerSchema: z.record(z.string(), z.unknown()).optional(),
+    params: z.record(z.string(), z.unknown()).optional(),
+    requiredParams: z.array(z.string()).optional(),
+    requires: z.array(AutomationIntegrationIdSchema).optional(),
     dir: z.string().min(1).startsWith("/").optional(),
     vcsRepo: z.string().min(1).optional(),
     createdByAgentId: z.string().optional(),

@@ -1,5 +1,91 @@
 import { describe, expect, test } from "bun:test";
-import { resolveNonInteractiveProvider } from "../commands/onboard/non-interactive.ts";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  parseMaxConcurrentTasks,
+  resolveNonInteractiveProvider,
+} from "../commands/onboard/non-interactive.ts";
+import { CHILD_PROCESS_TEST_BUDGET_MS, runChild } from "./test-proc.ts";
+
+const CLI_PATH = new URL("../cli.tsx", import.meta.url).pathname;
+
+describe("non-interactive onboarding CLI", () => {
+  test(
+    "--yes without --preset errors before provisioning",
+    async () => {
+      const outputDir = await mkdtemp(join(tmpdir(), "onboard-no-preset-"));
+      try {
+        const result = await runChild(["bun", CLI_PATH, "onboard", "--yes"], {
+          cwd: outputDir,
+          env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "test-oauth" },
+        });
+
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stdout).toContain("--preset is required in non-interactive mode (--yes)");
+        expect(result.stdout).toContain("full, dev, content, research, solo");
+        expect(result.stdout).not.toContain("Preset: Full");
+        expect(await readdir(outputDir)).toEqual([]);
+      } finally {
+        await rm(outputDir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "rejects an invalid CLI concurrency override before provisioning",
+    async () => {
+      const outputDir = await mkdtemp(join(tmpdir(), "onboard-invalid-concurrency-"));
+      try {
+        const result = await runChild(
+          ["bun", CLI_PATH, "onboard", "--yes", "--preset=solo", "--max-concurrent-tasks=0"],
+          {
+            cwd: outputDir,
+            env: { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: "test-oauth" },
+          },
+        );
+
+        expect(result.exitCode).not.toBe(0);
+        expect(result.stdout).toContain(
+          "--max-concurrent-tasks must be an integer between 1 and 100",
+        );
+        expect(await readdir(outputDir)).toEqual([]);
+      } finally {
+        await rm(outputDir, { recursive: true, force: true });
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+
+  test(
+    "documents explicit unattended presets and conservative concurrency",
+    async () => {
+      const result = await runChild(["bun", CLI_PATH, "onboard", "--help"]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain("required with --yes");
+      expect(result.stdout).toContain("onboard --yes --preset=full");
+      expect(result.stdout).toContain("default: lead 2, worker 1");
+      expect(result.stdout).not.toContain("default: full");
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
+  );
+});
+
+describe("parseMaxConcurrentTasks", () => {
+  test("validates the explicit concurrency override", () => {
+    expect(parseMaxConcurrentTasks(undefined)).toEqual({ ok: true, value: null });
+    expect(parseMaxConcurrentTasks("4")).toEqual({ ok: true, value: 4 });
+    expect(parseMaxConcurrentTasks("0")).toEqual({
+      ok: false,
+      error: "--max-concurrent-tasks must be an integer between 1 and 100",
+    });
+    expect(parseMaxConcurrentTasks("1.5").ok).toBe(false);
+    expect(parseMaxConcurrentTasks("1e2").ok).toBe(false);
+    expect(parseMaxConcurrentTasks("101").ok).toBe(false);
+  });
+});
 
 describe("resolveNonInteractiveProvider", () => {
   test("keeps Claude as the default and accepts OAuth", () => {

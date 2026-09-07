@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../client";
+import { invalidateStatusQuery } from "./status-query";
 
 export function useWorkflows() {
   return useQuery({
@@ -52,6 +53,7 @@ export function useUpdateWorkflow() {
         name: string;
         description: string;
         enabled: boolean;
+        params: Record<string, unknown>;
         // null = clear the schema, object = set/replace, undefined/omitted = unchanged.
         // Mirrors the backend semantics shared by PUT and PATCH.
         triggerSchema: Record<string, unknown> | null;
@@ -60,6 +62,7 @@ export function useUpdateWorkflow() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
       queryClient.invalidateQueries({ queryKey: ["workflow"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }
@@ -70,6 +73,7 @@ export function useDeleteWorkflow() {
     mutationFn: (id: string) => api.deleteWorkflow(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["workflows"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }

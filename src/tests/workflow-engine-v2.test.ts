@@ -5,6 +5,7 @@ import {
   closeDb,
   createWorkflow,
   deleteWorkflow,
+  getDbClient,
   getWorkflowRun,
   getWorkflowRunStepsByRunId,
   initDb,
@@ -220,6 +221,9 @@ async function makeWorkflow(
     triggers: overrides?.triggers,
     cooldown: overrides?.cooldown,
     input: overrides?.input,
+    params: overrides?.params,
+    requiredParams: overrides?.requiredParams,
+    requires: overrides?.requires,
   });
   // Track for cleanup
   createdWorkflowIds.push(workflow.id);
@@ -258,6 +262,94 @@ describe("Workflow Engine v2 (Phase 3)", () => {
   });
 
   // ─── Linear Workflow ──────────────────────────────────────
+
+  describe("Automation preflight", () => {
+    test("records one failed run per workflow/day despite reason changes and creates no tasks", async () => {
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow(
+        {
+          nodes: [{ id: "start", type: "echo", config: { message: "{{REPO_URL}}" } }],
+        },
+        { params: {}, requiredParams: ["REPO_URL"] },
+      );
+      const before = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM agent_tasks",
+      );
+
+      const { createWorkflowRun, updateWorkflowRun } = await import("../be/db");
+      const ordinaryRunId = crypto.randomUUID();
+      await createWorkflowRun({ id: ordinaryRunId, workflowId: workflow.id });
+      await updateWorkflowRun(ordinaryRunId, {
+        status: "failed",
+        error: "ordinary executor failure",
+        finishedAt: new Date().toISOString(),
+      });
+
+      const firstRunId = await startWorkflowExecution(workflow, {}, registry);
+      const secondRunId = await startWorkflowExecution(
+        { ...workflow, requiredParams: ["OTHER_PARAM"] },
+        {},
+        registry,
+      );
+      const run = await getWorkflowRun(firstRunId);
+      const after = await getDbClient().get<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM agent_tasks",
+      );
+
+      expect(secondRunId).toBe(firstRunId);
+      expect(firstRunId).not.toBe(ordinaryRunId);
+      expect(run?.status).toBe("failed");
+      expect(run?.error).toBe("needs_setup: params=[REPO_URL] integrations=[]");
+      expect(await getWorkflowRunStepsByRunId(firstRunId)).toEqual([]);
+      expect(after?.count).toBe(before?.count);
+      expect(
+        await getDbClient().get<{ total: number; preflight: number }>(
+          `SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN error LIKE 'needs_setup:%' THEN 1 ELSE 0 END) AS preflight
+           FROM workflow_runs WHERE workflowId = ?`,
+          [workflow.id],
+        ),
+      ).toEqual({ total: 2, preflight: 1 });
+    });
+
+    test("renders parameters across workflow runtime fields and preserves input value types", async () => {
+      const registry = createTestRegistry();
+      const workflow = await makeWorkflow(
+        {
+          nodes: [
+            {
+              id: "start",
+              type: "echo",
+              config: {
+                message:
+                  "Review {{workflow.vcsRepo}} in {{workflow.dir}}: {{input.COMPETITORS}} for {{trigger.ref}}",
+              },
+            },
+          ],
+        },
+        {
+          input: { COMPETITORS: "{{COMPETITORS}}" },
+          dir: "/workspace/{{WORKSPACE_NAME}}",
+          vcsRepo: "{{REPO_URL}}",
+          params: {
+            COMPETITORS: ["one", "two"],
+            REPO_URL: "acme/widgets",
+            WORKSPACE_NAME: "widgets",
+          },
+          requiredParams: ["COMPETITORS", "REPO_URL", "WORKSPACE_NAME"],
+        },
+      );
+
+      const runId = await startWorkflowExecution(workflow, { ref: "main" }, registry);
+      const run = await getWorkflowRun(runId);
+
+      expect(run?.status).toBe("completed");
+      expect(run?.context?.input).toEqual({ COMPETITORS: ["one", "two"] });
+      expect(run?.context?.start).toEqual({
+        echo: 'Review acme/widgets in /workspace/widgets: ["one","two"] for main',
+      });
+    });
+  });
 
   describe("Linear workflow execution", () => {
     test("executes 3 instant nodes to completion, context accumulates", async () => {

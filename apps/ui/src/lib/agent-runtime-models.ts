@@ -19,13 +19,13 @@ const REASONING_EFFORT_LEVELS: readonly ReasoningEffortLevel[] = [
   "max",
 ];
 
-export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode";
+export type LocalHarnessProvider = "claude" | "codex" | "pi" | "opencode" | "acp";
 
 export interface ModelOption {
   id: string;
   label: string;
   provider: string;
-  providerId: ProviderIconKey;
+  providerId: ProviderIconKey | null;
   requiredKey: string;
   cost?: { input?: number; output?: number };
   contextWindow?: number;
@@ -56,6 +56,8 @@ export interface ModelGroup {
 
 export type SnapshotProviderId = "openrouter" | "anthropic" | "openai" | "amazon-bedrock";
 
+type CatalogProviderId = SnapshotProviderId | "opencode";
+
 interface CachedReasoningOption {
   type: string;
   values?: string[];
@@ -83,9 +85,9 @@ interface CachedProvider {
  * provider is present here it is preferred over the build-time snapshot;
  * when the fetch hasn't resolved the snapshot keeps the picker non-blank.
  */
-export type LiveModelsCatalog = Partial<Record<SnapshotProviderId, CachedProvider>>;
+export type LiveModelsCatalog = Partial<Record<CatalogProviderId, CachedProvider>>;
 
-const CACHE = modelsCache as Record<SnapshotProviderId, CachedProvider | undefined>;
+const CACHE = modelsCache as Record<CatalogProviderId, CachedProvider | undefined>;
 
 // --- Reasoning-effort capability mirror ---------------------------------------
 // Client-side mirror of the resolution order in `reasoningCapability()`
@@ -180,7 +182,7 @@ function reasoningLevelsFromCache(
   return levels.length > 0 ? levels : undefined;
 }
 
-export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode"];
+export const LOCAL_HARNESSES: LocalHarnessProvider[] = ["claude", "codex", "pi", "opencode", "acp"];
 
 export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   claude: "Claude",
@@ -189,7 +191,12 @@ export const HARNESS_LABEL: Record<ProviderName | string, string> = {
   devin: "Devin",
   opencode: "Opencode",
   pi: "Pi-Mono",
+  acp: "ACP",
 };
+
+export function harnessSupportsModelSelection(harness: LocalHarnessProvider): boolean {
+  return harness !== "acp";
+}
 
 const ANTHROPIC_META = {
   provider: "Anthropic",
@@ -287,6 +294,7 @@ const FALLBACK_MODEL: Record<LocalHarnessProvider, string> = {
   codex: "gpt-5.6-terra",
   pi: "openrouter/google/gemini-3-flash-preview",
   opencode: "openrouter/qwen/qwen3-coder-flash",
+  acp: "",
 };
 
 function hasConfigKey(configs: SwarmConfig[] | undefined, key: string): boolean {
@@ -334,6 +342,8 @@ export function modelGroupsForHarness(
   liveBedrockStatus?: LiveBedrockStatus | null,
   liveCatalog?: LiveModelsCatalog | null,
 ): ModelGroup[] {
+  if (harness === "acp") return [];
+
   const providerCache = (providerId: SnapshotProviderId): CachedProvider | undefined =>
     liveCatalog?.[providerId] ?? CACHE[providerId];
 
@@ -433,6 +443,49 @@ export function modelGroupsForHarness(
   }
 
   return snapshotGroups;
+}
+
+/**
+ * Best-effort model suggestions for ACP targets whose model namespace is known.
+ * The value remains free-form because ACP servers can expose models outside
+ * models.dev and custom targets have no catalog we can infer safely.
+ */
+export function modelGroupsForAcpTarget(
+  target: "opencode" | "custom",
+  liveCatalog?: LiveModelsCatalog | null,
+): ModelGroup[] {
+  if (target !== "opencode") return [];
+
+  const opencodeCache = liveCatalog?.opencode ?? CACHE.opencode;
+  const opencodeModels: ModelOption[] = Object.values(opencodeCache?.models ?? {})
+    .map((model) => ({
+      id: `opencode/${model.id}`,
+      label: model.name ?? model.id,
+      provider: opencodeCache?.name ?? "OpenCode Zen",
+      providerId: null,
+      requiredKey: "",
+      cost: model.cost,
+      contextWindow: model.limit?.context,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const providerGroups = modelGroupsForHarness(
+    "opencode",
+    undefined,
+    undefined,
+    null,
+    liveCatalog,
+  ).map((group) => ({ ...group, enabled: true, disabledReason: undefined }));
+
+  return [
+    {
+      provider: opencodeCache?.name ?? "OpenCode Zen",
+      models: opencodeModels,
+      requiredKey: "",
+      enabled: true,
+    },
+    ...providerGroups,
+  ];
 }
 
 export function findModelOption(
@@ -559,5 +612,11 @@ export function pickDefaultModelForHarness(
 export function isLocalHarness(
   value: ProviderName | string | null | undefined,
 ): value is LocalHarnessProvider {
-  return value === "claude" || value === "codex" || value === "pi" || value === "opencode";
+  return (
+    value === "claude" ||
+    value === "codex" ||
+    value === "pi" ||
+    value === "opencode" ||
+    value === "acp"
+  );
 }

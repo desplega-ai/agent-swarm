@@ -1,0 +1,14 @@
+{
+  "kind": "workflow",
+  "name": "competitor-radar",
+  "displayName": "Competitor Radar",
+  "slug": "competitor-radar",
+  "title": "Competitor Radar",
+  "description": "Find validated competitor-query gaps and dispatch a small, deduplicated backlog.",
+  "version": "1.0.0",
+  "category": "workflows",
+  "placeholders": ["COMPETITORS", "AGENT_FS_ORG_ID"],
+  "requires": ["agentfs"],
+  "runAllSeedersCandidate": true,
+  "tags": ["research", "competitors", "content"]
+}

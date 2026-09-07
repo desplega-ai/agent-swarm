@@ -23,6 +23,7 @@ import type {
   AssetEntityType,
   AssetKeyMapping,
   AssetSummary,
+  AutomationIntegrationId,
   Budget,
   BudgetRefusalCause,
   BudgetRefusalNotification,
@@ -1520,6 +1521,44 @@ export async function createTask(
   return rowToAgentTask(row);
 }
 
+/**
+ * In-process dedup for `task_dispatch_rejected_affinity` logging in
+ * `getPendingTaskForAgent` below — that function runs on every poll tick for
+ * every agent with a directly-assigned pending task, so an unresolved skip
+ * (e.g. a corrupt/misassigned legacy row) would otherwise write one log row
+ * per poll forever. Keyed by taskId; per-process, like `alarmActive` in
+ * `queue-stall-alarm.ts` — an API restart re-arms it, which is fine since the
+ * point is "don't spam," not "log exactly once ever."
+ */
+const AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS = 5 * 60 * 1000;
+const lastAffinityDispatchSkipLoggedAt = new Map<string, number>();
+
+async function logAffinityDispatchSkip(
+  agent: Pick<Agent, "id" | "isLead" | "role">,
+  task: Pick<AgentTask, "id" | "routingAffinity" | "routingAffinityInvalid">,
+): Promise<void> {
+  const now = Date.now();
+  const lastLoggedAt = lastAffinityDispatchSkipLoggedAt.get(task.id);
+  if (lastLoggedAt !== undefined && now - lastLoggedAt < AFFINITY_DISPATCH_SKIP_LOG_COOLDOWN_MS) {
+    return;
+  }
+  lastAffinityDispatchSkipLoggedAt.set(task.id, now);
+  try {
+    await createLogEntry({
+      eventType: "task_dispatch_rejected_affinity",
+      agentId: agent.id,
+      taskId: task.id,
+      metadata: {
+        agentRole: agent.role ?? null,
+        requiredRole: task.routingAffinity?.role ?? null,
+        leadOnly: task.routingAffinity?.leadOnly === true,
+        agentIsLead: agent.isLead ?? false,
+        routingAffinityInvalid: task.routingAffinityInvalid === true,
+      },
+    });
+  } catch {}
+}
+
 export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask | null> {
   // Get all pending tasks for this agent, ordered by priority (desc) then creation time (asc)
   const rows = await getDbClient().query<AgentTaskRow>(
@@ -1530,11 +1569,34 @@ export async function getPendingTaskForAgent(agentId: string): Promise<AgentTask
   const agent = await getAgentById(agentId);
   if (!agent) return null;
 
-  // A persisted legacy task may already be pending on an unauthorized agent.
-  // Do not dispatch it merely because it bypassed creation-time checks.
   for (const row of rows) {
     const task = rowToAgentTask(row);
-    if (!isAgentEligibleForTask(agent, task)) continue;
+    // `task.agentId` (the WHERE clause above) is a direct-assignment decision
+    // already made by the task's creator — `createTaskExtended` enforces a
+    // caller-declared requirement at creation time (see
+    // `routingAffinityIsInheritedProvenance` there). Re-running the FULL
+    // role/capability match here re-litigates that decision using metadata
+    // that may be pure inherited PROVENANCE (e.g. a Lead-routed
+    // worker-completion follow-up that inherits the finishing worker's
+    // role/capabilities as lineage, not a requirement anyone declared) —
+    // which permanently stalls dispatch to the agent the task is already
+    // pinned to (the #1276-regression this fixes; see PR body). Mirror the
+    // convention `acceptTask`/`claimOfferedTask` already use for an
+    // established offer: only `leadOnly` (a real authorization boundary) and
+    // `routingAffinityInvalid` (quarantined corrupt data) still veto a
+    // directly-assigned task. Pool-claim paths (`claimTask`,
+    // `assignUnassignedTaskPending`) are untouched and keep the full gate —
+    // they are deciding "who gets this" from the pool, not redispatching an
+    // assignment that was already authorized (or, for provenance, never a
+    // requirement) at creation time.
+    if (task.routingAffinityInvalid) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
+    }
+    if (task.routingAffinity?.leadOnly && !isAgentEligibleForTask(agent, task)) {
+      await logAffinityDispatchSkip(agent, task);
+      continue;
+    }
     const { ready } = await checkDependencies(task.id);
     if (ready) return task;
   }
@@ -4796,6 +4858,14 @@ export async function createTaskExtended(
   // coerce: a bad shape throws before anything reaches the INSERT; absent
   // fields keep the `??` defaults at the bind site below.
   options = CreateTaskOptionsSchema.parse(options ?? {});
+  if (
+    options.inheritParentRoutingAffinity === false &&
+    options.routingAffinity?.leadOnly !== true
+  ) {
+    throw new Error(
+      "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity.",
+    );
+  }
   let requestedByUserIdInherited = false;
   // True only when `options.routingAffinity` ends up populated purely via
   // the plain parent-fallback inherit below (child declared no affinity of
@@ -4962,12 +5032,12 @@ export async function createTaskExtended(
       if (parent.followUpConfig && !options.followUpConfig) {
         options.followUpConfig = parent.followUpConfig;
       }
-      if (parent.routingAffinityInvalid) {
+      if (parent.routingAffinityInvalid && options.inheritParentRoutingAffinity !== false) {
         // Never let a corrupt parent affinity create an apparently untagged
         // continuation. This is a fail-closed quarantine, including recovery.
         throw new Error(`Cannot continue task ${parent.id}: routing affinity is invalid.`);
       }
-      if (parent.routingAffinity) {
+      if (parent.routingAffinity && options.inheritParentRoutingAffinity !== false) {
         // Privilege cannot be shed by a continuation. A child can narrow or
         // replace ordinary routing provenance, but a Lead-only parent always
         // stamps Lead-only onto the child (including callers that supplied
@@ -7996,6 +8066,9 @@ type ScheduledTaskRow = {
   workflowId: string | null;
   scriptName: string | null;
   scriptArgs: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   createdAt: string;
   lastUpdatedAt: string;
   created_by: string | null;
@@ -8045,6 +8118,9 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     workflowId: row.workflowId ?? undefined,
     scriptName: row.scriptName ?? undefined,
     scriptArgs: row.scriptArgs ? JSON.parse(row.scriptArgs) : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     createdBy: row.created_by ?? undefined,
@@ -8188,6 +8264,9 @@ export interface CreateScheduledTaskData {
   workflowId?: string;
   scriptName?: string;
   scriptArgs?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   createdBy?: string;
 }
 
@@ -8200,9 +8279,10 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, timezone, model, modelTier, scheduleType, targetType,
-        workflowId, scriptName, scriptArgs, createdAt, lastUpdatedAt,
+        workflowId, scriptName, scriptArgs, params, requiredParams, requires,
+        createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -8226,6 +8306,9 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.workflowId ?? null,
       data.scriptName ?? null,
       data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       now,
       now,
       data.createdBy ?? null,
@@ -8262,6 +8345,9 @@ export interface UpdateScheduledTaskData {
   workflowId?: string | null;
   scriptName?: string | null;
   scriptArgs?: Record<string, unknown> | null;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   lastUpdatedAt?: string;
   updatedBy?: string;
 }
@@ -8369,6 +8455,18 @@ export async function updateScheduledTask(
   if (data.scriptArgs !== undefined) {
     updates.push("scriptArgs = ?");
     params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");
@@ -9451,6 +9549,9 @@ type WorkflowRow = {
   cooldown: string | null;
   input: string | null;
   triggerSchema: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   dir: string | null;
   vcs_repo: string | null;
   createdByAgentId: string | null;
@@ -9474,6 +9575,9 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggerSchema: row.triggerSchema
       ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
       : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
@@ -9494,6 +9598,9 @@ export async function createWorkflow(
     cooldown?: CooldownConfig;
     input?: Record<string, InputValue>;
     triggerSchema?: Record<string, unknown>;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string;
     vcsRepo?: string;
     createdByAgentId?: string;
@@ -9503,8 +9610,8 @@ export async function createWorkflow(
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
   const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
@@ -9515,6 +9622,9 @@ export async function createWorkflow(
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
       data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       data.dir ?? null,
       data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
@@ -9634,6 +9744,9 @@ export async function updateWorkflow(
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
     triggerSchema?: Record<string, unknown> | null;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string | null;
     vcsRepo?: string | null;
     updatedBy?: string;
@@ -9676,6 +9789,18 @@ export async function updateWorkflow(
   if (data.triggerSchema !== undefined) {
     updates.push("triggerSchema = ?");
     params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.dir !== undefined) {
     updates.push("dir = ?");

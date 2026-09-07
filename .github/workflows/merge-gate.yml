@@ -118,7 +118,7 @@ jobs:
 
           # ui app lint + typecheck. ui's dependency tree is resolved by the ROOT
           # bun.lock + root overrides since the workspace migration.
-          UI=$(match '^(apps/ui/|bun\.lock|package\.json$|bunfig\.toml$)')
+          UI=$(match '^(apps/ui/|packages/ui-e2e/|bun\.lock|package\.json$|bunfig\.toml$)')
 
           # workflow template validation: content.md changes in templates/workflows/.
           TEMPLATES_WORKFLOWS=$(match '^(templates/workflows/|scripts/validate-template-workflows\.ts$|src/workflows/definition\.ts$|src/types\.ts$)')
@@ -1017,6 +1017,12 @@ jobs:
           echo "status=$([ $code -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           exit $code
         working-directory: apps/ui
+
+      - name: Run UI E2E TypeScript type check
+        run: bun run e2e:ui:tsc
+
+      - name: Run UI E2E Biome check
+        run: bunx biome check packages/ui-e2e
 
       # See agent-fs docs/ci-timings.md. Skipped on merge_group events and forks
       # (no secret); reporting is best-effort and never blocks the gate.

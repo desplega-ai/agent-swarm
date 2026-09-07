@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { api } from "../client";
 import type { ProviderName } from "../types";
+import { invalidateStatusQuery, STATUS_QUERY_KEY } from "./status-query";
 
 /**
  * Identity + setup + activity + agent_fs payload from `GET /status`.
@@ -18,7 +19,7 @@ export function useStatus(options?: { pollIntervalMs?: number }) {
   const isVisible = useDocumentVisible();
 
   return useQuery({
-    queryKey: ["status"],
+    queryKey: STATUS_QUERY_KEY,
     queryFn: () => api.fetchStatus(),
     retry: 2,
     retryDelay: 1000,
@@ -55,7 +56,7 @@ export function useTestConnection() {
     mutationFn: (provider: ProviderName) => api.testConnection(provider),
     onSuccess: () => {
       // Refresh /status so the harness milestone flips to `verified`.
-      queryClient.invalidateQueries({ queryKey: ["status"] });
+      void invalidateStatusQuery(queryClient);
     },
   });
 }

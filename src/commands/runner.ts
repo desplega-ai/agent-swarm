@@ -57,6 +57,7 @@ import {
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
@@ -84,6 +85,7 @@ import {
   buildLatestModelReport,
   isBedrockSdkMode,
   isCredCheckDisabled,
+  reportAcpStatus,
   reportCredStatus,
   reportLatestModel,
   sendCredStatusReport,
@@ -2022,7 +2024,10 @@ function setupShutdownHandlers(
   apiConfig?: ApiConfig,
   getRunnerState?: () => RunnerState | undefined,
 ): void {
-  const shutdown = async (signal: string) => {
+  let shutdownInProgress = false;
+  const shutdown = async (signal: string, exitCode = 0) => {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
     console.log(`\n[${role}] Received ${signal}, shutting down...`);
 
     // Wait for active tasks with timeout
@@ -2086,6 +2091,8 @@ function setupShutdownHandlers(
       }
     }
 
+    await terminateRegisteredProcessGroups();
+
     if (apiConfig) {
       telemetry.session("ended", {
         agentId: apiConfig.agentId,
@@ -2095,11 +2102,32 @@ function setupShutdownHandlers(
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  const beginShutdown = (signal: string, exitCode = 0) => {
+    void shutdown(signal, exitCode).catch(async (error) => {
+      console.error(`[${role}] Shutdown failed after ${signal}:`, error);
+      await terminateRegisteredProcessGroups();
+      process.exit(1);
+    });
+  };
+
+  process.on("SIGINT", () => beginShutdown("SIGINT"));
+  process.on("SIGTERM", () => beginShutdown("SIGTERM"));
+  let fatalShutdownInProgress = false;
+  const fatalShutdown = (kind: string, error: unknown) => {
+    if (fatalShutdownInProgress) return;
+    fatalShutdownInProgress = true;
+    console.error(`[${role}] ${kind}:`, error);
+    void terminateRegisteredProcessGroups().finally(() => process.exit(1));
+  };
+  process.on("uncaughtException", (error) => {
+    fatalShutdown("Uncaught exception", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    fatalShutdown("Unhandled rejection", reason);
+  });
 }
 
 /** Configuration for a runner role (worker or lead) */
@@ -3381,7 +3409,20 @@ async function spawnProviderProcess(
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    // A resolved config-store pool slot always wins over OPENAI_API_KEY at
+    // runtime — `resolveCodexAuthMode` in codex-adapter.ts revalidates and
+    // writes chatgpt-mode auth.json whenever `codexSlot` is set, and OPENAI_API_KEY
+    // is only forwarded to the spawned CLI when auth.json is NOT in chatgpt
+    // mode. Gating this on `credentialSelections[0]`'s rate-limit status
+    // (the old behavior) reported OPENAI_API_KEY as the credential used on
+    // every task as long as OPENAI_API_KEY itself wasn't rate-limited — even
+    // when a healthy CODEX_OAUTH pool slot was the credential actually
+    // authenticating the session (issue: credentialKeyType mislabeled
+    // OPENAI_API_KEY, and CODEX_OAUTH usage never reported to
+    // /api/keys/report-usage so no api_key_status row was ever created for
+    // the pool slot).
     const oauthIsPrimary =
+      oauthIsPoolBacked ||
       credentialSelections.length === 0 ||
       (credentialSelections[0]?.isRateLimitFallback &&
         oauthSelection &&
@@ -3539,6 +3580,7 @@ async function spawnProviderProcess(
   let providerSessionId = session.sessionId;
   let pendingHarnessVariant: string | undefined;
   let pendingHarnessVariantMeta: Record<string, unknown> | undefined;
+  let acpStatusReport: Promise<void> | undefined;
   let runningTaskForSessionInit: RunningTask | undefined;
   const activeToolSpans = new Map<
     string,
@@ -3604,6 +3646,18 @@ async function spawnProviderProcess(
             "agentswarm.provider.name": event.provider,
             "agentswarm.provider.meta_preview": telemetryPreview(event.providerMeta),
           });
+          if (
+            event.provider === "acp" &&
+            (event.providerMeta?.target === "opencode" ||
+              event.providerMeta?.target === "custom") &&
+            Array.isArray(event.providerMeta.configOptions)
+          ) {
+            acpStatusReport = reportAcpStatus(opts.apiUrl, opts.apiKey, opts.agentId, {
+              target: event.providerMeta.target,
+              configOptions: event.providerMeta.configOptions,
+              reportedAt: Date.now(),
+            }).catch((err) => console.warn(`[runner] Failed to report ACP options: ${err}`));
+          }
           if (realTaskId) {
             saveProviderSessionId(
               opts.apiUrl,
@@ -3927,6 +3981,9 @@ async function spawnProviderProcess(
         // Stop event flush timer and do a final flush
         clearInterval(eventFlushTimer);
         await flushEvents();
+        // Keep the agent-level ACP option snapshot ordered before the poll
+        // loop can publish a post-task credential snapshot for a harness swap.
+        await acpStatusReport;
 
         // Final log flush
         if (shouldStream && logBuffer.lines.length > 0) {
@@ -4076,11 +4133,17 @@ async function spawnProviderProcess(
     );
 
   // Build credential info for rate limit tracking.
-  // For codex: when OPENAI_API_KEY is rate-limited but CODEX_OAUTH has
-  // available slots (or vice versa), prefer the healthy credential.
+  // For codex: a resolved CODEX_OAUTH pool slot (oauthIsPoolBacked) is always
+  // the credential actually used at runtime (see resolveCodexAuthMode in
+  // codex-adapter.ts — config store beats OPENAI_API_KEY whenever both
+  // exist), so it must win here too, independent of OPENAI_API_KEY's
+  // rate-limit status. Otherwise fall back to the OPENAI_API_KEY-rate-limited
+  // cross-keyType failover this block already handled.
   let primarySelection: CredentialSelection | undefined;
   const firstCred = credentialSelections[0];
-  if (firstCred && oauthSelection) {
+  if (oauthSelection && oauthIsPoolBacked) {
+    primarySelection = oauthSelection;
+  } else if (firstCred && oauthSelection) {
     if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
       primarySelection = oauthSelection;
       console.log(

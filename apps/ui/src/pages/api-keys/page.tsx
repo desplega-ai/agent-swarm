@@ -99,6 +99,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   codex: "Codex",
   devin: "Devin",
   opencode: "Opencode",
+  acp: "ACP",
 };
 
 function formatProvider(provider: string): string {

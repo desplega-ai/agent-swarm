@@ -77,6 +77,11 @@ import {
 import { SessionErrorTracker } from "../utils/error-tracker";
 import { summarizeSession as runSummarize } from "../utils/internal-ai";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
+import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { type CodexAgentsMdHandle, writeCodexAgentsMd } from "./codex-agents-md";
 import { computeCodexCostUsd, getCodexContextWindow, resolveCodexModel } from "./codex-models";
@@ -1622,41 +1627,46 @@ class CodexSubprocessSession implements ProviderSession {
 
     const apiKey = getApiKey();
 
-    this.proc = Bun.spawn(argv, {
-      // Minimal env: forward what the subprocess needs to talk to the API,
-      // load the codex CLI binary, and read OAuth tokens. config.env (which
-      // already includes the swarm-config overlay) is delivered via stdin
-      // — NOT here — so we don't repeat the same string in two places.
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: process.env.HOME ?? "",
-        ...(process.env.NODE_EXTRA_CA_CERTS
-          ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
-          : {}),
-        ...(process.env.MCP_BASE_URL ? { MCP_BASE_URL: process.env.MCP_BASE_URL } : {}),
-        ...(apiKey ? { AGENT_SWARM_API_KEY: apiKey, API_KEY: apiKey } : {}),
-        // Embedding / summarization paths read these:
-        ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
-        ...(process.env.OPENROUTER_API_KEY
-          ? { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
-          : {}),
-        ...(process.env.ANTHROPIC_API_KEY
-          ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
-          : {}),
-        ...(process.env.CODEX_PATH_OVERRIDE
-          ? { CODEX_PATH_OVERRIDE: process.env.CODEX_PATH_OVERRIDE }
-          : {}),
-        ...(process.env.CODEX_SKILLS_DIR ? { CODEX_SKILLS_DIR: process.env.CODEX_SKILLS_DIR } : {}),
-        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
-        ...(process.env.SKIP_SESSION_SUMMARY
-          ? { SKIP_SESSION_SUMMARY: process.env.SKIP_SESSION_SUMMARY }
-          : {}),
-        ...(process.env.MEMORY_RATERS ? { MEMORY_RATERS: process.env.MEMORY_RATERS } : {}),
-      },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    this.proc = registerProcessGroup(
+      Bun.spawn(argv, {
+        detached: detachedProcessGroup,
+        // Minimal env: forward what the subprocess needs to talk to the API,
+        // load the codex CLI binary, and read OAuth tokens. config.env (which
+        // already includes the swarm-config overlay) is delivered via stdin
+        // — NOT here — so we don't repeat the same string in two places.
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          ...(process.env.NODE_EXTRA_CA_CERTS
+            ? { NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS }
+            : {}),
+          ...(process.env.MCP_BASE_URL ? { MCP_BASE_URL: process.env.MCP_BASE_URL } : {}),
+          ...(apiKey ? { AGENT_SWARM_API_KEY: apiKey, API_KEY: apiKey } : {}),
+          // Embedding / summarization paths read these:
+          ...(process.env.OPENAI_API_KEY ? { OPENAI_API_KEY: process.env.OPENAI_API_KEY } : {}),
+          ...(process.env.OPENROUTER_API_KEY
+            ? { OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY }
+            : {}),
+          ...(process.env.ANTHROPIC_API_KEY
+            ? { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY }
+            : {}),
+          ...(process.env.CODEX_PATH_OVERRIDE
+            ? { CODEX_PATH_OVERRIDE: process.env.CODEX_PATH_OVERRIDE }
+            : {}),
+          ...(process.env.CODEX_SKILLS_DIR
+            ? { CODEX_SKILLS_DIR: process.env.CODEX_SKILLS_DIR }
+            : {}),
+          CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
+          ...(process.env.SKIP_SESSION_SUMMARY
+            ? { SKIP_SESSION_SUMMARY: process.env.SKIP_SESSION_SUMMARY }
+            : {}),
+          ...(process.env.MEMORY_RATERS ? { MEMORY_RATERS: process.env.MEMORY_RATERS } : {}),
+        },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
 
     // `Bun.spawn`'s `stdin` is typed as `number | FileSink`; with `stdin:
     // "pipe"` it is always a FileSink. Narrow via assertion.
@@ -1684,7 +1694,7 @@ class CodexSubprocessSession implements ProviderSession {
   }
 
   async abort(): Promise<void> {
-    this.proc.kill("SIGTERM");
+    await terminateProcessGroup(this.proc.pid);
   }
 
   private emit(event: ProviderEvent): void {
@@ -1747,6 +1757,7 @@ class CodexSubprocessSession implements ProviderSession {
 
     await Promise.all([stdoutPromise, stderrPromise]);
     const exitCode = await this.proc.exited;
+    await terminateProcessGroup(this.proc.pid);
 
     if (result) {
       return result;

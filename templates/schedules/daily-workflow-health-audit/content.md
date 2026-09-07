@@ -1,5 +1,7 @@
 # Daily Workflow Health Audit
 
+Delivery uses configured admin channels with an in-app fallback.
+
 Check scheduled jobs and workflows for repeated failures, stale runs, and silent drift.
 
 ## Schedule
@@ -174,7 +176,7 @@ Omit any section whose count is 0. Cap message at 4000 chars (Slack limit) — i
 
 ## Phase 3 — Post to Slack and complete
 
-1. Call `slack-post` with your configured channel ID and `message=<rendered digest>`. Prefer a top-level daily fire unless your team's convention is to thread recurring audit messages.
+1. Post `message=<rendered digest>` through configured admin delivery channels, using the in-app fallback when no external channel is configured. Prefer a top-level daily fire unless your team's convention is to thread recurring audit messages.
 2. Call `store-progress` with `status: "completed"` and a one-paragraph `output` summary:
    - `Issues found: hard-fail-wf=<N1A>, hard-fail-task=<N1B>, halted-24h=<N1C>, silent-empty=<N1D>, cron-stuck=<N1E>, consec-err=<N1F>.`
    - `Totals: workflowRuns24h=<X>, scheduledFires24h=<Y>.`

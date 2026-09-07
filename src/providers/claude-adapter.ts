@@ -20,6 +20,11 @@ import {
 } from "../utils/error-tracker";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
 import { swarmRuntimeInstanceId } from "../utils/multi-runtime";
+import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { CTX_MODE_NUDGE_EVERY } from "./ctx-mode-env";
 import { buildOtelTraceparentEnv, isHarnessOtelEnabled } from "./otel-env";
@@ -616,38 +621,41 @@ class ClaudeSession implements ProviderSession {
     const reasoningEnv = reasoningApplication.kind === "claude-env" ? reasoningApplication.env : {};
     this.appliedReasoningEffort =
       reasoningApplication.kind === "claude-env" ? (config.reasoningEffort ?? null) : null;
-    this.proc = Bun.spawn(cmd, {
-      cwd: this.config.cwd,
-      env: {
-        ENABLE_PROMPT_CACHING_1H: "1",
-        ...sourceEnv,
-        ...runtimeEnv,
-        ...otelEnv,
-        ...reasoningEnv,
-        TASK_FILE: taskFilePath,
-        // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
-        // with task lifecycle), which silently drops the Stop-hook memory
-        // rater. The hook prefers these env vars when present. See PR #444.
-        AGENT_SWARM_TASK_ID: config.taskId,
-        AGENT_SWARM_AGENT_ID: config.agentId,
-        // The parent adapter owns a reliable in-memory stream-json transcript.
-        // Prevent the child Stop hook from attempting the missing CLI artifact.
-        AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
-        // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocess env
-        // (security: prevents OAuth-token leakage to user-written hooks).
-        // Mirror it under a name claude doesn't recognize so the Stop hook
-        // can resolve the claude-cli fallback in internal-ai/credentials.ts.
-        ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
-          ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
-          : {}),
-        CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
-      } as Record<string, string>,
-      // Only pipe stdin on the stream-json path; on the `-p` path the child
-      // has never had a stdin pipe and must not start waiting for one.
-      ...(this.queueSteeringSupported ? { stdin: "pipe" as const } : {}),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    this.proc = registerProcessGroup(
+      Bun.spawn(cmd, {
+        cwd: this.config.cwd,
+        detached: detachedProcessGroup,
+        env: {
+          ENABLE_PROMPT_CACHING_1H: "1",
+          ...sourceEnv,
+          ...runtimeEnv,
+          ...otelEnv,
+          ...reasoningEnv,
+          TASK_FILE: taskFilePath,
+          // Belt-and-braces: TASK_FILE on disk can disappear mid-session (race
+          // with task lifecycle), which silently drops the Stop-hook memory
+          // rater. The hook prefers these env vars when present. See PR #444.
+          AGENT_SWARM_TASK_ID: config.taskId,
+          AGENT_SWARM_AGENT_ID: config.agentId,
+          // The parent adapter owns a reliable in-memory stream-json transcript.
+          // Prevent the child Stop hook from attempting the missing CLI artifact.
+          AGENT_SWARM_ADAPTER_SESSION_SUMMARY: "1",
+          // claude CLI strips CLAUDE_CODE_OAUTH_TOKEN from hook subprocess env
+          // (security: prevents OAuth-token leakage to user-written hooks).
+          // Mirror it under a name claude doesn't recognize so the Stop hook
+          // can resolve the claude-cli fallback in internal-ai/credentials.ts.
+          ...(sourceEnv.CLAUDE_CODE_OAUTH_TOKEN
+            ? { AGENT_SWARM_CLAUDE_OAUTH_TOKEN: sourceEnv.CLAUDE_CODE_OAUTH_TOKEN }
+            : {}),
+          CONTEXT_MODE_EXTERNAL_MCP_NUDGE_EVERY: CTX_MODE_NUDGE_EVERY,
+        } as Record<string, string>,
+        // Only pipe stdin on the stream-json path; on the `-p` path the child
+        // has never had a stdin pipe and must not start waiting for one.
+        ...(this.queueSteeringSupported ? { stdin: "pipe" as const } : {}),
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
 
     if (this.queueSteeringSupported) {
       const stdin = this.proc.stdin;
@@ -663,7 +671,7 @@ class ClaudeSession implements ProviderSession {
           );
           this.closeStdin();
           try {
-            this.proc.kill("SIGTERM");
+            void terminateProcessGroup(this.proc.pid);
           } catch {
             // The subprocess may already have exited after the broken pipe.
           }
@@ -673,7 +681,7 @@ class ClaudeSession implements ProviderSession {
           "\x1b[33m[claude]\x1b[0m Claude stdin was not piped; terminating the session to avoid waiting without a prompt.",
         );
         try {
-          this.proc.kill("SIGTERM");
+          void terminateProcessGroup(this.proc.pid);
         } catch {
           // The subprocess may already have exited.
         }
@@ -859,6 +867,7 @@ class ClaudeSession implements ProviderSession {
     }
     await logFileHandle.end();
     const exitCode = await this.proc.exited;
+    await terminateProcessGroup(this.proc.pid);
 
     const transcript = this.transcript.join("\n");
     if (transcript.length <= 100) {
@@ -1195,7 +1204,7 @@ class ClaudeSession implements ProviderSession {
   async abort(): Promise<void> {
     this.closeStdin();
     try {
-      this.proc.kill("SIGTERM");
+      await terminateProcessGroup(this.proc.pid);
     } catch {
       // The subprocess may already have exited.
     }

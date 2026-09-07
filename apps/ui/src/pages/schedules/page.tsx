@@ -6,6 +6,8 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useCreateSchedule, useScheduledTasks, useUpdateSchedule } from "@/api/hooks/use-schedules";
 import type { ScheduledTask, ScheduledTaskTargetType } from "@/api/types";
+import { useStatusContext } from "@/app/status-context";
+import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import {
   EMPTY_SCHEDULE_TARGET,
   isScheduleTargetInvalid,
@@ -295,6 +297,7 @@ export default function SchedulesPage() {
   const navigate = useNavigate();
   const { searchParams, setParam } = useUrlSearchState();
   const { data: schedules, isLoading } = useScheduledTasks();
+  const { data: status } = useStatusContext();
   const { data: agents } = useAgents();
   const createSchedule = useCreateSchedule();
   const updateSchedule = useUpdateSchedule();
@@ -416,6 +419,25 @@ export default function SchedulesPage() {
                 : "Agent Task"}
           </Badge>
         ),
+      },
+      {
+        headerName: "Setup",
+        width: 190,
+        minWidth: 190,
+        cellRenderer: (params: ICellRendererParams<ScheduledTask>) => {
+          const schedule = params.data;
+          if (!schedule) return null;
+          return (
+            <NeedsSetupBadge
+              automation={findAutomation(
+                status?.automations,
+                "schedule",
+                schedule.key,
+                schedule.name,
+              )}
+            />
+          );
+        },
       },
       {
         headerName: "Schedule",
@@ -542,14 +564,14 @@ export default function SchedulesPage() {
         },
       },
     ],
-    [agentMap, favoriteToggle, handleToggleEnabled],
+    [agentMap, favoriteToggle, handleToggleEnabled, status?.automations],
   );
 
   const onRowClicked = useCallback(
     (event: RowClickedEvent<ScheduledTask>) => {
       // Skip navigation when clicking interactive elements (switch, button, etc.)
       const target = event.event?.target as HTMLElement | null;
-      if (target?.closest('[data-slot="switch"], button')) return;
+      if (target?.closest('a, [data-slot="switch"], button')) return;
       if (event.data) void navigate(`/schedules/${event.data.id}`);
     },
     [navigate],

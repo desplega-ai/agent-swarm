@@ -371,6 +371,158 @@ describe("PATCH /api/agents/:id/runtime", () => {
     });
     expect(res.status).toBe(400);
   });
+
+  test("accepts acp with omitted reasoning_effort", async () => {
+    const a = await createAgent({
+      name: "runtime-acp-omitted-effort",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "acp", model: null }),
+    });
+    expect(res.status).toBe(200);
+
+    const row = await getAgentById(a.id);
+    expect(row?.harnessProvider).toBe("acp");
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((config) => config.key === "HARNESS_PROVIDER")?.value).toBe("acp");
+    expect(rows.find((config) => config.key === "MODEL_OVERRIDE")).toBeUndefined();
+  });
+
+  test("accepts acp with null reasoning_effort", async () => {
+    const a = await createAgent({
+      name: "runtime-acp-null-effort",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: a.id,
+      key: "REASONING_EFFORT_OVERRIDE",
+      value: "high",
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harness_provider: "acp",
+        model: null,
+        reasoning_effort: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((config) => config.key === "REASONING_EFFORT_OVERRIDE")).toBeUndefined();
+  });
+
+  test("persists OpenCode ACP target and protocol options with the model override", async () => {
+    const a = await createAgent({
+      name: "runtime-acp-opencode",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harness_provider: "acp",
+        model: "opencode/big-pickle",
+        reasoning_effort: null,
+        acp: {
+          target: "opencode",
+          options: { thought: "high", autoApprove: true },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((config) => config.key === "ACP_TARGET")?.value).toBe("opencode");
+    expect(rows.find((config) => config.key === "MODEL_OVERRIDE")?.value).toBe(
+      "opencode/big-pickle",
+    );
+    expect(JSON.parse(rows.find((config) => config.key === "ACP_CONFIG_OPTIONS")!.value)).toEqual({
+      thought: "high",
+      autoApprove: true,
+    });
+  });
+
+  test("persists custom ACP launch settings and rejects them for another harness", async () => {
+    const a = await createAgent({
+      name: "runtime-acp-custom",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    const acp = {
+      target: "custom",
+      command: "my-agent",
+      args: ["--acp"],
+      envKeys: ["MY_AGENT_TOKEN"],
+      modelEnvKey: "MY_AGENT_MODEL",
+    };
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "acp", model: "model-1", acp }),
+    });
+    expect(res.status).toBe(200);
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((config) => config.key === "ACP_TARGET_COMMAND")?.value).toBe("my-agent");
+    expect(rows.find((config) => config.key === "ACP_TARGET_ARGS")?.value).toBe('["--acp"]');
+    expect(rows.find((config) => config.key === "ACP_TARGET_ENV_KEYS")?.value).toBe(
+      '["MY_AGENT_TOKEN"]',
+    );
+    expect(rows.find((config) => config.key === "ACP_MODEL_ENV_KEY")?.value).toBe("MY_AGENT_MODEL");
+
+    const invalid = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "codex", model: "gpt-5.4", acp }),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
+  test("rejects acp with non-null reasoning_effort and reports no allowed levels", async () => {
+    const a = await createAgent({
+      name: "runtime-acp-invalid-effort",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        harness_provider: "acp",
+        model: null,
+        reasoning_effort: "high",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "Unsupported reasoning_effort for this harness/model",
+      harness: "acp",
+      model: null,
+      level: "high",
+      allowed: [],
+    });
+
+    expect((await getAgentById(a.id))?.harnessProvider).toBeNull();
+    expect(await getSwarmConfigs({ scope: "agent", scopeId: a.id })).toHaveLength(0);
+  });
 });
 
 // ─── PATCH /api/agents/:id/runtime — reasoning_effort (Phase 2) ─────────────

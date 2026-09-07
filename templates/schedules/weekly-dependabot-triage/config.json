@@ -7,7 +7,8 @@
   "description": "Review dependency update PRs, group safe patches, and flag risky upgrades.",
   "version": "1.0.0",
   "category": "schedules",
-  "placeholders": ["SLACK_CHANNEL_ID", "REPO_URL", "TIMEZONE"],
+  "placeholders": ["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"],
+  "requires": ["github", "slack"],
   "runAllSeedersCandidate": false,
   "tags": ["github", "dependencies", "maintenance"]
 }

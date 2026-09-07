@@ -11,11 +11,17 @@
  *   (already covered by scheduled-tasks.test.ts).
  * - HTTP route cross-field validation (create + update) for workflow/script targets.
  */
+import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { z } from "zod";
+import {
+  type AutomationSetupStates,
+  preflightAutomation,
+  renderAutomationTokens,
+} from "../be/automation-preflight";
 import {
   closeDb,
   createAgent,
@@ -34,7 +40,13 @@ import { upsertScriptByName } from "../be/scripts/db";
 import { setScriptEmbeddingProviderForTests } from "../be/scripts/embeddings";
 import { handleSchedules } from "../http/schedules";
 import { getPathSegments, parseQueryParams } from "../http/utils";
-import { dispatchScheduleTarget, startScheduler, stopScheduler } from "../scheduler/scheduler";
+import {
+  dispatchScheduleTarget,
+  executeSchedule,
+  renderScheduledTaskParams,
+  startScheduler,
+  stopScheduler,
+} from "../scheduler/scheduler";
 import type { Workflow, WorkflowDefinition } from "../types";
 import { InProcessEventBus } from "../workflows/event-bus";
 import { BaseExecutor, type ExecutorResult } from "../workflows/executors/base";
@@ -162,6 +174,169 @@ afterAll(async () => {
 });
 
 describe("scheduled_tasks DB layer — targetType", () => {
+  test("automation migrations gate legacy template rows and preserve custom rows", async () => {
+    const db = new Database(":memory:");
+    try {
+      db.exec(`
+        CREATE TABLE scheduled_tasks (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled INTEGER NOT NULL,
+          taskTemplate TEXT,
+          timezone TEXT DEFAULT 'UTC'
+        );
+        CREATE TABLE workflows (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          enabled INTEGER NOT NULL,
+          definition TEXT NOT NULL
+        );
+        INSERT INTO scheduled_tasks VALUES
+          ('legacy-dependabot', 'weekly-dependabot-triage', 1, 'Review owner/repo and notify the configured channel or thread', 'UTC'),
+          ('legacy-health', 'weekly-code-health-reports', 1, 'Clone https://github.com/OWNER/REPO.git as my-repo and publish <PAGE_ID>; Default branch: \`main\`; Path scope: \`src\`; BRANCH=main SCOPE_PATH=src', 'UTC'),
+          ('legacy-dora', 'weekly-dora-metrics', 1, 'Clone https://github.com/OWNER/REPO.git as my-repo and publish <PAGE_ID>; Default branch: \`main\`; Release tag pattern: \`v*\`; BRANCH=main TAG_PATTERN=''v*''', 'UTC'),
+          ('legacy-hn', 'daily-hn-briefing', 1, 'From lead@agent-swarm.dev To: the configured recipient list for this briefing', 'UTC'),
+          ('legacy-gtm', 'gtm-weekly-review', 1, 'Inspect owner/repo and example.com docs.example.com', 'UTC'),
+          ('custom-schedule', 'my-team-triage', 1, 'Review owner/repo example.com my-repo', 'UTC');
+        INSERT INTO workflows VALUES
+          ('legacy-autopilot', 'autopilot', 1, '{"task":"Work in {{repoUrl}} and {{trigger.repoUrl}}"}'),
+          ('legacy-linear', 'linear-drain-loop', 1, '{"task":"Drain {{projectId}} and {{trigger.projectId}}"}'),
+          ('custom-workflow', 'my-team-autopilot', 1, '{}');
+      `);
+      db.exec(
+        await Bun.file(
+          new URL("../be/migrations/141_scheduled_task_automation_preflight.sql", import.meta.url),
+        ).text(),
+      );
+      db.exec(
+        await Bun.file(
+          new URL("../be/migrations/142_workflow_automation_preflight.sql", import.meta.url),
+        ).text(),
+      );
+
+      const legacySchedule = db
+        .query<
+          {
+            params: string;
+            requiredParams: string;
+            requires: string;
+            taskTemplate: string;
+            timezone: string;
+          },
+          []
+        >(
+          "SELECT params, requiredParams, requires, taskTemplate, timezone FROM scheduled_tasks WHERE id = 'legacy-dependabot'",
+        )
+        .get()!;
+      expect(JSON.parse(legacySchedule.requiredParams)).toEqual([
+        "REPO_URL",
+        "SLACK_CHANNEL_ID",
+        "TIMEZONE",
+      ]);
+      expect(JSON.parse(legacySchedule.requires)).toEqual(["github", "slack"]);
+      expect(legacySchedule.taskTemplate).toBe(
+        "Review {{REPO_URL}} and notify {{SLACK_CHANNEL_ID}}",
+      );
+      expect(legacySchedule.timezone).toBe("{{TIMEZONE}}");
+      expect(
+        renderAutomationTokens(legacySchedule.taskTemplate, {
+          REPO_URL: "acme/widgets",
+          SLACK_CHANNEL_ID: "C123",
+        }),
+      ).toBe("Review acme/widgets and notify C123");
+
+      const tokenizedBodies = db
+        .query<{ id: string; taskTemplate: string }, []>(
+          "SELECT id, taskTemplate FROM scheduled_tasks WHERE id IN ('legacy-dora', 'legacy-gtm', 'legacy-health', 'legacy-hn') ORDER BY id",
+        )
+        .all();
+      expect(tokenizedBodies).toEqual([
+        {
+          id: "legacy-dora",
+          taskTemplate:
+            "Clone {{REPO_URL}} as {{REPORT_NAME}} and publish {{PAGE_ID}}; Default branch: `{{BRANCH}}`; Release tag pattern: `{{TAG_PATTERN}}`; BRANCH={{BRANCH}} TAG_PATTERN={{TAG_PATTERN}}",
+        },
+        {
+          id: "legacy-gtm",
+          taskTemplate: "Inspect {{REPO_URL}} and {{GSC_PROPERTY}}",
+        },
+        {
+          id: "legacy-health",
+          taskTemplate:
+            "Clone {{REPO_URL}} as {{REPORT_NAME}} and publish {{PAGE_ID}}; Default branch: `{{BRANCH}}`; Path scope: `{{SCOPE_PATH}}`; BRANCH={{BRANCH}} SCOPE_PATH={{SCOPE_PATH}}",
+        },
+        {
+          id: "legacy-hn",
+          taskTemplate: "From the configured reporting inbox To: {{REPORT_EMAIL}}",
+        },
+      ]);
+
+      const setup: AutomationSetupStates = {
+        slack: "unverified",
+        github: "unverified",
+        linear: "verified",
+        jira: "verified",
+        gsc: "verified",
+        agentmail: "verified",
+        agentfs: "verified",
+      };
+      const gated = preflightAutomation(
+        {
+          id: "legacy-dependabot",
+          name: "weekly-dependabot-triage",
+          kind: "schedule",
+          params: JSON.parse(legacySchedule.params),
+          requiredParams: JSON.parse(legacySchedule.requiredParams),
+          requires: JSON.parse(legacySchedule.requires),
+        },
+        setup,
+      );
+      expect(gated.state).toBe("needs_setup");
+      expect(gated.missing.params).toEqual(["REPO_URL", "SLACK_CHANNEL_ID", "TIMEZONE"]);
+
+      const legacyWorkflows = db
+        .query<{ id: string; definition: string; requiredParams: string; requires: string }, []>(
+          "SELECT id, definition, requiredParams, requires FROM workflows WHERE id IN ('legacy-autopilot', 'legacy-linear') ORDER BY id",
+        )
+        .all();
+      expect(legacyWorkflows).toEqual([
+        {
+          id: "legacy-autopilot",
+          definition: '{"task":"Work in {{REPO_URL}} and {{REPO_URL}}"}',
+          requiredParams: '["REPO_URL"]',
+          requires: '["github"]',
+        },
+        {
+          id: "legacy-linear",
+          definition: '{"task":"Drain {{LINEAR_PROJECT_ID}} and {{LINEAR_PROJECT_ID}}"}',
+          requiredParams: '["LINEAR_PROJECT_ID"]',
+          requires: '["linear"]',
+        },
+      ]);
+
+      for (const [table, id] of [
+        ["scheduled_tasks", "custom-schedule"],
+        ["workflows", "custom-workflow"],
+      ] as const) {
+        const custom = db
+          .query<{ requiredParams: string; requires: string }, []>(
+            `SELECT requiredParams, requires FROM ${table} WHERE id = '${id}'`,
+          )
+          .get()!;
+        expect([custom.requiredParams, custom.requires]).toEqual(["[]", "[]"]);
+      }
+      expect(
+        db
+          .query<{ taskTemplate: string }, []>(
+            "SELECT taskTemplate FROM scheduled_tasks WHERE id = 'custom-schedule'",
+          )
+          .get()!.taskTemplate,
+      ).toBe("Review owner/repo example.com my-repo");
+    } finally {
+      db.close();
+    }
+  });
+
   test("defaults to targetType='agent-task' and preserves back-compat rows", async () => {
     const schedule = await createScheduledTask({
       name: `db-default-${crypto.randomUUID()}`,
@@ -201,6 +376,21 @@ describe("scheduled_tasks DB layer — targetType", () => {
     expect(schedule.targetType).toBe("script");
     expect(schedule.scriptName).toBe("my-catalog-script");
     expect(schedule.scriptArgs).toEqual({ foo: "bar" });
+  });
+
+  test("persists automation params and setup requirements", async () => {
+    const schedule = await createScheduledTask({
+      name: `db-preflight-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Inspect {{REPO_URL}}",
+      params: { REPO_URL: "acme/widgets" },
+      requiredParams: ["REPO_URL"],
+      requires: ["github"],
+    });
+
+    expect(schedule.params).toEqual({ REPO_URL: "acme/widgets" });
+    expect(schedule.requiredParams).toEqual(["REPO_URL"]);
+    expect(schedule.requires).toEqual(["github"]);
   });
 
   test("the recreated table's CHECK constraint rejects targetType='workflow' with no workflowId", async () => {
@@ -314,6 +504,152 @@ describe("dispatchScheduleTarget — workflow target", () => {
     });
 
     await expect(dispatchScheduleTarget(schedule)).rejects.toThrow("not found");
+  });
+
+  test("a workflow needs_setup run is a failed schedule fire without task creation or backoff", async () => {
+    const wf = await createWorkflow({
+      name: `workflow-needs-setup-${crypto.randomUUID()}`,
+      definition: {
+        nodes: [{ id: "n1", type: "echo", config: { value: "{{REPO_URL}}" } }],
+      },
+      requiredParams: ["REPO_URL"],
+      params: {},
+    });
+    const schedule = await createScheduledTask({
+      name: `schedule-workflow-needs-setup-${crypto.randomUUID()}`,
+      intervalMs: 86_400_000,
+      nextRunAt: new Date(Date.now() - 60_000).toISOString(),
+      targetType: "workflow",
+      workflowId: wf.id,
+    });
+    const before = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+
+    await executeSchedule(schedule);
+
+    const updated = await getScheduledTaskById(schedule.id);
+    const after = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+    expect(after?.count).toBe(before?.count);
+    expect(updated?.enabled).toBe(true);
+    expect(updated?.lastRunAt).toBeUndefined();
+    expect(updated?.consecutiveErrors).toBe(0);
+    expect(updated?.lastErrorMessage).toBe("needs_setup: params=[REPO_URL] integrations=[]");
+    expect(new Date(updated!.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("dispatchScheduleTarget — automation preflight", () => {
+  test("does not create an agent task for a shell-active repository parameter", async () => {
+    const schedule = await createScheduledTask({
+      name: `dispatch-injection-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Review {{REPO_URL}}",
+      params: { REPO_URL: "acme/widgets; touch /tmp/injected" },
+      requiredParams: ["REPO_URL"],
+    });
+    const before = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+
+    await expect(dispatchScheduleTarget(schedule)).rejects.toThrow(
+      "needs_setup: params=[REPO_URL] integrations=[]",
+    );
+
+    const after = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+    expect(after?.count).toBe(before?.count);
+  });
+
+  test("renders every runtime-consumed schedule field and preserves argument value types", async () => {
+    const schedule = await createScheduledTask({
+      name: `schedule-render-fields-${crypto.randomUUID()}`,
+      cronExpression: "0 9 * * *",
+      timezone: "{{TIMEZONE}}",
+      taskTemplate: "Review {{REPO_URL}}",
+      scriptArgs: { competitors: "{{COMPETITORS}}", repo: "{{REPO_URL}}" },
+      targetAgentId: "{{TARGET_AGENT_ID}}",
+      params: {
+        TIMEZONE: "America/New_York",
+        REPO_URL: "acme/widgets",
+        COMPETITORS: ["one", "two"],
+        TARGET_AGENT_ID: agentId,
+      },
+      requiredParams: ["TIMEZONE", "REPO_URL", "COMPETITORS", "TARGET_AGENT_ID"],
+    });
+
+    expect(renderScheduledTaskParams(schedule)).toMatchObject({
+      timezone: "America/New_York",
+      taskTemplate: "Review acme/widgets",
+      scriptArgs: { competitors: ["one", "two"], repo: "acme/widgets" },
+      targetAgentId: agentId,
+    });
+  });
+
+  test("renders configured parameters before creating an agent task", async () => {
+    const schedule = await createScheduledTask({
+      name: `dispatch-render-${crypto.randomUUID()}`,
+      intervalMs: 60_000,
+      taskTemplate: "Review {{REPO_URL}} while preserving {{trigger.ref}}",
+      params: { REPO_URL: "acme/widgets" },
+      requiredParams: ["REPO_URL"],
+    });
+
+    const result = await dispatchScheduleTarget(schedule);
+    expect(result.task?.task).toBe("Review acme/widgets while preserving {{trigger.ref}}");
+  });
+
+  test("dedupes the same needs_setup record per UTC day and keeps normal cadence", async () => {
+    const schedule = await createScheduledTask({
+      name: `dispatch-needs-setup-${crypto.randomUUID()}`,
+      intervalMs: 86_400_000,
+      nextRunAt: new Date(Date.now() - 60_000).toISOString(),
+      taskTemplate: "Review {{REPO_URL}}",
+      params: {},
+      requiredParams: ["REPO_URL"],
+    });
+    const before = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+
+    await executeSchedule(schedule);
+    const first = (await getScheduledTaskById(schedule.id))!;
+    await executeSchedule(first);
+    const second = (await getScheduledTaskById(schedule.id))!;
+    const after = await getDbClient().get<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM agent_tasks",
+    );
+
+    expect(after?.count).toBe(before?.count);
+    expect(second.lastErrorAt).toBe(first.lastErrorAt);
+    expect(second.lastErrorMessage).toBe("needs_setup: params=[REPO_URL] integrations=[]");
+    expect(second.consecutiveErrors).toBe(0);
+    expect(second.enabled).toBe(true);
+    expect(second.lastRunAt).toBeUndefined();
+    expect(new Date(second.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  test("advances a cron schedule while its required timezone is still unset", async () => {
+    const schedule = await createScheduledTask({
+      name: `dispatch-needs-timezone-${crypto.randomUUID()}`,
+      cronExpression: "40 3 * * 0",
+      timezone: "{{TIMEZONE}}",
+      nextRunAt: new Date(Date.now() - 60_000).toISOString(),
+      taskTemplate: "Review {{REPO_URL}}",
+      params: {},
+      requiredParams: ["REPO_URL", "TIMEZONE"],
+    });
+
+    await executeSchedule(schedule);
+
+    const updated = (await getScheduledTaskById(schedule.id))!;
+    expect(updated.lastErrorMessage).toBe(
+      "needs_setup: params=[REPO_URL,TIMEZONE] integrations=[]",
+    );
+    expect(new Date(updated.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
   });
 });
 
@@ -565,5 +901,23 @@ describe("PUT /api/schedules/{id} — targetType validation", () => {
     expect(status).toBe(200);
     expect(json.targetType).toBe("workflow");
     expect(json.workflowId).toBe(wf.id);
+  });
+
+  test("persists automation setup fields", async () => {
+    const schedule = await createScheduledTask({
+      name: `http-put-preflight-${crypto.randomUUID()}`,
+      taskTemplate: "Inspect {{REPO_URL}}",
+      intervalMs: 60_000,
+    });
+    const { status, json } = await putSchedule(schedule.id, {
+      params: { REPO_URL: "acme/widgets" },
+      requiredParams: ["REPO_URL"],
+      requires: ["github"],
+    });
+
+    expect(status).toBe(200);
+    expect(json.params).toEqual({ REPO_URL: "acme/widgets" });
+    expect(json.requiredParams).toEqual(["REPO_URL"]);
+    expect(json.requires).toEqual(["github"]);
   });
 });

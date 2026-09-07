@@ -1,11 +1,20 @@
 import { ensure } from "@desplega.ai/business-use";
 import { CronExpressionParser } from "cron-parser";
 import {
+  getAutomationSetupStates,
+  isNeedsSetupFailure,
+  preflightAutomation,
+  recordSchedulePreflightFailure,
+  renderAutomationTokens,
+  schedulePreflightInput,
+} from "@/be/automation-preflight";
+import {
   getDbClient,
   getDueScheduledTasks,
   getScheduledTaskById,
   getUserById,
   getWorkflow,
+  getWorkflowRun,
   updateScheduledTask,
 } from "@/be/db";
 import {
@@ -118,15 +127,37 @@ export interface DispatchScheduleResult {
   task?: AgentTask;
 }
 
+export class AutomationNeedsSetupError extends Error {
+  constructor(public readonly failureReason: string) {
+    super(failureReason);
+    this.name = "AutomationNeedsSetupError";
+  }
+}
+
 async function withoutDeletedRequester(schedule: ScheduledTask): Promise<ScheduledTask> {
   if (!schedule.createdBy || (await getUserById(schedule.createdBy))) return schedule;
   return { ...schedule, createdBy: undefined };
+}
+
+export function renderScheduledTaskParams(schedule: ScheduledTask): ScheduledTask {
+  return renderAutomationTokens(schedule, schedule.params ?? {});
 }
 
 export async function dispatchScheduleTarget(
   schedule: ScheduledTask,
   extraTags: string[] = [],
 ): Promise<DispatchScheduleResult> {
+  const preflight = preflightAutomation(
+    schedulePreflightInput(schedule),
+    await getAutomationSetupStates(),
+  );
+  if (preflight.state === "needs_setup") {
+    await recordSchedulePreflightFailure(schedule.id, preflight.failureReason!);
+    throw new AutomationNeedsSetupError(preflight.failureReason!);
+  }
+  // Params are safe and integrations are ready. Only now render values into
+  // the complete target snapshot, before metadata lookup or dispatch.
+  schedule = renderScheduledTaskParams(schedule);
   schedule = await withoutDeletedRequester(schedule);
   switch (schedule.targetType) {
     case "workflow": {
@@ -153,6 +184,7 @@ export async function dispatchScheduleTarget(
         triggerType: "schedule",
         requestedByUserId: schedule.createdBy,
       });
+      await throwIfWorkflowNeedsSetup(schedule.id, [runId]);
       console.log(
         `[Scheduler] Schedule "${schedule.name}" → triggered workflow "${workflow.name}"`,
       );
@@ -170,6 +202,7 @@ export async function dispatchScheduleTarget(
       if (registry) {
         const runIds = await handleScheduleTrigger(schedule.id, schedule, registry);
         if (runIds.length > 0) {
+          await throwIfWorkflowNeedsSetup(schedule.id, runIds);
           triggeredWorkflows = true;
           workflowRunIds = runIds;
           console.log(
@@ -188,6 +221,37 @@ export async function dispatchScheduleTarget(
   }
 }
 
+async function throwIfWorkflowNeedsSetup(scheduleId: string, runIds: string[]): Promise<void> {
+  for (const runId of runIds) {
+    const run = await getWorkflowRun(runId);
+    if (!isNeedsSetupFailure(run?.error)) continue;
+    await recordSchedulePreflightFailure(scheduleId, run.error);
+    throw new AutomationNeedsSetupError(run.error);
+  }
+}
+
+async function advanceScheduleAfterNeedsSetup(
+  schedule: ScheduledTask,
+  now: Date = new Date(),
+): Promise<void> {
+  schedule = renderScheduledTaskParams(schedule);
+  const timestamp = now.toISOString();
+  if (schedule.scheduleType === "one_time") {
+    await updateScheduledTask(schedule.id, {
+      nextRunAt: null,
+      lastUpdatedAt: timestamp,
+    });
+    return;
+  }
+  await updateScheduledTask(schedule.id, {
+    nextRunAt: calculateNextRun(
+      schedule.timezone?.includes("{{") ? { ...schedule, timezone: "UTC" } : schedule,
+      now,
+    ),
+    lastUpdatedAt: timestamp,
+  });
+}
+
 /**
  * Recover missed scheduled task runs from downtime.
  * Fires ONE catch-up run per schedule (not N missed runs).
@@ -197,7 +261,8 @@ async function recoverMissedSchedules(): Promise<void> {
   const now = new Date();
   const dueSchedules = await getDueScheduledTasks();
 
-  for (const schedule of dueSchedules) {
+  for (const storedSchedule of dueSchedules) {
+    const schedule = renderScheduledTaskParams(storedSchedule);
     if (!schedule.nextRunAt) continue;
     const missedBy = now.getTime() - new Date(schedule.nextRunAt).getTime();
     if (missedBy < 15000) continue; // Less than 15s — normal timing jitter
@@ -237,6 +302,16 @@ async function recoverMissedSchedules(): Promise<void> {
         wasRecovered: true,
       });
     } catch (err) {
+      if (err instanceof AutomationNeedsSetupError) {
+        await advanceScheduleAfterNeedsSetup(schedule, now);
+        telemetry.schedule("error", {
+          scheduleType: schedule.scheduleType,
+          triggeredWorkflows,
+          wasRecovered: true,
+          consecutiveErrors: schedule.consecutiveErrors ?? 0,
+        });
+        continue;
+      }
       telemetry.schedule("error", {
         scheduleType: schedule.scheduleType,
         triggeredWorkflows,
@@ -295,7 +370,8 @@ function getBackoffMs(consecutiveErrors: number): number {
  * Execute a single scheduled task by creating an agent task.
  * Tracks consecutive errors and applies exponential backoff on failure.
  */
-async function executeSchedule(schedule: ScheduledTask): Promise<void> {
+export async function executeSchedule(schedule: ScheduledTask): Promise<void> {
+  schedule = renderScheduledTaskParams(schedule);
   let triggeredWorkflows = false;
   try {
     ({ triggeredWorkflows } = await dispatchScheduleTarget(schedule));
@@ -331,6 +407,16 @@ async function executeSchedule(schedule: ScheduledTask): Promise<void> {
       wasRecovered: false,
     });
   } catch (err) {
+    if (err instanceof AutomationNeedsSetupError) {
+      await advanceScheduleAfterNeedsSetup(schedule);
+      telemetry.schedule("error", {
+        scheduleType: schedule.scheduleType,
+        triggeredWorkflows,
+        wasRecovered: false,
+        consecutiveErrors: schedule.consecutiveErrors ?? 0,
+      });
+      return;
+    }
     const errorCount = (schedule.consecutiveErrors ?? 0) + 1;
     const now = new Date();
     const errorMsg = err instanceof Error ? err.message : String(err);

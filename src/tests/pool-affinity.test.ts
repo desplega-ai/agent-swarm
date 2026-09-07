@@ -8,6 +8,7 @@ import {
   createTaskExtended,
   getAgentById,
   getDbClient,
+  getPendingTaskForAgent,
   getTaskById,
   getUnassignedTaskIdsForAgent,
   initDb,
@@ -328,6 +329,21 @@ describe("Pool Affinity", () => {
       expect(await claimTask(child.id, underprivilegedLead.id)).toBeNull();
     });
 
+    test("the parent-affinity opt-out requires explicit Lead-only control-plane authorization", async () => {
+      const parent = await createTaskExtended("parent", {
+        routingAffinity: affinity({ role: "coder" }),
+      });
+
+      await expect(
+        createTaskExtended("unsafe control child", {
+          parentTaskId: parent.id,
+          inheritParentRoutingAffinity: false,
+        }),
+      ).rejects.toThrow(
+        "Disabling parent routing-affinity inheritance requires an explicit Lead-only control-plane affinity",
+      );
+    });
+
     test("a child of a task whose affinity is inherited provenance (not a declared requirement) can be direct-assigned to a worker lacking the parent's capabilities", async () => {
       const originalWorker = await createAgent({
         name: "provenance-original-worker",
@@ -409,6 +425,130 @@ describe("Pool Affinity", () => {
           agentId: capableWorker.id,
         }),
       ).rejects.toThrow("Task routing affinity does not authorize assignment or offer");
+    });
+  });
+
+  // ==========================================================================
+  // getPendingTaskForAgent dispatch gate — the direct-assignment pickup path
+  // (`agentId` already pinned, status already 'pending'). Distinct from the
+  // pool-claim gate above: a directly-assigned task's affinity may be pure
+  // inherited PROVENANCE (see the "inherited provenance" creation test
+  // above), which must not re-veto dispatch to the agent it's already
+  // pinned to. `leadOnly` and `routingAffinityInvalid` stay hard vetoes.
+  // ==========================================================================
+
+  describe("getPendingTaskForAgent", () => {
+    test("a Lead-routed worker-completion follow-up carrying the finishing worker's inherited affinity is dispatched to the Lead", async () => {
+      const worker = await createAgent({
+        name: "followup-source-worker",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(worker.id, {
+        role: "Implementation Engineer / Coder",
+        capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+      });
+      const lead = await createAgent({ name: "followup-lead", isLead: true, status: "idle" });
+
+      // The worker's own task carries a provenance affinity snapshot of
+      // itself (e.g. stamped at some earlier interruption/resume).
+      const workerTask = await createTaskExtended("Implement the thing", {
+        agentId: worker.id,
+        routingAffinity: affinity({
+          sourceAgentId: worker.id,
+          role: "Implementation Engineer / Coder",
+          capabilities: ["typescript", "javascript", "nodejs", "git", "worktrees"],
+        }),
+      });
+
+      // `createWorkerTaskFollowUp`'s exact shape: assigns directly to the
+      // Lead, declares no routingAffinity of its own, so it inherits the
+      // worker's affinity as pure provenance via parentTaskId fallback.
+      const followUp = await createTaskExtended("Worker task completed — review needed", {
+        agentId: lead.id,
+        parentTaskId: workerTask.id,
+        taskType: "follow-up",
+      });
+      expect(followUp.agentId).toBe(lead.id);
+      expect(followUp.status).toBe("pending");
+      expect(followUp.routingAffinity).toMatchObject({ sourceAgentId: worker.id });
+      // Before the fix: isAgentEligibleForTask(lead, followUp) is false
+      // (Lead's role/capabilities never match a worker's) — that's the bug.
+      expect(isAgentEligibleForTask(lead, followUp)).toBe(false);
+
+      const dispatched = await getPendingTaskForAgent(lead.id);
+      expect(dispatched?.id).toBe(followUp.id);
+    });
+
+    test("regression: a lead-only affinity still vetoes dispatch to a directly-assigned non-lead agent", async () => {
+      const worker = await createAgent({
+        name: "dispatch-lead-only-worker",
+        isLead: false,
+        status: "idle",
+      });
+      // Simulates a legacy/corrupt row that bypassed creation-time
+      // enforcement — createTaskExtended itself rejects this combination at
+      // creation (see "lead-only accepts a Lead and rejects direct worker
+      // assignment" above), so a raw UPDATE is the only way to construct it.
+      const task = await createTaskExtended("Merge", { agentId: worker.id });
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        JSON.stringify(affinity({ leadOnly: true })),
+        task.id,
+      ]);
+
+      const dispatched = await getPendingTaskForAgent(worker.id);
+      expect(dispatched).toBeNull();
+
+      const log = (await getDbClient().get(
+        "SELECT eventType FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1",
+        [task.id],
+      )) as { eventType: string } | null;
+      expect(log?.eventType).toBe("task_dispatch_rejected_affinity");
+    });
+
+    test("regression: a quarantined (schema-invalid) affinity still vetoes dispatch to its directly-assigned agent", async () => {
+      const agent = await createAgent({
+        name: "dispatch-invalid-affinity-agent",
+        isLead: false,
+        status: "idle",
+      });
+      const task = await createTaskExtended("Task with corrupt affinity", { agentId: agent.id });
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        JSON.stringify({ leadOnly: true, capabilities: "not-an-array" }),
+        task.id,
+      ]);
+      expect((await getTaskById(task.id))?.routingAffinityInvalid).toBe(true);
+
+      const dispatched = await getPendingTaskForAgent(agent.id);
+      expect(dispatched).toBeNull();
+
+      const log = (await getDbClient().get(
+        "SELECT eventType FROM agent_log WHERE taskId = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1",
+        [task.id],
+      )) as { eventType: string } | null;
+      expect(log?.eventType).toBe("task_dispatch_rejected_affinity");
+    });
+
+    test("a plain (non-lead-only) role/capability mismatch does NOT veto dispatch to the directly-assigned agent", async () => {
+      const agent = await createAgent({
+        name: "dispatch-role-mismatch-agent",
+        isLead: false,
+        status: "idle",
+      });
+      await updateAgentProfile(agent.id, { role: "researcher" });
+      // Directly assigned with a caller-declared, non-lead-only requirement
+      // for a DIFFERENT role. createTaskExtended's creation-time gate is
+      // about caller-declared requirements too, so build this the same way
+      // the legacy-row tests above do: assign first, then attach the
+      // affinity, to isolate the dispatch-time behavior under test.
+      const task = await createTaskExtended("Coding task", { agentId: agent.id });
+      await getDbClient().run("UPDATE agent_tasks SET routingAffinity = ? WHERE id = ?", [
+        JSON.stringify(affinity({ role: "coder" })),
+        task.id,
+      ]);
+
+      const dispatched = await getPendingTaskForAgent(agent.id);
+      expect(dispatched?.id).toBe(task.id);
     });
   });
 

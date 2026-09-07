@@ -5,7 +5,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import pkg from "../../package.json";
 import { getApiKey } from "../utils/api-key.ts";
 import { buildOnboardDashboardUrl } from "./onboard/dashboard-url.ts";
-import { resolveNonInteractiveProvider } from "./onboard/non-interactive.ts";
+import {
+  parseMaxConcurrentTasks,
+  resolveNonInteractiveProvider,
+} from "./onboard/non-interactive.ts";
 import { getAgentSummary, getPresetById, PRESETS } from "./onboard/presets.ts";
 import { CoreCredentialsStep } from "./onboard/steps/core-credentials.tsx";
 import { CustomTemplatesStep } from "./onboard/steps/custom-templates.tsx";
@@ -43,13 +46,26 @@ const BANNER = `   _                    _     ____
 /_/   \\_\\__, |\\___|_| |_|\\__| |____/ \\_/\\_/ \\__,_|_|  |_| |_| |_|
        |___/`;
 
-export function Onboard({ dryRun = false, yes = false, preset, pullPolicy }: OnboardProps) {
+export function Onboard({
+  dryRun = false,
+  yes = false,
+  preset,
+  maxConcurrentTasks,
+  pullPolicy,
+}: OnboardProps) {
   const { exit } = useApp();
   const [state, setState] = useState<OnboardState>(() => {
     const initial = { ...INITIAL_STATE };
     if (preset) {
       initial.presetId = preset;
     }
+    const concurrency = parseMaxConcurrentTasks(maxConcurrentTasks);
+    if (!concurrency.ok) {
+      initial.step = "error";
+      initial.error = concurrency.error;
+      return initial;
+    }
+    initial.maxConcurrentTasks = concurrency.value;
     if (pullPolicy !== undefined) {
       if (!isPullPolicy(pullPolicy)) {
         initial.step = "error";
@@ -120,7 +136,10 @@ export function Onboard({ dryRun = false, yes = false, preset, pullPolicy }: Onb
   // Exit on done/error
   useEffect(() => {
     if (state.step === "done" || state.step === "error") {
-      const timer = setTimeout(() => exit(), 500);
+      const timer = setTimeout(() => {
+        if (state.step === "error") process.exitCode = 1;
+        exit();
+      }, 500);
       return () => clearTimeout(timer);
     }
   }, [state.step, exit]);
@@ -136,14 +155,17 @@ export function Onboard({ dryRun = false, yes = false, preset, pullPolicy }: Onb
 
     if (!preset) {
       goToError(
-        "--preset is required in non-interactive mode (--yes). Options: dev, content, research, solo",
+        "--preset is required in non-interactive mode (--yes). Options: full, dev, content, research, solo",
       );
       return;
     }
 
-    const selectedPreset = getPresetById(preset);
-    if (!selectedPreset || preset === "custom") {
-      goToError(`Invalid preset "${preset}". Options: dev, content, research, solo`);
+    const selectedPresetId = preset;
+    const selectedPreset = getPresetById(selectedPresetId);
+    if (!selectedPreset || selectedPresetId === "custom") {
+      goToError(
+        `Invalid preset "${selectedPresetId}". Options: full, dev, content, research, solo`,
+      );
       return;
     }
 

@@ -95,6 +95,15 @@ function OpencodeIcon(props: IconProps) {
   );
 }
 
+function AcpIcon(props: IconProps) {
+  return (
+    // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
+    <svg aria-hidden {...ICON_BASE_24} {...props}>
+      <path d="M4 5h5v2H6v10h3v2H4V5zm16 0v14h-5v-2h3V7h-3V5h5zm-9 3h2v3h-2V8zm0 5h2v3h-2v-3z" />
+    </svg>
+  );
+}
+
 function DevinIcon(props: IconProps) {
   return (
     // biome-ignore lint/a11y/noSvgWithoutTitle: decorative icon, harness label provides accessible name
@@ -112,6 +121,7 @@ const ICON_BY_HARNESS: Record<string, (p: IconProps) => ReactElement> = {
   pi: PiIcon,
   opencode: OpencodeIcon,
   devin: DevinIcon,
+  acp: AcpIcon,
 };
 
 export interface HarnessIconProps extends IconProps {

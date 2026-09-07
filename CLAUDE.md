@@ -61,6 +61,7 @@ New MCP tools: when adding a tool, register it in `SDK_TOOL_NAME_MAP` (`src/scri
 | `bun run lint:fix` | Lint & format with Biome |
 | `bun run tsc:check` | Type check |
 | `bun run test:root` | Run root unit tests (`bun run test:root -- src/tests/<file>.test.ts` for one) |
+| `bun run e2e:ui` | Playwright UI suite: builds `apps/ui`, one seeded API per worker (`-- --grep @smoke`, `-- --no-build`) |
 | `bun run pm2-{start,stop,restart,logs,status}` | All services (API 3013, UI 5274, lead 3201, worker 3202) |
 | `bun run docker:build:worker` | Build Docker worker image (full) |
 | `bun run docker:build:worker:slim` | Build slim worker image (`--target worker-slim`, for CI/E2E) |
@@ -277,7 +278,7 @@ Hub: [runbooks/testing.md](./runbooks/testing.md) — routes to LOCAL_TESTING.md
 
 Hard rules:
 - Plan-mode verification steps MUST copy real commands from LOCAL_TESTING.md; don't paraphrase.
-- The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`.
+- The black-box runner and optional `--harness` legs are documented in `LOCAL_TESTING.md` under `Black-box E2E`. The Playwright UI suite (`bun run e2e:ui`, `packages/ui-e2e`) is under `UI E2E`; its workflow `ui-e2e.yml` is informational.
 - Frontend PRs (`apps/ui/`, `apps/templates-ui/`) MUST include screenshots of the change running locally, captured with `agent-browser` and uploaded to agent-fs (signed URL in the PR body). Never `qa-use` unless explicitly asked. This is a reviewer convention; no CI job enforces it. Recipe: LOCAL_TESTING.md § When you need to verify a UI change.
 - E2E/test agents MUST use valid UUID agent IDs (e.g. `AGENT_ID=$(uuidgen)`), never slugs like `e2e-lead` — several MCP tool *output* schemas pin `yourAgentId`/`task.agentId` to UUID, so slug-ID agents get `MCP error -32602: Output validation error` on `get-tasks`/`get-task-details`/`store-progress`/`memory-search` **after the write already landed** (retrying double-writes).
 - Tests MUST NOT hard-code ports. CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `src/tests/test-net.ts`: `listenOnFreePort(server)` for in-process `node:http` servers, `port: 0` + `server.port` for `Bun.serve`, `getFreePort()` + `waitForServer()` for spawned `src/http.ts` children. No global test retry: a timing-sensitive test opts in with `test(name, fn, { retry: 2 })` plus a comment.
@@ -305,6 +306,7 @@ bun run lint           # NOT lint:fix — CI runs `lint` (read-only)
 bun run tsc:check
 bun run test:root -- --parallel=4     # CI: 2 shards x --parallel=4, balanced by cached --timings
 bun run e2e                          # black-box contract suite: boots the API on a free port, no Docker, no LLM
+bun run e2e:ui                       # Playwright UI suite: seeded API per worker, headless Chromium, needs Node 22+
 bun run check:bun-version             # Dockerfile oven/bun tags == package.json packageManager
 bash scripts/check-db-boundary.sh
 bash scripts/check-test-spawn-sync.sh # tests must use runChild(), never Bun.spawnSync
