@@ -1,3 +1,5 @@
+Template parameters: {{REPO_URL}}, {{GSC_PROPERTY}}
+
 # Weekly GTM Metrics Review
 
 Summarize product, marketing, or sales signals into an operator-friendly weekly review.
@@ -15,7 +17,7 @@ Summarize product, marketing, or sales signals into an operator-friendly weekly 
 
 ## Scheduled Task
 
-This is the full task prompt the schedule runs on each fire. Adapt the repositories, Search Console properties, report paths, and campaign goals to your environment before enabling.
+This is the full task prompt the schedule runs on each fire. It uses the declared repository and Search Console property.
 
 Task Type: Research
 Topic: Weekly GTM Metrics Review for your product
@@ -23,29 +25,47 @@ Topic: Weekly GTM Metrics Review for your product
 Goal: Check current GitHub stars, traffic, Google Search Console performance, and content metrics for the GTM campaign.
 
 Instructions:
-1. Check GitHub metrics: `gh api repos/owner/repo` (stars, forks, issues)
-2. Check traffic: `gh api repos/owner/repo/traffic/views` and `/traffic/clones`
-3. Check referrers: `gh api repos/owner/repo/traffic/popular/referrers`
-4. Check popular content: `gh api repos/owner/repo/traffic/popular/paths`
+Before running commands, initialize the validated template values as quoted shell variables. Run the remaining commands in the same shell session, and use only quoted variable expansions.
 
-5. **Pull Google Search Console data** using the `gsc-analytics` skill (already installed on this agent). Do NOT write Python auth code — use the `gsc` CLI at `/workspace/repos/agent-work/gsc/gsc`. The setup script already wires up `GOOGLE_APPLICATION_CREDENTIALS`, so no extra env setup needed.
+Normalize the validated GitHub repository value once:
+```bash
+REPO_URL='{{REPO_URL}}'
+GSC_PROPERTY='{{GSC_PROPERTY}}'
+REPO_SLUG="${REPO_URL#https://github.com/}"
+REPO_SLUG="${REPO_SLUG#git@github.com:}"
+REPO_SLUG="${REPO_SLUG%/}"
+REPO_SLUG="${REPO_SLUG%.git}"
+```
+
+1. Check GitHub metrics: `gh api "repos/$REPO_SLUG"` (stars, forks, issues)
+2. Check traffic: `gh api "repos/$REPO_SLUG/traffic/views"` and `gh api "repos/$REPO_SLUG/traffic/clones"`
+3. Check referrers: `gh api "repos/$REPO_SLUG/traffic/popular/referrers"`
+4. Check popular content: `gh api "repos/$REPO_SLUG/traffic/popular/paths"`
+
+5. **Pull Google Search Console data** using the configured `gsc` integration. Do not write credential-handling code.
 
    Pull the weekly snapshot for each configured site:
    ```bash
-   GSC=/workspace/repos/agent-work/gsc/gsc
-   for site in example.com docs.example.com; do
+   GSC=gsc
+   read -r -a gsc_properties <<< "$GSC_PROPERTY"
+   for site in "${gsc_properties[@]}"; do
      echo "=== $site ==="
-     $GSC analytics "sc-domain:$site" --top 20 --json > "/tmp/gsc-$site.json"
+     case "$site" in
+       sc-domain:*|https://*) property="$site" ;;
+       *) property="sc-domain:$site" ;;
+     esac
+     safe_site=$(printf '%s' "$site" | tr -c 'A-Za-z0-9._-' '_')
+     "$GSC" analytics "$property" --top 20 --json > "/tmp/gsc-$safe_site.json"
      jq '{current, previous, window, prior,
           top_queries: [.topQueries[:10][] | {q: .keys[0], c: .clicks, i: .impressions, ctr: .ctr, pos: .position}],
           top_pages:   [.topPages[:10][]   | {p: .keys[0], c: .clicks, i: .impressions, ctr: .ctr, pos: .position}]
-         }' "/tmp/gsc-$site.json"
+         }' "/tmp/gsc-$safe_site.json"
    done
    ```
 
    The `analytics` subcommand returns headline KPIs (clicks, impressions, CTR, avg position) PLUS a WoW comparison against the prior 7 days — this is what powers the "this week vs last week" section of the report.
 
-6. Review the GTM plan at /workspace/shared/thoughts/shared/research/gtm-state-assessment.md
+6. Review the installation's configured GTM plan or state artifact.
 7. Compile a brief report with:
    - Current star count, weekly change
    - Top traffic sources
@@ -53,6 +73,6 @@ Instructions:
    - What's working, what to try next
    - **SEO opportunities**: queries where we're close to page 1, content gaps to fill
 
-Save report to /workspace/shared/thoughts/shared/research/gtm-weekly-{date}.md
+Post the final report through configured admin delivery channels, using the in-app fallback when no external channel is configured, and save it in the deployment's configured research workspace.
 
 This is part of your team's GTM goal; update the goal statement before enabling the schedule.

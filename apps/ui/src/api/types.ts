@@ -1013,6 +1013,14 @@ export interface AgentUsageSummary {
 }
 
 export type ScheduledTaskTargetType = "agent-task" | "workflow" | "script";
+export type AutomationIntegrationId =
+  | "slack"
+  | "github"
+  | "linear"
+  | "jira"
+  | "gsc"
+  | "agentmail"
+  | "agentfs";
 
 export interface ScheduledTask {
   id: string;
@@ -1038,6 +1046,12 @@ export interface ScheduledTask {
   workflowId?: string;
   scriptName?: string;
   scriptArgs?: Record<string, unknown>;
+  /** Setup values injected into the automation template at run time. */
+  params?: Record<string, unknown>;
+  /** Parameter names which must be set before the automation can run. */
+  requiredParams?: string[];
+  /** Integrations that must be verified before the automation can run. */
+  requires?: AutomationIntegrationId[];
   createdAt: string;
   lastUpdatedAt: string;
   favorite?: boolean;
@@ -1192,6 +1206,12 @@ export interface Workflow {
   createdAt: string;
   lastUpdatedAt: string;
   favorite?: boolean;
+  /** Setup values injected into the workflow at trigger time. */
+  params?: Record<string, unknown>;
+  /** Parameter names which must be set before the workflow can run. */
+  requiredParams?: string[];
+  /** Integrations that must be verified before the workflow can run. */
+  requires?: AutomationIntegrationId[];
 }
 
 export type WorkflowRunStatus = "running" | "waiting" | "completed" | "failed" | "skipped";
@@ -2345,6 +2365,9 @@ export type MilestoneId =
   | "github"
   | "linear"
   | "jira"
+  | "gsc"
+  | "agentmail"
+  | "agentfs"
   | "workers"
   | "first_task";
 
@@ -2401,6 +2424,21 @@ export interface StatusAgentFs {
   capabilities: Record<string, unknown>;
 }
 
+export interface StatusAutomation {
+  id: string;
+  name: string;
+  kind: "schedule" | "workflow";
+  state: "running" | "needs_setup";
+  missing: {
+    params: string[];
+    integrations: string[];
+  };
+  fixes: Array<
+    { type: "param"; key: string; url: string } | { type: "integration"; key: string; url: string }
+  >;
+  fixUrl: string;
+}
+
 /**
  * Phase 2: Aggregate health rolled up server-side from the setup milestones.
  * Drives the always-on header badge color.
@@ -2412,6 +2450,7 @@ export interface StatusResponse {
   setup: SetupMilestone[];
   activity: StatusActivity;
   agent_fs: StatusAgentFs;
+  automations: StatusAutomation[];
   /** Phase 2: rolled-up health for the always-on header badge. */
   health: StatusHealth;
 }

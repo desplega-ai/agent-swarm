@@ -1,43 +1,13 @@
 # Iterative Review Loop
 
+Template parameter: {{REPO_URL}}
+
 A bounded implement → review loop. A coder agent implements the task and reports the diff; a reviewer agent checks it and returns PASS or a blocking fix list. Use this when you want automated quality control with a clear exit condition rather than open-ended implementation.
 
 ## Configuration
 
 ```json
-{
-  "name": "Iterative review loop",
-  "description": "Implement, review, and revise until accepted or blocked.",
-  "triggerSchema": {
-    "type": "object",
-    "required": ["task"],
-    "properties": {
-      "task": { "type": "string" },
-      "repoUrl": { "type": "string" },
-      "maxIterations": { "type": "number" }
-    }
-  },
-  "nodes": [
-    {
-      "id": "implement",
-      "type": "agent-task",
-      "config": {
-        "role": "coder",
-        "task": "Implement this task in {{repoUrl}}: {{task}}. Run focused checks and report the diff."
-      },
-      "next": ["review"]
-    },
-    {
-      "id": "review",
-      "type": "agent-task",
-      "inputs": { "implementation": "implement" },
-      "config": {
-        "role": "reviewer",
-        "task": "Review the implementation. Return PASS when ready, otherwise list blocking fixes only."
-      }
-    }
-  ]
-}
+{"name":"Iterative review loop","description":"Implement, review, and revise until accepted or blocked.","triggerSchema":{"type":"object","required":["task"],"properties":{"task":{"type":"string"},"maxIterations":{"type":"number"}}},"nodes":[{"id":"implement","type":"agent-task","config":{"template":"Implement this task in {{REPO_URL}}: {{trigger.task}}. Run focused checks and report the diff."},"next":["review"]},{"id":"review","type":"agent-task","inputs":{"implementation":"implement"},"config":{"template":"Review the implementation. Return PASS when ready, otherwise list blocking fixes only."}}]}
 ```
 
 ## What It Does

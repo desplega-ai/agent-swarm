@@ -1,5 +1,7 @@
 # Daily Hacker News Briefing
 
+Template parameters: {{REPORT_EMAIL}}
+
 Demonstrate web research automation by summarizing relevant technology discussion.
 
 ## Schedule
@@ -72,8 +74,8 @@ Instructions:
    This creates a persistent archive we can reference later.
 
 6. SEND EMAIL: Use AgentMail MCP tools to send the report as an email:
-   - From inbox: lead@agent-swarm.dev
-   - To: the configured recipient list for this briefing
+   - From inbox: the configured reporting inbox
+   - To: {{REPORT_EMAIL}}
    - Subject: "HN Briefing — [TODAY'S DATE, e.g. Feb 25, 2026]"
    - Body: Send as HTML email. Format the briefing nicely with:
      - A header: "HN Briefing — [DATE]"
@@ -93,5 +95,5 @@ IMPORTANT:
 - Keep it scannable — clickable links, not walls of text
 - Target 5-20 relevant stories (quality over quantity)
 - You MUST scrape all 5 URLs (3 main pages + new + show) — this is required, but ONE AT A TIME
-- The email is sent from lead@agent-swarm.dev using AgentMail MCP `send_message` tool
-- Recipients: use the configured recipient list for this briefing
+- The email is sent using AgentMail MCP `send_message`.
+- Recipients: {{REPORT_EMAIL}}

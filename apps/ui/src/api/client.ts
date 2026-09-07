@@ -1063,6 +1063,7 @@ class ApiClient {
     id: string,
     data: Partial<
       Pick<Workflow, "key" | "name" | "description" | "enabled"> & {
+        params: Record<string, unknown>;
         // null = clear, object = set/replace, undefined/omitted = unchanged.
         triggerSchema: Record<string, unknown> | null;
       }

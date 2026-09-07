@@ -6,6 +6,9 @@ export interface ServiceEntry {
   isLead?: boolean;
 }
 
+/** Match the conservative role defaults used by the worker runtime. */
+export const DEFAULT_MAX_CONCURRENT_TASKS = { lead: 2, worker: 1 } as const;
+
 export interface ComposeConfig {
   services: ServiceEntry[];
   apiImage: string;
@@ -140,6 +143,9 @@ export function generateCompose(config: ComposeConfig): string {
     lines.push("      - MCP_BASE_URL=http://api:3013");
     lines.push("      - YOLO=true");
     lines.push("      - SWARM_URL=${SWARM_URL:-localhost}");
+    lines.push(
+      `      - MAX_CONCURRENT_TASKS=${svc.isLead ? DEFAULT_MAX_CONCURRENT_TASKS.lead : DEFAULT_MAX_CONCURRENT_TASKS.worker}`,
+    );
 
     if (config.integrations.github) {
       lines.push("      - GITHUB_TOKEN=${GITHUB_TOKEN:-}");

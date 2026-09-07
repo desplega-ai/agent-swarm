@@ -6,11 +6,14 @@ import { useAgents } from "@/api/hooks/use-agents";
 import { useFavoriteToggle } from "@/api/hooks/use-favorites";
 import { useAllWorkflowRuns, useUpdateWorkflow, useWorkflows } from "@/api/hooks/use-workflows";
 import type { WorkflowRun, WorkflowRunStatus, WorkflowSummary } from "@/api/types";
+import { useStatusContext } from "@/app/status-context";
+import { findAutomation, NeedsSetupBadge } from "@/components/automations/needs-setup-badge";
 import { DataGrid } from "@/components/shared/data-grid";
 import { EmptyState } from "@/components/shared/empty-state";
 import { FavoriteButton } from "@/components/shared/favorite-button";
 import { ListFilterBar } from "@/components/shared/list-filter-bar";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -24,6 +27,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { readBooleanParam, readStringParam, useUrlSearchState } from "@/hooks/use-url-search-state";
+import { isAutomationSetupError } from "@/lib/automation-setup";
 import { formatElapsed, formatSmartTime } from "@/lib/utils";
 
 function formatDuration(startedAt: string, finishedAt?: string): string {
@@ -49,6 +53,7 @@ export default function WorkflowsPage() {
   const workflowFilter = readStringParam(searchParams, "workflow", "all");
 
   const { data: workflows, isLoading: wfLoading } = useWorkflows();
+  const { data: status } = useStatusContext();
   const { data: agents } = useAgents();
   const { data: allRuns, isLoading: runsLoading } = useAllWorkflowRuns();
   const updateWorkflow = useUpdateWorkflow();
@@ -100,7 +105,10 @@ export default function WorkflowsPage() {
               favorite={workflow.favorite}
               disabled={favoriteToggle.isPending}
               onToggle={() =>
-                favoriteToggle.mutate({ itemId: workflow.id, favorite: !workflow.favorite })
+                favoriteToggle.mutate({
+                  itemId: workflow.id,
+                  favorite: !workflow.favorite,
+                })
               }
             />
           );
@@ -123,6 +131,25 @@ export default function WorkflowsPage() {
         cellRenderer: (params: { value?: string }) => (
           <span className="text-muted-foreground truncate">{params.value || "—"}</span>
         ),
+      },
+      {
+        headerName: "Setup",
+        width: 190,
+        minWidth: 190,
+        cellRenderer: (params: ICellRendererParams<WorkflowSummary>) => {
+          const workflow = params.data;
+          if (!workflow) return null;
+          return (
+            <NeedsSetupBadge
+              automation={findAutomation(
+                status?.automations,
+                "workflow",
+                workflow.key,
+                workflow.name,
+              )}
+            />
+          );
+        },
       },
       {
         headerName: "Nodes",
@@ -154,13 +181,13 @@ export default function WorkflowsPage() {
         valueFormatter: (params) => (params.value ? formatSmartTime(params.value) : ""),
       },
     ],
-    [favoriteToggle, handleToggleEnabled],
+    [favoriteToggle, handleToggleEnabled, status?.automations],
   );
 
   const onWorkflowRowClicked = useCallback(
     (event: RowClickedEvent<WorkflowSummary>) => {
       const target = event.event?.target as HTMLElement | null;
-      if (target?.closest('[data-slot="switch"], button')) return;
+      if (target?.closest('a, [data-slot="switch"], button')) return;
       if (event.data) void navigate(`/workflows/${event.data.id}`);
     },
     [navigate],
@@ -191,9 +218,18 @@ export default function WorkflowsPage() {
         field: "status",
         headerName: "Status",
         width: 130,
-        cellRenderer: (params: { value: WorkflowRunStatus }) => (
-          <StatusBadge status={params.value} />
-        ),
+        cellRenderer: (params: { value: WorkflowRunStatus; data?: WorkflowRun }) =>
+          isAutomationSetupError(params.data?.error) ? (
+            <Badge
+              variant="outline"
+              size="tag"
+              className="border-status-pending/30 text-status-pending-strong"
+            >
+              Needs setup
+            </Badge>
+          ) : (
+            <StatusBadge status={params.value} />
+          ),
       },
       {
         field: "startedAt",
@@ -316,7 +352,10 @@ export default function WorkflowsPage() {
                   searchPlaceholder="Search creator agents…"
                   options={[
                     { value: "all", label: "All creator agents" },
-                    ...(agents ?? []).map((agent) => ({ value: agent.id, label: agent.name })),
+                    ...(agents ?? []).map((agent) => ({
+                      value: agent.id,
+                      label: agent.name,
+                    })),
                   ]}
                 />
                 <Select

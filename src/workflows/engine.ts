@@ -1,4 +1,11 @@
 import {
+  getAutomationSetupStates,
+  preflightAutomation,
+  recordWorkflowPreflightFailure,
+  renderAutomationTokens,
+  workflowPreflightInput,
+} from "../be/automation-preflight";
+import {
   createWorkflowRun,
   createWorkflowRunStep,
   getCompletedStepNodeIds,
@@ -50,6 +57,18 @@ export class TriggerSchemaError extends Error {
   }
 }
 
+async function resolveRenderedWorkflowInputs(
+  input: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const stringInputs: Record<string, string> = {};
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === "string") stringInputs[key] = value;
+    else resolved[key] = value;
+  }
+  return { ...resolved, ...(await resolveInputs(stringInputs)) };
+}
+
 // ─── Public API ────────────────────────────────────────────
 
 /**
@@ -67,6 +86,25 @@ export async function startWorkflowExecution(
   registry: ExecutorRegistry,
   options: WorkflowExecutionOptions = {},
 ): Promise<string> {
+  const preflight = preflightAutomation(
+    workflowPreflightInput(workflow),
+    await getAutomationSetupStates(),
+  );
+  if (preflight.state === "needs_setup") {
+    return await recordWorkflowPreflightFailure({
+      workflowId: workflow.id,
+      triggerType: options.triggerType ?? "manual",
+      triggerData,
+      failureReason: preflight.failureReason!,
+      createdBy: options.requestedByUserId,
+    });
+  }
+
+  // Templates can consume install params outside the graph definition (most
+  // importantly workflow.input). Render the complete runtime snapshot once;
+  // exact-token values retain their JSON type, including COMPETITORS arrays.
+  workflow = renderAutomationTokens(workflow, workflow.params ?? {});
+
   // Validate trigger data against triggerSchema (before any DB writes)
   if (workflow.triggerSchema) {
     const validationErrors = validateJsonSchema(workflow.triggerSchema, triggerData);
@@ -120,7 +158,7 @@ export async function startWorkflowExecution(
 
   if (workflow.input) {
     try {
-      const resolved = await resolveInputs(workflow.input);
+      const resolved = await resolveRenderedWorkflowInputs(workflow.input);
       Object.assign(ctx, { input: resolved });
     } catch (err) {
       await updateWorkflowRun(runId, {

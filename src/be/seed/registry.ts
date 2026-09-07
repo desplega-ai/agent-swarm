@@ -10,9 +10,17 @@ import { scriptsSeeder } from "../seed-scripts";
 import { skillsSeeder } from "../seed-skills";
 import { agentFsProvisionSeeder } from "./agent-fs-provision";
 import { runSeeders } from "./runner";
+import { schedulesSeeder } from "./schedules-seeder";
 import type { Seeder, SeederResult, SeederRunOptions } from "./types";
+import { workflowsSeeder } from "./workflows-seeder";
 
-export const SEEDERS: Seeder[] = [agentFsProvisionSeeder, scriptsSeeder, skillsSeeder];
+export const SEEDERS: Seeder[] = [
+  agentFsProvisionSeeder,
+  scriptsSeeder,
+  skillsSeeder,
+  workflowsSeeder,
+  schedulesSeeder,
+];
 
 /** Apply every registered seeder. Called at API boot and by the seed CLI. */
 export function runAllSeeders(opts?: SeederRunOptions): Promise<SeederResult[]> {

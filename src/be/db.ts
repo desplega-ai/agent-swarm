@@ -23,6 +23,7 @@ import type {
   AssetEntityType,
   AssetKeyMapping,
   AssetSummary,
+  AutomationIntegrationId,
   Budget,
   BudgetRefusalCause,
   BudgetRefusalNotification,
@@ -8096,6 +8097,9 @@ type ScheduledTaskRow = {
   workflowId: string | null;
   scriptName: string | null;
   scriptArgs: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   createdAt: string;
   lastUpdatedAt: string;
   created_by: string | null;
@@ -8145,6 +8149,9 @@ function rowToScheduledTask(row: ScheduledTaskRow): ScheduledTask {
     workflowId: row.workflowId ?? undefined,
     scriptName: row.scriptName ?? undefined,
     scriptArgs: row.scriptArgs ? JSON.parse(row.scriptArgs) : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     createdAt: normalizeDateRequired(row.createdAt),
     lastUpdatedAt: normalizeDateRequired(row.lastUpdatedAt),
     createdBy: row.created_by ?? undefined,
@@ -8288,6 +8295,9 @@ export interface CreateScheduledTaskData {
   workflowId?: string;
   scriptName?: string;
   scriptArgs?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   createdBy?: string;
 }
 
@@ -8300,9 +8310,10 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
         id, "key", name, description, cronExpression, intervalMs, taskTemplate,
         taskType, tags, priority, targetAgentId, enabled, nextRunAt,
         createdByAgentId, timezone, model, modelTier, scheduleType, targetType,
-        workflowId, scriptName, scriptArgs, createdAt, lastUpdatedAt,
+        workflowId, scriptName, scriptArgs, params, requiredParams, requires,
+        createdAt, lastUpdatedAt,
         created_by, updated_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("schedule", id)),
@@ -8326,6 +8337,9 @@ export async function createScheduledTask(data: CreateScheduledTaskData): Promis
       data.workflowId ?? null,
       data.scriptName ?? null,
       data.scriptArgs !== undefined ? JSON.stringify(data.scriptArgs) : "{}",
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       now,
       now,
       data.createdBy ?? null,
@@ -8362,6 +8376,9 @@ export interface UpdateScheduledTaskData {
   workflowId?: string | null;
   scriptName?: string | null;
   scriptArgs?: Record<string, unknown> | null;
+  params?: Record<string, unknown>;
+  requiredParams?: string[];
+  requires?: AutomationIntegrationId[];
   lastUpdatedAt?: string;
   updatedBy?: string;
 }
@@ -8469,6 +8486,18 @@ export async function updateScheduledTask(
   if (data.scriptArgs !== undefined) {
     updates.push("scriptArgs = ?");
     params.push(data.scriptArgs === null ? null : JSON.stringify(data.scriptArgs));
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.updatedBy !== undefined) {
     updates.push("updated_by = ?");
@@ -9551,6 +9580,9 @@ type WorkflowRow = {
   cooldown: string | null;
   input: string | null;
   triggerSchema: string | null;
+  params: string;
+  requiredParams: string;
+  requires: string;
   dir: string | null;
   vcs_repo: string | null;
   createdByAgentId: string | null;
@@ -9574,6 +9606,9 @@ function rowToWorkflow(row: WorkflowRow): Workflow {
     triggerSchema: row.triggerSchema
       ? (JSON.parse(row.triggerSchema) as Record<string, unknown>)
       : undefined,
+    params: JSON.parse(row.params) as Record<string, unknown>,
+    requiredParams: JSON.parse(row.requiredParams) as string[],
+    requires: JSON.parse(row.requires) as AutomationIntegrationId[],
     dir: row.dir ?? undefined,
     vcsRepo: row.vcs_repo ?? undefined,
     createdByAgentId: row.createdByAgentId ?? undefined,
@@ -9594,6 +9629,9 @@ export async function createWorkflow(
     cooldown?: CooldownConfig;
     input?: Record<string, InputValue>;
     triggerSchema?: Record<string, unknown>;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string;
     vcsRepo?: string;
     createdByAgentId?: string;
@@ -9603,8 +9641,8 @@ export async function createWorkflow(
 ): Promise<Workflow> {
   const id = crypto.randomUUID();
   const row = await getDbClient().get<WorkflowRow>(
-    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, dir, vcs_repo, createdByAgentId, created_by, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
+    `INSERT INTO workflows (id, "key", name, description, definition, triggers, cooldown, input, triggerSchema, params, requiredParams, requires, dir, vcs_repo, createdByAgentId, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
     [
       id,
       normalizeAssetKey(data.key ?? defaultAssetKey("workflow", id)),
@@ -9615,6 +9653,9 @@ export async function createWorkflow(
       data.cooldown ? JSON.stringify(data.cooldown) : null,
       data.input ? JSON.stringify(data.input) : null,
       data.triggerSchema ? JSON.stringify(data.triggerSchema) : null,
+      JSON.stringify(data.params ?? {}),
+      JSON.stringify(data.requiredParams ?? []),
+      JSON.stringify(data.requires ?? []),
       data.dir ?? null,
       data.vcsRepo ?? null,
       data.createdByAgentId ?? null,
@@ -9734,6 +9775,9 @@ export async function updateWorkflow(
     cooldown?: CooldownConfig | null;
     input?: Record<string, InputValue> | null;
     triggerSchema?: Record<string, unknown> | null;
+    params?: Record<string, unknown>;
+    requiredParams?: string[];
+    requires?: AutomationIntegrationId[];
     dir?: string | null;
     vcsRepo?: string | null;
     updatedBy?: string;
@@ -9776,6 +9820,18 @@ export async function updateWorkflow(
   if (data.triggerSchema !== undefined) {
     updates.push("triggerSchema = ?");
     params.push(data.triggerSchema ? JSON.stringify(data.triggerSchema) : null);
+  }
+  if (data.params !== undefined) {
+    updates.push("params = ?");
+    params.push(JSON.stringify(data.params));
+  }
+  if (data.requiredParams !== undefined) {
+    updates.push("requiredParams = ?");
+    params.push(JSON.stringify(data.requiredParams));
+  }
+  if (data.requires !== undefined) {
+    updates.push("requires = ?");
+    params.push(JSON.stringify(data.requires));
   }
   if (data.dir !== undefined) {
     updates.push("dir = ?");
