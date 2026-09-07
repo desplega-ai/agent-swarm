@@ -15,6 +15,24 @@ function processExists(pid: number): boolean {
   }
 }
 
+/**
+ * `terminateProcessGroup` returns as soon as SIGKILL is *sent*. The kernel then
+ * tears the grandchild down asynchronously, and `kill(pid, 0)` keeps succeeding
+ * while it is a zombie waiting for init to reap it. Under CI load that window
+ * spans the immediate assertion (merge-gate flaked 3 of 6 runs), so poll with a
+ * bounded deadline instead of asserting once.
+ */
+async function waitForProcessGone(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (processExists(pid)) {
+    if (Date.now() >= deadline) return false;
+    await Bun.sleep(20);
+  }
+  return true;
+}
+
+const PROCESS_GONE_TIMEOUT_MS = 5_000;
+
 describe("provider process groups", () => {
   const posixTest = process.platform === "win32" ? test.skip : test;
 
@@ -70,7 +88,7 @@ describe("provider process groups", () => {
 
         expect(result.exitCode).toBe(0);
         expect(Number.isInteger(grandchildPid)).toBe(true);
-        expect(processExists(grandchildPid)).toBe(false);
+        expect(await waitForProcessGone(grandchildPid, PROCESS_GONE_TIMEOUT_MS)).toBe(true);
       } finally {
         if (grandchildPid && processExists(grandchildPid)) {
           try {
