@@ -84,12 +84,12 @@ export async function terminateScriptRunProcess(runId: string): Promise<boolean>
   const managedRun = managed.get(runId);
   const run = await getScriptRun(runId);
   if (managedRun) {
-    managedRun.execution.terminate("SIGTERM");
+    await managedRun.execution.terminate("SIGTERM");
     managed.delete(runId);
     return true;
   }
   if (run?.pid && scriptExecutor.isRunning(run.pid)) {
-    scriptExecutor.terminatePid(run.pid, "SIGTERM");
+    await scriptExecutor.terminatePid(run.pid, "SIGTERM");
     return true;
   }
   return false;

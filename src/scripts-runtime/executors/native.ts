@@ -1,5 +1,10 @@
 import { fileURLToPath } from "node:url";
 import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../../utils/process-group";
+import {
   buildSandboxedCommand,
   readStreamCapped,
   sandboxSpawnEnv,
@@ -37,11 +42,11 @@ function makeUnsupportedOutput(stderr: string): ExecutorOutput {
  *
  * 134 is checked before `timedOut`/`killed` below, and wins unconditionally.
  * Both of our own termination paths (the wall-clock watchdog and an external
- * `input.signal` abort) kill the child via `AbortController` -> `Bun.spawn`'s
- * default signal, which is SIGTERM (exit 143) — never SIGABRT (134, signal
- * 6). So an observed 134 can only be the process's own abort; it did not
- * come from us. Under CI load the watchdog can still fire in the same window
- * as a genuine self-abort (`setTimeout` is a macrotask racing `proc.exited`'s
+ * `input.signal` abort) start process-group teardown with SIGTERM (exit 143),
+ * never SIGABRT (134, signal 6). So an observed 134 can only be the process's
+ * own abort; it did not come from us. Under CI load the watchdog can still
+ * fire in the same window as a genuine self-abort (`setTimeout` is a
+ * macrotask racing `proc.exited`'s
  * resolution), which flips `timedOut` true even though the process had
  * already exited on its own — trusting that flag over the exit code
  * misclassifies a real `capacity_exceeded`/`eval_error` as `timeout`.
@@ -157,10 +162,10 @@ export class NativeScriptExecutor implements ScriptExecutor {
     const harnessPath = process.env.SCRIPT_RUNTIME_DIR
       ? `${process.env.SCRIPT_RUNTIME_DIR}/eval-harness.bundle.js`
       : fileURLToPath(new URL("../eval-harness.ts", import.meta.url));
-    const controller = new AbortController();
     let timedOut = false;
     let killed = input.signal?.aborted ?? false;
     let removeAbortListener: (() => void) | undefined;
+    let proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | undefined;
 
     try {
       if (killed) {
@@ -181,14 +186,14 @@ export class NativeScriptExecutor implements ScriptExecutor {
 
       const onExternalAbort = () => {
         killed = true;
-        controller.abort();
+        if (proc) void terminateProcessGroup(proc.pid);
       };
       input.signal?.addEventListener("abort", onExternalAbort, { once: true });
       removeAbortListener = () => input.signal?.removeEventListener("abort", onExternalAbort);
 
       const timeout = setTimeout(() => {
         timedOut = true;
-        controller.abort();
+        if (proc) void terminateProcessGroup(proc.pid);
       }, input.resources.wallClockMs);
 
       const harnessEnv = {
@@ -205,20 +210,22 @@ export class NativeScriptExecutor implements ScriptExecutor {
         SWARM_SCRIPT_STARTED_FILE: startedFile,
       };
 
-      const proc = Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
-        // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
-        // binary for argv[0] — the sandboxed command's `env -i` prelude is
-        // what actually scrubs the child's environment down to `harnessEnv`
-        // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
-        // passes `harnessEnv` through directly instead — see
-        // `buildSandboxedCommand`'s win32 doc comment.
-        env: sandboxSpawnEnv(harnessEnv),
-        cwd: tmpdir,
-        stdin: "pipe",
-        stdout: "pipe",
-        stderr: "pipe",
-        signal: controller.signal,
-      });
+      proc = registerProcessGroup(
+        Bun.spawn(harnessCommand(harnessPath, input, harnessEnv), {
+          // On POSIX, Bun.spawn only needs PATH itself to locate the `sh`
+          // binary for argv[0] — the sandboxed command's `env -i` prelude is
+          // what actually scrubs the child's environment down to `harnessEnv`
+          // above. On win32 there is no such prelude, so `sandboxSpawnEnv`
+          // passes `harnessEnv` through directly instead — see
+          // `buildSandboxedCommand`'s win32 doc comment.
+          env: sandboxSpawnEnv(harnessEnv),
+          cwd: tmpdir,
+          detached: detachedProcessGroup,
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "pipe",
+        }),
+      );
 
       proc.stdin.write(JSON.stringify(input.configPayload));
       proc.stdin.end();
@@ -228,7 +235,6 @@ export class NativeScriptExecutor implements ScriptExecutor {
         readStreamCapped(proc.stderr, input.resources.maxStdoutBytes),
         proc.exited.catch(() => (timedOut ? 124 : 1)),
       ]).finally(() => clearTimeout(timeout));
-
       const result = exitCode === 0 ? await readResultFile(resultFile) : undefined;
       const runtimeError = exitCode === 0 ? undefined : await readRuntimeError(errorFile);
       const userCodeStarted = await Bun.file(startedFile).exists();
@@ -256,6 +262,7 @@ export class NativeScriptExecutor implements ScriptExecutor {
       };
     } finally {
       removeAbortListener?.();
+      if (proc) await terminateProcessGroup(proc.pid);
       await Bun.$`rm -rf ${tmpdir}`;
     }
   }

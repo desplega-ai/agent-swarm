@@ -57,6 +57,7 @@ import {
 } from "../utils/error-tracker.ts";
 import { resolveHarnessProvider } from "../utils/harness-provider.ts";
 import { prettyPrintLine, prettyPrintStderr } from "../utils/pretty-print.ts";
+import { terminateRegisteredProcessGroups } from "../utils/process-group.ts";
 import { resolveScriptsOnlyMode } from "../utils/scripts-only-mode.ts";
 import { scrubSecrets } from "../utils/secret-scrubber.ts";
 import { refreshSkillsIfChanged } from "../utils/skills-refresh.ts";
@@ -2023,7 +2024,10 @@ function setupShutdownHandlers(
   apiConfig?: ApiConfig,
   getRunnerState?: () => RunnerState | undefined,
 ): void {
-  const shutdown = async (signal: string) => {
+  let shutdownInProgress = false;
+  const shutdown = async (signal: string, exitCode = 0) => {
+    if (shutdownInProgress) return;
+    shutdownInProgress = true;
     console.log(`\n[${role}] Received ${signal}, shutting down...`);
 
     // Wait for active tasks with timeout
@@ -2087,6 +2091,8 @@ function setupShutdownHandlers(
       }
     }
 
+    await terminateRegisteredProcessGroups();
+
     if (apiConfig) {
       telemetry.session("ended", {
         agentId: apiConfig.agentId,
@@ -2096,11 +2102,32 @@ function setupShutdownHandlers(
       await closeAgent(apiConfig, role);
     }
     await savePm2State(role);
-    process.exit(0);
+    process.exit(exitCode);
   };
 
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  const beginShutdown = (signal: string, exitCode = 0) => {
+    void shutdown(signal, exitCode).catch(async (error) => {
+      console.error(`[${role}] Shutdown failed after ${signal}:`, error);
+      await terminateRegisteredProcessGroups();
+      process.exit(1);
+    });
+  };
+
+  process.on("SIGINT", () => beginShutdown("SIGINT"));
+  process.on("SIGTERM", () => beginShutdown("SIGTERM"));
+  let fatalShutdownInProgress = false;
+  const fatalShutdown = (kind: string, error: unknown) => {
+    if (fatalShutdownInProgress) return;
+    fatalShutdownInProgress = true;
+    console.error(`[${role}] ${kind}:`, error);
+    void terminateRegisteredProcessGroups().finally(() => process.exit(1));
+  };
+  process.on("uncaughtException", (error) => {
+    fatalShutdown("Uncaught exception", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    fatalShutdown("Unhandled rejection", reason);
+  });
 }
 
 /** Configuration for a runner role (worker or lead) */

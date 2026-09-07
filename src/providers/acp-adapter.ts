@@ -12,6 +12,11 @@ import {
 import pkg from "../../package.json";
 import type { AcpSessionConfigOption } from "../types";
 import { fetchInstalledMcpServers } from "../utils/mcp-server-fetcher";
+import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../utils/process-group";
 import { scrubSecrets } from "../utils/secret-scrubber";
 import { translateAcpSessionNotification } from "./acp-swarm-events";
 import { resolveAcpTarget } from "./acp-targets";
@@ -97,7 +102,7 @@ class ACPSession implements ProviderSession {
         category: "abort",
       });
     }
-    this.process.kill();
+    await terminateProcessGroup(this.process.pid);
     this.finish({
       exitCode: 1,
       sessionId: this.sessionId,
@@ -124,6 +129,7 @@ class ACPSession implements ProviderSession {
   }
 
   private async runPrompt(): Promise<void> {
+    let result: ProviderResult;
     try {
       const response = await this.connection.prompt({
         sessionId: this.sessionId,
@@ -131,7 +137,7 @@ class ACPSession implements ProviderSession {
       });
       const isError = response.stopReason === "refusal" || response.stopReason === "cancelled";
       const cost = this.buildCostData(isError);
-      const result: ProviderResult = {
+      result = {
         exitCode: isError ? 1 : 0,
         sessionId: this.sessionId,
         cost,
@@ -140,19 +146,19 @@ class ACPSession implements ProviderSession {
         failureReason: isError ? `ACP prompt stopped with ${response.stopReason}` : undefined,
       };
       this.emit({ type: "result", cost, output: this.output, isError });
-      this.finish(result);
     } catch (err) {
       const message = scrubSecrets(formatError(err));
       this.emit({ type: "error", message, category: "protocol" });
-      this.finish({
+      result = {
         exitCode: 1,
         sessionId: this.sessionId,
         isError: true,
         failureReason: `ACP prompt failed: ${message}`,
-      });
+      };
     } finally {
-      this.process.kill();
+      await terminateProcessGroup(this.process.pid);
     }
+    this.finish(result);
   }
 
   private async consumeStderr(): Promise<void> {
@@ -206,13 +212,16 @@ export class ACPAdapter implements ProviderAdapter {
     const target = resolveAcpTarget(config);
     await target.writeSystemPromptArtifact(config);
     const command = target.command(config);
-    const proc = Bun.spawn(command, {
-      cwd: config.cwd,
-      env: target.env(config),
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
+    const proc = registerProcessGroup(
+      Bun.spawn(command, {
+        cwd: config.cwd,
+        detached: detachedProcessGroup,
+        env: target.env(config),
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      }),
+    );
 
     let session: ACPSession | null = null;
     const client = new SwarmAcpClient((event) => session?.emitFromAcp(event));
@@ -265,7 +274,7 @@ export class ACPAdapter implements ProviderAdapter {
       });
       return session;
     } catch (err) {
-      proc.kill();
+      await terminateProcessGroup(proc.pid);
       throw new Error(`ACP target failed during startup: ${scrubSecrets(formatError(err))}`);
     }
   }
