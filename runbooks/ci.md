@@ -10,7 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
-| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`; push → `main` | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
+| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`. Push → `main`. Nightly cron `0 3 * * *` UTC. Manual dispatch. | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. Uploads artifacts to agent-fs and ingests into the UI E2E tracker for every same-repo event. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
@@ -41,6 +41,18 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 | **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
+
+### ui-e2e.yml secrets and variables
+
+| Name | Kind | Owner | Feeds | When absent |
+|---|---|---|---|---|
+| `E2E_AGENT_FS_API_URL` | secret | Taras | agent-fs upload of screenshots and traces | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_API_KEY` | secret | Taras | agent-fs upload | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_ORG_ID` | secret | Taras | agent-fs upload target org | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_DRIVE_ID` | secret | Taras | agent-fs upload target drive | Uploads skipped, comment stays text-only |
+| `UI_E2E_INGEST_URL` | secret | Taras | tracker ingest endpoint | Ingest skipped |
+| `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
+| `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
 ## The full local pre-push command
 

@@ -316,16 +316,16 @@ The docs describe the ingest, the artifact convention, the secrets, and the trac
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Anchors exist: `grep -n "### Tracker ingest and artifacts" LOCAL_TESTING.md && grep -n "UI_E2E_INGEST_BEARER" runbooks/ci.md packages/ui-e2e/README.md LOCAL_TESTING.md`
-- [ ] Skill sources still valid: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
-- [ ] No stale reference: `! grep -rn "public, no auth required" templates/skills/artifacts/`
-- [ ] Root gates: `bun run lint && bun run tsc:check`
+- [x] Anchors exist: `grep -n "### Tracker ingest and artifacts" LOCAL_TESTING.md && grep -n "UI_E2E_INGEST_BEARER" runbooks/ci.md packages/ui-e2e/README.md LOCAL_TESTING.md`
+- [x] Skill sources still valid: `bun run check:skill-sources && bun run check:skill-md && bun run check:seed-skill-files`
+- [x] No stale reference: `! grep -rn "public, no auth required" templates/skills/artifacts/`
+- [x] Root gates: `bun run lint && bun run tsc:check`
 
 #### Automated QA:
-- [ ] Follow `### Tracker ingest and artifacts` literally in a clean shell against the Phase 3 `all-results` directory; every command runs as written.
+- [x] Follow `### Tracker ingest and artifacts` literally in a clean shell against the Phase 3 `all-results` directory; every command runs as written.
 
 #### Manual Verification:
-- [ ] Read the docs diff once for the STE rules (short sentences, no em dashes). (autopilot: Claude re-reads the diff.)
+- [x] Read the docs diff once for the STE rules (short sentences, no em dashes). (autopilot: Claude read the diff, a Sonnet accuracy review checked every flag, env name, path, and claim against the code; two wording fixes applied: `UI_E2E_PR_NUMBER` is also resolved for `manual` runs, `titlePath` includes the test title)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 4] ui-e2e tracker docs and artifacts skill fix`.
 

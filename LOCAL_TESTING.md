@@ -210,6 +210,81 @@ Package layout, the boot handshake, and the fixture contract: `packages/ui-e2e/R
 It is informational: it is not a required check. It merges the shard reports into the `ui-e2e-html-report` artifact and upserts one sticky PR comment (`<!-- ui-e2e -->`) with per-spec results.
 Screenshot links in the comment need the `E2E_AGENT_FS_*` repository secrets. Without them the comment carries the text table only.
 
+### Tracker ingest and artifacts
+
+After a run, the `report` job in `.github/workflows/ui-e2e.yml` uploads artifacts to agent-fs and posts one payload per shard to the UI E2E tracker.
+
+Screenshots, traces, and each shard's `summary.json` go to agent-fs under `e2e/desplega-ai__agent-swarm/<pr-N|main>/<sha>/<shard>/`. The publish step writes `artifacts.json` (agent-fs paths, kinds, spec ids, sizes) and `images.json` (7-day signed URLs for the comment, failures first, capped at 24).
+
+The ingest step reads every shard's `summary.json` and `artifacts.json`. It builds one v1 payload per shard, writes each to disk, then posts it to `UI_E2E_INGEST_URL`.
+
+Run the three reporter scripts by hand against a copied `all-results` directory. Add `--dry-run` where the script supports it. Each script only writes local files then. It never calls agent-fs or the tracker.
+
+```bash
+# 1. Plan the agent-fs upload. Writes artifacts.json and images.json, no network calls.
+node --experimental-strip-types packages/ui-e2e/reporter/publish-artifacts.ts \
+  --results /tmp/ui-e2e-p2/all-results \
+  --prefix "e2e/desplega-ai__agent-swarm/pr-9999/$(git rev-parse HEAD)" \
+  --artifacts-out /tmp/ui-e2e-p2/artifacts.json \
+  --images-out /tmp/ui-e2e-p2/images.json \
+  --dry-run
+
+# 2. Build the tracker payloads. Writes ingest-payloads/, does not POST.
+GITHUB_REPOSITORY=desplega-ai/agent-swarm UI_E2E_TRIGGER=pr UI_E2E_PR_NUMBER=9999 \
+UI_E2E_SHA=$(git rev-parse HEAD) UI_E2E_REF=ui-e2e-p2 \
+  node --experimental-strip-types packages/ui-e2e/reporter/ingest.ts \
+  --summaries /tmp/ui-e2e-p2/all-results \
+  --artifacts /tmp/ui-e2e-p2/artifacts.json \
+  --out /tmp/ui-e2e-p2/ingest-payloads \
+  --dry-run
+
+# 3. Render the PR comment. Always local. The script has no --dry-run flag.
+node --experimental-strip-types packages/ui-e2e/reporter/comment.ts \
+  --summaries /tmp/ui-e2e-p2/all-results \
+  --images /tmp/ui-e2e-p2/images.json \
+  --run-url https://github.com/desplega-ai/agent-swarm/actions/runs/0 \
+  --report-artifact ui-e2e-html-report \
+  --out /tmp/ui-e2e-p2/comment.md
+```
+
+In CI the working directory is `packages/ui-e2e`. The same three steps land there: `artifacts.json`, `images.json`, and `ingest-payloads/shard-<n>.json`. The `ui-e2e-ingest-payloads` artifact carries `ingest-payloads/` and `artifacts.json` for review.
+
+| Variable | Read by | Meaning |
+|---|---|---|
+| `UI_E2E_INGEST_URL` | `ingest.ts` | Tracker endpoint. Missing it skips the POST. |
+| `UI_E2E_INGEST_BEARER` | `ingest.ts` | Bearer for the endpoint. Missing it skips the POST. |
+| `UI_E2E_TRIGGER` | `ingest.ts` | One of `pr`, `main`, `nightly`, `manual`. |
+| `UI_E2E_SHA` | `ingest.ts` | 7 to 40 lowercase hex characters. |
+| `UI_E2E_REF` | `ingest.ts` | Git ref for the run. |
+| `UI_E2E_PR_NUMBER` | `ingest.ts` | PR number. Set when the trigger is `pr`, or resolved for `manual` when an open PR exists for the ref. |
+| `GITHUB_REPOSITORY` | `ingest.ts` | `owner/repo`, exactly one slash. |
+| `AGENT_FS_API_URL` | `publish-artifacts.ts` | agent-fs API base URL. |
+| `AGENT_FS_API_KEY` | `publish-artifacts.ts` | agent-fs API key. |
+| `AGENT_FS_DEFAULT_ORG_ID` | `publish-artifacts.ts` | Org id for the upload. |
+| `AGENT_FS_DEFAULT_DRIVE_ID` | `publish-artifacts.ts` | Drive id for the upload. |
+
+Posture: `ingest.ts` skips the POST and exits 0 when `UI_E2E_INGEST_URL` or `UI_E2E_INGEST_BEARER` is absent. It fails the step when both are set and the endpoint answers anything but `200 { ok: true }`. `publish-artifacts.ts` follows the same rule for the four `AGENT_FS_*` variables. It throws instead of skipping when every upload fails.
+
+The workflow maps its trigger to the tracker's trigger field:
+
+| GitHub event | Tracker trigger |
+|---|---|
+| `pull_request` | `pr` |
+| `push` to `main` | `main` |
+| `schedule` (nightly cron) | `nightly` |
+| `workflow_dispatch` | `manual`. The open PR for the branch is resolved, if one exists. |
+
+Local install of the tracker: the template lives at `desplega-ai/agent-work`, `workflows/ui-e2e-tracker/`. Follow its README for the install steps. Boot a local API with `MCP_BASE_URL` on its own port, since the scripts runtime calls back through that variable. `--no-env-file` stops a repo `.env` from overriding `PORT`.
+
+```bash
+PORT=3998 MCP_BASE_URL=http://127.0.0.1:3998 DATABASE_PATH=/tmp/ui-e2e-p2/tracker.sqlite \
+  AGENT_SWARM_API_KEY=localkey API_KEY=localkey GITHUB_DISABLE=true LINEAR_DISABLE=true \
+  JIRA_DISABLE=true SLACK_DISABLE=true HEARTBEAT_DISABLE=true \
+  bun --no-env-file run src/http.ts
+```
+
+Once the endpoint exists, it answers `401` to a POST without the bearer and `200 { ok: true }` with it.
+
 ## E2E with Docker
 
 Use the **`swarm-local-e2e` skill** — it owns the full flow (start API, build image, start lead + worker, create tasks, verify registration, check session logs, cleanup). Invoke it when:

@@ -18,7 +18,7 @@ Hub for everything test-shaped in this repo. The canonical, up-to-date testing r
 
 ## Hard rules
 
-1. **Frontend PRs require `agent-browser` screenshots uploaded to agent-fs.** Reviewer convention. `.github/workflows/merge-gate.yml` does not check it. `.github/workflows/ui-e2e.yml` runs the Playwright suite on UI and API PRs, informational only.
+1. **Frontend PRs require `agent-browser` screenshots uploaded to agent-fs.** Reviewer convention. `.github/workflows/merge-gate.yml` does not check it. `.github/workflows/ui-e2e.yml` runs the Playwright suite on UI and API PRs, informational only. It reports every run to the UI E2E tracker. A failure on `main` or on the nightly cron opens an incident there.
 2. **Plan-mode verification steps must reference real commands** from `LOCAL_TESTING.md` — invented commands break agent runs.
 3. **Memory tests are not optional** when touching memory code — all four files in [memory-system.md](./memory-system.md).
 4. **Never hard-code a test port.** CI runs `bun test --parallel=4` (one worker process per file), so two files with the same literal collide. Use `listenOnFreePort(server)` / `getFreePort()` / `waitForServer()` from `src/tests/test-net.ts`. Commands, the preload template cache, and the `--changed` pre-push hook are in [LOCAL_TESTING.md](../LOCAL_TESTING.md).
