@@ -3381,7 +3381,20 @@ async function spawnProviderProcess(
     const oauthInfo = await resolveCodexOAuthCredentialInfo(opts.apiUrl, opts.apiKey);
     oauthSelection = oauthInfo?.selection;
     oauthIsPoolBacked = oauthInfo?.isPoolBacked ?? false;
+    // A resolved config-store pool slot always wins over OPENAI_API_KEY at
+    // runtime — `resolveCodexAuthMode` in codex-adapter.ts revalidates and
+    // writes chatgpt-mode auth.json whenever `codexSlot` is set, and OPENAI_API_KEY
+    // is only forwarded to the spawned CLI when auth.json is NOT in chatgpt
+    // mode. Gating this on `credentialSelections[0]`'s rate-limit status
+    // (the old behavior) reported OPENAI_API_KEY as the credential used on
+    // every task as long as OPENAI_API_KEY itself wasn't rate-limited — even
+    // when a healthy CODEX_OAUTH pool slot was the credential actually
+    // authenticating the session (issue: credentialKeyType mislabeled
+    // OPENAI_API_KEY, and CODEX_OAUTH usage never reported to
+    // /api/keys/report-usage so no api_key_status row was ever created for
+    // the pool slot).
     const oauthIsPrimary =
+      oauthIsPoolBacked ||
       credentialSelections.length === 0 ||
       (credentialSelections[0]?.isRateLimitFallback &&
         oauthSelection &&
@@ -4076,11 +4089,17 @@ async function spawnProviderProcess(
     );
 
   // Build credential info for rate limit tracking.
-  // For codex: when OPENAI_API_KEY is rate-limited but CODEX_OAUTH has
-  // available slots (or vice versa), prefer the healthy credential.
+  // For codex: a resolved CODEX_OAUTH pool slot (oauthIsPoolBacked) is always
+  // the credential actually used at runtime (see resolveCodexAuthMode in
+  // codex-adapter.ts — config store beats OPENAI_API_KEY whenever both
+  // exist), so it must win here too, independent of OPENAI_API_KEY's
+  // rate-limit status. Otherwise fall back to the OPENAI_API_KEY-rate-limited
+  // cross-keyType failover this block already handled.
   let primarySelection: CredentialSelection | undefined;
   const firstCred = credentialSelections[0];
-  if (firstCred && oauthSelection) {
+  if (oauthSelection && oauthIsPoolBacked) {
+    primarySelection = oauthSelection;
+  } else if (firstCred && oauthSelection) {
     if (firstCred.isRateLimitFallback && !oauthSelection.isRateLimitFallback) {
       primarySelection = oauthSelection;
       console.log(
