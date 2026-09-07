@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.141.0] - 2026-09-07
+
+### Added
+- **Operators can select Agent Client Protocol runtimes from the dashboard** (#1363), including runtime-aware agent settings, provider icons, capability checks, and API support for the `acp` harness.
+
+### Fixed
+- **Directly assigned tasks are not rejected by inherited routing affinity** (#1362), so explicit ownership takes precedence over provenance inherited from a parent task.
+- **Routing-affinity enforcement is audited across task dispatch and recovery paths** (#1365), closing gaps in follow-up routing and documenting the end-to-end invariants.
+
 ## [1.140.0] - 2026-09-06
 
 ### Added
