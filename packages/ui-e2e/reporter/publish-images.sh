@@ -67,8 +67,11 @@ jq -sc '
   | .[]
   | . as $result
   | ($result.screenshots // [])[]?
+  # Passed smoke tests attach the route screenshot under the route name and Playwright
+  # adds its own "screenshot" attachment of the same frame; keep one per route.
+  | select($result.status != "passed" or .name != "screenshot")
   | {
-      name: $result.title,
+      name: (if $result.status == "passed" then $result.title else "\($result.status): \($result.title)" end),
       status: $result.status,
       path: .path,
       summaryDir: $result._summaryDir

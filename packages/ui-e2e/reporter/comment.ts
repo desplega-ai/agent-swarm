@@ -224,10 +224,16 @@ function renderComment(
   }
 
   if (images.length > 0) {
-    lines.push("", "### Images", "");
+    lines.push("", "<details>", `<summary>Images (${images.length})</summary>`);
     for (const image of images) {
-      lines.push(`![${escapeTable(image.name)}](${image.url})`);
+      lines.push(
+        "",
+        `**${escapeHtml(image.name)}**`,
+        "",
+        `![${escapeTable(image.name)}](${image.url})`,
+      );
     }
+    lines.push("", "</details>");
   }
 
   lines.push(
