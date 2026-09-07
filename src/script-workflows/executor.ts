@@ -4,6 +4,13 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ScriptRun } from "../types";
 import {
+  detachedProcessGroup,
+  forceTerminateProcessGroup,
+  registerProcessGroup,
+  signalProcessGroup,
+  terminateProcessGroup,
+} from "../utils/process-group";
+import {
   buildSandboxedCommand,
   readStreamCapped,
   sandboxSpawnEnv,
@@ -23,7 +30,7 @@ export type ScriptExecutionHandle = {
   tmpdir: string;
   startedAtMs: number;
   exited: Promise<ScriptExecutionResult>;
-  terminate(signal?: NodeJS.Signals): void;
+  terminate(signal?: NodeJS.Signals): Promise<void>;
   cleanup(): Promise<void>;
 };
 
@@ -36,7 +43,7 @@ export type StartScriptExecutionInput = {
 export interface ScriptExecutor {
   start(input: StartScriptExecutionInput): Promise<ScriptExecutionHandle>;
   isRunning(pid: number): boolean;
-  terminatePid(pid: number, signal?: NodeJS.Signals): void;
+  terminatePid(pid: number, signal?: NodeJS.Signals): Promise<void>;
 }
 
 export function getScriptWorkflowHarnessPath(): string {
@@ -92,10 +99,10 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       SCRIPT_RUN_MAX_WALL_MS: String(scriptRunMaxWallMs()),
     };
 
-    const proc = Bun.spawn(
-      buildSandboxedCommand(["bun", "run", getScriptWorkflowHarnessPath()], harnessEnv),
-      {
+    const proc = registerProcessGroup(
+      Bun.spawn(buildSandboxedCommand(["bun", "run", getScriptWorkflowHarnessPath()], harnessEnv), {
         cwd: tmpdir,
+        detached: detachedProcessGroup,
         // On POSIX, Bun.spawn only needs PATH itself to find the `sh` binary
         // — the sandboxed command's `env -i` prelude scrubs the child down
         // to `harnessEnv` above, so no secret rides on this outer env
@@ -106,7 +113,7 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
         stdin: "pipe",
         stdout: "ignore",
         stderr: "pipe",
-      },
+      }),
     );
 
     // Bearer travels over stdin, never as an env var — matches the inline
@@ -125,12 +132,14 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       pid: proc.pid,
       tmpdir,
       startedAtMs: Date.now(),
-      exited: proc.exited.then(async (exitCode) => ({
-        exitCode,
-        stderr: await stderrPromise,
-      })),
-      terminate: (signal = "SIGTERM") => {
-        proc.kill(signal);
+      exited: proc.exited.then(async (exitCode) => {
+        await terminateProcessGroup(proc.pid);
+        return { exitCode, stderr: await stderrPromise };
+      }),
+      terminate: async (signal = "SIGTERM") => {
+        if (signal === "SIGTERM") await terminateProcessGroup(proc.pid);
+        else if (signal === "SIGKILL") forceTerminateProcessGroup(proc.pid);
+        else signalProcessGroup(proc.pid, signal);
       },
       cleanup: async () => {
         await rm(tmpdir, { recursive: true, force: true });
@@ -147,8 +156,10 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     }
   }
 
-  terminatePid(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
-    process.kill(pid, signal);
+  async terminatePid(pid: number, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+    if (signal === "SIGTERM") await terminateProcessGroup(pid);
+    else if (signal === "SIGKILL") forceTerminateProcessGroup(pid);
+    else signalProcessGroup(pid, signal);
   }
 }
 

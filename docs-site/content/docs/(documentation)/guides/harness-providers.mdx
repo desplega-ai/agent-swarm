@@ -125,6 +125,10 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
 | [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode preset or custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection` | None swarm-side for the model provider — the ACP target owns its own model auth. It receives the worker's swarm API key as the swarm MCP bearer; a custom `ACP_TARGET_COMMAND` is operator-configured and trusted with that credential |
 
+### Local subprocess teardown
+
+Local CLI adapters start each harness in a dedicated POSIX process group. Normal completion, `abort()`, runner shutdown, and fatal runner errors terminate the whole group with SIGTERM, followed by SIGKILL after a short grace period. This also removes MCP servers and other descendants that outlive the harness CLI; Windows keeps direct-PID termination because it has no POSIX process groups.
+
 ### Live task steering
 
 Running tasks can receive more input through the optional `ProviderSession.deliverSteering()` method. `queue` adds context at the next turn boundary. `steer` requests an interrupt of the current turn; provider implementations must not advertise it unless they can deliver that semantic.

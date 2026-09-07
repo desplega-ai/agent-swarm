@@ -664,22 +664,19 @@ describe("ScriptExecutor", () => {
   );
 
   spawnTestUnlessMacOS(
-    "drain-deadline snapshot keeps the partial output already read instead of discarding it as empty (PRRT_kwDOQr3Tmc6XCRuy)",
+    "process-group teardown closes stdout inherited by a background descendant",
     async () => {
       // The direct child prints known output, backgrounds a descendant that
-      // inherits its stdout pipe, then exits. `proc.exited` resolves
-      // immediately, but the descendant keeps the pipe's write end open past
-      // STREAM_DRAIN_GRACE_MS (5s) — the exact "successful script + surviving
-      // descendant holding the pipe" scenario the review comment described.
+      // inherits its stdout pipe, then exits. The process-group exit watcher
+      // terminates that descendant, so stream draining finishes without the
+      // old five-second deadline fallback.
       const result = await executor.run(
         input({ runtime: "bash", script: "printf 'kept-output'; sleep 8 & disown; exit 0" }, {}),
       );
       expect(result.status).toBe("success");
       const out = result.output as { exitCode: number; stdout: string };
       expect(out.exitCode).toBe(0);
-      // The bytes read before the deadline fired must survive — not an empty string.
-      expect(out.stdout).toContain("kept-output");
-      expect(out.stdout).toContain("…[stdout truncated]");
+      expect(out.stdout).toBe("kept-output");
     },
     10_000,
   );
