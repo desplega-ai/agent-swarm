@@ -432,7 +432,7 @@ Create a dedicated agent-fs user for CI (editor on the e2e drive) and add reposi
 - [x] With `agent-browser`, open the PR comment and screenshot it; the image count in the comment matches `images.json` from the run log. (autopilot: screenshot at `/tmp/ui-e2e-p1/pr-1364-comment.png`, zero images in both, the `E2E_AGENT_FS_*` secrets are absent)
 
 #### Manual Verification:
-- [ ] The screenshots render inline in the PR comment (camo plus the agent-fs attachment disposition is the unconfirmed part). If they show as broken images, switch `publish-images.sh` to `gh pr comment --attach` and record the outcome in the plan Appendix. (blocked: the `E2E_AGENT_FS_*` repository secrets do not exist, so no run has published images yet; verify after the secrets land)
+- [x] The screenshots render inline in the PR comment (verified 2026-09-07 on PR #1364 after the `E2E_AGENT_FS_*` secrets landed: GitHub camo serves the agent-fs presigned PNGs inline despite the attachment disposition; Taras confirmed visually)
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 5] ui-e2e workflow, reporters, sticky comment`.
 
