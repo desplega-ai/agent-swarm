@@ -2,6 +2,11 @@ import { z } from "zod";
 import { MAX_SCRIPT_WALL_CLOCK_MS } from "../../scripts-runtime/executors/types";
 import type { ExecutorMeta } from "../../types";
 import {
+  detachedProcessGroup,
+  registerProcessGroup,
+  terminateProcessGroup,
+} from "../../utils/process-group";
+import {
   buildSandboxedCommand,
   createCappedStreamState,
   readStreamCapped,
@@ -195,18 +200,21 @@ export class ScriptExecutor extends BaseExecutor<
     };
 
     try {
-      const proc = Bun.spawn(buildSandboxedCommand(cmd, env), {
-        stdout: "pipe",
-        stderr: "pipe",
-        cwd: workdir,
-        // On POSIX, Bun.spawn only needs PATH to locate `sh` for argv[0] —
-        // the sandboxed command's `env -i` prelude scrubs the child down to
-        // `env` above, so the server's secrets never reach it either way. On
-        // win32 there is no such prelude, so `sandboxSpawnEnv` passes `env`
-        // through directly instead — see `buildSandboxedCommand`'s win32 doc
-        // comment.
-        env: sandboxSpawnEnv(env),
-      });
+      const proc = registerProcessGroup(
+        Bun.spawn(buildSandboxedCommand(cmd, env), {
+          stdout: "pipe",
+          stderr: "pipe",
+          cwd: workdir,
+          detached: detachedProcessGroup,
+          // On POSIX, Bun.spawn only needs PATH to locate `sh` for argv[0] —
+          // the sandboxed command's `env -i` prelude scrubs the child down to
+          // `env` above, so the server's secrets never reach it either way. On
+          // win32 there is no such prelude, so `sandboxSpawnEnv` passes `env`
+          // through directly instead — see `buildSandboxedCommand`'s win32 doc
+          // comment.
+          env: sandboxSpawnEnv(env),
+        }),
+      );
 
       // Drain both pipes concurrently with the wait — a script producing more
       // than a pipe buffer of output would otherwise block forever on write.
@@ -221,9 +229,9 @@ export class ScriptExecutor extends BaseExecutor<
       let timedOut = false;
       const killTimer = globalThis.setTimeout(() => {
         timedOut = true;
-        // SIGKILL, not SIGTERM: a shell script can trap and ignore SIGTERM.
+        // The shared teardown escalates to SIGKILL if the shell traps SIGTERM.
         try {
-          proc.kill("SIGKILL");
+          void terminateProcessGroup(proc.pid);
         } catch {
           // Already reaped — nothing to kill.
         }
@@ -233,6 +241,7 @@ export class ScriptExecutor extends BaseExecutor<
       let exitCode: number;
       try {
         exitCode = await proc.exited;
+        await terminateProcessGroup(proc.pid);
       } finally {
         globalThis.clearTimeout(killTimer);
       }
