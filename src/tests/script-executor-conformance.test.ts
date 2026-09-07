@@ -165,21 +165,26 @@ describe("native-only executor behavior", () => {
   // 134. That precedence is now fixed, so the assertion below no longer depends
   // on winning a timing race.
   // Explicit test timeout: these two tests each spawn a REAL bun subprocess and
-  // give the script itself a 5s wallClockMs budget, but CI runs the suite with a
-  // global `--timeout 10000` and `--parallel=4`, leaving only ~5s for spawn +
-  // interpreter startup. That margin is not enough on a saturated runner: on
-  // 2d1a1801 the top-level variant below took 8653ms — it passed, with 1.3s to
-  // spare — and any extra load in the same shard pushed it over 10s. The budget
-  // is scheduling headroom only; every assertion still has to hold, so raising
-  // it weakens nothing.
+  // give the script enough wall-clock headroom for spawn + interpreter startup.
+  // A 5s script budget is not enough on a saturated runner: on 2d1a1801 the
+  // top-level variant below took 8653ms, and PR #1371 measured both variants at
+  // ~5.29s after the 5s watchdog fired and its 250ms process-group escalation
+  // replaced the pending self-abort with SIGKILL (137). The explicit 30s test
+  // timeout below allows this larger script budget. It is scheduling headroom
+  // only; every exit-code and classification assertion still has to hold.
   const SANDBOX_SPAWN_TIMEOUT_MS = 30_000;
+  const SANDBOX_SCRIPT_WALL_CLOCK_MS = 20_000;
 
   test(
     "SIGABRT raised by user code is not classified capacity_exceeded",
     async () => {
       const output = await new NativeScriptExecutor().run(
         input({
-          resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
+          resources: {
+            ...DEFAULT_SCRIPT_RESOURCES,
+            memoryMb: 2048,
+            wallClockMs: SANDBOX_SCRIPT_WALL_CLOCK_MS,
+          },
           source: "export default async () => { process.abort(); };",
         }),
       );
@@ -207,7 +212,11 @@ describe("native-only executor behavior", () => {
     async () => {
       const output = await new NativeScriptExecutor().run(
         input({
-          resources: { ...DEFAULT_SCRIPT_RESOURCES, memoryMb: 2048, wallClockMs: 5_000 },
+          resources: {
+            ...DEFAULT_SCRIPT_RESOURCES,
+            memoryMb: 2048,
+            wallClockMs: SANDBOX_SCRIPT_WALL_CLOCK_MS,
+          },
           source:
             "console.log('TOP_LEVEL_SIDE_EFFECT'); process.abort(); export default async () => {};",
         }),
