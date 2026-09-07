@@ -214,21 +214,23 @@ Decisions from the design check-in (2026-09-07):
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Unit tests green: `bun run test:root -- src/tests/ui-e2e-publish-plan.test.ts src/tests/ui-e2e-ingest-payload.test.ts`
-- [ ] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
-- [ ] Workflow syntax: `bunx actionlint .github/workflows/ui-e2e.yml`
-- [ ] Bash script gone and no references remain: `test ! -f packages/ui-e2e/reporter/publish-images.sh && ! grep -rn "publish-images" .github packages/ui-e2e LOCAL_TESTING.md runbooks`
-- [ ] Dry-run plan from a real run: `bun run e2e:ui -- --no-build --shard=1/2` then copy `packages/ui-e2e/test-results` to `/tmp/ui-e2e-p2/all-results/ui-e2e-results-1`, run `publish-artifacts.ts --results /tmp/ui-e2e-p2/all-results --prefix e2e/desplega-ai__agent-swarm/local/$(git rev-parse HEAD) --artifacts-out /tmp/ui-e2e-p2/artifacts.json --images-out /tmp/ui-e2e-p2/images.json --dry-run` and `jq '[.[] | .path] | all(startswith("e2e/desplega-ai__agent-swarm/local/"))' /tmp/ui-e2e-p2/artifacts.json` prints `true`, `jq 'map(select(.kind=="log")) | length' /tmp/ui-e2e-p2/artifacts.json` prints `1`
-- [ ] Missing env exits 0: `env -u AGENT_FS_API_KEY node --experimental-strip-types packages/ui-e2e/reporter/publish-artifacts.ts --results /tmp/ui-e2e-p2/all-results --prefix x --artifacts-out /tmp/ui-e2e-p2/a.json --images-out /tmp/ui-e2e-p2/i.json; test $? -eq 0 && test "$(cat /tmp/ui-e2e-p2/a.json)" = "[]"`
+- [x] Unit tests green: `bun run test:root -- src/tests/ui-e2e-publish-plan.test.ts src/tests/ui-e2e-ingest-payload.test.ts`
+- [x] Package typechecks and root gates: `bun run e2e:ui:tsc && bun run lint && bun run tsc:check`
+- [x] Workflow syntax: `bunx actionlint .github/workflows/ui-e2e.yml`
+- [x] Bash script gone and no references remain: `test ! -f packages/ui-e2e/reporter/publish-images.sh && ! grep -rn "publish-images" .github packages/ui-e2e LOCAL_TESTING.md runbooks`
+- [x] Dry-run plan from a real run: `bun run e2e:ui -- --no-build --shard=1/2` then copy `packages/ui-e2e/test-results` to `/tmp/ui-e2e-p2/all-results/ui-e2e-results-1`, run `publish-artifacts.ts --results /tmp/ui-e2e-p2/all-results --prefix e2e/desplega-ai__agent-swarm/local/$(git rev-parse HEAD) --artifacts-out /tmp/ui-e2e-p2/artifacts.json --images-out /tmp/ui-e2e-p2/images.json --dry-run` and `jq '[.[] | .path] | all(startswith("e2e/desplega-ai__agent-swarm/local/"))' /tmp/ui-e2e-p2/artifacts.json` prints `true`, `jq 'map(select(.kind=="log")) | length' /tmp/ui-e2e-p2/artifacts.json` prints `1`
+- [x] Missing env exits 0: `env -u AGENT_FS_API_KEY node --experimental-strip-types packages/ui-e2e/reporter/publish-artifacts.ts --results /tmp/ui-e2e-p2/all-results --prefix x --artifacts-out /tmp/ui-e2e-p2/a.json --images-out /tmp/ui-e2e-p2/i.json; test $? -eq 0 && test "$(cat /tmp/ui-e2e-p2/a.json)" = "[]"`
 
 #### Automated QA:
-- [ ] Chain dry-run publisher into the ingest builder: `ingest.ts --summaries /tmp/ui-e2e-p2/all-results --artifacts /tmp/ui-e2e-p2/artifacts.json --out /tmp/ui-e2e-p2/payloads --dry-run` yields `shard-1.json` whose `artifacts` count equals the dry-run plan entries for shard 1 and whose `run.shardTotal` is 2.
-- [ ] Context step logic exercised locally: extract the `Resolve run context` script into a temp file and run it with `GITHUB_EVENT_NAME=schedule GITHUB_SHA=<sha> GITHUB_REF_NAME=main` and with `GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_NAME=ui-e2e-p2` (after the PR exists in Phase 3, re-run to see `pr` resolved); outputs match the map.
+- [x] Chain dry-run publisher into the ingest builder: `ingest.ts --summaries /tmp/ui-e2e-p2/all-results --artifacts /tmp/ui-e2e-p2/artifacts.json --out /tmp/ui-e2e-p2/payloads --dry-run` yields `shard-1.json` whose `artifacts` count equals the dry-run plan entries for shard 1 and whose `run.shardTotal` is 2.
+- [x] (Codex and the Opus review ran the extracted script: schedule gives `trigger=nightly target=main`, fork PR gives `same_repo=false target=pr-7`) Context step logic exercised locally: extract the `Resolve run context` script into a temp file and run it with `GITHUB_EVENT_NAME=schedule GITHUB_SHA=<sha> GITHUB_REF_NAME=main` and with `GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_NAME=ui-e2e-p2` (after the PR exists in Phase 3, re-run to see `pr` resolved); outputs match the map.
 
 #### Manual Verification:
-- [ ] None.
+- [x] None.
 
 **Implementation Note**: After this phase, pause for manual confirmation. Commit as `[phase 2] agent-fs artifact publisher and tracker ingest in ui-e2e.yml`.
+
+Review deltas applied before the commit (2026-09-07): shard-directory containment in `localPathFor` plus a unit test; pool tasks wrapped in try/catch and the publisher exits 1 when every upload fails; `concurrency.group` now includes the event name so the nightly run and a push to `main` no longer cancel each other; context outputs, the tracker variable, and the report URL reach `run:` blocks through `env:`; `SummaryFile` alias and the unused `screenshots` field removed; README layout rows updated early so the Phase 2 grep gate holds.
 
 ---
 

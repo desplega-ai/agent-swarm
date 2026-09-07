@@ -7,6 +7,7 @@ export interface SummaryResult {
   durationMs: number;
   retry: number;
   error?: string;
+  attachments?: Array<{ name: string; contentType: string; path: string }>;
 }
 
 export interface Summary {
@@ -75,6 +76,10 @@ function titlePathFor(result: SummaryResult): string[] {
   return result.specId.split(" > ").slice(2);
 }
 
+export function trackerSpecId(result: SummaryResult): string {
+  return `${result.file}:${titlePathFor(result).join(" > ")}`;
+}
+
 function trackerStatus(status: string, retries: number): "passed" | "failed" | "skipped" | "flaky" {
   if (status === "passed") return retries > 0 ? "flaky" : "passed";
   if (status === "skipped") return "skipped";
@@ -110,7 +115,7 @@ export function buildShardPayload(
   const bySpec = new Map<string, { result: SummaryResult; retries: number }>();
 
   for (const result of summary.results) {
-    const specId = `${result.file}:${titlePathFor(result).join(" > ")}`;
+    const specId = trackerSpecId(result);
     const previous = bySpec.get(specId);
     bySpec.set(specId, {
       result,

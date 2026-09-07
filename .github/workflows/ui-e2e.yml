@@ -14,10 +14,13 @@ on:
       - ".github/workflows/ui-e2e.yml"
   push:
     branches: [main]
+  # Runs on main and is reported to the tracker as a nightly run.
+  schedule:
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: ui-e2e-${{ github.event.pull_request.number || github.ref }}
+  group: ui-e2e-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: true
 
 jobs:
@@ -107,6 +110,57 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Resolve run context
+        id: context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          same_repo="true"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ] && [ "$PR_HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            same_repo="false"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            trigger="pr"
+            sha="$PR_HEAD_SHA"
+            ref="$PR_HEAD_REF"
+            pr="$PR_NUMBER"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            trigger="main"
+            sha="$GITHUB_SHA"
+            ref="$GITHUB_REF_NAME"
+            pr=""
+          elif [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            trigger="nightly"
+            sha="$GITHUB_SHA"
+            ref="$GITHUB_REF_NAME"
+            pr=""
+          else
+            trigger="manual"
+            sha="$GITHUB_SHA"
+            ref="$GITHUB_REF_NAME"
+            pr=""
+            if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+              pr=$(gh pr list --head "$GITHUB_REF_NAME" --state open --json number --jq '.[0].number // empty' || true)
+            fi
+          fi
+          target="main"
+          if [ -n "$pr" ]; then
+            target="pr-$pr"
+          fi
+          {
+            echo "same_repo=$same_repo"
+            echo "trigger=$trigger"
+            echo "sha=$sha"
+            echo "ref=$ref"
+            echo "pr=$pr"
+            echo "target=$target"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -139,6 +193,7 @@ jobs:
         working-directory: packages/ui-e2e
 
       - name: Upload HTML report
+        id: html-report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -148,7 +203,7 @@ jobs:
 
       - name: Check agent-fs secrets
         id: image-secrets
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: steps.context.outputs.same_repo == 'true'
         env:
           AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
           AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
@@ -163,20 +218,28 @@ jobs:
             echo "agent-fs secrets are incomplete. The comment will omit images."
           fi
 
-      - name: Publish screenshots to agent-fs
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && steps.image-secrets.outputs.available == 'true'
+      - name: Publish artifacts to agent-fs
+        if: steps.context.outputs.same_repo == 'true' && steps.image-secrets.outputs.available == 'true'
         env:
           AGENT_FS_API_URL: ${{ secrets.E2E_AGENT_FS_API_URL }}
           AGENT_FS_API_KEY: ${{ secrets.E2E_AGENT_FS_API_KEY }}
           AGENT_FS_DEFAULT_ORG_ID: ${{ secrets.E2E_AGENT_FS_ORG_ID }}
           AGENT_FS_DEFAULT_DRIVE_ID: ${{ secrets.E2E_AGENT_FS_DRIVE_ID }}
+          RUN_TARGET: ${{ steps.context.outputs.target }}
+          RUN_SHA: ${{ steps.context.outputs.sha }}
         run: |
           set -euo pipefail
           npm i -g @desplega.ai/agent-fs@0.13.5
-          reporter/publish-images.sh all-results "e2e/agent-swarm/pr-${{ github.event.pull_request.number }}/${{ github.event.pull_request.head.sha }}"
+          node --experimental-strip-types reporter/publish-artifacts.ts \
+            --results all-results \
+            --prefix "e2e/desplega-ai__agent-swarm/$RUN_TARGET/$RUN_SHA" \
+            --artifacts-out artifacts.json \
+            --images-out images.json
         working-directory: packages/ui-e2e
 
       - name: Build UI E2E summary
+        env:
+          TRACKER_URL: ${{ vars.UI_E2E_TRACKER_URL }}
         run: |
           set -euo pipefail
           node --experimental-strip-types packages/ui-e2e/reporter/comment.ts \
@@ -184,11 +247,12 @@ jobs:
             --images packages/ui-e2e/images.json \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --report-artifact ui-e2e-html-report \
+            --tracker-url "$TRACKER_URL" \
             --out packages/ui-e2e/comment.md
           cat packages/ui-e2e/comment.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upsert sticky PR comment
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: github.event_name == 'pull_request' && steps.context.outputs.same_repo == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
@@ -201,6 +265,36 @@ jobs:
           else
             gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --raw-field body="$(<packages/ui-e2e/comment.md)"
           fi
+
+      - name: Ingest into the UI E2E tracker
+        if: steps.context.outputs.same_repo == 'true'
+        env:
+          UI_E2E_INGEST_URL: ${{ secrets.UI_E2E_INGEST_URL }}
+          UI_E2E_INGEST_BEARER: ${{ secrets.UI_E2E_INGEST_BEARER }}
+          UI_E2E_TRIGGER: ${{ steps.context.outputs.trigger }}
+          UI_E2E_SHA: ${{ steps.context.outputs.sha }}
+          UI_E2E_REF: ${{ steps.context.outputs.ref }}
+          UI_E2E_PR_NUMBER: ${{ steps.context.outputs.pr }}
+          REPORT_URL: ${{ steps.html-report.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types reporter/ingest.ts \
+            --summaries all-results \
+            --artifacts artifacts.json \
+            --out ingest-payloads \
+            --report-url "$REPORT_URL" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+        working-directory: packages/ui-e2e
+
+      - name: Upload ingest payloads
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-e2e-ingest-payloads
+          path: |
+            packages/ui-e2e/ingest-payloads
+            packages/ui-e2e/artifacts.json
+          if-no-files-found: ignore
 
       - name: Fail when a UI E2E shard failed
         if: always()

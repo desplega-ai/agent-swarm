@@ -28,7 +28,11 @@ The full recipe, the env table, and the CI notes live in [LOCAL_TESTING.md](../.
 | `specs/` | Node | `home`, the route smoke (`routes.ts` + `smoke.spec.ts`), `tasks`, `configuration`, `pages`. |
 | `reporter/summary.ts` | Node | Writes `test-results/summary.json`. |
 | `reporter/comment.ts` | Node | Turns summaries into the sticky PR comment. |
-| `reporter/publish-images.sh` | bash | Uploads screenshots to agent-fs and mints seven-day links. |
+| `reporter/publish-plan.ts` | Node | Turns summaries into the agent-fs upload plan and the comment image pick. |
+| `reporter/publish-artifacts.ts` | Node | Uploads screenshots, traces, and summaries to agent-fs, writes `artifacts.json` and `images.json`. |
+| `reporter/ingest-payload.ts` | Node | Builds the tracker v1 payload from a shard summary plus `artifacts.json`. |
+| `reporter/ingest.ts` | Node | Posts one payload per shard to the tracker endpoint. |
+| `reporter/cli.ts` | Node | Shared flag parser. |
 
 Two tsconfigs cover the two runtimes: `tsconfig.json` (Node, `specs`, `fixtures`, `reporter`, `global-setup.ts`) and `tsconfig.boot.json` (Bun, `boot/`). `bun run e2e:ui:tsc` runs both.
 
