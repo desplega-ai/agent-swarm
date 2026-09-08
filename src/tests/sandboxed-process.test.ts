@@ -3,6 +3,7 @@ import {
   BUN_NO_ORPHANS_FLAG,
   BUN_SANDBOX_VIRTUAL_MEMORY_MB,
   buildSandboxedCommand,
+  buildSandboxedCommandForNprocEnforcementTest,
   createCappedStreamState,
   DEFAULT_SANDBOX_LIMITS,
   JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS,
@@ -157,13 +158,31 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
         "wait 2>/dev/null",
       ].join("; ");
 
-      const result = await runChild(
-        buildSandboxedCommand(["bash", "-c", script], TEST_ENV, tinyLimits),
-        { env: sandboxSpawnEnv(TEST_ENV) },
+      // Plain `buildSandboxedCommand` cannot exercise this: passing
+      // `["bash", "-c", script]` gets `tinyLimits.maxProcs: 8` silently
+      // discarded in favor of the `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS`
+      // (4096) interpreter floor (Codex PRRT_kwDOQr3Tmc6gX9f1), and routing
+      // through a non-shell inner command instead gets the "sh" branch,
+      // whose dash `ulimit` silently no-ops on `-u` — so nothing would ever
+      // actually be enforced either way. Use the test-only helper that
+      // forces bash (so `-u` is real) while skipping only the floor, so
+      // `tinyLimits.maxProcs` is both the rendered AND the enforced ceiling.
+      const command = buildSandboxedCommandForNprocEnforcementTest(
+        ["bash", "-c", script],
+        TEST_ENV,
+        tinyLimits,
       );
+      // Prove the tiny limit is actually the one rendered, not just assert
+      // on behavior that could pass for the wrong reason (e.g. ambient
+      // fleet-wide UID pressure happening to be low that run).
+      expect(command[0]).toBe("bash");
+      expect(command[2]).toContain(`ulimit -u ${tinyLimits.maxProcs}`);
+
+      const result = await runChild(command, { env: sandboxSpawnEnv(TEST_ENV) });
 
       // `Number("")` is 0, not NaN — even a total wrapper-level fork failure
-      // under extreme ambient load reads as "0 spawned", which is still a
+      // under extreme ambient load (a real possibility now that the ceiling
+      // is genuinely 8, not 4096) reads as "0 spawned", which is still a
       // correct containment outcome rather than a broken assertion.
       const spawned = Number(result.stdout.trim());
       expect(spawned).toBeLessThan(attemptCount);
