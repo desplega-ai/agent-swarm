@@ -46,6 +46,7 @@ let retentionTableDurationHistogram: Histogram | undefined;
 let retentionSlowestStatementGauge: Gauge | undefined;
 let retentionStatementDurationHistogram: Histogram | undefined;
 let retentionBatchSizeGauge: Gauge | undefined;
+let slackReactionInvalidNameCounter: Counter | undefined;
 
 function decodeResourceAttributeValue(value: string): string {
   try {
@@ -342,6 +343,10 @@ function ensureInstruments(): void {
     description: "The adaptive batch size a table settled on for a tick",
     unit: "{row}",
   });
+  slackReactionInvalidNameCounter = meter.createCounter("agentswarm.slack.reaction.invalid_name", {
+    description: "Slack rejected a configured reaction shortcode with invalid_name",
+    unit: "{reaction}",
+  });
 }
 
 export function recordSessionCost(m: SessionCostMetric): void {
@@ -404,6 +409,15 @@ export function recordDbRetentionStatement(
 ): void {
   ensureInstruments();
   retentionStatementDurationHistogram!.record(durationMs, { table, dry_run: dryRun });
+}
+
+export function recordSlackReactionInvalidName(event: string): void {
+  ensureInstruments();
+  // `event` is one of the 6 known SlackReactionEvent literals or "unknown" —
+  // bounded cardinality. The operator-configured shortcode that was rejected
+  // must never become a metric label (unbounded) or reach this attribute set;
+  // callers log it separately, through the secret scrubber.
+  slackReactionInvalidNameCounter!.add(1, { event, verdict: "invalid_name" });
 }
 
 export function _injectCountersForTests(

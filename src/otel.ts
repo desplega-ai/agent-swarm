@@ -88,6 +88,7 @@ let realRecordDbRetentionSweep: ((m: DbRetentionSweepMetric) => void) | undefine
 let realRecordDbRetentionStatement:
   | ((table: string, dryRun: boolean, durationMs: number) => void)
   | undefined;
+let realRecordSlackReactionInvalidName: ((event: string) => void) | undefined;
 
 export function isOtelEnabled(): boolean {
   return otelConfigured();
@@ -114,6 +115,7 @@ export async function initOtel(serviceRole = process.env.AGENT_ROLE || "api"): P
     realRecordSessionCost = impl.recordSessionCost;
     realRecordDbRetentionSweep = impl.recordDbRetentionSweep;
     realRecordDbRetentionStatement = impl.recordDbRetentionStatement;
+    realRecordSlackReactionInvalidName = impl.recordSlackReactionInvalidName;
     console.log(`[OTel] enabled for ${impl.resolveServiceName(serviceRole)} (${serviceRole})`);
   } catch (error) {
     console.warn(`[OTel] disabled after initialization failure: ${error}`);
@@ -186,6 +188,11 @@ export function recordDbRetentionStatement(
   realRecordDbRetentionStatement(table, dryRun, durationMs);
 }
 
+export function recordSlackReactionInvalidName(event: string): void {
+  if (!otelConfigured() || !realRecordSlackReactionInvalidName) return;
+  realRecordSlackReactionInvalidName(event);
+}
+
 export function _resetOtelForTests() {
   initialized = false;
   realWithSpan = undefined;
@@ -197,4 +204,5 @@ export function _resetOtelForTests() {
   realRecordSessionCost = undefined;
   realRecordDbRetentionSweep = undefined;
   realRecordDbRetentionStatement = undefined;
+  realRecordSlackReactionInvalidName = undefined;
 }

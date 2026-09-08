@@ -96,6 +96,37 @@ services:
     platform: linux/amd64
     pull_policy: always
     stop_grace_period: 60s
+    # Independent per-container cgroup pids ceiling (containment), separate
+    # from JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS (headroom for a sandboxed
+    # script's own `ulimit -u`, src/utils/sandboxed-process.ts). `ulimit -u`
+    # is a per-real-UID limit shared by the API process itself *and* every
+    # concurrently running sandboxed script subprocess in this container — a
+    # single runaway script can otherwise starve that whole shared budget
+    # before its own rlimit trips. `pids_limit` is enforced by the kernel
+    # cgroup controller independently of what the sandboxed process does to
+    # its own rlimits, so it holds even if a script resets them.
+    #
+    # Sizing arithmetic (measured 2026-09-08 in a worker container, no
+    # compose/docker daemon available to validate this end-to-end — see the
+    # PR description for that open item):
+    #   - Idle API server (Bun HTTP server + scheduler + heartbeat + OAuth
+    #     keepalive timers), isolated measurement via /proc/<pid>/task:
+    #     ~29 threads.
+    #   - One lightweight sandboxed `bun -e` script run, measured via the
+    #     container-wide /proc thread-count delta while it executed:
+    #     ~22-25 threads/procs (bash wrapper + Bun runtime boot).
+    #   - Assume up to ~15 concurrent script executions for a single-replica
+    #     self-host (there is no concurrency limiter on script runs today) at
+    #     ~30 threads/procs each with margin: 15 * 30 = 450.
+    #   - Total realistic worst-case legitimate load: 29 + 450 = 479.
+    #   - pids_limit = 1024: ~2x that legitimate-load estimate (room to grow
+    #     without bricking the API pod), while staying 4x tighter than the
+    #     4096 `ulimit -u` ceiling so this is genuine independent containment,
+    #     not a number that only ever rubber-stamps the rlimit.
+    # Raise this if you run heavier concurrent script/workflow load; lower it
+    # if you want tighter containment and have validated it against your own
+    # traffic.
+    pids_limit: 1024
     depends_on:
       agent-fs:
         condition: service_healthy

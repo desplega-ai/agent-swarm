@@ -11,7 +11,7 @@ import { resolveTemplate } from "../prompts/resolver";
 import { slackContextKey } from "../tasks/context-key";
 import { createTaskWithSiblingAwareness } from "../tasks/sibling-awareness";
 import { workflowEventBus } from "../workflows/event-bus";
-import { ackSlackMessage } from "./ack";
+import { ackSlackMessage, reactionName } from "./ack";
 import { buildTreeBlocks, type TreeNode } from "./blocks";
 import { enrichSlackUserEmail, resolveSlackUserId, rewriteSlackMentions } from "./enrich";
 import { wasEventSeen } from "./event-dedup";
@@ -536,11 +536,7 @@ export function registerMessageHandler(app: App): void {
         // Instant flush — no dependency
         await instantFlush(threadKey);
 
-        try {
-          await client.reactions.add({ channel: msg.channel, name: "zap", timestamp: msg.ts });
-        } catch (e) {
-          console.log(`[Slack] Reaction failed: ${e instanceof Error ? e.message : e}`);
-        }
+        await ackSlackMessage(client, msg.channel, msg.ts, reactionName("now"), "now");
 
         return;
       }
@@ -569,17 +565,12 @@ export function registerMessageHandler(app: App): void {
         const threadKey = `${msg.channel}:${msg.thread_ts}`;
         bufferThreadMessage(msg.channel, msg.thread_ts, effectiveText, msg.user, msg.ts);
 
-        // Slack feedback: react with :eyes: on first buffer, :heavy_plus_sign: on appends
+        // Slack feedback: react with the accepted reaction on first buffer, buffered on appends
         const count = getBufferMessageCount(threadKey);
-        console.log(
-          `[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${count === 1 ? "eyes" : "heavy_plus_sign"})`,
-        );
-        await ackSlackMessage(
-          client,
-          msg.channel,
-          msg.ts,
-          count === 1 ? "eyes" : "heavy_plus_sign",
-        );
+        const event = count === 1 ? "accepted" : "buffered";
+        const name = reactionName(event);
+        console.log(`[Slack] Additive buffer: ${threadKey} (message #${count}, reaction: ${name})`);
+        await ackSlackMessage(client, msg.channel, msg.ts, name, event);
 
         return; // Don't process further — buffer will flush
       }
@@ -653,7 +644,7 @@ export function registerMessageHandler(app: App): void {
         requestedByUserId,
         contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
       });
-      await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+      await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
 
       if (isSlackRenderV2Enabled()) {
         await ensureSlackThreadTree([task.id]);
@@ -737,7 +728,7 @@ export function registerMessageHandler(app: App): void {
               })
             : null;
           if (steering) {
-            await ackSlackMessage(client, msg.channel, msg.ts, "speech_balloon");
+            await ackSlackMessage(client, msg.channel, msg.ts, reactionName("steered"), "steered");
             results.steered.push({
               agentName: agent.name,
               acknowledgement: formatSlackSteeringAck(steering.result),
@@ -756,7 +747,7 @@ export function registerMessageHandler(app: App): void {
             requestedByUserId,
             contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
           });
-          await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+          await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
           results.assigned.push({ agentName: agent.name, taskId: task.id });
           continue;
         }
@@ -772,7 +763,7 @@ export function registerMessageHandler(app: App): void {
           requestedByUserId,
           contextKey: slackContextKey({ channelId: msg.channel, threadTs }),
         });
-        await ackSlackMessage(client, msg.channel, msg.ts, "eyes");
+        await ackSlackMessage(client, msg.channel, msg.ts, reactionName("accepted"), "accepted");
 
         // Check if agent has an in-progress task in this thread (queued follow-up)
         const agentTasks = await getTasksByAgentId(agent.id);

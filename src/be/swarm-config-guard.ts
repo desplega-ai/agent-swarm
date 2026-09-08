@@ -1,3 +1,4 @@
+import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 
 /**
@@ -82,6 +83,18 @@ function enumValidator(key: string, options: string[]): Record<string, ConfigVal
       return options.includes(value.trim()) ? null : message;
     },
   };
+}
+
+/** Build `{ KEY: validator }` entries accepting a Slack emoji shortcode. */
+function shortcodeValidators(keys: string[]): Record<string, ConfigValidator> {
+  const message = (key: string) =>
+    `Invalid ${key} (must be a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      (value: unknown) => (normalizeSlackReactionShortcode(value) !== null ? null : message(key)),
+    ]),
+  );
 }
 
 /** Build `{ KEY: validator }` entries accepting integers >= `min`. */
@@ -256,6 +269,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ]),
   ...enumValidator("SLACK_THREAD_STEERING", ["lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
+  ...shortcodeValidators([
+    "SLACK_REACTION_ACCEPTED",
+    "SLACK_REACTION_BUFFERED",
+    "SLACK_REACTION_NOW",
+    "SLACK_REACTION_STEERED",
+    "SLACK_REACTION_COMPLETED",
+    "SLACK_REACTION_FAILED",
+  ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive
   // on the upper bound — an operator raising a sweep cap is legitimate.
   ...integerValidators(
