@@ -2,6 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
+import {
+  closeDb,
+  createSessionLogs,
+  createTaskExtended,
+  getSessionLogsByTaskId,
+  initDb,
+} from "../be/db";
 import { createProviderAdapter } from "../providers";
 import {
   ACPAdapter,
@@ -60,7 +68,7 @@ describe("ACPAdapter", () => {
     );
   });
 
-  test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {
+  test("runs a configured ACP target and persists its sanitized diagnostic traffic", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -88,6 +96,10 @@ class FakeAgent {
     if (!params.mcpServers.some((server) => server.name === "swarm" && server.type === "http")) {
       throw new Error("missing swarm MCP server");
     }
+    await this.connection.sessionUpdate({
+      sessionId: "acp-session-1",
+      update: { sessionUpdate: "current_mode_update", currentModeId: "code" },
+    });
     return {
       sessionId: "acp-session-1",
       configOptions: [
@@ -140,6 +152,15 @@ class FakeAgent {
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "done" },
+        messageId: "assistant-1",
+      },
+    });
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "x".repeat(31_000) },
+        messageId: "user-1",
       },
     });
     await this.connection.sessionUpdate({
@@ -149,7 +170,15 @@ class FakeAgent {
         toolCallId: "tool-1",
         title: "Run command",
         kind: "execute",
-        rawInput: { command: "true" },
+        rawInput: {
+          command: "true",
+          headers: [
+            { name: "Authorization", value: "Bearer opaque-vendor-credential-123456" },
+            { name: "X-Debug", value: "kept" },
+          ],
+          diagnosticToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+          chunks: Array.from({ length: 20 }, () => "y".repeat(2_000)),
+        },
       },
     });
     await this.connection.sessionUpdate({
@@ -158,8 +187,8 @@ class FakeAgent {
         sessionUpdate: "tool_call_update",
         toolCallId: "tool-1",
         title: "Run command",
-        status: "completed",
-        rawOutput: "ok",
+        status: "failed",
+        rawOutput: { chunks: Array.from({ length: 20 }, () => "z".repeat(2_000)) },
       },
     });
     return { stopReason: "end_turn" };
@@ -213,6 +242,72 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+
+    const rawLogs = events
+      .filter(
+        (event): event is Extract<ProviderEvent, { type: "raw_log" }> => event.type === "raw_log",
+      )
+      .map((event) => event.content);
+    expect(rawLogs.length).toBeGreaterThan(0);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        const update = event.update as Record<string, unknown> | undefined;
+        return update?.sessionUpdate === "agent_message_chunk";
+      }),
+    ).toBe(true);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        const update = event.update as Record<string, unknown> | undefined;
+        return update?.sessionUpdate === "current_mode_update";
+      }),
+    ).toBe(true);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        return event.type === "message" && event.content === "done";
+      }),
+    ).toBe(true);
+    expect(rawLogs.every((content) => content.length <= 30_000)).toBe(true);
+    expect(rawLogs.join("\n")).not.toContain("Authorization");
+    expect(rawLogs.join("\n")).not.toContain("opaque-vendor-credential-123456");
+    expect(rawLogs.join("\n")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(rawLogs.join("\n")).toContain("[REDACTED:github_token]");
+    expect(rawLogs.join("\n")).toContain("… [truncated]");
+    expect(rawLogs.join("\n")).not.toContain("x".repeat(30_001));
+
+    initDb(":memory:");
+    try {
+      const task = await createTaskExtended("ACP persistence test");
+      await createSessionLogs({
+        taskId: task.id,
+        sessionId: session.sessionId,
+        iteration: 1,
+        cli: "acp",
+        lines: rawLogs,
+      });
+      const persisted = await getSessionLogsByTaskId(task.id);
+      expect(persisted).toHaveLength(rawLogs.length);
+      expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
+      expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
+      const transcript = normalizeSessionLogs(persisted);
+      expect(transcript.items.some((item) => item.kind === "unknown")).toBe(false);
+      expect(
+        transcript.items.some(
+          (item) => item.kind === "text" && item.role === "assistant" && item.text === "done",
+        ),
+      ).toBe(true);
+      expect(
+        transcript.items.some((item) => item.kind === "tool_call" && item.tool?.id === "tool-1"),
+      ).toBe(true);
+      expect(
+        transcript.items.find((item) => item.kind === "tool_result" && item.result?.id === "tool-1")
+          ?.result?.isError,
+      ).toBe(true);
+    } finally {
+      closeDb();
+    }
   });
 
   test("OpenCode preset supplies command, credentials, and a model environment fallback", () => {

@@ -1,4 +1,5 @@
 import {
+  normalizeAcp,
   normalizeAnthropic,
   normalizeClaudeManaged,
   normalizeCodex,
@@ -39,6 +40,7 @@ export type {
 type Adapter = (ordered: ReturnType<typeof orderDecodedRecords>) => NormalizedItem[];
 
 const ADAPTERS: Record<string, Adapter> = {
+  acp: normalizeAcp,
   claude: normalizeAnthropic,
   "claude-managed": normalizeClaudeManaged,
   pi: normalizeAnthropic,
