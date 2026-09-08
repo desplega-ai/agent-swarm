@@ -2,6 +2,12 @@ import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import {
+  generateDefaultClaudeMd,
+  generateDefaultIdentityMd,
+  matchesDefaultClaudeMd,
+  matchesDefaultIdentityMd,
+} from "../prompts/defaults";
 import { configureDbResolver } from "../prompts/resolver";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
@@ -6007,6 +6013,38 @@ export async function updateAgentProfile(
     // Get current agent state for version comparison
     const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
+
+    // Compare with the old metadata before replacing it. Persist refreshed defaults
+    // atomically so both running workers and restarted workers see matching blobs.
+    const previous = rowToAgent(current);
+    const next = {
+      name: updates.name ?? previous.name,
+      description: updates.description ?? previous.description,
+      role: updates.role ?? previous.role,
+      capabilities: updates.capabilities ?? previous.capabilities,
+    };
+    const metadataChanged =
+      next.name !== previous.name ||
+      next.description !== previous.description ||
+      next.role !== previous.role ||
+      JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
+    if (metadataChanged) {
+      updates = { ...updates };
+      if (
+        updates.identityMd === undefined &&
+        previous.identityMd &&
+        matchesDefaultIdentityMd(previous.identityMd, previous)
+      ) {
+        updates.identityMd = generateDefaultIdentityMd(next);
+      }
+      if (
+        updates.claudeMd === undefined &&
+        previous.claudeMd &&
+        matchesDefaultClaudeMd(previous.claudeMd, previous)
+      ) {
+        updates.claudeMd = generateDefaultClaudeMd(next);
+      }
+    }
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
       const nextValue = updates[field];

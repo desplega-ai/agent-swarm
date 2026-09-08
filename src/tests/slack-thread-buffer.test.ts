@@ -7,6 +7,7 @@ import {
   createUser,
   getLatestActiveTaskInThread,
   getMostRecentTaskInThread,
+  getSlackTasksInThread,
   initDb,
 } from "../be/db";
 import { type IdentityActor, linkIdentity } from "../be/users";
@@ -258,9 +259,12 @@ describe("Slack thread buffer", () => {
 
       await instantFlush(`${channelId}:${threadTs}`);
 
-      const followUp = await getMostRecentTaskInThread(channelId, threadTs);
-      expect(followUp).not.toBeNull();
-      expect(followUp!.id).not.toBe(existingTask.id);
+      // Task creation can share a timestamp. Identify the new task by its ID.
+      const followUps = (await getSlackTasksInThread(channelId, threadTs)).filter(
+        (task) => task.id !== existingTask.id,
+      );
+      expect(followUps).toHaveLength(1);
+      const followUp = followUps[0];
       expect(followUp!.task).toContain("[Thread follow-up — 1 message(s) buffered]");
       expect(followUp!.task).toContain("regular human follow-up");
     });
