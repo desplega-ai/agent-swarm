@@ -193,6 +193,101 @@ async function runSessionWithFakeThread(
 }
 
 describe("Codex app-server session", () => {
+  test.each([
+    "failed",
+    "interrupted",
+    "aborted",
+    "exit",
+    "start-rejected",
+  ])("rejects queued input that never starts when the session is %s", async (ending) => {
+    const started = Promise.withResolvers<void>();
+    let starts = 0;
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      if (method === "thread/start") return { thread: { id: "queued-thread" } };
+      if (method === "turn/start") {
+        if (++starts > 1) throw new Error("queued turn rejected");
+        started.resolve();
+        return { turn: { id: "active-turn" } };
+      }
+      if (method === "turn/interrupt") {
+        emit("turn/completed", {
+          threadId: "queued-thread",
+          turn: { id: "active-turn", status: "interrupted" },
+        });
+        return {};
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    await started.promise;
+    let acknowledged = false;
+    const queued = session.deliverSteering!({ mode: "queue", text: "do not lose this" });
+    void queued.then(() => {
+      acknowledged = true;
+    });
+    await Promise.resolve();
+    expect(acknowledged).toBe(false);
+    if (ending === "aborted") await session.abort("cancelled");
+    else if (ending === "exit") fake.fail(new Error("app-server exited"));
+    else
+      fake.emit("turn/completed", {
+        threadId: "queued-thread",
+        turn: {
+          id: "active-turn",
+          status: ending === "start-rejected" ? "completed" : ending,
+          error: ending === "failed" ? { message: "turn failed" } : null,
+        },
+      });
+    expect(await queued).toMatchObject({ delivered: false });
+    expect((await session.waitForCompletion()).isError).toBe(true);
+    expect(starts).toBe(ending === "start-rejected" ? 2 : 1);
+  });
+
+  test("acknowledges queued input only after Codex accepts its turn", async () => {
+    const firstStarted = Promise.withResolvers<void>();
+    const queueStarted = Promise.withResolvers<void>();
+    const acceptQueue = Promise.withResolvers<{ turn: { id: string } }>();
+    let starts = 0;
+    const fake = makeFakeAppServer((method) => {
+      if (method === "thread/start") return { thread: { id: "queued-thread" } };
+      if (method === "turn/start") {
+        if (++starts === 1) {
+          firstStarted.resolve();
+          return { turn: { id: "first-turn" } };
+        }
+        queueStarted.resolve();
+        return acceptQueue.promise;
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    await firstStarted.promise;
+    let acknowledged = false;
+    const queued = session.deliverSteering!({ mode: "queue", text: "second" });
+    void queued.then(() => {
+      acknowledged = true;
+    });
+    fake.emit("turn/completed", {
+      threadId: "queued-thread",
+      turn: { id: "first-turn", status: "completed" },
+    });
+    await queueStarted.promise;
+    expect(acknowledged).toBe(false);
+    acceptQueue.resolve({ turn: { id: "second-turn" } });
+    expect(await queued).toEqual({ delivered: true, mode: "queue" });
+    fake.emit("turn/completed", {
+      threadId: "queued-thread",
+      turn: { id: "second-turn", status: "completed" },
+    });
+    expect((await session.waitForCompletion()).isError).toBe(false);
+  });
+
   test("steer waits for the active turn and sends expectedTurnId", async () => {
     const requests: Array<{ method: string; params: unknown }> = [];
     const fake = makeFakeAppServer((method, params, emit) => {

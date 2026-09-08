@@ -19,7 +19,11 @@ import {
   startTask,
 } from "../be/db";
 import { requestSteering } from "../be/steering";
-import { createSteeringDispatchState, pollAndDispatchSteering } from "../commands/runner";
+import {
+  createSteeringDispatchState,
+  pollAndDispatchSteering,
+  scheduleSteeringDispatch,
+} from "../commands/runner";
 import { handleTasks } from "../http/tasks";
 import { getPathSegments, parseQueryParams } from "../http/utils";
 import { getBasePrompt } from "../prompts/base-prompt";
@@ -94,6 +98,97 @@ afterAll(async () => {
 });
 
 describe("steering worker transport", () => {
+  test("a pending queue allows a later steer for the same task without duplicate delivery", async () => {
+    const taskId = crypto.randomUUID();
+    const first = pendingMessage({ taskId, mode: "queue" });
+    const second = pendingMessage({ taskId, mode: "steer" });
+    let pollCount = 0;
+    const deliveryCounts = new Map<string, number>();
+    let resolveFirstDelivery!: (value: { delivered: true; mode: "queue" }) => void;
+    const firstDelivery = new Promise<{ delivered: true; mode: "queue" }>((resolve) => {
+      resolveFirstDelivery = resolve;
+    });
+    let resolveFirstDeliveryStarted!: () => void;
+    const firstDeliveryStarted = new Promise<void>((resolve) => {
+      resolveFirstDeliveryStarted = resolve;
+    });
+    let resolveFirstReport!: () => void;
+    let resolveSecondReport!: () => void;
+    const firstReported = new Promise<void>((resolve) => {
+      resolveFirstReport = resolve;
+    });
+    const secondReported = new Promise<void>((resolve) => {
+      resolveSecondReport = resolve;
+    });
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/steering-messages") {
+        pollCount += 1;
+        return Response.json({ messages: pollCount === 1 ? [first] : [first, second] });
+      }
+      if (url.pathname.includes(first.id)) resolveFirstReport();
+      if (url.pathname.includes(second.id)) resolveSecondReport();
+      return Response.json({});
+    }) as typeof fetch;
+    const providerSession = session(async (delivery) => {
+      deliveryCounts.set(delivery.mode, (deliveryCounts.get(delivery.mode) ?? 0) + 1);
+      if (delivery.mode === "queue") {
+        resolveFirstDeliveryStarted();
+        return firstDelivery;
+      }
+      return { delivered: true, mode: "steer" };
+    });
+    const dispatchState = createSteeringDispatchState();
+    const config = { apiUrl: "http://steering.test", apiKey: "key", agentId: "agent" };
+    const errors: unknown[] = [];
+
+    expect(
+      scheduleSteeringDispatch(
+        config,
+        taskId,
+        providerSession,
+        dispatchState,
+        (error) => errors.push(error),
+        fetchImpl,
+      ),
+    ).toBe(true);
+    expect(
+      scheduleSteeringDispatch(
+        config,
+        taskId,
+        providerSession,
+        dispatchState,
+        (error) => errors.push(error),
+        fetchImpl,
+      ),
+    ).toBe(false);
+    await firstDeliveryStarted;
+    await Bun.sleep(0);
+    expect(
+      scheduleSteeringDispatch(
+        config,
+        taskId,
+        providerSession,
+        dispatchState,
+        (error) => errors.push(error),
+        fetchImpl,
+      ),
+    ).toBe(true);
+
+    await secondReported;
+    expect(pollCount).toBe(2);
+    expect(deliveryCounts.get("queue")).toBe(1);
+    expect(deliveryCounts.get("steer")).toBe(1);
+    expect(dispatchState.inFlightMessageIds.has(first.id)).toBe(true);
+
+    resolveFirstDelivery({ delivered: true, mode: "queue" });
+    await firstReported;
+    await Bun.sleep(0);
+    expect(dispatchState.inFlightMessageIds.size).toBe(0);
+    expect(dispatchState.pollingTaskIds.size).toBe(0);
+    expect(errors).toEqual([]);
+  });
+
   test("delivers pending rows once and reports the adapter's actual mode", async () => {
     const pending = pendingMessage();
     const nonPending = pendingMessage({ id: crypto.randomUUID(), status: "delivered" });

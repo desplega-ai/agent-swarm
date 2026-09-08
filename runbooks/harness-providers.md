@@ -89,7 +89,9 @@ When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `
 Production Codex sessions start a fresh `codex app-server` inside the existing isolated per-task runner. The parent adapter and task runner keep their JSONL control channel open. The task runner uses JSON-RPC with the app-server.
 
 - `steer` sends native `turn/steer`. Codex adds the input to the active turn.
-- `queue` stores the message in the adapter. The adapter starts the next native turn only after the active turn ends.
+- `queue` stores the message in the adapter. Delivery succeeds only after Codex accepts the next native turn.
+- If the session ends before that turn starts, delivery fails and the pending message remains eligible for follow-up promotion.
+- Queue acknowledgements do not block cancellation or polling other tasks.
 - A message accepted before app-server readiness remains pending until the connection is ready.
 - `abort()` sends the native turn interrupt request. If it cannot complete within the bounded grace period, the runner terminates the task process group.
 

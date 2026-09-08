@@ -933,7 +933,10 @@ export class CodexSession implements ProviderSession {
   private resolveCompletion!: (result: ProviderResult) => void;
   private abortController: AbortController | null = null;
   private abortReason = "cancelled";
-  private readonly queuedPrompts: string[] = [];
+  private readonly queuedPrompts: Array<{
+    text: string;
+    resolve: (result: SteerDeliveryResult) => void;
+  }> = [];
   /**
    * Per-session transcript buffer used to feed the session-end summarizer.
    * Reset at the start of `runSession` and appended in `handleEvent`.
@@ -1073,8 +1076,7 @@ export class CodexSession implements ProviderSession {
       return { delivered: false, reason: "Codex session has completed" };
     }
     if (mode === "queue") {
-      this.queuedPrompts.push(text);
-      return { delivered: true, mode: "queue" };
+      return new Promise((resolve) => this.queuedPrompts.push({ text, resolve }));
     }
     try {
       await this.thread.steer(text);
@@ -1111,6 +1113,12 @@ export class CodexSession implements ProviderSession {
   private settle(result: ProviderResult): void {
     if (this.settled) return;
     this.settled = true;
+    for (const queued of this.queuedPrompts.splice(0)) {
+      queued.resolve({
+        delivered: false,
+        reason: "Codex session ended before the queued turn started",
+      });
+    }
     // Resolution deferred until `runSession`'s finally-block fully cleans up
     // (see `pendingResult` rationale on the field above). Caller-visible
     // ordering: cleanup → resolve waitForCompletion.
@@ -1560,9 +1568,14 @@ export class CodexSession implements ProviderSession {
 
       try {
         let nextPrompt: string | undefined = resolvedPrompt;
+        let queuedPrompt: (typeof this.queuedPrompts)[number] | undefined;
         while (nextPrompt !== undefined && !this.aborted && !terminalError && !sawTurnInterrupted) {
           if (nextPrompt !== resolvedPrompt) this.transcript.push(`User: ${nextPrompt}`);
           const streamed = await this.thread.runStreamed(nextPrompt);
+          if (queuedPrompt) {
+            this.queuedPrompts.shift();
+            queuedPrompt.resolve({ delivered: true, mode: "queue" });
+          }
           for await (const event of streamed.events) {
             if (
               event.type === "turn.failed" ||
@@ -1590,7 +1603,8 @@ export class CodexSession implements ProviderSession {
               this.errorTracker.processCodexUsageLimitMessage(event.message);
             }
           }
-          nextPrompt = this.queuedPrompts.shift();
+          queuedPrompt = this.queuedPrompts[0];
+          nextPrompt = queuedPrompt?.text;
         }
       } catch (err) {
         this.acceptsSteering = false;
@@ -2082,7 +2096,7 @@ class CodexSubprocessSession implements ProviderSession {
   private nextControlId = 0;
   private readonly pendingSteering = new Map<
     number,
-    { resolve: (result: SteerDeliveryResult) => void; timer: ReturnType<typeof setTimeout> }
+    { resolve: (result: SteerDeliveryResult) => void; timer?: ReturnType<typeof setTimeout> }
   >();
 
   constructor(config: ProviderSessionConfig, skillsDir: string | undefined) {
@@ -2187,10 +2201,15 @@ class CodexSubprocessSession implements ProviderSession {
     if (this.finished) return { delivered: false, reason: "Codex session has completed" };
     const id = ++this.nextControlId;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingSteering.delete(id);
-        resolve({ delivered: false, reason: "Codex steering request timed out" });
-      }, 35_000);
+      // Queued input waits for the active turn, which can outlast an RPC timeout.
+      // The child acknowledges its turn start or rejects it during session cleanup.
+      const timer =
+        delivery.mode === "queue"
+          ? undefined
+          : setTimeout(() => {
+              this.pendingSteering.delete(id);
+              resolve({ delivered: false, reason: "Codex steering request timed out" });
+            }, 35_000);
       this.pendingSteering.set(id, { resolve, timer });
       try {
         this.writeControl({ kind: "steer", id, delivery });

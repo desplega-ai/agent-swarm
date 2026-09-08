@@ -128,13 +128,15 @@ async function runCodexSessionRunnerInner(): Promise<void> {
         if (command.kind === "abort") {
           await session.abort(command.reason);
         } else if (command.kind === "steer") {
-          let delivery: SteerDeliveryResult;
-          try {
-            delivery = await session.deliverSteering(command.delivery);
-          } catch (error) {
-            delivery = { delivered: false, reason: scrubSecrets(String(error)) };
-          }
-          writeLine({ kind: "steering-result", id: command.id, delivery });
+          // Queue acknowledgements wait for a later turn. Keep reading controls
+          // so cancellation and active-turn steering can proceed during that wait.
+          const respond = (delivery: SteerDeliveryResult) =>
+            writeLine({ kind: "steering-result", id: command.id, delivery });
+          void session
+            .deliverSteering(command.delivery)
+            .then(respond, (error) =>
+              respond({ delivered: false, reason: scrubSecrets(String(error)) }),
+            );
         }
       }
       await session.abort("Codex parent closed its control channel");

@@ -163,6 +163,8 @@ Each Codex task starts a fresh `codex app-server` inside the isolated session ru
 
 `mode: "steer"` sends native `turn/steer`, which adds input to the active turn. `mode: "queue"` stores input in the adapter and starts the next native turn after the active turn ends. Input that arrives before app-server readiness remains pending until the session is ready. `abort()` sends the native interrupt request, then terminates the isolated process group if Codex does not finish during the bounded grace period.
 
+Queued input counts as delivered only after Codex accepts its turn. If the session ends first, delivery fails and the pending input remains eligible for follow-up promotion. Waiting for that acknowledgement does not block cancellation or other tasks.
+
 The worker does not use a shared app-server daemon. It does not resume native Codex threads. Follow-up task continuity uses the swarm context preamble.
 
 #### Codex hook delivery for legacy exec sessions
