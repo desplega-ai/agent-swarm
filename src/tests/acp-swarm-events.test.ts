@@ -12,9 +12,12 @@ describe("translateAcpSessionNotification", () => {
       notification({
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "hello" },
+        messageId: "msg-1",
       }),
     );
-    expect(events).toEqual([{ type: "message", role: "assistant", content: "hello" }]);
+    expect(events).toEqual([
+      { type: "message", role: "assistant", content: "hello", messageId: "msg-1" },
+    ]);
   });
 
   test("maps thought chunks to custom events", () => {

@@ -31,6 +31,118 @@ import type {
 } from "./types";
 
 type EventListener = (event: ProviderEvent) => void;
+const ACP_LOG_MAX_CHARS = 30_000;
+const ACP_LOG_FIELD_MAX_CHARS = 12_000;
+const ACP_LOG_PREVIEW_MAX_CHARS = 10_000;
+const CREDENTIAL_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "www-authenticate",
+  "proxy-authenticate",
+  "x-api-key",
+  "api-key",
+  "x-auth-token",
+  "x-access-token",
+  "x-session-token",
+]);
+
+function isCredentialHeaderName(value: string): boolean {
+  return CREDENTIAL_HEADER_NAMES.has(value.trim().toLowerCase());
+}
+
+function isCredentialHeader(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const name = (value as { name?: unknown }).name;
+  return typeof name === "string" && isCredentialHeaderName(name);
+}
+
+function serializeAcpLog(value: unknown): string {
+  const serialized = JSON.stringify(value, (key, child) => {
+    if (isCredentialHeaderName(key)) return undefined;
+    if (key.toLowerCase() === "headers" && Array.isArray(child)) {
+      return child.filter((header) => !isCredentialHeader(header));
+    }
+    if (typeof child !== "string") return child;
+    const scrubbed = scrubSecrets(child);
+    return scrubbed.length > ACP_LOG_FIELD_MAX_CHARS
+      ? `${scrubbed.slice(0, ACP_LOG_FIELD_MAX_CHARS)}… [truncated]`
+      : scrubbed;
+  });
+  if (serialized.length <= ACP_LOG_MAX_CHARS) return serialized;
+
+  const sanitizedValue = JSON.parse(serialized) as unknown;
+  const record: Record<string, unknown> | undefined =
+    sanitizedValue && typeof sanitizedValue === "object" && !Array.isArray(sanitizedValue)
+      ? (sanitizedValue as Record<string, unknown>)
+      : undefined;
+  const update =
+    record && "update" in record && record.update && typeof record.update === "object"
+      ? record.update
+      : undefined;
+  const preview = `${serialized.slice(0, ACP_LOG_PREVIEW_MAX_CHARS)}… [truncated]`;
+  if (record && "type" in record) {
+    const type = record.type;
+    if (type === "tool_start") {
+      return JSON.stringify({
+        type,
+        toolCallId: boundedAcpLogScalar(record.toolCallId),
+        toolName: boundedAcpLogScalar(record.toolName),
+        args: { truncated: true, preview },
+      });
+    }
+    if (type === "tool_end") {
+      const result =
+        record.result && typeof record.result === "object" && !Array.isArray(record.result)
+          ? (record.result as Record<string, unknown>)
+          : undefined;
+      return JSON.stringify({
+        type,
+        toolCallId: boundedAcpLogScalar(record.toolCallId),
+        toolName: boundedAcpLogScalar(record.toolName),
+        result: {
+          status: boundedAcpLogScalar(result?.status),
+          truncated: true,
+          preview,
+        },
+      });
+    }
+    if (type === "custom") {
+      return JSON.stringify({
+        type,
+        name: boundedAcpLogScalar(record.name),
+        data: { truncated: true, preview },
+      });
+    }
+  }
+  const summary = {
+    type: "acp_log_truncated",
+    originalType:
+      record && "type" in record && typeof record.type === "string" ? record.type : undefined,
+    sessionId:
+      record && "sessionId" in record && typeof record.sessionId === "string"
+        ? record.sessionId.slice(0, 500)
+        : undefined,
+    sessionUpdate:
+      update && "sessionUpdate" in update && typeof update.sessionUpdate === "string"
+        ? update.sessionUpdate
+        : undefined,
+    preview,
+  };
+  const bounded = JSON.stringify(summary);
+  if (bounded.length <= ACP_LOG_MAX_CHARS) return bounded;
+  return JSON.stringify({
+    type: "acp_log_truncated",
+    originalType: summary.originalType?.slice(0, 500),
+    sessionId: summary.sessionId,
+    sessionUpdate: summary.sessionUpdate?.slice(0, 500),
+  });
+}
+
+function boundedAcpLogScalar(value: unknown): unknown {
+  return typeof value === "string" ? value.slice(0, 500) : value;
+}
 
 class SwarmAcpClient implements Client {
   constructor(private readonly emit: (event: ProviderEvent) => void) {}
@@ -45,6 +157,7 @@ class SwarmAcpClient implements Client {
   }
 
   async sessionUpdate(params: SessionNotification): Promise<void> {
+    this.emit({ type: "raw_log", content: serializeAcpLog(params) });
     for (const event of translateAcpSessionNotification(params)) {
       this.emit(event);
     }
@@ -119,6 +232,16 @@ class ACPSession implements ProviderSession {
     if (event.type === "message" && event.role === "assistant") {
       this.output += event.content;
     }
+    this.emitDirect(event);
+    if (event.type !== "raw_log" && event.type !== "raw_stderr") {
+      this.emitDirect({
+        type: "raw_log",
+        content: serializeAcpLog(event),
+      });
+    }
+  }
+
+  private emitDirect(event: ProviderEvent): void {
     if (this.listeners.size === 0) {
       this.pendingEvents.push(event);
       return;
@@ -224,7 +347,11 @@ export class ACPAdapter implements ProviderAdapter {
     );
 
     let session: ACPSession | null = null;
-    const client = new SwarmAcpClient((event) => session?.emitFromAcp(event));
+    const preSessionEvents: ProviderEvent[] = [];
+    const client = new SwarmAcpClient((event) => {
+      if (session) session.emitFromAcp(event);
+      else preSessionEvents.push(event);
+    });
     const stream = ndJsonStream(fileSinkWritableStream(proc.stdin), proc.stdout);
     const connection = new ClientSideConnection(() => client, stream);
 
@@ -272,6 +399,7 @@ export class ACPAdapter implements ProviderAdapter {
         target: target.target,
         configOptions: sanitizeAcpConfigOptions(configOptions),
       });
+      for (const event of preSessionEvents) session.emitFromAcp(event);
       return session;
     } catch (err) {
       await terminateProcessGroup(proc.pid);

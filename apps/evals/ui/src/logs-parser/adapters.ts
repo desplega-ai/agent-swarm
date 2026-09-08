@@ -114,6 +114,143 @@ export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
   return items;
 }
 
+export function normalizeAcp(ordered: DecodedRecord[]): NormalizedItem[] {
+  const items: NormalizedItem[] = [];
+
+  for (const d of ordered) {
+    const ev = d.event;
+    if (isParseError(ev)) {
+      items.push(makeItem(d, "parse_error", { role: "system", raw: ev.raw }));
+      continue;
+    }
+    if (!isRecord(ev)) {
+      items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+      continue;
+    }
+
+    if (emitStderr(items, d, ev)) continue;
+
+    const rawUpdate = isRecord(ev.update) ? ev.update : undefined;
+    if (
+      typeof rawUpdate?.sessionUpdate === "string" ||
+      (ev.type === "acp_log_truncated" && typeof ev.sessionUpdate === "string")
+    ) {
+      // The corresponding normalized ProviderEvent is persisted immediately
+      // after this raw notification. Keep the raw row in `ordered` for
+      // diagnostics without rendering duplicate transcript content.
+      continue;
+    }
+
+    switch (ev.type) {
+      case "message": {
+        const role = ev.role === "user" ? "user" : "assistant";
+        appendAcpChunk(
+          items,
+          d,
+          "text",
+          role,
+          String(ev.content ?? ""),
+          typeof ev.messageId === "string" ? ev.messageId : undefined,
+        );
+        break;
+      }
+      case "tool_start": {
+        items.push(
+          makeItem(d, "tool_call", {
+            role: "assistant",
+            tool: {
+              id: String(ev.toolCallId ?? ""),
+              name: String(ev.toolName ?? "tool"),
+              input: ev.args,
+            },
+          }),
+        );
+        break;
+      }
+      case "tool_end": {
+        const result = isRecord(ev.result) ? ev.result : undefined;
+        items.push(
+          makeItem(d, "tool_result", {
+            role: "user",
+            result: {
+              id: String(ev.toolCallId ?? ""),
+              payload: ev.result,
+              isError: result?.status === "failed",
+            },
+          }),
+        );
+        break;
+      }
+      case "custom": {
+        const data = isRecord(ev.data) ? ev.data : undefined;
+        if (ev.name === "acp_agent_thought_chunk") {
+          const content = data?.content;
+          const text =
+            isRecord(content) && content.type === "text"
+              ? String(content.text ?? "")
+              : resultBlockText(content);
+          appendAcpChunk(
+            items,
+            d,
+            "reasoning",
+            "assistant",
+            text,
+            typeof data?.messageId === "string" ? data.messageId : undefined,
+          );
+        } else {
+          items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
+        }
+        break;
+      }
+      case "result": {
+        items.push(makeItem(d, "result", { role: "system", meta: ev }));
+        break;
+      }
+      case "error": {
+        items.push(
+          makeItem(d, "text", {
+            role: "system",
+            text: `[acp error] ${String(ev.message ?? "unknown error")}`,
+          }),
+        );
+        break;
+      }
+      case "session_init":
+      case "progress":
+      case "context_usage": {
+        items.push(makeItem(d, "lifecycle", { role: "system", meta: ev }));
+        break;
+      }
+      default: {
+        items.push(makeItem(d, "unknown", { role: "system", raw: ev }));
+        break;
+      }
+    }
+  }
+
+  return items;
+}
+
+function appendAcpChunk(
+  items: NormalizedItem[],
+  d: DecodedRecord,
+  kind: "text" | "reasoning",
+  role: LogRole,
+  text: string,
+  messageId: string | undefined,
+): void {
+  const previous = items.at(-1);
+  const previousMeta = isRecord(previous?.meta) ? previous.meta : undefined;
+  const previousMessageId =
+    typeof previousMeta?.messageId === "string" ? previousMeta.messageId : undefined;
+  if (previous?.kind === kind && previous.role === role && previousMessageId === messageId) {
+    previous.text = `${previous.text ?? ""}${text}`;
+    previous.coveredRecIds = [...(previous.coveredRecIds ?? []), d.rec.id];
+    return;
+  }
+  items.push(makeItem(d, kind, { role, text, meta: messageId ? { messageId } : undefined }));
+}
+
 export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
   const toolCallById = new Map<string, NormalizedItem>();
