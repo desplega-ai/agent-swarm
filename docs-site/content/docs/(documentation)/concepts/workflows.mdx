@@ -5,6 +5,8 @@ description: Run multi-step AI agent pipelines automatically — trigger workflo
 
 Agent Swarm includes a **workflow automation engine** that lets you define multi-step processes as directed acyclic graphs (DAGs). Workflows connect triggers, conditions, and actions into pipelines that execute automatically.
 
+Bundled workflows declare the parameters and integrations they require. If one is enabled before setup is complete, it reports `needs_setup` with exactly what is missing in the dashboard and refuses to trigger until setup is complete. Operator-created workflows remain unaffected unless they opt into the same `params`, `requiredParams`, and `requires` metadata.
+
 ## Core Concepts
 
 A workflow consists of:
@@ -111,6 +113,9 @@ The `next` field supports three formats:
 | `webhook` | HTTP POST to `/api/workflows/:id/trigger` with optional verification |
 | `schedule` | References a schedule by ID — the schedule creates workflow runs at configured times |
 | `manual` | Triggered via the `trigger-workflow` MCP tool or dashboard UI |
+| `event` | Starts from a named internal event; `slack.message` is currently supported |
+
+An event trigger uses `{ "type": "event", "eventName": "slack.message" }`. The Slack message payload becomes the workflow's `triggerData` and contains `channel`, `text`, `user`, `ts`, and `threadTs`; any configured `triggerSchema` is applied before a run starts.
 
 Workflow runs preserve the human who actually triggered them in `createdBy`. Authenticated HTTP and MCP triggers use the trusted caller context, schedules use their creator when present, and Kapso routing uses its resolved sender. Generic ownerless webhooks and creatorless schedules remain unattributed rather than inheriting the workflow author's identity. Retry, resume, and recovery paths rehydrate this requester from the run so agent tasks created later keep the same attribution.
 

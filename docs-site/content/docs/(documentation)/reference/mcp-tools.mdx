@@ -551,12 +551,14 @@ Create a new automation workflow with a DAG definition.
 
 Upstream outputs require an `inputs` mapping. Agent-task templates may interpolate declared aliases, but executable source uses a stricter security boundary: inline `script` source allows only `input`, `workflow`, `swarm`, and `run` values, while named `swarm-script` source is never workflow-interpolated. Pass trigger and upstream values through `config.args`; unresolved source tokens fail the node before execution.
 
+Workflow triggers can use `webhook`, `schedule`, `manual`, or the internal event form `{ "type": "event", "eventName": "slack.message" }`.
+
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `name` | string | Yes | Unique workflow name |
 | `description` | string | No | What the workflow does |
 | `definition` | object | Yes | DAG definition with `nodes` array |
-| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, or `manual` |
+| `triggers` | array | No | Trigger configs: `webhook`, `schedule`, `manual`, or `event` |
 | `cooldown` | object | No | Cooldown period: `{ hours, minutes, seconds }` |
 | `input` | object | No | Workflow-level input values (env vars, secrets, or literals) |
 | `key` | string | No | Logical asset namespace inherited by tasks created from this workflow |

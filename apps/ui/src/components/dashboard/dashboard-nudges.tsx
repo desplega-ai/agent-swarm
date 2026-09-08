@@ -29,7 +29,7 @@ export function DashboardNudges() {
   const showUpgrade =
     upgradeGate.currentVersion !== null && !upgradeGate.supported && !upgradeCard.dismissed;
   const showOrgName = configs !== undefined && !orgName && !orgNameCard.dismissed;
-  const waitingAutomations = status?.automations.filter(
+  const waitingAutomations = status?.automations?.filter(
     (automation) => automation.state === "needs_setup",
   );
   const showAutomations = (waitingAutomations?.length ?? 0) > 0;

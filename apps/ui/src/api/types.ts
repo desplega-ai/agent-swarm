@@ -2450,7 +2450,11 @@ export interface StatusResponse {
   setup: SetupMilestone[];
   activity: StatusActivity;
   agent_fs: StatusAgentFs;
-  automations: StatusAutomation[];
+  /**
+   * Added in v1.142.0 (#1330). Absent when the dashboard talks to an older API,
+   * so every consumer must treat it as optional.
+   */
+  automations?: StatusAutomation[];
   /** Phase 2: rolled-up health for the always-on header badge. */
   health: StatusHealth;
 }

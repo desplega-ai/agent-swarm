@@ -134,3 +134,37 @@ test("public page preserves authored styles after Tailwind loads", async ({
     expect(removed.status()).toBe(204);
   }
 });
+
+test("page viewer forwards its query params to the page body", async ({
+  page,
+  seed,
+  clean,
+}, testInfo) => {
+  test.skip(!seed, "remote run without seed");
+  const id = seed!.pages.public.id;
+
+  // `key` is SPA-reserved (password unlock) and must not reach the body;
+  // everything else rides along so a page can deep-link on its own params.
+  await page.goto(`/pages/${id}?target=pr-1373&status=failed&key=secret`);
+  const frame = page.locator("iframe[title='e2e public page']");
+  const forwarded = new RegExp(`/p/${id}\\?target=pr-1373&status=failed$`);
+  await expect(frame).toHaveAttribute("src", forwarded);
+  await expect(page.getByRole("link", { name: "Open", exact: true })).toHaveAttribute(
+    "href",
+    forwarded,
+  );
+  const screenshot = testInfo.outputPath("page-query-passthrough.png");
+  await page.screenshot({ path: screenshot });
+  await testInfo.attach("page-query-passthrough", { path: screenshot, contentType: "image/png" });
+
+  // Toggling full mode keeps the forwarded params on both the route and the body.
+  await page.getByRole("link", { name: "Full" }).click();
+  await expect(page).toHaveURL(`/pages/${id}?target=pr-1373&status=failed&mode=full`);
+  await expect(page.locator("iframe[title='e2e public page']")).toHaveAttribute("src", forwarded);
+  await expect(page.getByRole("link", { name: "Exit full" })).toHaveAttribute(
+    "href",
+    `/pages/${id}?target=pr-1373&status=failed`,
+  );
+
+  await clean.assertClean();
+});

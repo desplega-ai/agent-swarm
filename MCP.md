@@ -1171,7 +1171,7 @@ Create a new automation workflow. Key concepts: - Nodes are linked via 'next' (s
 | `key` | `unknown` | No | - | Logical namespace. Defaults to a shared/workflow:<id>/ resource key. |
 | `description` | `string` | No | - | Description of what this workflow does |
 | `definition` | `unknown` | Yes | - | The workflow definition with nodes (each node has id, type, config, and optional next/retry/validation) |
-| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality. |
+| `triggers` | `array` | No | - | Optional trigger configurations (webhook, schedule, event). Webhook verification formats: legacy omitted verification, hmac-sha256, timestamped-hmac-sha256, token-equality. |
 | `cooldown` | `unknown` | No | - | Optional cooldown configuration to prevent re-triggering too frequently |
 | `input` | `object` | No | - | Optional input values resolved at execution time (env vars like VAR_NAME, secrets secret.NAME, or literals) |
 | `dir` | `string` | No | - | Default working directory for all agent-task nodes (absolute path, e.g. /tmp/workspace) |
