@@ -78,6 +78,7 @@
     "sync:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts",
     "check:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts --check",
     "check:skill-sources": "bun scripts/check-skill-sources.ts",
+    "check:operator-skill": "bun scripts/check-operator-skill.ts",
     "build:script-types": "bun scripts/bundle-script-types.ts",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",

@@ -12,9 +12,10 @@ kubectl create secret generic agent-swarm-secrets \
 
 # 2. Install.
 helm install swarm oci://ghcr.io/desplega-ai/charts/agent-swarm \
-  --version 0.1.0 \
   --set auth.existingSecret=agent-swarm-secrets
 ```
+
+Omit `--version` for latest, or pin the release you want.
 
 That's a minimal install: API + lead + 1 coder pool, no agent-fs, no litestream. Override `pools` in your own values to size the swarm.
 
