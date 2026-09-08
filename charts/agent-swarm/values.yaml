@@ -115,6 +115,19 @@ api:
   replicas: 1
   port: 3013
   resources: {}
+  # -- Optional Kubernetes RuntimeClass for the API pod (the pod that
+  # actually spawns sandboxed script subprocesses — see
+  # src/utils/sandboxed-process.ts). `resources.limits` has no pids field
+  # (only cpu/memory/ephemeral-storage), so a per-pod pids ceiling
+  # independent of the sandbox's own `ulimit -u` isn't expressible from this
+  # chart's pod spec directly. Point this at a cluster-provided RuntimeClass
+  # (e.g. a `runc` handler with a tighter `pids.max` in its OCI runtime spec,
+  # or a gVisor/Kata RuntimeClass) to apply one. Empty = no runtimeClassName
+  # set, i.e. zero behavior change from before this field existed. See
+  # DEPLOYMENT.md's "Sandboxed-script pids containment" section for the
+  # cluster-wide alternative (kubelet `--pod-max-pids`) that also does not
+  # require this field.
+  runtimeClassName: ""
   storage:
     size: 10Gi
     # -- StorageClass used for the API PVC. Empty = cluster default.

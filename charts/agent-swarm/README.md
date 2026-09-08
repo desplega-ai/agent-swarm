@@ -153,6 +153,24 @@ litestream:
 
 Restore procedure: see the [litestream docs](https://litestream.io/guides/restore/).
 
+## Sandboxed-script pids containment
+
+The API pod (not a pool pod — see "What this chart deploys") spawns a subprocess sandbox for every script/workflow run (`src/utils/sandboxed-process.ts`). That sandbox's own `ulimit -u` (`JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS`, 4096) is a per-real-UID limit shared by the API process itself *and* every concurrently running sandboxed script in that pod — it is headroom for an interpreter's own thread-pool startup, not independent containment against a runaway or malicious script exhausting that shared budget ([issue #1332](https://github.com/desplega-ai/agent-swarm/issues/1332)).
+
+Kubernetes' native pod spec has no per-pod pids field — `resources.limits` only supports `cpu`/`memory`/`ephemeral-storage`. Two ways to add independent containment, neither of which this chart can fully own:
+
+1. **Cluster-wide (works today, no chart change needed):** set the kubelet flag `--pod-max-pids` on the nodes that run the API pod (GA since Kubernetes 1.20, feature gate `SupportPodPidsLimit`). This caps every pod on that node, not just the API pod — coordinate with whoever owns your node pools/kubelet config, since it's out of this chart's control.
+2. **Per-pod, via `api.runtimeClassName`:** point the API pod at a cluster-provided [RuntimeClass](https://kubernetes.io/docs/concepts/containers/runtime-class/) whose OCI runtime spec carries a tighter `pids.max` (a `runc` handler configured with one, or a gVisor/Kata RuntimeClass), e.g.:
+
+   ```yaml
+   api:
+     runtimeClassName: swarm-api-pids-limited
+   ```
+
+   Empty (the default) sets no `runtimeClassName` — zero behavior change from before this field existed. The RuntimeClass itself has to be provisioned by whoever administers the cluster; this chart only wires the pod spec to reference it.
+
+Docker Compose deployments get `pids_limit` directly on the `api` service — see the sizing arithmetic in `docker-compose.example.yml`'s `api.pids_limit` comment. That number was derived from process/thread measurements in a container, not validated against a live compose stack under real load; treat it as a documented starting point and tune it against your own traffic.
+
 ## Configuration
 
 See [`values.yaml`](./values.yaml) for the full configuration surface. Every field is documented inline.
