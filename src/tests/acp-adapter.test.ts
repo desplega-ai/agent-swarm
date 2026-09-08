@@ -68,7 +68,7 @@ describe("ACPAdapter", () => {
     );
   });
 
-  test("runs a configured ACP target and persists its sanitized diagnostic traffic", async () => {
+  test("redacts credential headers from arrays and nested maps before persistence", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -173,9 +173,40 @@ class FakeAgent {
         rawInput: {
           command: "true",
           headers: [
-            { name: "Authorization", value: "Bearer opaque-vendor-credential-123456" },
+            { name: "Authorization", value: "opaque-array-authorization-credential" },
+            {
+              name: "Proxy-Authorization",
+              value: "opaque-array-proxy-authorization-credential",
+            },
+            { name: "Cookie", value: "opaque-array-cookie-credential" },
+            { name: "Set-Cookie", value: "opaque-array-set-cookie-credential" },
+            { name: "WWW-Authenticate", value: "opaque-array-www-authenticate-credential" },
+            { name: "Proxy-Authenticate", value: "opaque-array-proxy-authenticate-credential" },
+            { name: "X-API-Key", value: "opaque-array-x-api-key-credential" },
+            { name: "API-Key", value: "opaque-array-api-key-credential" },
+            { name: "X-Auth-Token", value: "opaque-array-x-auth-token-credential" },
+            { name: "X-Access-Token", value: "opaque-array-x-access-token-credential" },
+            { name: "X-Session-Token", value: "opaque-array-x-session-token-credential" },
             { name: "X-Debug", value: "kept" },
           ],
+          metadata: {
+            nested: {
+              headers: {
+                AUTHORIZATION: "opaque-map-authorization-credential",
+                "proxy-authorization": "opaque-map-proxy-authorization-credential",
+                COOKIE: "opaque-map-cookie-credential",
+                "set-cookie": "opaque-map-set-cookie-credential",
+                "www-authenticate": "opaque-map-www-authenticate-credential",
+                "proxy-authenticate": "opaque-map-proxy-authenticate-credential",
+                "x-api-key": "opaque-map-x-api-key-credential",
+                "api-key": "opaque-map-api-key-credential",
+                "x-auth-token": "opaque-map-x-auth-token-credential",
+                "x-access-token": "opaque-map-x-access-token-credential",
+                "x-session-token": "opaque-map-x-session-token-credential",
+                "X-Debug-Map": "kept-too",
+              },
+            },
+          },
           diagnosticToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
           chunks: Array.from({ length: 20 }, () => "y".repeat(2_000)),
         },
@@ -270,12 +301,6 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       }),
     ).toBe(true);
     expect(rawLogs.every((content) => content.length <= 30_000)).toBe(true);
-    expect(rawLogs.join("\n")).not.toContain("Authorization");
-    expect(rawLogs.join("\n")).not.toContain("opaque-vendor-credential-123456");
-    expect(rawLogs.join("\n")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
-    expect(rawLogs.join("\n")).toContain("[REDACTED:github_token]");
-    expect(rawLogs.join("\n")).toContain("… [truncated]");
-    expect(rawLogs.join("\n")).not.toContain("x".repeat(30_001));
 
     initDb(":memory:");
     try {
@@ -291,6 +316,36 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
       expect(persisted).toHaveLength(rawLogs.length);
       expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
       expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
+      const persistedJson = persisted.map((entry) => entry.content).join("\n");
+      const credentialHeaderNames = [
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie",
+        "www-authenticate",
+        "proxy-authenticate",
+        "x-api-key",
+        "api-key",
+        "x-auth-token",
+        "x-access-token",
+        "x-session-token",
+      ];
+      for (const headerName of credentialHeaderNames) {
+        expect(persistedJson.toLowerCase()).not.toContain(headerName);
+      }
+      const credentialValues = credentialHeaderNames.flatMap((headerName) => [
+        `opaque-array-${headerName}-credential`,
+        `opaque-map-${headerName}-credential`,
+      ]);
+      for (const credentialValue of credentialValues) {
+        expect(persistedJson).not.toContain(credentialValue);
+      }
+      expect(persistedJson).toContain("X-Debug");
+      expect(persistedJson).toContain("X-Debug-Map");
+      expect(persistedJson).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+      expect(persistedJson).toContain("[REDACTED:github_token]");
+      expect(persistedJson).toContain("… [truncated]");
+      expect(persistedJson).not.toContain("x".repeat(30_001));
       const transcript = normalizeSessionLogs(persisted);
       expect(transcript.items.some((item) => item.kind === "unknown")).toBe(false);
       expect(

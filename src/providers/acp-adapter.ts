@@ -34,18 +34,35 @@ type EventListener = (event: ProviderEvent) => void;
 const ACP_LOG_MAX_CHARS = 30_000;
 const ACP_LOG_FIELD_MAX_CHARS = 12_000;
 const ACP_LOG_PREVIEW_MAX_CHARS = 10_000;
+const CREDENTIAL_HEADER_NAMES = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "set-cookie",
+  "www-authenticate",
+  "proxy-authenticate",
+  "x-api-key",
+  "api-key",
+  "x-auth-token",
+  "x-access-token",
+  "x-session-token",
+]);
 
-function isAuthorizationHeader(value: unknown): boolean {
+function isCredentialHeaderName(value: string): boolean {
+  return CREDENTIAL_HEADER_NAMES.has(value.trim().toLowerCase());
+}
+
+function isCredentialHeader(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const name = (value as { name?: unknown }).name;
-  return typeof name === "string" && name.toLowerCase() === "authorization";
+  return typeof name === "string" && isCredentialHeaderName(name);
 }
 
 function serializeAcpLog(value: unknown): string {
   const serialized = JSON.stringify(value, (key, child) => {
-    if (key.toLowerCase() === "authorization") return undefined;
+    if (isCredentialHeaderName(key)) return undefined;
     if (key.toLowerCase() === "headers" && Array.isArray(child)) {
-      return child.filter((header) => !isAuthorizationHeader(header));
+      return child.filter((header) => !isCredentialHeader(header));
     }
     if (typeof child !== "string") return child;
     const scrubbed = scrubSecrets(child);
