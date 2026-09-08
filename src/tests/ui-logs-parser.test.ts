@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { normalizeSessionLogs as normalizeEvalLogs } from "../../apps/evals/ui/src/logs-parser";
 import {
   extractSubagentRuns,
   normalizeSessionLogs,
@@ -1045,5 +1046,52 @@ describe("ui logs parser", () => {
         content: [{ type: "text", text: "Pi response" }],
       }),
     );
+  });
+});
+
+// Exercise both deployed viewers with the exact production advisory and controls.
+describe.each([
+  ["dashboard", normalizeSessionLogs],
+  ["evals", normalizeEvalLogs],
+] as const)("%s Codex advisory classification", (_viewer, normalize) => {
+  const advisory =
+    "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+
+  test.each([
+    false,
+    true,
+  ])("keeps the advisory visible as a notice (after output: %s)", (afterOutput) => {
+    const rows = afterOutput
+      ? [
+          log("text", "codex", 1, {
+            type: "item.completed",
+            item: { type: "agent_message", text: "Working" },
+          }),
+        ]
+      : [];
+    rows.push(
+      log("notice", "codex", 2, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message: advisory },
+      }),
+    );
+    const item = normalize(rows).items.at(-1);
+    expect(item?.kind).toBe("lifecycle");
+    expect(item?.meta).toMatchObject({ type: "codex_notice", output: advisory, isError: false });
+  });
+
+  test.each([
+    "Authentication failed",
+    `${advisory} Fatal startup failure.`,
+    undefined,
+  ])("preserves unknown error messages: %s", (message) => {
+    const item = normalize([
+      log("error", "codex", 1, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message },
+      }),
+    ]).items[0];
+    expect(item?.kind).toBe("result");
+    expect(item?.meta).toMatchObject({ type: "codex_error", isError: true });
   });
 });
