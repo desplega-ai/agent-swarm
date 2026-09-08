@@ -571,7 +571,9 @@ Composed by `getBasePrompt(args)` in [`src/prompts/base-prompt.ts`](https://gith
 
 Inject-when-edited: IDENTITY.md and CLAUDE.md are compared (whitespace-normalized) with the generators in [`src/prompts/defaults.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/prompts/defaults.ts), current and legacy. An unedited default is skipped. SOUL.md is always injected. TOOLS.md is never injected; the workspace block points at it.
 
-Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me`. If missing, defaults come from the template, then from the generators in `src/prompts/defaults.ts`, then pushed back to the server.
+Identity sources (`soulMd`, `identityMd`, `claudeMd`, `toolsMd`, `heartbeatMd`) are fetched from `GET /me`. If missing, defaults come from the template, then from the generators in `src/prompts/defaults.ts`, then pushed back to the server. At each polled task, the runner reads `/me` again before building the provider's system prompt. This read has a two-second deadline covering headers and body; unavailable or malformed responses preserve the last good identity. Omitted fields preserve cached values, while empty strings clear them.
+
+Per-task identity refresh only updates memory. It does not rewrite workspace files or profile-sync baselines, which avoids overwriting edits made by concurrent local tasks. Boot materialization and the existing FS → DB sync lifecycle continue to own those files. In particular, TOOLS.md and HEARTBEAT.md are not injected prompt sections, and remote changes to those workspace files are outside this refresh's scope. One full `/me` read per task keeps this compatible with existing servers without adding a signature endpoint.
 
 Reference material (script authoring contract, scheduling, Slack rules, memory triage, code-quality checks, heartbeat runbook) lives in the seeded skills `swarm-scripts`, `scheduling`, `slack-interaction`, `memory`, `code-quality`, and `heartbeat-runbook`. The prompt carries the branch and a pointer. Render every variant with `bun scripts/dump-prompt-variants.ts [outDir]`.
 

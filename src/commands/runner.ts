@@ -72,6 +72,7 @@ import {
   EX_CONFIG,
   retryBootStep,
 } from "./credential-wait.ts";
+import { refreshIdentityIfChanged } from "./identity-refresh.ts";
 import {
   contentSha256,
   prependProfileSyncRejectionBanner,
@@ -6167,6 +6168,33 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
               `[${role}] Skills changed — refreshing system prompt (${agentSkillsSummary.length} skills)`,
             );
           }
+        }
+
+        // Refresh prompt inputs per task without rewriting files shared with
+        // active sessions. A failed or bounded-out /me read keeps the cache.
+        const identityResult = await refreshIdentityIfChanged(
+          { apiUrl, apiKey, agentId, role },
+          {
+            soulMd: agentSoulMd,
+            identityMd: agentIdentityMd,
+            toolsMd: agentToolsMd,
+            claudeMd: agentClaudeMd,
+            heartbeatMd: agentHeartbeatMd,
+            name: agentProfileName,
+            description: agentDescription,
+          },
+        );
+        if (identityResult.changed) {
+          agentSoulMd = identityResult.fields.soulMd;
+          agentIdentityMd = identityResult.fields.identityMd;
+          agentToolsMd = identityResult.fields.toolsMd;
+          agentClaudeMd = identityResult.fields.claudeMd;
+          agentHeartbeatMd = identityResult.fields.heartbeatMd;
+          agentProfileName = identityResult.fields.name;
+          agentDescription = identityResult.fields.description;
+          console.log(
+            `[${role}] Identity changed — refreshing system prompt (${identityResult.changedFields.join(", ")})`,
+          );
         }
 
         // Rebuild system prompt with per-task repo context
