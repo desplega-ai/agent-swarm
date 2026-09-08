@@ -466,10 +466,11 @@ export async function applyConfiguredOptions(
 export function sanitizeAcpConfigOptions(options: SessionConfigOption[]): AcpSessionConfigOption[] {
   return options.map((option) => {
     const common = {
-      id: option.id,
-      name: option.name,
-      description: option.description,
-      category: option.category,
+      id: scrubSecrets(option.id),
+      name: scrubSecrets(option.name),
+      description:
+        option.description == null ? option.description : scrubSecrets(option.description),
+      category: option.category == null ? option.category : scrubSecrets(option.category),
     };
     if (option.type === "boolean") {
       return { ...common, type: "boolean" as const, currentValue: option.currentValue };
@@ -477,19 +478,24 @@ export function sanitizeAcpConfigOptions(options: SessionConfigOption[]): AcpSes
     return {
       ...common,
       type: "select" as const,
-      currentValue: option.currentValue,
+      currentValue: scrubSecrets(option.currentValue),
       options: option.options.map((entry) =>
         "group" in entry
           ? {
-              group: entry.group,
-              name: entry.name,
+              group: scrubSecrets(entry.group),
+              name: entry.name == null ? entry.name : scrubSecrets(entry.name),
               options: entry.options.map(({ value, name, description }) => ({
-                value,
-                name,
-                description,
+                value: scrubSecrets(value),
+                name: scrubSecrets(name),
+                description: description == null ? description : scrubSecrets(description),
               })),
             }
-          : { value: entry.value, name: entry.name, description: entry.description },
+          : {
+              value: scrubSecrets(entry.value),
+              name: scrubSecrets(entry.name),
+              description:
+                entry.description == null ? entry.description : scrubSecrets(entry.description),
+            },
       ),
     };
   });

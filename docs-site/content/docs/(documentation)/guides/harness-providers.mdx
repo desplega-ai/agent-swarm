@@ -125,6 +125,8 @@ The runner consumes these events (not the provider's native ones) to post progre
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
 | [`src/providers/acp-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/acp-adapter.ts) | `Bun.spawn` of the selected OpenCode preset or custom target, driven over stdio with `@agentclientprotocol/sdk`'s ndjson `ClientSideConnection` | None swarm-side for the model provider — the ACP target owns its own model auth. It receives the worker's swarm API key as the swarm MCP bearer; a custom `ACP_TARGET_COMMAND` is operator-configured and trusted with that credential |
 
+ACP config-option metadata is scrubbed with `scrubSecrets` before session events are emitted, including strings in grouped choices. This protects both persisted dashboard metadata and diagnostic logs while preserving non-secret model IDs, descriptions, and boolean values.
+
 ### Local subprocess teardown
 
 Local CLI adapters start each harness in a dedicated POSIX process group. Normal completion, `abort()`, runner shutdown, and fatal runner errors terminate the whole group with SIGTERM, followed by SIGKILL after a short grace period. This also removes MCP servers and other descendants that outlive the harness CLI; Windows keeps direct-PID termination because it has no POSIX process groups.

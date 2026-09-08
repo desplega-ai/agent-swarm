@@ -458,6 +458,63 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         },
       ]),
     ).toEqual([{ type: "boolean", id: "flag", name: "Flag", currentValue: true }]);
+
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    const redacted = "[REDACTED:github_token]";
+    const sanitized = sanitizeAcpConfigOptions([
+      {
+        type: "select",
+        id: "model",
+        name: secret,
+        description: "Choose a model",
+        category: "model",
+        currentValue: secret,
+        options: [
+          { value: secret, name: secret, description: secret },
+          { value: "openai/gpt-5", name: "GPT-5", description: "A plain model" },
+          {
+            group: secret,
+            name: secret,
+            options: [{ value: secret, name: secret, description: secret }],
+          },
+        ],
+      },
+      {
+        type: "boolean",
+        id: secret,
+        name: secret,
+        description: secret,
+        category: secret,
+        currentValue: false,
+      },
+    ]);
+    expect(sanitized).toEqual([
+      {
+        type: "select",
+        id: "model",
+        name: redacted,
+        description: "Choose a model",
+        category: "model",
+        currentValue: redacted,
+        options: [
+          { value: redacted, name: redacted, description: redacted },
+          { value: "openai/gpt-5", name: "GPT-5", description: "A plain model" },
+          {
+            group: redacted,
+            name: redacted,
+            options: [{ value: redacted, name: redacted, description: redacted }],
+          },
+        ],
+      },
+      {
+        type: "boolean",
+        id: redacted,
+        name: redacted,
+        description: redacted,
+        category: redacted,
+        currentValue: false,
+      },
+    ]);
   });
 
   test("toAcpMcpServers converts installed stdio and http/sse servers to ACP's array shape", () => {
