@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
@@ -611,35 +611,51 @@ describe("db-query bounded execution (Fix 1)", () => {
     expect(body.message).toMatch(/150ms budget/);
   });
 
-  // Review round 4 (desplega-bot, pullrequestreview-4975616777): the
-  // concurrency cap was also collapsed into the generic 400. Saturate the
-  // cap with slots that never release (SELECT 1 calls made without an
-  // `await` between them so the acquire checks all run in the same tick —
-  // same technique as test O), then confirm the one HTTP call that lands on
-  // top gets 429 with a stable code and a Retry-After header instead of 400.
+  // Hold completion of real query children until the HTTP assertion finishes.
+  // SELECT 1 can finish before the HTTP request arrives and release the slots.
   test("caps saturation via the HTTP route returns 429 with a stable code and Retry-After", async () => {
+    const release = Promise.withResolvers<void>();
+    const childExits: Promise<number>[] = [];
+    const originalSpawn = Bun.spawn;
+    const spawnSpy = spyOn(Bun, "spawn").mockImplementation(((
+      ...args: Parameters<typeof Bun.spawn>
+    ) => {
+      const child = originalSpawn(...args);
+      const exited = child.exited;
+      childExits.push(exited);
+      Object.defineProperty(child, "exited", {
+        value: release.promise.then(() => exited),
+      });
+      return child;
+    }) as typeof Bun.spawn);
     const fillers = Array.from({ length: getDbQueryConcurrencyCap() }, () =>
       executeReadOnlyQueryBounded("SELECT 1", [], 10_000),
     );
+    spawnSpy.mockRestore();
 
-    const { status, headers, body } = await withDbQueryHttpServer(async (_post) => {
-      const res = await fetch(`http://localhost:${HTTP_TEST_PORT}/api/db-query`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: "SELECT 1", params: [] }),
+    try {
+      await Promise.all(childExits);
+      const { status, headers, body } = await withDbQueryHttpServer(async (_post) => {
+        const res = await fetch(`http://localhost:${HTTP_TEST_PORT}/api/db-query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sql: "SELECT 1", params: [] }),
+        });
+        return {
+          status: res.status,
+          headers: res.headers,
+          body: (await res.json()) as DbQueryHttpBody,
+        };
       });
-      return {
-        status: res.status,
-        headers: res.headers,
-        body: (await res.json()) as DbQueryHttpBody,
-      };
-    });
 
-    expect(status).toBe(429);
-    expect(body.error).toBe("db_query_concurrency_cap");
-    expect(headers.get("retry-after")).not.toBeNull();
-
-    await Promise.allSettled(fillers);
+      expect(status).toBe(429);
+      expect(body.error).toBe("db_query_concurrency_cap");
+      expect(headers.get("retry-after")).not.toBeNull();
+    } finally {
+      spawnSpy.mockRestore();
+      release.resolve();
+      await Promise.allSettled(fillers);
+    }
   });
 
   // L: DB_QUERY_HTTP_MAX_ROWS actually reaches the HTTP route's row cap.
