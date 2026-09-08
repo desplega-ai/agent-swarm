@@ -69,6 +69,35 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("RBAC_AUDIT_RETENTION_DAYS", "30")).toBeNull();
   });
 
+  test("OPENROUTER_BASE_URL accepts any http(s) gateway and blank, rejects broken URLs", () => {
+    // Vendor-neutral: the swarm redirects its OpenRouter provider at whatever
+    // OpenAI-compatible gateway the operator names.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")).toBeNull();
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://api.orcarouter.ai/v1")).toBeNull();
+    expect(
+      validateConfigValue("OPENROUTER_BASE_URL", "http://gateway.internal:8080/v1"),
+    ).toBeNull();
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "  https://gw.example.com/v1  ")).toBeNull();
+    // Blank is how an operator reverts to openrouter.ai without deleting the row.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "")).toBeNull();
+
+    // Call sites append `/models` and `/chat/completions`, so a query string or
+    // fragment would build a nonsense URL.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://gw.example.com/v1?key=x")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://gw.example.com/v1#a")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "openrouter.ai/api/v1")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "ftp://gw.example.com/v1")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", 42)).toContain("Invalid OPENROUTER_BASE_URL");
+  });
+
   test("WORKER_API_READY_TIMEOUT_SECONDS requires a positive integer", () => {
     expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "90")).toBeNull();
     expect(validateConfigValue("WORKER_API_READY_TIMEOUT_SECONDS", "1")).toBeNull();
