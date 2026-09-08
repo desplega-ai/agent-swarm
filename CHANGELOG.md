@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.142.0] - 2026-09-08
+
+### Added
+- **Fresh self-hosted installs bootstrap bundled automations safely** (#1330), with shared preflight checks for required parameters and integrations, `needs_setup` status in the dashboard, and fail-forward dispatch until setup is complete.
+- **The dashboard configures Agent Client Protocol target presets** (#1368), including discovered presets, custom commands and arguments, environment overrides, and editable per-agent runtime settings.
+- **A Playwright dashboard E2E suite publishes durable evidence and tracker results** (#1364, #1373), with seeded isolated stacks, nightly coverage, agent-fs artifacts, PR summaries, and ingest validation.
+
+### Changed
+- **Durable script workflows broker swarm capabilities outside the user-code realm** (#1304), keeping authenticated host operations behind a bounded capability bridge while workflow code runs in a credential-free guest.
+
+### Fixed
+- **Provider and script subprocess trees terminate as process groups** (#1371), preventing grandchildren from surviving cancellation, timeout, or worker shutdown.
+- **Codex reports the resolved OAuth pool slot as its primary credential** (#1370), so runtime readiness and dashboard status reflect the credential actually selected for the session.
+
 ## [1.141.0] - 2026-09-07
 
 ### Added
