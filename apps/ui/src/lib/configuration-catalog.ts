@@ -279,7 +279,7 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     id: "harness",
     title: "Harness & tools",
     description:
-      "The tool surface exposed to workers. Provider and model selection are configured per agent, not here — anything set globally would become the default for EVERY agent, so those knobs are deliberately left to each agent's own configuration.",
+      "The tool surface exposed to workers, plus the model gateway they route through. Provider and model selection are configured per agent, not here — anything set globally would become the default for EVERY agent, so those knobs are deliberately left to each agent's own configuration. The gateway base URL is the exception: it is a deployment-wide routing endpoint, not a model choice.",
     icon: Cpu,
     entries: [
       {
@@ -307,6 +307,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
           "Comma-separated list of MCP capability groups exposed to workers (core, tasks, scripts, memory, workflows, …). Leave unset for the standard default surface; there is no wildcard value.",
         kind: "string",
         placeholder: "core,tasks,scripts,memory,workflows",
+      },
+      {
+        key: "OPENROUTER_BASE_URL",
+        label: "OpenAI-compatible model gateway",
+        description:
+          "Base URL every OpenRouter consumer calls — the OpenCode and pi-mono harness sessions, model refreshes, and the internal summarizers. Point it at any gateway that serves OpenRouter-compatible GET /models and POST /chat/completions (OpenRouter itself, OrcaRouter, or a self-hosted proxy) to route model traffic through it. This is a deployment-wide routing endpoint, not a per-agent model choice: it changes where requests go, not which model is selected. The gateway's credential stays in OPENROUTER_API_KEY on the Secrets page. Leave blank for openrouter.ai. Takes effect on each worker's next task; no restart.",
+        kind: "string",
+        defaultValue: "https://openrouter.ai/api/v1",
+        placeholder: "https://openrouter.ai/api/v1",
+        docsUrl: `${DOCS}guides/provider-auth/model-gateways`,
       },
       {
         key: "WORKER_API_READY_TIMEOUT_SECONDS",

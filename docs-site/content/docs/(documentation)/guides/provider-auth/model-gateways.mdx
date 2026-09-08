@@ -1,6 +1,6 @@
 ---
 title: Model Gateways
-description: Route Agent Swarm harnesses through OpenRouter, Ramp Router, or an OpenRouter-compatible proxy
+description: Route Agent Swarm harnesses through OpenRouter, OrcaRouter, or any OpenAI-compatible gateway
 ---
 
 Agent Swarm's harness and its model gateway are separate choices. `HARNESS_PROVIDER` selects the coding agent that runs the task. Gateway settings tell that harness where to send model requests.
@@ -13,9 +13,12 @@ This page covers the stock worker image. A gateway that an upstream CLI supports
 | ------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------- | ---------------- | ---------------- |
 | **OpenRouter**                  | Not yet supported: the worker rejects `ANTHROPIC_AUTH_TOKEN` before Claude Code starts | Custom image/config and a swarm-recognized Codex credential required | **Supported** with environment variables                      | **Supported** with environment variables                      | Not configurable | Not configurable |
 | **Ramp Router**                 | Not yet supported: same `ANTHROPIC_AUTH_TOKEN` credential gap                          | Custom image/config and a swarm-recognized Codex credential required | Not yet supported: Ramp's provider plugin is not in the image | Not yet supported: Ramp's provider plugin is not in the image | Not configurable | Not configurable |
-| **OpenRouter-compatible proxy** | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
+| **OrcaRouter**                  | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
+| **OpenAI-compatible gateway**   | Not supported by `OPENROUTER_BASE_URL`                                                 | Not supported by `OPENROUTER_BASE_URL`                               | **Supported**                                                 | **Supported**                                                 | Not configurable | Not configurable |
 
 **Supported** means the stock image works with environment or swarm-config values. “Custom image” means the upstream harness can use the gateway, but the stock Agent Swarm image does not install the required provider configuration or plugin.
+
+There is no per-vendor gateway adapter in Agent Swarm, and adding one is not required. OpenCode and pi-mono reach every gateway through the same seam: `OPENROUTER_BASE_URL` redirects the built-in OpenRouter provider at an arbitrary chat-completions endpoint. OrcaRouter is documented below as a worked example of that generic path, not as a special case.
 
 <Callout type="warn">
   `OPENROUTER_BASE_URL` is not a universal OpenAI base-URL switch. It only
@@ -106,41 +109,88 @@ An experimental derivative image therefore needs both the complete provider conf
 
 See OpenRouter's [Codex CLI setup](https://openrouter.ai/blog/tutorials/codex-cli-openrouter/) for the upstream configuration. This path has not been smoke-tested with the stock Agent Swarm worker.
 
-## OpenRouter-compatible proxies
+## OpenAI-compatible gateways
 
-`OPENROUTER_BASE_URL` redirects the OpenRouter provider used by OpenCode and pi-mono. It also redirects other OpenRouter consumers in the deployment, including model refreshes and internal summarizers.
+`OPENROUTER_BASE_URL` redirects the OpenRouter provider used by OpenCode and pi-mono. It also redirects other OpenRouter consumers in the deployment, including model refreshes and internal summarizers. The variable name says OpenRouter, but the target does not have to be openrouter.ai — any gateway meeting the contract below works, and no swarm code path is vendor-specific.
 
-The target must accept the OpenRouter key as a bearer credential and provide, at minimum:
+The target must accept `OPENROUTER_API_KEY` as a bearer credential and provide, at minimum:
 
 - `GET <base-url>/models` for model discovery
 - `POST <base-url>/chat/completions` for OpenRouter-compatible inference and swarm summarizers
-- Model IDs compatible with the OpenRouter catalog entries selected through `MODEL_OVERRIDE`
+- Model IDs the gateway resolves for the value you select through `MODEL_OVERRIDE`
 
-Set the variable on both API and worker processes if every OpenRouter call must use the proxy.
+Set the variable on both API and worker processes if every OpenRouter call must use the gateway.
 
-### OpenCode through a proxy
+### Setting it from the dashboard
+
+`OPENROUTER_BASE_URL` is on Settings → Configuration under **Harness & tools**. A saved value is a global `swarm_config` row and reaches both sides without a container restart:
+
+- **API server** — the debounced global-config reload re-injects the row over the server process environment, so model refreshes and internal summarizers pick it up within seconds.
+- **Workers** — each worker fetches `GET /api/config/resolved` before it starts a task and passes the merged environment into the harness adapter, so the next task on that worker uses the new gateway.
+
+A task already running keeps the gateway it started with. The gateway credential itself stays out of this page: put `OPENROUTER_API_KEY` on the Secrets/Integrations pages or in the worker environment.
+
+### OpenCode through a gateway
 
 ```bash
 HARNESS_PROVIDER=opencode
-OPENROUTER_API_KEY=your-proxy-credential
+OPENROUTER_API_KEY=your-gateway-credential
 OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/qwen/qwen3-coder-flash
 ```
 
-The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config.
+The adapter writes `provider.openrouter.options.baseURL` into its per-task OpenCode config. It also mirrors the resolved value into the spawned OpenCode process environment so the bundled summarize plugin uses the same gateway instead of calling openrouter.ai directly.
 
-### pi-mono through a proxy
+### pi-mono through a gateway
 
 ```bash
 HARNESS_PROVIDER=pi
-OPENROUTER_API_KEY=your-proxy-credential
+OPENROUTER_API_KEY=your-gateway-credential
 OPENROUTER_BASE_URL=https://gateway.example.com/v1
 MODEL_OVERRIDE=openrouter/moonshotai/kimi-k2.5
 ```
 
-The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads.
+The adapter writes the override to pi-mono's `~/.pi/agent/models.json` before its per-session model runtime loads. Clearing the variable reverts that file to whatever it held before the swarm wrote the override.
 
 `OPENROUTER_BASE_URL` does not affect Claude Code, Codex, Devin, or Claude Managed Agents. It also cannot adapt a Responses-only gateway into the chat-completions shape expected by these OpenRouter-backed paths.
+
+## OrcaRouter (api.orcarouter.ai)
+
+OrcaRouter is an OpenAI-compatible gateway, so it needs no new provider, adapter, or code path in Agent Swarm. It is configured exactly like any other gateway in the previous section: point `OPENROUTER_BASE_URL` at it and use an OrcaRouter key as `OPENROUTER_API_KEY`.
+
+Its published contract matches the requirements above. Per OrcaRouter's [documentation](https://docs.orcarouter.ai/): the base URL is `https://api.orcarouter.ai/v1` and must include `/v1`; authentication is a bearer API key (`sk-orca-…`); [`GET /v1/models`](https://docs.orcarouter.ai/getting-started/models) returns the catalog for the authenticated key; and [`POST /v1/chat/completions`](https://docs.orcarouter.ai/native-formats/openai-compat) serves OpenAI-compatible Chat Completions. Model IDs are provider-prefixed (`openai/`, `anthropic/`, `google/`, `deepseek/`, `grok/`, and others).
+
+### OpenCode through OrcaRouter
+
+```bash
+HARNESS_PROVIDER=opencode
+OPENROUTER_API_KEY=sk-orca-...
+OPENROUTER_BASE_URL=https://api.orcarouter.ai/v1
+MODEL_OVERRIDE=openrouter/anthropic/claude-opus-4.7
+```
+
+### pi-mono through OrcaRouter
+
+```bash
+HARNESS_PROVIDER=pi
+OPENROUTER_API_KEY=sk-orca-...
+OPENROUTER_BASE_URL=https://api.orcarouter.ai/v1
+MODEL_OVERRIDE=openrouter/anthropic/claude-opus-4.7
+```
+
+Two details differ from OrcaRouter's own OpenCode and pi guides, which configure a dedicated `orcarouter` provider entry in `opencode.json` / `models.json`:
+
+- **Keep the `openrouter/` harness prefix.** Agent Swarm reuses the harness's built-in OpenRouter provider and redirects it, rather than registering a second provider. `MODEL_OVERRIDE` is therefore `openrouter/` followed by the full OrcaRouter model ID — including that ID's own provider prefix. OrcaRouter's routing alias becomes `openrouter/orcarouter/auto`.
+- **Do not hand-edit the harness config files.** Both adapters generate their gateway configuration per task from `OPENROUTER_BASE_URL`; a manual `opencode.json` or `~/.pi/agent/models.json` provider block is not the supported path here and the pi-mono adapter actively manages its own override in that file.
+
+<Callout type="info">
+  These OrcaRouter values are taken from its public documentation
+  ([docs.orcarouter.ai](https://docs.orcarouter.ai/), read 2026-09-08). They have
+  not been authenticated end to end from an Agent Swarm worker, because no
+  OrcaRouter key was available during verification. What is verified is the swarm
+  side: `OPENROUTER_BASE_URL` reaches both the OpenCode and pi-mono adapters, and
+  a chat-completions gateway is the shape they expect.
+</Callout>
 
 ## Ramp Router (router.com)
 
@@ -178,7 +228,7 @@ Do not point `OPENROUTER_BASE_URL` at Ramp Router. Ramp's OpenCode and Pi integr
 
 Devin and Claude Managed Agents execute sessions in their vendors' clouds. Their adapters call vendor-managed session APIs directly and expose no model base-URL override. `OPENROUTER_BASE_URL`, `ANTHROPIC_BASE_URL`, and Codex provider files do not redirect them.
 
-If gateway routing is mandatory, choose a supported local harness. Today that means OpenCode or pi-mono with OpenRouter or an OpenRouter-compatible proxy.
+If gateway routing is mandatory, choose a supported local harness. Today that means OpenCode or pi-mono with OpenRouter or another OpenAI-compatible gateway.
 
 ## Troubleshooting
 
@@ -192,12 +242,17 @@ Confirm the gateway supports `POST /chat/completions`, not only `POST /responses
 
 ### The model is not found
 
-OpenCode and pi-mono require the `openrouter/` harness prefix before the OpenRouter catalog ID. For example:
+OpenCode and pi-mono require the `openrouter/` harness prefix before the gateway's catalog ID, whichever gateway is behind `OPENROUTER_BASE_URL`. The prefix selects the harness provider; everything after it is passed through. For example:
 
 ```
-OpenRouter ID:  qwen/qwen3-coder-flash
-MODEL_OVERRIDE: openrouter/qwen/qwen3-coder-flash
+OpenRouter ID:   qwen/qwen3-coder-flash
+MODEL_OVERRIDE:  openrouter/qwen/qwen3-coder-flash
+
+OrcaRouter ID:   anthropic/claude-opus-4.7
+MODEL_OVERRIDE:  openrouter/anthropic/claude-opus-4.7
 ```
+
+Do not strip a gateway ID's own provider prefix to avoid the doubled-looking path — the gateway receives only the part after `openrouter/`, so removing it sends an ID the gateway does not know.
 
 Ramp model IDs are key-specific. Discover them with Ramp's configuration flow instead of reusing an OpenRouter slug.
 

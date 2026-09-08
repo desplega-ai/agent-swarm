@@ -27,9 +27,23 @@ function toolResult(update: ToolCallUpdate): unknown {
 export function translateAcpSessionUpdate(update: SessionUpdate): ProviderEvent[] {
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
-      return [{ type: "message", role: "assistant", content: contentToText(update.content) }];
+      return [
+        {
+          type: "message",
+          role: "assistant",
+          content: contentToText(update.content),
+          messageId: update.messageId ?? undefined,
+        },
+      ];
     case "user_message_chunk":
-      return [{ type: "message", role: "user", content: contentToText(update.content) }];
+      return [
+        {
+          type: "message",
+          role: "user",
+          content: contentToText(update.content),
+          messageId: update.messageId ?? undefined,
+        },
+      ];
     case "agent_thought_chunk":
       return [
         {

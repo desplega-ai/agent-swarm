@@ -55,8 +55,10 @@ It writes `./e2e-results.json` by default.
 Every run also boots an in-process `@desplega.ai/slack-mock` before the API and starts the server with `NODE_ENV=test`,
 so Bolt connects to the mock over Socket Mode (the socket-mode guard refuses `NODE_ENV=development`).
 Scenarios drive that Slack workspace through `ctx.slack`.
-The Slack scenarios are `slack-mention`, `slack-follow-up`, and `slack-failed-task`.
-They cover a mention, a thread follow-up, and a failed task outcome.
+The Slack scenarios are `slack-mention`, `slack-follow-up`, `slack-failed-task`, and
+`slack-relay-restart`. They cover a mention, a thread follow-up, a failed task outcome,
+and exactly-once terminal relay delivery across an API-process restart. The restart
+reuses the run's database, port, API key, secrets, agent-fs directory, and Slack mock.
 `ctx.db` is a read-only SQLite handle on the SUT database for assertions only; seed every fixture through the API.
 
 ```bash
@@ -64,6 +66,7 @@ bun run e2e
 bun run e2e --list
 bun run e2e --only health,auth
 bun run e2e --only slack-mention
+bun run e2e --only slack-relay-restart
 bun run e2e --skip workflow-script-node
 bun run e2e --json /tmp/e2e.json --summary-md /tmp/e2e.md
 bun run e2e --min-route-coverage 4 --min-tool-coverage 3

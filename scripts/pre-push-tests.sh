@@ -12,9 +12,17 @@
 #
 # `--changed` must compare against the merge-base, not origin/main itself, or
 # every upstream commit counts as a change. See LOCAL_TESTING.md.
+# Keep the explicit 10s timeout in parity with merge-gate.yml and ci.yml;
+# bunfig.toml intentionally sets no global test timeout.
 set -euo pipefail
 
 FULL_RUN_PATHS='^(src/be/migrations/|templates/|bunfig\.toml$|bun\.lock)'
+
+run_full_suite() {
+  # Mirror merge-gate's shard boundaries so local load matches CI.
+  bun run test:root -- --timeout 10000 --parallel=4 --shard=1/2
+  exec bun run test:root -- --timeout 10000 --parallel=4 --shard=2/2
+}
 
 probe_file=$(mktemp)
 trap 'rm -f "$probe_file"' EXIT
@@ -57,12 +65,12 @@ fi
 
 if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
   echo "[pre-push-tests] origin/main not found; running the full suite"
-  exec bun run test:root -- --parallel=4
+  run_full_suite
 fi
 
 if git diff --name-only "$base" HEAD | grep -Eq "$FULL_RUN_PATHS"; then
   echo "[pre-push-tests] migrations/templates/bunfig/bun.lock changed; running the full suite"
-  exec bun run test:root -- --parallel=4
+  run_full_suite
 fi
 
 if git diff --name-only "$base" HEAD | grep -qx 'package.json' &&
@@ -71,8 +79,8 @@ if git diff --name-only "$base" HEAD | grep -qx 'package.json' &&
     grep -vE '^(\+\+\+|---)' |
     grep -qvE '^[+-][[:space:]]*"version":'; then
   echo "[pre-push-tests] package.json changed beyond version; running the full suite"
-  exec bun run test:root -- --parallel=4
+  run_full_suite
 fi
 
 echo "[pre-push-tests] running tests affected since $base"
-exec bun run test:root -- --parallel=4 --changed="$base"
+exec bun run test:root -- --timeout 10000 --parallel=4 --changed="$base"

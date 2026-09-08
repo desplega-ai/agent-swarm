@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { normalizeSessionLogs as normalizeEvalLogs } from "../../apps/evals/ui/src/logs-parser";
 import {
   extractSubagentRuns,
   normalizeSessionLogs,
@@ -402,6 +403,136 @@ describe("ui logs parser", () => {
         text: "[stderr] [opencode] skill resolver warning",
       }),
     ]);
+  });
+
+  test("parses ACP normalized traffic once while retaining raw session updates for diagnostics", () => {
+    const logs = [
+      log("raw-message", "acp", 1, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Hello from ACP" },
+          messageId: "message-1",
+        },
+      }),
+      log("message", "acp", 2, {
+        type: "message",
+        role: "assistant",
+        content: "Hello ",
+        messageId: "message-1",
+      }),
+      log("message-2", "acp", 3, {
+        type: "message",
+        role: "assistant",
+        content: "from ACP",
+        messageId: "message-1",
+      }),
+      log("message-3", "acp", 4, {
+        type: "message",
+        role: "assistant",
+        content: "Second response",
+        messageId: "message-2",
+      }),
+      log("thought", "acp", 5, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: { content: { type: "text", text: "Checking " }, messageId: "thought-1" },
+      }),
+      log("thought-2", "acp", 6, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: { content: { type: "text", text: "files" }, messageId: "thought-1" },
+      }),
+      log("thought-3", "acp", 7, {
+        type: "custom",
+        name: "acp_agent_thought_chunk",
+        data: {
+          content: { type: "image", mimeType: "image/png", data: "encoded" },
+          messageId: "thought-2",
+        },
+      }),
+      log("raw-truncated", "acp", 8, {
+        type: "acp_log_truncated",
+        sessionId: "session-1",
+        sessionUpdate: "user_message_chunk",
+        preview: "large raw update",
+      }),
+      log("raw-tool", "acp", 9, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "call-1",
+          title: "Read file",
+          rawInput: { path: "README.md" },
+        },
+      }),
+      log("tool-start", "acp", 10, {
+        type: "tool_start",
+        toolCallId: "call-1",
+        toolName: "Read file",
+        args: { path: "README.md" },
+      }),
+      log("raw-tool-result", "acp", 11, {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "call-1",
+          title: "Read file",
+          status: "completed",
+          rawOutput: "contents",
+        },
+      }),
+      log("tool-end", "acp", 12, {
+        type: "tool_end",
+        toolCallId: "call-1",
+        toolName: "Read file",
+        result: { status: "completed", rawOutput: "contents" },
+      }),
+      log("result", "acp", 13, {
+        type: "result",
+        cost: { totalCostUsd: 0, model: "opencode/glm-5.3-flash" },
+        output: "Hello from ACP",
+        isError: false,
+      }),
+    ];
+
+    for (const normalize of [normalizeSessionLogs, normalizeEvalLogs]) {
+      const result = normalize(logs);
+      expect(result.ordered).toHaveLength(13);
+      expect(result.items.map((item) => item.kind)).toEqual([
+        "text",
+        "text",
+        "reasoning",
+        "reasoning",
+        "tool_call",
+        "tool_result",
+        "result",
+      ]);
+      expect(result.items[0]).toMatchObject({
+        role: "assistant",
+        text: "Hello from ACP",
+        coveredRecIds: ["message-2"],
+      });
+      expect(result.items[1]).toMatchObject({
+        role: "assistant",
+        text: "Second response",
+      });
+      expect(result.items[2]).toMatchObject({
+        role: "assistant",
+        text: "Checking files",
+        coveredRecIds: ["thought-2"],
+      });
+      expect(result.items[3]?.text).toContain('"type": "image"');
+      expect(result.items[3]?.text).not.toBe("[object Object]");
+      expect(result.items[4]?.tool).toEqual({
+        id: "call-1",
+        name: "Read file",
+        input: { path: "README.md" },
+      });
+      expect(result.pairing).toEqual(
+        expect.objectContaining({ paired: 1, orphanCalls: [], orphanResults: [] }),
+      );
+    }
   });
 
   test("makes unknown top-level and nested codex event types self-describing", () => {
@@ -1045,5 +1176,52 @@ describe("ui logs parser", () => {
         content: [{ type: "text", text: "Pi response" }],
       }),
     );
+  });
+});
+
+// Exercise both deployed viewers with the exact production advisory and controls.
+describe.each([
+  ["dashboard", normalizeSessionLogs],
+  ["evals", normalizeEvalLogs],
+] as const)("%s Codex advisory classification", (_viewer, normalize) => {
+  const advisory =
+    "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.";
+
+  test.each([
+    false,
+    true,
+  ])("keeps the advisory visible as a notice (after output: %s)", (afterOutput) => {
+    const rows = afterOutput
+      ? [
+          log("text", "codex", 1, {
+            type: "item.completed",
+            item: { type: "agent_message", text: "Working" },
+          }),
+        ]
+      : [];
+    rows.push(
+      log("notice", "codex", 2, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message: advisory },
+      }),
+    );
+    const item = normalize(rows).items.at(-1);
+    expect(item?.kind).toBe("lifecycle");
+    expect(item?.meta).toMatchObject({ type: "codex_notice", output: advisory, isError: false });
+  });
+
+  test.each([
+    "Authentication failed",
+    `${advisory} Fatal startup failure.`,
+    undefined,
+  ])("preserves unknown error messages: %s", (message) => {
+    const item = normalize([
+      log("error", "codex", 1, {
+        type: "item.completed",
+        item: { id: "item_0", type: "error", message },
+      }),
+    ]).items[0];
+    expect(item?.kind).toBe("result");
+    expect(item?.meta).toMatchObject({ type: "codex_error", isError: true });
   });
 });

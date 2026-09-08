@@ -183,6 +183,16 @@ export async function sendTaskResponse(task: AgentTask): Promise<boolean> {
         icon_emoji: getAgentEmoji(agent),
         blocks,
       });
+    } else if (task.status === "cancelled") {
+      const blocks = buildCancelledBlocks({ agentName, taskId: task.id });
+      await sendWithPersona(client, {
+        channel: task.slackChannelId,
+        thread_ts: task.slackThreadTs,
+        text: "Task cancelled",
+        username: getAgentDisplayName(agent),
+        icon_emoji: getAgentEmoji(agent),
+        blocks,
+      });
     }
 
     return true;
@@ -271,12 +281,15 @@ export async function updateProgressInPlace(
  * Update the task message to its final state (completed/failed) via chat.update.
  * Uses full blocks (not compact) since this is the only message for the task.
  */
-export async function updateToFinal(task: AgentTask, messageTs: string): Promise<boolean> {
+export async function updateToFinal(
+  task: AgentTask,
+  messageTs: string,
+): Promise<SlackUpdateResult> {
   const app = getSlackApp();
-  if (!app || !task.slackChannelId || !task.agentId) return false;
+  if (!app || !task.slackChannelId || !task.agentId) return "failed";
 
   const agent = await getAgentById(task.agentId);
-  if (!agent) return false;
+  if (!agent) return "failed";
 
   const agentName = agent.name;
   let blocks: unknown[];
@@ -339,10 +352,17 @@ export async function updateToFinal(task: AgentTask, messageTs: string): Promise
         });
       }
     }
-    return true;
+    return "ok";
   } catch (error) {
-    console.error(`[Slack] Failed to update task message to final state:`, error);
-    return false;
+    const result = classifySlackUpdateError(error);
+    if (result === "not_found") {
+      console.warn(
+        `[Slack] Final task message missing for task ${task.id} ts=${messageTs}; will repost`,
+      );
+    } else {
+      console.error(`[Slack] Failed to update task message to final state:`, error);
+    }
+    return result;
   }
 }
 
