@@ -6,9 +6,9 @@ const SKILL_DIRECTORY = "skills/agent-swarm";
 const SKILL_FILE = `${SKILL_DIRECTORY}/SKILL.md`;
 const FRONTMATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 const GITHUB_BLOB_URL =
-  /https?:\/\/github\.com\/desplega-ai\/agent-swarm\/blob\/main\/[^\s<>()\]}",`]+/g;
+  /https?:\/\/github\.com\/desplega-ai\/agent-swarm\/blob\/main\/[^\s<>()\]}"',`]+/g;
 const DOCS_URL =
-  /https?:\/\/docs\.agent-swarm\.dev(?:[/?#:][^\s<>()\]}",`]*)?(?=$|[\s<>()\]}",`])/g;
+  /https?:\/\/docs\.agent-swarm\.dev(?:[/?#:][^\s<>()\]}"',`]*)?(?=$|[\s<>()\]}"',`])/g;
 const REQUEST_TIMEOUT_MS = 10_000;
 const REQUEST_ATTEMPTS = 3;
 
