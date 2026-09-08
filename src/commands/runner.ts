@@ -503,12 +503,16 @@ export interface ApiConfig {
 export interface SteeringDispatchState {
   dispatchedIds: Set<string>;
   outcomes: Map<string, SteerDeliveryResult>;
+  pollingTaskIds: Set<string>;
+  inFlightMessageIds: Set<string>;
 }
 
 export function createSteeringDispatchState(): SteeringDispatchState {
   return {
     dispatchedIds: new Set(),
     outcomes: new Map(),
+    pollingTaskIds: new Set(),
+    inFlightMessageIds: new Set(),
   };
 }
 
@@ -524,13 +528,30 @@ export async function pollAndDispatchSteering(
   state: SteeringDispatchState,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  if (!isSteeringEnabled()) return;
+  const dispatches = await pollAndStartSteeringDispatches(
+    config,
+    taskId,
+    session,
+    state,
+    fetchImpl,
+  );
+  await Promise.all(dispatches);
+}
+
+async function pollAndStartSteeringDispatches(
+  config: ApiConfig,
+  taskId: string,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  fetchImpl: typeof fetch,
+): Promise<Array<Promise<void>>> {
+  if (!isSteeringEnabled()) return [];
   // Harness-side delivery (codex hooks): the hook polls pending rows and
   // injects them itself. Dispatching here would race it into a false
   // "Provider session does not support live steering" undeliverable →
   // premature promotion. Leave the rows pending; the terminal sweep still
   // promotes anything the hook never delivered.
-  if (session.steeringDeliveredExternally) return;
+  if (session.steeringDeliveredExternally) return [];
 
   const headers = {
     Authorization: `Bearer ${config.apiKey}`,
@@ -545,57 +566,103 @@ export async function pollAndDispatchSteering(
   }
 
   const data = (await response.json()) as { messages?: SteeringMessage[] };
-  for (const message of data.messages ?? []) {
-    if (message.status !== "pending") continue;
-
-    let outcome = state.dispatchedIds.has(message.id) ? state.outcomes.get(message.id) : undefined;
-    if (!outcome) {
-      try {
-        outcome = session.deliverSteering
-          ? await session.deliverSteering({
-              mode: message.mode,
-              // Wrap the body so it carries its own ID — the agent needs it to
-              // call `accept-steer`, which is the only path to `handled`.
-              text: await renderSteeringDelivery(message.id, message.body),
-            })
-          : {
-              delivered: false,
-              reason: "Provider session does not support live steering",
-            };
-      } catch (error) {
-        outcome = {
-          delivered: false,
-          reason: scrubSecrets(`Provider steering failed: ${(error as Error).message}`),
-        };
-      }
-      if (!outcome.delivered) {
-        outcome = {
-          delivered: false,
-          reason:
-            scrubSecrets(outcome.reason).trim() || "Provider rejected steering without a reason",
-        };
-      }
-      state.dispatchedIds.add(message.id);
-      state.outcomes.set(message.id, outcome);
+  const prepared: Array<{ message: SteeringMessage; text?: string }> = [];
+  try {
+    for (const message of data.messages ?? []) {
+      if (message.status !== "pending") continue;
+      if (state.inFlightMessageIds.has(message.id)) continue;
+      state.inFlightMessageIds.add(message.id);
+      const item: { message: SteeringMessage; text?: string } = { message };
+      prepared.push(item);
+      item.text =
+        session.deliverSteering && !state.outcomes.has(message.id)
+          ? await renderSteeringDelivery(message.id, message.body)
+          : undefined;
     }
-
-    const endpoint = outcome.delivered ? "delivered" : "undeliverable";
-    const body = outcome.delivered ? { mode: outcome.mode } : { reason: outcome.reason };
-    const reportResponse = await fetchImpl(
-      `${config.apiUrl}/api/steering-messages/${encodeURIComponent(message.id)}/${endpoint}`,
-      {
-        method: "POST",
-        headers: {
-          ...headers,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-    );
-    if (!reportResponse.ok) {
-      throw new Error(`Steering ${endpoint} report failed (HTTP ${reportResponse.status})`);
-    }
+  } catch (error) {
+    for (const { message } of prepared) state.inFlightMessageIds.delete(message.id);
+    throw error;
   }
+  return prepared.map(({ message, text }) =>
+    dispatchSteeringMessage(config, message, text, session, state, fetchImpl).finally(() =>
+      state.inFlightMessageIds.delete(message.id),
+    ),
+  );
+}
+
+async function dispatchSteeringMessage(
+  config: ApiConfig,
+  message: SteeringMessage,
+  text: string | undefined,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  fetchImpl: typeof fetch,
+): Promise<void> {
+  let outcome = state.dispatchedIds.has(message.id) ? state.outcomes.get(message.id) : undefined;
+  if (!outcome) {
+    state.dispatchedIds.add(message.id);
+    try {
+      outcome = session.deliverSteering
+        ? await session.deliverSteering({
+            mode: message.mode,
+            text: text ?? message.body,
+          })
+        : {
+            delivered: false,
+            reason: "Provider session does not support live steering",
+          };
+    } catch (error) {
+      outcome = {
+        delivered: false,
+        reason: scrubSecrets(`Provider steering failed: ${(error as Error).message}`),
+      };
+    }
+    if (!outcome.delivered) {
+      outcome = {
+        delivered: false,
+        reason:
+          scrubSecrets(outcome.reason).trim() || "Provider rejected steering without a reason",
+      };
+    }
+    state.outcomes.set(message.id, outcome);
+  }
+
+  const endpoint = outcome.delivered ? "delivered" : "undeliverable";
+  const body = outcome.delivered ? { mode: outcome.mode } : { reason: outcome.reason };
+  const reportResponse = await fetchImpl(
+    `${config.apiUrl}/api/steering-messages/${encodeURIComponent(message.id)}/${endpoint}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "X-Agent-ID": config.agentId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!reportResponse.ok) {
+    throw new Error(`Steering ${endpoint} report failed (HTTP ${reportResponse.status})`);
+  }
+}
+
+export function scheduleSteeringDispatch(
+  config: ApiConfig,
+  taskId: string,
+  session: ProviderSession,
+  state: SteeringDispatchState,
+  onError: (error: unknown) => void,
+  fetchImpl: typeof fetch = fetch,
+): boolean {
+  if (state.pollingTaskIds.has(taskId)) return false;
+  state.pollingTaskIds.add(taskId);
+  void pollAndStartSteeringDispatches(config, taskId, session, state, fetchImpl)
+    .then((dispatches) => {
+      for (const dispatch of dispatches) void dispatch.catch(onError);
+    })
+    .catch(onError)
+    .finally(() => state.pollingTaskIds.delete(taskId));
+  return true;
 }
 
 /** Ping the server to indicate activity and update status */
@@ -5887,15 +5954,13 @@ export async function runAgent(config: RunnerConfig, opts: RunnerOptions) {
     if (steeringDispatchState && state.activeTasks.size > 0) {
       const dispatchState = steeringDispatchState;
       for (const [taskId, task] of state.activeTasks) {
-        try {
-          await pollAndDispatchSteering(apiConfig, taskId, task.session, dispatchState);
-        } catch (error) {
+        scheduleSteeringDispatch(apiConfig, taskId, task.session, dispatchState, (error) => {
           console.warn(
             `[${role}] Steering dispatch failed for task ${taskId.slice(0, 8)} (non-fatal): ${scrubSecrets(
               (error as Error).message,
             )}`,
           );
-        }
+        });
       }
     }
 

@@ -25,7 +25,7 @@ The `HARNESS_PROVIDER` environment variable selects which provider adapter is us
 
 ```
 HARNESS_PROVIDER=claude          →  ClaudeAdapter         →  spawns `claude` CLI process
-HARNESS_PROVIDER=codex           →  CodexAdapter          →  spawns `codex` CLI process
+HARNESS_PROVIDER=codex           →  CodexAdapter          →  starts an isolated `codex app-server`
 HARNESS_PROVIDER=opencode        →  OpencodeAdapter       →  spawns `opencode` CLI process
 HARNESS_PROVIDER=pi              →  PiMonoAdapter         →  creates in-process pi-mono session
 HARNESS_PROVIDER=devin           →  DevinAdapter          →  POSTs /sessions, polls events
@@ -114,9 +114,11 @@ Set a per-agent reasoning/effort level with `PATCH /api/agents/{id}/runtime` (`r
 
 ## Codex
 
-Codex runs through the `codex` CLI and supports both direct OpenAI API keys and ChatGPT OAuth.
+Codex runs through `codex app-server` and supports direct OpenAI API keys and ChatGPT OAuth.
 
-Each task runs inside a throwaway `codex-session-runner` subprocess. The worker sends the session config over stdin and receives line-delimited events/results over stdout, so `@openai/codex-sdk` state dies with the task instead of accumulating in the long-lived runner process.
+Each task runs inside a throwaway `codex-session-runner` subprocess. That process starts one fresh `codex app-server` process.
+
+The worker sends session configuration and control messages over stdin. The runner returns line-delimited events and results over stdout. Both processes exit with the task.
 
 ### Authentication Methods
 
@@ -161,7 +163,7 @@ Set the per-agent reasoning/effort level (`off | low | medium | high | xhigh`) v
 ### Codex Specifics
 
 - **Cross-keyType failover**: when Codex workers have both `OPENAI_API_KEY` slots and `codex_oauth_*` slots available, the runner now fails over across key types instead of retrying a known-exhausted pool. A successful task also clears stale rate-limit state for the credential that proved healthy.
-- **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` process, which keeps the worker's baseline memory flat and avoids long-lived SDK heap growth on hot workers.
+- **Per-task subprocess isolation**: each task gets a fresh `codex-session-runner` and `codex app-server` process. This keeps worker memory stable on hot workers.
 - **Small spawn argv**: large system prompts are staged to a temp file and passed via `--append-system-prompt-file`, avoiding Linux `MAX_ARG_STRLEN` / `E2BIG` failures on prompt-heavy repos.
 - **Actionable failure reporting**: subprocess startup / parse failures are emitted back to the parent as structured errors, and non-TTY runs no longer leak cursor escape sequences into the JSON pipe.
 

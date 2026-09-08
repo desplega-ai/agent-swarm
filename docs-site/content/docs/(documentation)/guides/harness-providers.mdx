@@ -16,7 +16,7 @@ A *harness provider* is the runtime that actually drives an LLM: it owns the sub
 
 For an operator-facing comparison of the install choices, see the [Provider Capability Matrix](/docs/guides/provider-capability-matrix).
 
-**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (OpenAI Codex SDK hosted inside a per-task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents — sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping; experimental, rolling out across DES-295 → DES-299), `acp` (a curated OpenCode preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command).
+**Supported today:** `claude` (Anthropic Claude Code CLI), `pi` (pi-mono, in-process via `@earendil-works/pi-coding-agent`), `codex` (a fresh Codex app-server inside each isolated task subprocess), `devin` (Cognition Devin via `/sessions`), `claude-managed` (Anthropic Managed Agents. Sessions execute in Anthropic's cloud sandbox), `opencode` (in-process [`@opencode-ai/sdk`](https://opencode.ai) server with SSE event mapping. Experimental rollout across DES-295 to DES-299), `acp` (a curated OpenCode preset or a custom [Agent Client Protocol](https://agentclientprotocol.com) command).
 
 ---
 
@@ -119,7 +119,7 @@ The runner consumes these events (not the provider's native ones) to post progre
 |---|---|---|
 | [`src/providers/claude-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-adapter.ts) | `Bun.spawn` of `claude` CLI with `--output-format stream-json`, JSONL stdout parsing | `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
 | [`src/providers/pi-mono-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/pi-mono-adapter.ts) | In-process via `createAgentSession` from `@earendil-works/pi-coding-agent`; no subprocess | `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / `~/.pi/agent/auth.json` — or, when `BEDROCK_AUTH_MODE=sdk` or `MODEL_OVERRIDE=amazon-bedrock/*`, AWS SDK default chain (probed via `ListFoundationModels`; see [pi-mono + Amazon Bedrock](#pi-mono-amazon-bedrock-auth) below) |
-| [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`, sends session config over stdin, and receives line-delimited events/results over stdout; the child hosts `@openai/codex-sdk` `Codex` / `Thread` and streams `ThreadEvent`s back | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
+| [`src/providers/codex-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/codex-adapter.ts) | Parent adapter spawns `src/commands/codex-session-runner.ts`. The child starts one `codex app-server`, then bridges JSON-RPC notifications and requests to normalized events and controls over bidirectional JSONL. | `OPENAI_API_KEY` or ChatGPT OAuth stored in `swarm_config.codex_oauth` (see §6) |
 | [`src/providers/claude-managed-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/claude-managed-adapter.ts) | Anthropic SDK `client.beta.sessions.events.stream` (SSE); session executes in Anthropic's managed cloud sandbox, worker is a thin relay | `ANTHROPIC_API_KEY` plus pre-existing `MANAGED_AGENT_ID` + `MANAGED_ENVIRONMENT_ID` from one-time `claude-managed-setup` CLI (see §13) |
 | [`src/providers/devin-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/devin-adapter.ts) | Cognition Devin v3 REST API; worker polls the remote session | `DEVIN_API_KEY` + `DEVIN_ORG_ID` |
 | [`src/providers/opencode-adapter.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/opencode-adapter.ts) | In-process `@opencode-ai/sdk` server with SSE event mapping | Provider-specific API key, commonly `OPENROUTER_API_KEY` |
@@ -142,7 +142,7 @@ Running tasks can receive more input through the optional `ProviderSession.deliv
 | `opencode` | `queue` | `queued` | `promptAsync` can add input at a turn boundary; abort-and-re-prompt is not advertised because live E2E found it undeliverable. |
 | `devin` | `queue` | `queued` | The message API accepts working sessions but does not guarantee interruption. |
 | `claude` | `queue` | `queued` | Raw CLI stream-json can queue only. |
-| `codex` | `queue` | `queued` | Harness-side delivery via managed Codex hooks; no in-process channel. See below. |
+| `codex` | `steer`, `queue` | `steered` or `queued` | The per-task app-server receives native `turn/steer`. Queued input starts after the active turn ends. See below. |
 | `acp` | none | n/a | ACP exposes a single in-flight `session/prompt`; the only interrupt is `session/cancel` (a full abort), so no steering mode is advertised. |
 
 The static `PROVIDER_STEER_CAPABILITIES` map drives `supportedSteerModes` in task responses and `onUnsupported: "fail"` admission. It must match `adapter.traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates every name in `ProviderNameSchema`, constructs its adapter, and fails with the provider name if the two drift.
@@ -157,9 +157,21 @@ The operator override accepts:
 - `1`, `true`, `on`, `yes`: force stream-json on without the automatic version/wrapper decision.
 - unset, empty, or another value: use automatic probing.
 
-#### Codex harness-side delivery (codex-hook)
+#### Codex app-server delivery
 
-Codex has no in-process input channel: `@openai/codex-sdk` runs `codex exec` with stdin closed after the prompt, and the app-server's native `turn/steer` is not reachable through the SDK. Codex sessions therefore set `steeringDeliveredExternally`, which tells the worker's dispatch poll to leave `pending` rows alone, and delivery happens inside the Codex lifecycle instead: the worker image bakes `/etc/codex/requirements.toml` registering `agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`. The hook polls the agent's pending steering messages, marks each `delivered`, and injects the rendered envelope as hook `additionalContext` (or a one-shot Stop block for a session about to finish). Requirements-managed hooks are trusted by policy, so no interactive hook-trust review is needed in headless workers. `PreToolUse` is not used because Codex drops its `additionalContext`. Messages a session never picks up are promoted to follow-up tasks by the terminal sweep, like any other provider.
+Each Codex task starts a fresh `codex app-server` inside the isolated session runner. The parent and child keep their JSONL control channel open. The child sends JSON-RPC requests and notifications to the app-server.
+
+`mode: "steer"` sends native `turn/steer`, which adds input to the active turn. `mode: "queue"` stores input in the adapter and starts the next native turn after the active turn ends. Input that arrives before app-server readiness remains pending until the session is ready. `abort()` sends the native interrupt request, then terminates the isolated process group if Codex does not finish during the bounded grace period.
+
+Queued input counts as delivered only after Codex accepts its turn. If the session ends first, delivery fails and the pending input remains eligible for follow-up promotion. Waiting for that acknowledgement does not block cancellation or other tasks.
+
+The worker does not use a shared app-server daemon. It does not resume native Codex threads. Follow-up task continuity uses the swarm context preamble.
+
+#### Codex hook delivery for legacy exec sessions
+
+`src/hooks/codex-hook.ts` still supports legacy `codex exec` sessions. The worker image registers the hook for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each one delivered, and injects the rendered envelope through hook output.
+
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook returns before it polls in that mode. The worker then remains the only steering transport. `PreToolUse` remains disabled because Codex drops its `additionalContext`.
 
 For user-facing modes, degradation, entry points, and message states, see [Steer a running task](/docs/guides/task-steering).
 

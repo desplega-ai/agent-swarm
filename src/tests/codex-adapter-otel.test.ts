@@ -1,19 +1,11 @@
 /**
  * Tests for harness-OTEL `TRACEPARENT` injection in the Codex adapter.
  *
- * The Codex SDK does NOT inherit `process.env` — `CodexAdapter.createSession`
- * builds a minimal explicit env and hands it to `new Codex({ env })`. This
- * suite verifies that, when the harness-OTEL gate is on and a sampled worker
- * span is active, that env carries a W3C `TRACEPARENT`.
- *
- * The SDK stores the constructor `env` on `codex.exec.envOverride`, so we
- * intercept `Codex.prototype.startThread` (same prototype-patch trick the
- * existing codex-adapter tests use) and read it off `this`. `trace.getActiveSpan`
- * is stubbed — no real OpenTelemetry SDK is started.
+ * The adapter supplies an explicit environment to the app-server.
+ * The injected thread factory captures that environment without spawning Codex.
  */
 
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import * as codexSdk from "@openai/codex-sdk";
 import { type Span, trace } from "@opentelemetry/api";
 import { CodexAdapter } from "../providers/codex-adapter";
 import type { ProviderSessionConfig } from "../providers/types";
@@ -32,14 +24,19 @@ function makeSpan(opts: { sampled?: boolean } = {}): Span {
   } as unknown as Span;
 }
 
-/** Fake `Thread` — `createSession` stores it; this suite never drives it. */
+/** Complete a session without a model request. */
 function makeFakeThread() {
   return {
     id: null as string | null,
     async runStreamed() {
-      async function* generate() {}
+      async function* generate() {
+        yield { type: "turn.completed" as const };
+      }
       return { events: generate() };
     },
+    async steer() {},
+    async interrupt() {},
+    async close() {},
   };
 }
 
@@ -49,9 +46,8 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
     systemPrompt: "",
     model: "gpt-5.4",
     role: "worker",
-    agentId: "agent-test",
-    taskId: "task-test",
-    apiUrl: "http://localhost:0",
+    agentId: "11111111-1111-4111-8111-111111111111",
+    apiUrl: "http://swarm.test",
     apiKey: "test",
     cwd: "/tmp",
     logFile: `/tmp/codex-adapter-otel-test-${Date.now()}-${Math.random().toString(36).slice(2)}.log`,
@@ -59,61 +55,60 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
   };
 }
 
-type CodexProto = { startThread: (...args: unknown[]) => unknown };
-type CodexInstance = { exec?: { envOverride?: Record<string, string> } };
-
-describe("CodexAdapter spawn env — harness OTEL gate", () => {
+describe("CodexAdapter spawn env: harness OTEL gate", () => {
   let capturedEnv: Record<string, string> | undefined;
-  let originalStartThread: (...args: unknown[]) => unknown;
   let getActiveSpanSpy: ReturnType<typeof spyOn>;
+
+  async function captureEnvironment(overrides: Partial<ProviderSessionConfig>) {
+    const config = testConfig(overrides);
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      threadFactory: ({ env }) => {
+        capturedEnv = env;
+        return makeFakeThread();
+      },
+    });
+    const session = await adapter.createSession(config);
+    await session.waitForCompletion();
+    await Bun.file(config.logFile).delete();
+  }
 
   beforeEach(() => {
     capturedEnv = undefined;
-    const proto = codexSdk.Codex.prototype as unknown as CodexProto;
-    originalStartThread = proto.startThread;
-    proto.startThread = function startThread(this: CodexInstance): unknown {
-      // The SDK keeps the constructor `env` on `this.exec.envOverride`.
-      capturedEnv = this.exec?.envOverride;
-      return makeFakeThread();
-    };
     getActiveSpanSpy = spyOn(trace, "getActiveSpan").mockReturnValue(makeSpan());
   });
 
   afterEach(() => {
-    (codexSdk.Codex.prototype as unknown as CodexProto).startThread = originalStartThread;
     getActiveSpanSpy.mockRestore();
   });
 
   test("gate on (SWARM_ENABLE_HARNESS_OTEL) → spawn env carries TRACEPARENT", async () => {
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    await adapter.createSession(testConfig({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } }));
+    await captureEnvironment({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } });
 
     expect(capturedEnv).toBeDefined();
     expect(capturedEnv?.TRACEPARENT).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
   });
 
   test("gate on via deprecated SWARM_ENABLE_CLAUDE_CODE_OTEL alias → TRACEPARENT injected", async () => {
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    await adapter.createSession(testConfig({ env: { SWARM_ENABLE_CLAUDE_CODE_OTEL: "1" } }));
+    await captureEnvironment({ env: { SWARM_ENABLE_CLAUDE_CODE_OTEL: "1" } });
 
     expect(capturedEnv?.TRACEPARENT).toBe(`00-${TRACE_ID}-${SPAN_ID}-01`);
   });
 
   test("gate off → no TRACEPARENT, existing env wiring intact", async () => {
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    await adapter.createSession(testConfig({ env: {} }));
+    await captureEnvironment({ env: {} });
 
     expect(capturedEnv).toBeDefined();
     expect(capturedEnv?.TRACEPARENT).toBeUndefined();
     // The minimal explicit env the adapter always builds is untouched.
     expect(capturedEnv?.PATH).toBeDefined();
     expect(capturedEnv?.HOME).toBeDefined();
+    expect(capturedEnv?.SWARM_CODEX_APP_SERVER).toBe("1");
   });
 
   test("gate on but unsampled active span → no TRACEPARENT", async () => {
     getActiveSpanSpy.mockReturnValue(makeSpan({ sampled: false }));
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    await adapter.createSession(testConfig({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } }));
+    await captureEnvironment({ env: { SWARM_ENABLE_HARNESS_OTEL: "1" } });
 
     expect(capturedEnv?.TRACEPARENT).toBeUndefined();
   });
