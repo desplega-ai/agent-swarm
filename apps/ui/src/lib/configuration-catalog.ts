@@ -494,6 +494,60 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         docsUrl: `${DOCS}integrations/slack`,
       },
       {
+        key: "SLACK_REACTION_ACCEPTED",
+        label: "Accepted-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when a task is accepted from a channel mention, thread reply, follow-up or assistant DM. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "eyes",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_BUFFERED",
+        label: "Buffered-message reaction",
+        description:
+          "Slack emoji shortcode the bot adds when message 2 and later arrive in an additive buffer window. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "heavy_plus_sign",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_NOW",
+        label: "Instant-flush reaction",
+        description:
+          "Slack emoji shortcode the bot adds when the !now command flushes the buffer. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "zap",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_STEERED",
+        label: "Steering-accepted reaction",
+        description:
+          "Slack emoji shortcode the bot adds when a thread message is accepted as steering for a running task. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "speech_balloon",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_COMPLETED",
+        label: "Completed-task reaction",
+        description:
+          "Slack emoji shortcode the bot adds when every task linked to the trigger message reached status completed. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name. Change this when another tool in the workspace acts on the default emoji.",
+        kind: "string",
+        defaultValue: "white_check_mark",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_REACTION_FAILED",
+        label: "Failed-task reaction",
+        description:
+          "Slack emoji shortcode the bot adds when any linked task reached failed, cancelled or superseded. Bare name or :name:. Lowercase letters, digits, _ + ' -. Custom workspace emoji work by name.",
+        kind: "string",
+        defaultValue: "x",
+        docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
         key: "GITHUB_DISABLE",
         label: "Disable GitHub",
         description:
