@@ -197,6 +197,19 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
     const server = createServer((socket) => {
       sockets.add(socket);
       socket.once("close", () => sockets.delete(socket));
+      const failProtocol = (error: unknown) => {
+        protocolFailure ??=
+          error instanceof Error ? error : new Error(`Capability protocol failed: ${error}`);
+        built.abortInFlightSteps(protocolFailure);
+        socket.destroy();
+        proc?.kill();
+      };
+      // Failed writes also emit an error event, even with a write callback.
+      // Unauthenticated connections must not terminate the active workflow.
+      socket.on("error", (error) => {
+        if (socket === capabilitySocket) failProtocol(error);
+        else socket.destroy();
+      });
       // The harness authenticates before it imports user code. Reject later
       // connections once that handshake has claimed the bridge.
       if (capabilitySocket) {
@@ -216,14 +229,6 @@ export class LocalProcessScriptExecutor implements ScriptExecutor {
       }, 2_000);
       handshakeTimeout.unref?.();
       socket.once("close", () => clearTimeout(handshakeTimeout));
-
-      const failProtocol = (error: unknown) => {
-        protocolFailure =
-          error instanceof Error ? error : new Error(`Capability protocol failed: ${error}`);
-        built.abortInFlightSteps(protocolFailure);
-        socket.destroy();
-        proc?.kill();
-      };
 
       const writeResponse = (response: string): Promise<void> => {
         const framed = `${response}\n`;
