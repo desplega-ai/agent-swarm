@@ -163,6 +163,28 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
 
     return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
   },
+  // OpenAI-compatible model gateway for every OpenRouter consumer (OpenCode and
+  // pi-mono sessions, model refreshes, internal summarizers). Call sites append
+  // `/models` and `/chat/completions` to it, so a value carrying a query string
+  // or a fragment would build a nonsense URL — reject those here rather than
+  // letting workers fail one request at a time. Blank is meaningful and allowed:
+  // it is how an operator reverts to openrouter.ai without deleting the row.
+  OPENROUTER_BASE_URL: (value) => {
+    const invalid =
+      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1 — leave blank for openrouter.ai)";
+    if (typeof value !== "string") return invalid;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
+      if (url.search || url.hash) return invalid;
+    } catch {
+      return invalid;
+    }
+    return null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;

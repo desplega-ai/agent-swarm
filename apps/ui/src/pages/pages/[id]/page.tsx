@@ -74,6 +74,37 @@ function getPageHtmlUrl(id: string): string {
 }
 
 /**
+ * Query params the SPA owns on `/pages/:id` and must never forward to the
+ * page body: `mode` (full-screen toggle), `key` (password unlock is handled
+ * by the password frame itself) and the connection overrides, which would
+ * otherwise hand the API key to agent-authored HTML.
+ */
+const SPA_RESERVED_PAGE_PARAMS = new Set(["mode", "key", "apiUrl", "apiKey"]);
+
+/**
+ * Query string forwarded from the SPA route to the page body, so a link like
+ * `/pages/<id>?target=pr-1373` reaches the iframe as `/p/<id>?target=pr-1373`
+ * and the page can filter or deep-link on its own params. Empty when there is
+ * nothing to forward.
+ */
+function pageFrameQuery(searchParams: URLSearchParams): string {
+  const forwarded = new URLSearchParams();
+  for (const [name, value] of searchParams) {
+    if (!SPA_RESERVED_PAGE_PARAMS.has(name)) forwarded.append(name, value);
+  }
+  const query = forwarded.toString();
+  return query ? `?${query}` : "";
+}
+
+/** SPA route for the page, keeping the forwarded params and toggling `mode=full`. */
+function pageRoute(id: string, frameQuery: string, full: boolean): string {
+  const params = new URLSearchParams(frameQuery);
+  if (full) params.set("mode", "full");
+  const query = params.toString();
+  return `/pages/${id}${query ? `?${query}` : ""}`;
+}
+
+/**
  * Fetch the page metadata. For authed pages, the first call typically 401s —
  * we then attempt `launchPage` (which uses the bearer to mint a cookie) and
  * retry. Password pages can't be launched via the bearer endpoint, so we
@@ -127,6 +158,8 @@ async function fetchPageMetadataWithLaunchRetry(id: string): Promise<PageMetadat
 interface FrameProps {
   id: string;
   title: string;
+  /** `?a=b` string forwarded to the page body (see `pageFrameQuery`), or "". */
+  frameQuery: string;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 }
 
@@ -155,8 +188,8 @@ function PageIframe({
   );
 }
 
-function PublicHtmlFrame({ id, title, iframeRef }: FrameProps) {
-  const src = getPageHtmlUrl(id);
+function PublicHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
+  const src = getPageHtmlUrl(id) + frameQuery;
   return <PageIframe src={src} title={title} iframeRef={iframeRef} />;
 }
 
@@ -185,7 +218,7 @@ async function assertAuthedPageBodyReady(
   throw new Error(`page body ${id}: ${res.status}`);
 }
 
-function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
+function AuthedHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
   const [frameState, setFrameState] = useState<
     { status: "loading" } | { status: "ready"; src: string } | { status: "error"; message: string }
   >({ status: "loading" });
@@ -209,7 +242,7 @@ function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
         if (!active) return;
 
         if (bodyStatus === "ready") {
-          setFrameState({ status: "ready", src: getPageHtmlUrl(id) });
+          setFrameState({ status: "ready", src: getPageHtmlUrl(id) + frameQuery });
           return;
         }
 
@@ -233,7 +266,7 @@ function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
       active = false;
       controller.abort();
     };
-  }, [id]);
+  }, [id, frameQuery]);
 
   if (frameState.status === "loading") {
     return <Skeleton className="h-[calc(100vh-6rem)] w-full rounded-md" />;
@@ -246,7 +279,7 @@ function AuthedHtmlFrame({ id, title, iframeRef }: FrameProps) {
   return <PageIframe src={frameState.src} title={title} iframeRef={iframeRef} />;
 }
 
-function PasswordHtmlFrame({ id, title, iframeRef }: FrameProps) {
+function PasswordHtmlFrame({ id, title, frameQuery, iframeRef }: FrameProps) {
   const [password, setPassword] = useState("");
   const [iframeSrc, setIframeSrc] = useState<string | null>(null);
 
@@ -256,8 +289,9 @@ function PasswordHtmlFrame({ id, title, iframeRef }: FrameProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const url = `${getPageHtmlUrl(id)}?key=${encodeURIComponent(password)}`;
-    setIframeSrc(url);
+    const params = new URLSearchParams(frameQuery);
+    params.set("key", password);
+    setIframeSrc(`${getPageHtmlUrl(id)}?${params.toString()}`);
   }
 
   return (
@@ -320,6 +354,7 @@ export default function ArtifactPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const fullMode = searchParams.get("mode") === "full";
+  const frameQuery = pageFrameQuery(searchParams);
   const gate = useFeatureGate("1.79.0");
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const needsSlugResolve = !!id && !PAGE_ID_RE.test(id);
@@ -400,13 +435,34 @@ export default function ArtifactPage() {
   } else {
     switch (data.authMode) {
       case "public":
-        body = <PublicHtmlFrame id={pageId!} title={data.title} iframeRef={iframeRef} />;
+        body = (
+          <PublicHtmlFrame
+            id={pageId!}
+            title={data.title}
+            frameQuery={frameQuery}
+            iframeRef={iframeRef}
+          />
+        );
         break;
       case "authed":
-        body = <AuthedHtmlFrame id={pageId!} title={data.title} iframeRef={iframeRef} />;
+        body = (
+          <AuthedHtmlFrame
+            id={pageId!}
+            title={data.title}
+            frameQuery={frameQuery}
+            iframeRef={iframeRef}
+          />
+        );
         break;
       case "password":
-        body = <PasswordHtmlFrame id={pageId!} title={data.title} iframeRef={iframeRef} />;
+        body = (
+          <PasswordHtmlFrame
+            id={pageId!}
+            title={data.title}
+            frameQuery={frameQuery}
+            iframeRef={iframeRef}
+          />
+        );
         break;
     }
   }
@@ -424,7 +480,7 @@ export default function ArtifactPage() {
             <span className="font-mono text-[10px] text-muted-foreground">{data.authMode}</span>
           </div>
           <Button asChild variant="outline" size="sm">
-            <Link to={`/pages/${pageId}`}>
+            <Link to={pageRoute(pageId!, frameQuery, false)}>
               <Minimize2 className="size-3.5" />
               Exit full
             </Link>
@@ -443,6 +499,7 @@ export default function ArtifactPage() {
         action={
           <PageHeaderActions
             id={pageId!}
+            frameQuery={frameQuery}
             authMode={data.authMode}
             favorite={pageRow?.favorite}
             favoriteDisabled={favoriteToggle.isPending}
@@ -486,6 +543,7 @@ function PageSlugLine({ id }: { id: string }) {
  */
 function PageHeaderActions({
   id,
+  frameQuery,
   authMode,
   favorite,
   favoriteDisabled,
@@ -493,15 +551,16 @@ function PageHeaderActions({
   onExportPdf,
 }: {
   id: string;
+  frameQuery: string;
   authMode: PageMetadata["authMode"];
   favorite?: boolean;
   favoriteDisabled?: boolean;
   onToggleFavorite: () => void;
   onExportPdf: () => void;
 }) {
-  const config = getConfig();
-  const apiUrl = (config.apiUrl || "http://localhost:3013").replace(/\/+$/, "");
-  const href = `${apiUrl}/p/${encodeURIComponent(id)}`;
+  // The share link carries the same forwarded params as the iframe, so
+  // "Open" keeps whatever filter the page is showing.
+  const href = getPageHtmlUrl(id) + frameQuery;
   return (
     <div className="flex items-center gap-2">
       <FavoriteButton favorite={favorite} disabled={favoriteDisabled} onToggle={onToggleFavorite} />
@@ -524,7 +583,7 @@ function PageHeaderActions({
         Export PDF
       </Button>
       <Button asChild variant="outline" size="sm" title="Maximize within the SPA">
-        <Link to={`/pages/${id}?mode=full`}>
+        <Link to={pageRoute(id, frameQuery, true)}>
           <Maximize2 className="size-3.5" />
           Full
         </Link>

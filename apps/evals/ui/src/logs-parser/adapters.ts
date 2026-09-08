@@ -1,6 +1,11 @@
 import { asString, isRecord, makeItem, resultBlockText } from "./helpers.ts";
 import type { DecodedRecord, LogRole, NormalizedItem } from "./types.ts";
 
+// Exact Codex CLI advisories only; unknown error items must remain errors.
+const CODEX_ADVISORIES = new Set([
+  "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest.",
+]);
+
 export function normalizeAnthropic(ordered: DecodedRecord[]): NormalizedItem[] {
   const items: NormalizedItem[] = [];
 
@@ -201,10 +206,16 @@ export function normalizeCodex(ordered: DecodedRecord[]): NormalizedItem[] {
           }
           case "error": {
             const message = asString(item.message) ?? "Codex error";
+            const isAdvisory = CODEX_ADVISORIES.has(message);
             items.push(
-              makeItem(d, "result", {
+              makeItem(d, isAdvisory ? "lifecycle" : "result", {
                 role: "system",
-                meta: { ...item, type: "codex_error", output: message, isError: true },
+                meta: {
+                  ...item,
+                  type: isAdvisory ? "codex_notice" : "codex_error",
+                  output: message,
+                  isError: !isAdvisory,
+                },
               }),
             );
             break;

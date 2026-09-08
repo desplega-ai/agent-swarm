@@ -106,16 +106,25 @@ const publicPageJsonRoute = route({
  * still gets a presentable page, and finally the Browser SDK so
  * `window.swarmSdk` works.
  *
- * Agent-provided styles ALWAYS win — the reset uses generic selectors with
- * low specificity. Tailwind is loaded as an opt-in tool, not an enforced
- * theme.
+ * Agent-provided styles can override these defaults. Tailwind utilities stay
+ * available, but its Preflight reset is disabled to preserve browser heading,
+ * margin, and list styles.
  */
 const PAGE_HEAD_DEFAULTS = `<base target="_blank">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
+<script>
+  if (window.tailwind) {
+    window.tailwind.config = { corePlugins: { preflight: false } };
+  }
+</script>
 <style>
+  *, ::before, ::after { box-sizing: border-box; border: 0 solid #e5e7eb; }
+  hr { border-top-width: 1px; }
+  img, video { display: block; max-width: 100%; height: auto; }
+  button, input, optgroup, select, textarea, ::file-selector-button { font: inherit; }
   :root {
     --swarm-bg: #0b0f17;
     --swarm-card: #121826;
