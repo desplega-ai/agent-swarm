@@ -36,23 +36,27 @@ describe("isAdminLike", () => {
 });
 
 describe("shouldShowFeedbackPopup", () => {
-  test("shows from day seven onward", () => {
-    expect(shouldShowFeedbackPopup(eligible)).toBe(true);
-    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(7) })).toBe(true);
-    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(300) })).toBe(true);
-  });
-
-  test("shows before day seven after a failure", () => {
+  test("shows after a failed task within the install window", () => {
     expect(
-      shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(2), hasFailedTask: true }),
+      shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(5), hasFailedTask: true }),
     ).toBe(true);
   });
 
-  test("allows only the failure trigger when install age is unknown", () => {
+  test("does not show when the install date is unknown", () => {
     expect(shouldShowFeedbackPopup({ ...eligible, installedAt: null })).toBe(false);
     expect(shouldShowFeedbackPopup({ ...eligible, installedAt: null, hasFailedTask: true })).toBe(
-      true,
+      false,
     );
+  });
+
+  test("does not show after the install window", () => {
+    expect(
+      shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(31), hasFailedTask: true }),
+    ).toBe(false);
+  });
+
+  test("does not show without a failed task", () => {
+    expect(shouldShowFeedbackPopup({ ...eligible, installedAt: daysAgo(5) })).toBe(false);
   });
 
   test("waits for identity and any other dialog to close", () => {
@@ -70,12 +74,14 @@ describe("shouldShowFeedbackPopup", () => {
     expect(
       shouldShowFeedbackPopup({
         ...eligible,
+        hasFailedTask: true,
         state: { ...EMPTY_FEEDBACK_POPUP_STATE, lastSubmittedAt: submittedAt, submissionCount: 1 },
       }),
     ).toBe(false);
     expect(
       shouldShowFeedbackPopup({
         ...eligible,
+        hasFailedTask: true,
         state: {
           ...EMPTY_FEEDBACK_POPUP_STATE,
           lastSubmittedAt: new Date(NOW - FEEDBACK_SUBMISSION_COOLDOWN_MS).toISOString(),
@@ -89,6 +95,7 @@ describe("shouldShowFeedbackPopup", () => {
     expect(
       shouldShowFeedbackPopup({
         ...eligible,
+        hasFailedTask: true,
         state: {
           ...EMPTY_FEEDBACK_POPUP_STATE,
           lastDismissedAt: new Date(NOW - FEEDBACK_DISMISS_COOLDOWN_MS + 1).toISOString(),
@@ -98,6 +105,7 @@ describe("shouldShowFeedbackPopup", () => {
     expect(
       shouldShowFeedbackPopup({
         ...eligible,
+        hasFailedTask: true,
         state: {
           ...EMPTY_FEEDBACK_POPUP_STATE,
           lastDismissedAt: new Date(NOW - FEEDBACK_DISMISS_COOLDOWN_MS).toISOString(),
@@ -110,6 +118,7 @@ describe("shouldShowFeedbackPopup", () => {
     expect(
       shouldShowFeedbackPopup({
         ...eligible,
+        hasFailedTask: true,
         state: {
           ...EMPTY_FEEDBACK_POPUP_STATE,
           lastSubmittedAt: new Date(NOW + 24 * 60 * 60 * 1000).toISOString(),
