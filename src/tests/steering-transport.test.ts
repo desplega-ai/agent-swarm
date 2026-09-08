@@ -204,11 +204,7 @@ describe("steering worker transport", () => {
     ]);
   });
 
-  test("codex rows stay pending: the runner skips externally-delivered sessions", async () => {
-    // Codex delivery is harness-side (codex-hook). The row must queue at
-    // request time, and the runner's dispatch poll must leave it untouched —
-    // dispatching would synthesize a false undeliverable and promote it out
-    // from under the hook.
+  test("the runner preserves rows for explicitly external delivery", async () => {
     const agent = await createAgent({
       name: "codex steering worker",
       isLead: false,
@@ -230,7 +226,7 @@ describe("steering worker transport", () => {
       createdByKind: "system",
     });
 
-    expect(requested).toMatchObject({ outcome: "queued", degradedFrom: "steer" });
+    expect(requested).toMatchObject({ outcome: "steered", effectiveMode: "steer" });
 
     // Session without deliverSteering — would normally be reported
     // undeliverable — but the external-delivery flag short-circuits the poll.

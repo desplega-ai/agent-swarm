@@ -1,9 +1,9 @@
 /**
  * Phase 2 unit tests for CodexAdapter / CodexSession.
  *
- * We stub the Codex SDK via a tiny fake `Thread` object whose `runStreamed`
+ * We stub the Codex transport with a tiny fake `Thread` whose `runStreamed`
  * returns a pre-built async iterable of `ThreadEvent`s. This exercises the
- * adapter's event normalization loop without pulling in the real SDK.
+ * adapter's event normalization loop without starting the real CLI.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
@@ -12,10 +12,10 @@ import { join } from "node:path";
 import type {
   AgentMessageItem,
   CommandExecutionItem,
+  SummarizeSessionForCodexDeps,
   ThreadEvent,
   ThreadItem,
-} from "@openai/codex-sdk";
-import type { SummarizeSessionForCodexDeps } from "../providers/codex-adapter";
+} from "../providers/codex-adapter";
 import { buildCodexConfig, CodexAdapter } from "../providers/codex-adapter";
 import { writeCodexAgentsMd } from "../providers/codex-agents-md";
 import {
@@ -28,9 +28,8 @@ import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../pr
 
 /**
  * Build a tiny fake `Thread` whose `runStreamed` returns a fixed sequence of
- * `ThreadEvent`s. The SDK's `StreamedTurn.events` is typed as an
- * `AsyncGenerator`, so we return an async generator that yields each event
- * and then completes.
+ * `ThreadEvent`s. It returns an async generator that yields each event and
+ * then completes.
  */
 function makeFakeThread(events: ThreadEvent[]): {
   id: string | null;
@@ -38,9 +37,15 @@ function makeFakeThread(events: ThreadEvent[]): {
     _input: string,
     _opts?: { signal?: AbortSignal },
   ) => Promise<{ events: AsyncGenerator<ThreadEvent> }>;
+  steer: (_input: string) => Promise<void>;
+  interrupt: () => Promise<void>;
+  close: () => Promise<void>;
 } {
   return {
     id: null,
+    async steer() {},
+    async interrupt() {},
+    async close() {},
     async runStreamed(_input, _opts) {
       async function* generate(): AsyncGenerator<ThreadEvent> {
         for (const event of events) {
@@ -54,7 +59,7 @@ function makeFakeThread(events: ThreadEvent[]): {
 
 /**
  * Like `makeFakeThread` but throws the given error after all events have been
- * yielded. Simulates the SDK's "Codex Exec exited with code 1: Reading prompt
+ * yielded. Simulates the transport's "Codex Exec exited with code 1: Reading prompt
  * from stdin" throw that fires after the event stream closes.
  */
 function makeFakeThreadWithThrow(
@@ -77,36 +82,23 @@ function makeFakeThreadWithThrow(
 
 /**
  * Like `runSessionWithFakeThread` but injects a thread that throws after its
- * event stream ends (simulating the SDK exit-code throw).
+ * event stream ends (simulating the transport exit-code throw).
  */
 async function runSessionWithThrowingThread(
   events: ThreadEvent[],
   throwAfterStream: Error,
   config: ProviderSessionConfig,
 ): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
-  const sdk = await import("@openai/codex-sdk");
-  const originalStartThread = (
-    sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-  ).startThread;
-
   const fakeThread = makeFakeThreadWithThrow(events, throwAfterStream);
-  (sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }).startThread =
-    function startThread(): unknown {
-      return fakeThread as unknown;
-    };
-
-  try {
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    const session = await adapter.createSession(config);
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    const result = await session.waitForCompletion();
-    return { emitted, result };
-  } finally {
-    (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread = originalStartThread;
-  }
+  const adapter = new CodexAdapter({
+    bypassSubprocess: true,
+    threadFactory: () => fakeThread as never,
+  });
+  const session = await adapter.createSession(config);
+  const emitted: ProviderEvent[] = [];
+  session.onEvent((e) => emitted.push(e));
+  const result = await session.waitForCompletion();
+  return { emitted, result };
 }
 
 /**
@@ -142,6 +134,39 @@ function testConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderSes
   };
 }
 
+function makeFakeAppServer(
+  handleRequest: (
+    method: string,
+    params: unknown,
+    emit: (method: string, params?: unknown) => void,
+  ) => unknown | Promise<unknown>,
+) {
+  const listeners = new Set<(notification: { method: string; params?: unknown }) => void>();
+  const closeListeners = new Set<(error: Error) => void>();
+  const emit = (method: string, params?: unknown) => {
+    for (const listener of listeners) listener({ method, params });
+  };
+  return {
+    client: {
+      request: <T>(method: string, params?: unknown) =>
+        Promise.resolve(handleRequest(method, params, emit)) as Promise<T>,
+      onNotification(listener: (notification: { method: string; params?: unknown }) => void) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      onClose(listener: (error: Error) => void) {
+        closeListeners.add(listener);
+        return () => closeListeners.delete(listener);
+      },
+      async close() {},
+    },
+    emit,
+    fail(error: Error) {
+      for (const listener of closeListeners) listener(error);
+    },
+  };
+}
+
 /**
  * Because `CodexSession` is not exported, we load the module source and
  * instantiate it via `eval` of a small helper module. This is brittle but
@@ -154,42 +179,401 @@ async function runSessionWithFakeThread(
   events: ThreadEvent[],
   config: ProviderSessionConfig,
 ): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
-  // Patch `Codex.prototype.startThread` on the fly so `createSession` receives
-  // our fake thread. The adapter calls `new Codex({ env })` and then
-  // `codex.startThread(...)` — we intercept the latter.
-  const sdk = await import("@openai/codex-sdk");
-
-  const originalStartThread = (
-    sdk.Codex.prototype as unknown as {
-      startThread: (...args: unknown[]) => unknown;
-    }
-  ).startThread;
-
   const fakeThread = makeFakeThread(events);
-  (
-    sdk.Codex.prototype as unknown as {
-      startThread: (...args: unknown[]) => unknown;
-    }
-  ).startThread = function startThread(): unknown {
-    return fakeThread as unknown;
-  };
+  const adapter = new CodexAdapter({
+    bypassSubprocess: true,
+    threadFactory: () => fakeThread as never,
+  });
+  const session = await adapter.createSession(config);
 
-  try {
-    const adapter = new CodexAdapter({ bypassSubprocess: true });
-    const session = await adapter.createSession(config);
-
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    const result = await session.waitForCompletion();
-    return { emitted, result };
-  } finally {
-    (
-      sdk.Codex.prototype as unknown as {
-        startThread: (...args: unknown[]) => unknown;
-      }
-    ).startThread = originalStartThread;
-  }
+  const emitted: ProviderEvent[] = [];
+  session.onEvent((e) => emitted.push(e));
+  const result = await session.waitForCompletion();
+  return { emitted, result };
 }
+
+describe("Codex app-server session", () => {
+  test("steer waits for the active turn and sends expectedTurnId", async () => {
+    const requests: Array<{ method: string; params: unknown }> = [];
+    const fake = makeFakeAppServer((method, params, emit) => {
+      requests.push({ method, params });
+      if (method === "thread/start") return { thread: { id: "thread-native-steer" } };
+      if (method === "turn/start") {
+        queueMicrotask(() =>
+          emit("turn/started", {
+            threadId: "thread-native-steer",
+            turn: { id: "turn-native-steer", status: "inProgress" },
+          }),
+        );
+        return { turn: { id: "turn-native-steer" } };
+      }
+      if (method === "turn/steer") {
+        queueMicrotask(() => {
+          emit("thread/tokenUsage/updated", {
+            threadId: "thread-native-steer",
+            turnId: "turn-native-steer",
+            tokenUsage: {
+              total: {
+                inputTokens: 20,
+                cachedInputTokens: 5,
+                cacheWriteInputTokens: 2,
+                outputTokens: 8,
+                reasoningOutputTokens: 3,
+              },
+            },
+          });
+          emit("turn/completed", {
+            threadId: "thread-native-steer",
+            turn: { id: "turn-native-steer", status: "completed", error: null },
+          });
+        });
+        return { turnId: "turn-native-steer" };
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    });
+    const session = await adapter.createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+
+    expect(await session.deliverSteering?.({ mode: "steer", text: "change direction" })).toEqual({
+      delivered: true,
+      mode: "steer",
+    });
+    const result = await session.waitForCompletion();
+    const threadStart = requests.find((request) => request.method === "thread/start");
+    expect(threadStart?.params).toMatchObject({
+      ephemeral: true,
+      config: { model: "gpt-5.4" },
+    });
+    const steer = requests.find((request) => request.method === "turn/steer");
+    expect(steer?.params).toMatchObject({
+      threadId: "thread-native-steer",
+      expectedTurnId: "turn-native-steer",
+      input: [{ type: "text", text: "change direction", text_elements: [] }],
+    });
+    expect(result.cost?.cacheWriteTokens).toBe(2);
+  });
+
+  test("queue starts FIFO turns and derives per-turn usage from cumulative totals", async () => {
+    const prompts: string[] = [];
+    let turnNumber = 0;
+    const fake = makeFakeAppServer((method, params, emit) => {
+      if (method === "thread/start") return { thread: { id: "thread-native-queue" } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      turnNumber += 1;
+      const turnId = `turn-${turnNumber}`;
+      const input = (params as { input: Array<{ text: string }> }).input;
+      prompts.push(input[0]?.text ?? "");
+      const totals =
+        turnNumber === 1
+          ? {
+              inputTokens: 100,
+              cachedInputTokens: 40,
+              cacheWriteInputTokens: 3,
+              outputTokens: 20,
+              reasoningOutputTokens: 5,
+            }
+          : {
+              inputTokens: 260,
+              cachedInputTokens: 90,
+              cacheWriteInputTokens: 8,
+              outputTokens: 55,
+              reasoningOutputTokens: 12,
+            };
+      queueMicrotask(() => {
+        emit("turn/started", {
+          threadId: "thread-native-queue",
+          turn: { id: turnId, status: "inProgress" },
+        });
+        if (turnNumber === 1) {
+          const item = {
+            type: "fileChange",
+            id: "file-1",
+            changes: [{ path: "/tmp/new.ts", kind: { type: "add" }, diff: "+new" }],
+            status: "completed",
+          };
+          emit("item/started", { threadId: "thread-native-queue", turnId, item });
+          emit("item/completed", { threadId: "thread-native-queue", turnId, item });
+        }
+        emit("thread/tokenUsage/updated", {
+          threadId: "thread-native-queue",
+          turnId,
+          tokenUsage: { total: totals },
+        });
+        emit("turn/completed", {
+          threadId: "thread-native-queue",
+          turn: { id: turnId, status: "completed", error: null },
+        });
+      });
+      return { turn: { id: turnId } };
+    });
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    });
+    const session = await adapter.createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((event) => emitted.push(event));
+    expect(await session.deliverSteering?.({ mode: "queue", text: "second" })).toEqual({
+      delivered: true,
+      mode: "queue",
+    });
+
+    const result = await session.waitForCompletion();
+    expect(prompts).toEqual(["hello", "second"]);
+    expect(result.cost).toMatchObject({
+      inputTokens: 260,
+      cacheReadTokens: 90,
+      cacheWriteTokens: 8,
+      outputTokens: 55,
+      reasoningOutputTokens: 12,
+      numTurns: 2,
+    });
+    expect(
+      emitted.find((event) => event.type === "tool_start" && event.toolCallId === "file-1"),
+    ).toMatchObject({ toolName: "Write" });
+  });
+
+  test("abort uses turn/interrupt and scrubs complete provider events", async () => {
+    const requests: string[] = [];
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      requests.push(method);
+      if (method === "thread/start") return { thread: { id: "thread-native-abort" } };
+      if (method === "turn/start") {
+        queueMicrotask(() => {
+          emit("turn/started", {
+            threadId: "thread-native-abort",
+            turn: { id: "turn-native-abort", status: "inProgress" },
+          });
+          emit("item/completed", {
+            threadId: "thread-native-abort",
+            turnId: "turn-native-abort",
+            item: {
+              type: "agentMessage",
+              id: "secret-message",
+              text: "Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz012345",
+            },
+          });
+        });
+        return { turn: { id: "turn-native-abort" } };
+      }
+      if (method === "turn/interrupt") {
+        queueMicrotask(() =>
+          emit("turn/completed", {
+            threadId: "thread-native-abort",
+            turn: { id: "turn-native-abort", status: "interrupted", error: null },
+          }),
+        );
+        return {};
+      }
+      throw new Error(`Unexpected method: ${method}`);
+    });
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    });
+    const session = await adapter.createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((event) => emitted.push(event));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await session.abort("operator cancelled");
+    const result = await session.waitForCompletion();
+
+    expect(requests).toContain("turn/interrupt");
+    expect(result).toMatchObject({ exitCode: 130, failureReason: "operator cancelled" });
+    expect(JSON.stringify(emitted)).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz012345");
+  });
+
+  test("closes queue delivery before the final result event", async () => {
+    const prompts: string[] = [];
+    const fake = makeFakeAppServer((method, params, emit) => {
+      if (method === "thread/start") return { thread: { id: "thread-final-result" } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      prompts.push((params as { input: Array<{ text: string }> }).input[0]?.text ?? "");
+      queueMicrotask(() => {
+        emit("turn/started", {
+          threadId: "thread-final-result",
+          turn: { id: "turn-final-result", status: "inProgress" },
+        });
+        emit("turn/completed", {
+          threadId: "thread-final-result",
+          turn: { id: "turn-final-result", status: "completed", error: null },
+        });
+      });
+      return { turn: { id: "turn-final-result" } };
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    let lateDelivery: Promise<unknown> | undefined;
+    session.onEvent((event) => {
+      if (event.type === "result") {
+        lateDelivery = session.deliverSteering?.({ mode: "queue", text: "too late" });
+      }
+    });
+
+    await session.waitForCompletion();
+    expect(await lateDelivery).toEqual({
+      delivered: false,
+      reason: "Codex session has completed",
+    });
+    expect(prompts).toEqual(["hello"]);
+  });
+
+  test("keeps terminal interrupted usage and emits reasoning arrays as text", async () => {
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      if (method === "thread/start") return { thread: { id: "thread-native-interrupted" } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      queueMicrotask(() => {
+        emit("turn/started", {
+          threadId: "thread-native-interrupted",
+          turn: { id: "turn-native-interrupted", status: "inProgress" },
+        });
+        emit("item/completed", {
+          threadId: "thread-native-interrupted",
+          turnId: "turn-native-interrupted",
+          item: {
+            type: "reasoning",
+            id: "reasoning-1",
+            summary: ["First thought", "Second thought"],
+            content: [],
+          },
+        });
+        emit("thread/tokenUsage/updated", {
+          threadId: "thread-native-interrupted",
+          turnId: "turn-native-interrupted",
+          tokenUsage: {
+            total: {
+              inputTokens: 44,
+              cachedInputTokens: 11,
+              cacheWriteInputTokens: 4,
+              outputTokens: 9,
+              reasoningOutputTokens: 6,
+            },
+          },
+        });
+        emit("turn/completed", {
+          threadId: "thread-native-interrupted",
+          turn: { id: "turn-native-interrupted", status: "interrupted", error: null },
+        });
+      });
+      return { turn: { id: "turn-native-interrupted" } };
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((event) => emitted.push(event));
+
+    const result = await session.waitForCompletion();
+    expect(result).toMatchObject({
+      exitCode: 130,
+      isError: true,
+      cost: {
+        inputTokens: 44,
+        cacheReadTokens: 11,
+        cacheWriteTokens: 4,
+        outputTokens: 9,
+        reasoningOutputTokens: 6,
+      },
+    });
+    expect(
+      emitted.find((event) => event.type === "custom" && event.name === "codex.reasoning"),
+    ).toMatchObject({ data: { text: "First thought\nSecond thought" } });
+    expect(emitted.find((event) => event.type === "context_usage")).toMatchObject({
+      contextUsedTokens: 53,
+    });
+  });
+
+  test("keeps failed-turn usage and treats retrying errors as diagnostics", async () => {
+    const fake = makeFakeAppServer((method, _params, emit) => {
+      if (method === "thread/start") return { thread: { id: "thread-native-failed" } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      queueMicrotask(() => {
+        emit("turn/started", {
+          threadId: "thread-native-failed",
+          turn: { id: "turn-native-failed", status: "inProgress" },
+        });
+        emit("error", {
+          threadId: "thread-native-failed",
+          turnId: "turn-native-failed",
+          willRetry: true,
+          error: { message: "temporary reconnect" },
+        });
+        emit("thread/tokenUsage/updated", {
+          threadId: "thread-native-failed",
+          turnId: "turn-native-failed",
+          tokenUsage: {
+            total: {
+              inputTokens: 18,
+              cachedInputTokens: 2,
+              cacheWriteInputTokens: 1,
+              outputTokens: 3,
+              reasoningOutputTokens: 0,
+            },
+          },
+        });
+        emit("turn/completed", {
+          threadId: "thread-native-failed",
+          turn: {
+            id: "turn-native-failed",
+            status: "failed",
+            error: { message: "terminal failure", codexErrorInfo: null },
+          },
+        });
+      });
+      return { turn: { id: "turn-native-failed" } };
+    });
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((event) => emitted.push(event));
+
+    const result = await session.waitForCompletion();
+    expect(result).toMatchObject({
+      exitCode: 1,
+      cost: { inputTokens: 18, cacheWriteTokens: 1, outputTokens: 3 },
+    });
+    expect(
+      emitted.some(
+        (event) => event.type === "error" && event.message.includes("temporary reconnect"),
+      ),
+    ).toBe(false);
+    expect(
+      emitted.some(
+        (event) => event.type === "raw_stderr" && event.content.includes("temporary reconnect"),
+      ),
+    ).toBe(true);
+  });
+
+  test("fails the session when app-server exits after turn start", async () => {
+    let failServer: ((error: Error) => void) | undefined;
+    const fake = makeFakeAppServer((method) => {
+      if (method === "thread/start") return { thread: { id: "thread-native-exit" } };
+      if (method !== "turn/start") throw new Error(`Unexpected method: ${method}`);
+      queueMicrotask(() => failServer?.(new Error("app-server exited unexpectedly")));
+      return { turn: { id: "turn-native-exit" } };
+    });
+    failServer = fake.fail;
+    const session = await new CodexAdapter({
+      bypassSubprocess: true,
+      appServerFactory: () => fake.client as never,
+    }).createSession(testConfig({ taskId: "", apiUrl: "", apiKey: "" }));
+
+    const result = await session.waitForCompletion();
+    expect(result).toMatchObject({
+      exitCode: 1,
+      isError: true,
+      failureReason: "app-server exited unexpectedly",
+    });
+  });
+});
 
 describe("CodexSession event mapping", () => {
   const tmpLogDir = `/tmp/codex-adapter-test-${Date.now()}`;
@@ -282,10 +666,9 @@ describe("CodexSession event mapping", () => {
     expect(result.sessionId).toBe("thread-abc");
   });
 
-  test("accumulates per-turn SDK usage across a multi-turn session", async () => {
-    // @openai/codex-sdk defines Usage as tokens "during a turn" and describes
-    // a Thread as having multiple consecutive turns. Each turn.completed
-    // payload is therefore additive rather than a session-total replacement.
+  test("accumulates per-turn usage across a multi-turn session", async () => {
+    // Each normalized turn.completed payload is a delta from the app-server's
+    // cumulative thread total. Multiple turn payloads are additive.
     const events: ThreadEvent[] = [
       { type: "thread.started", thread_id: "thread-two-turns" },
       { type: "turn.started" },
@@ -575,35 +958,18 @@ describe("CodexSession event mapping", () => {
   });
 
   test("abort() resolves the session with cancelled result", async () => {
-    // Patch startThread with a fake whose runStreamed yields a long stream
-    // that respects the AbortSignal — yields one event, awaits, and only
-    // continues if the signal isn't aborted.
-    const sdk = await import("@openai/codex-sdk");
-    const originalStartThread = (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread;
-
+    let release!: () => void;
+    let interrupted = false;
     const fakeThread = {
       id: null,
-      runStreamed: async (_input: string, opts?: { signal?: AbortSignal }) => {
+      runStreamed: async (_input: string) => {
         async function* generate(): AsyncGenerator<ThreadEvent> {
           yield { type: "thread.started", thread_id: "thread-abort" };
           yield { type: "turn.started" };
-          // Wait until the signal aborts or 5s elapses (test safety net).
           await new Promise<void>((resolve) => {
-            const onAbort = () => {
-              opts?.signal?.removeEventListener("abort", onAbort);
-              resolve();
-            };
-            if (opts?.signal?.aborted) {
-              resolve();
-              return;
-            }
-            opts?.signal?.addEventListener("abort", onAbort);
-            setTimeout(resolve, 5000);
+            release = resolve;
           });
-          // Simulate the SDK throwing AbortError when the signal fires.
-          if (opts?.signal?.aborted) {
+          if (interrupted) {
             const err = new Error("aborted");
             err.name = "AbortError";
             throw err;
@@ -611,46 +977,42 @@ describe("CodexSession event mapping", () => {
         }
         return { events: generate() };
       },
+      async steer() {},
+      async interrupt() {
+        interrupted = true;
+        release?.();
+      },
+      async close() {},
     };
 
-    (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread = function startThread(): unknown {
-      return fakeThread as unknown;
-    };
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      threadFactory: () => fakeThread as never,
+    });
+    const config = testConfig({
+      logFile: join(tmpLogDir, "abort.log"),
+      cwd: "",
+      taskId: "",
+      apiUrl: "",
+      apiKey: "",
+    });
+    const session = await adapter.createSession(config);
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
 
-    try {
-      const adapter = new CodexAdapter({ bypassSubprocess: true });
-      const config = testConfig({
-        logFile: join(tmpLogDir, "abort.log"),
-        cwd: "",
-        taskId: "", // skip swarm event handler so we don't fire fetches
-        apiUrl: "",
-        apiKey: "",
-      });
-      const session = await adapter.createSession(config);
-      const emitted: ProviderEvent[] = [];
-      session.onEvent((e) => emitted.push(e));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await session.abort();
+    const result = await session.waitForCompletion();
 
-      // Give the session a tick to start streaming, then abort.
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      await session.abort();
-      const result = await session.waitForCompletion();
+    expect(result.isError).toBe(true);
+    expect(result.failureReason).toBe("cancelled");
+    expect(result.exitCode).toBe(130);
 
-      expect(result.isError).toBe(true);
-      expect(result.failureReason).toBe("cancelled");
-      expect(result.exitCode).toBe(130);
-
-      const cancelledResult = emitted.findLast((e) => e.type === "result");
-      expect(cancelledResult).toBeDefined();
-      if (cancelledResult && cancelledResult.type === "result") {
-        expect(cancelledResult.isError).toBe(true);
-        expect(cancelledResult.errorCategory).toBe("cancelled");
-      }
-    } finally {
-      (
-        sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-      ).startThread = originalStartThread;
+    const cancelledResult = emitted.findLast((e) => e.type === "result");
+    expect(cancelledResult).toBeDefined();
+    if (cancelledResult && cancelledResult.type === "result") {
+      expect(cancelledResult.isError).toBe(true);
+      expect(cancelledResult.errorCategory).toBe("cancelled");
     }
   });
 });
@@ -1355,29 +1717,17 @@ async function runSessionWithFakeThreadAndDeps(
   config: ProviderSessionConfig,
   summarizeDeps: SummarizeSessionForCodexDeps,
 ): Promise<{ emitted: ProviderEvent[]; result: ProviderResult }> {
-  const sdk = await import("@openai/codex-sdk");
-  const originalStartThread = (
-    sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-  ).startThread;
-
   const fakeThread = makeFakeThread(events);
-  (sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }).startThread =
-    function startThread(): unknown {
-      return fakeThread as unknown;
-    };
-
-  try {
-    const adapter = new CodexAdapter({ summarizeDeps, bypassSubprocess: true });
-    const session = await adapter.createSession(config);
-    const emitted: ProviderEvent[] = [];
-    session.onEvent((e) => emitted.push(e));
-    const result = await session.waitForCompletion();
-    return { emitted, result };
-  } finally {
-    (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread = originalStartThread;
-  }
+  const adapter = new CodexAdapter({
+    summarizeDeps,
+    bypassSubprocess: true,
+    threadFactory: () => fakeThread as never,
+  });
+  const session = await adapter.createSession(config);
+  const emitted: ProviderEvent[] = [];
+  session.onEvent((e) => emitted.push(e));
+  const result = await session.waitForCompletion();
+  return { emitted, result };
 }
 
 type RunSummarizeArgs = Parameters<NonNullable<SummarizeSessionForCodexDeps["runSummarize"]>>[0];
@@ -1787,7 +2137,7 @@ describe("CodexSession — rate-limit error preservation", () => {
     // Keep afterEach from the test runner clean
   });
 
-  test("terminalError survives SDK post-stream throw and surfaces as [usage-limit] failureReason", async () => {
+  test("terminalError survives a post-stream transport error and surfaces as [usage-limit]", async () => {
     const usageLimitMsg =
       "You've hit your usage limit. To get more access now, send a request to your admin or try again at 8:35 PM.";
     const events: ThreadEvent[] = [
@@ -1804,7 +2154,7 @@ describe("CodexSession — rate-limit error preservation", () => {
       testConfig({ logFile: join(tmpLogDir, "ratelimit-preserve.log"), cwd: "" }),
     );
 
-    // Bug #1 fix: structured failureReason must survive the SDK throw
+    // The structured failure reason must survive the transport error.
     expect(result.failureReason).toMatch(/\[usage-limit\]/);
     expect(result.failureReason).not.toContain("Reading prompt from stdin");
     expect(result.isError).toBe(true);
@@ -1842,32 +2192,18 @@ describe("CodexSession — rate-limit error preservation", () => {
   });
 
   test("AbortError still settles as cancelled even when terminalError is absent (regression guard)", async () => {
-    // If the session is aborted before any error event, the AbortError path
-    // must still win over the terminalError preservation branch.
-    const sdk = await import("@openai/codex-sdk");
-    const originalStartThread = (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread;
-
+    let release!: () => void;
+    let interrupted = false;
     const fakeThread = {
       id: null,
-      runStreamed: async (_input: string, opts?: { signal?: AbortSignal }) => {
+      runStreamed: async (_input: string) => {
         async function* generate(): AsyncGenerator<ThreadEvent> {
           yield { type: "thread.started", thread_id: "thread-abort-guard" };
           yield { type: "turn.started" };
           await new Promise<void>((resolve) => {
-            const onAbort = () => {
-              opts?.signal?.removeEventListener("abort", onAbort);
-              resolve();
-            };
-            if (opts?.signal?.aborted) {
-              resolve();
-              return;
-            }
-            opts?.signal?.addEventListener("abort", onAbort);
-            setTimeout(resolve, 5000);
+            release = resolve;
           });
-          if (opts?.signal?.aborted) {
+          if (interrupted) {
             const err = new Error("aborted");
             err.name = "AbortError";
             throw err;
@@ -1875,41 +2211,37 @@ describe("CodexSession — rate-limit error preservation", () => {
         }
         return { events: generate() };
       },
+      async steer() {},
+      async interrupt() {
+        interrupted = true;
+        release?.();
+      },
+      async close() {},
     };
+    const adapter = new CodexAdapter({
+      bypassSubprocess: true,
+      threadFactory: () => fakeThread as never,
+    });
+    const config = testConfig({
+      logFile: join(tmpLogDir, "abort-guard.log"),
+      cwd: "",
+      taskId: "",
+      apiUrl: "",
+      apiKey: "",
+    });
+    const session = await adapter.createSession(config);
+    const emitted: ProviderEvent[] = [];
+    session.onEvent((e) => emitted.push(e));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await session.abort();
+    const result = await session.waitForCompletion();
 
-    (
-      sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-    ).startThread = function startThread(): unknown {
-      return fakeThread as unknown;
-    };
-
-    try {
-      const adapter = new CodexAdapter({ bypassSubprocess: true });
-      const config = testConfig({
-        logFile: join(tmpLogDir, "abort-guard.log"),
-        cwd: "",
-        taskId: "",
-        apiUrl: "",
-        apiKey: "",
-      });
-      const session = await adapter.createSession(config);
-      const emitted: ProviderEvent[] = [];
-      session.onEvent((e) => emitted.push(e));
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      await session.abort();
-      const result = await session.waitForCompletion();
-
-      expect(result.failureReason).toBe("cancelled");
-      expect(result.exitCode).toBe(130);
-    } finally {
-      (
-        sdk.Codex.prototype as unknown as { startThread: (...args: unknown[]) => unknown }
-      ).startThread = originalStartThread;
-    }
+    expect(result.failureReason).toBe("cancelled");
+    expect(result.exitCode).toBe(130);
   });
 
   test("real unexpected exception (no terminalError) still falls through to outer catch", async () => {
-    // When the SDK throws before any error event, the outer catch must fire normally.
+    // A transport error before any error event must reach the outer catch.
     const events: ThreadEvent[] = [
       { type: "thread.started", thread_id: "thread-unexpected" },
       { type: "turn.started" },

@@ -193,10 +193,7 @@ describe("task steering core", () => {
     ]);
   });
 
-  test("codex steer requests degrade to queue and stay pending for the hook", async () => {
-    // Codex is queue-capable via harness-side hook delivery: the row must
-    // stay `pending` (never promoted at request time, never dispatched by the
-    // runner) until the codex-hook marks it delivered.
+  test("codex steer requests retain native steer mode until delivery", async () => {
     const task = await runningTask("codex", "codex parent");
     const result = await requestSteering({
       taskId: task.id,
@@ -208,10 +205,10 @@ describe("task steering core", () => {
     });
 
     expect(result).toMatchObject({
-      outcome: "queued",
-      effectiveMode: "queue",
-      degradedFrom: "steer",
+      outcome: "steered",
+      effectiveMode: "steer",
     });
+    expect(result.degradedFrom).toBeUndefined();
     expect(result.promotedTaskId).toBeUndefined();
     expect(await getSteeringMessagesForTask(task.id)).toEqual([
       expect.objectContaining({
@@ -377,7 +374,7 @@ describe("task steering core", () => {
     expect((await getSteeringMessageById(result.steeringMessageId))?.status).toBe("pending");
   });
 
-  test("pending codex tasks queue for hook delivery once the session starts", async () => {
+  test("pending codex tasks queue for delivery once the session starts", async () => {
     const task = await createTaskExtended("pending codex target", {
       agentId: agentIds.get("codex"),
       source: "api",

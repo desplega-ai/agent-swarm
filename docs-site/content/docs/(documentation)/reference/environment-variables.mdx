@@ -143,7 +143,7 @@ Which credentials you need depends on your selected harness provider:
 | `API_KEY` | Yes | — | Swarm API key used to fetch `codex_oauth` from the config store |
 | `MCP_BASE_URL` | Yes | `http://host.docker.internal:3013` | Swarm API URL reachable by the worker |
 | `CODEX_SKILLS_DIR` | No | `~/.codex/skills` | Directory used by the Codex inline slash-command resolver to find `<name>/SKILL.md` (mirrors `OPENCODE_SKILLS_DIR`) |
-| `CODEX_PATH_OVERRIDE` | No | Set automatically in the Docker image (`/usr/bin/codex`) | Absolute path to the Codex CLI wrapper/binary, passed to the SDK's `codexPathOverride`. Needed because the bundled `@openai/codex-sdk` can't `require.resolve` from a compiled Bun binary. Only needed for non-Docker/custom installs |
+| `CODEX_PATH_OVERRIDE` | No | Set automatically in the Docker image (`/usr/bin/codex`) | Absolute path to the Codex CLI wrapper or binary. The app-server transport invokes this path with `app-server --listen stdio://`. Use it for non-Docker or custom installs. |
 | `AGENT_SWARM_CODEX_RUNNER_ARGV` | No | Inferred from `process.argv` (dev vs. compiled-binary layout) | JSON-encoded string array overriding the argv prefix used to re-launch the `codex-session-runner` subprocess. Niche escape hatch for nonstandard install/packaging layouts |
 | `NODE_EXTRA_CA_CERTS` | No | — | Path to an extra CA certificate bundle, forwarded to the spawned Codex CLI subprocess so it trusts custom/corporate CAs on outbound HTTPS calls |
 
