@@ -62,7 +62,7 @@ Run from the repository root. Templates use a repository-path placeholder to avo
 ```sh
 bun -e '
 const source = "thoughts/taras/research/2026-09-09-claude-sdk-parity";
-for (const name of ["hooks", "environment", "lifecycle", "permissions", "telemetry", "context-mode", "bridge", "adapter-configuration"]) {
+for (const name of ["hooks", "environment", "lifecycle", "permissions", "telemetry", "context-mode", "bridge", "adapter-configuration", "worker-steering"]) {
   const text = await Bun.file(`${source}/${name}.ts.example`).text();
   await Bun.write(`/private/tmp/claude-sdk-parity-20260909/${name}.ts`, text.replaceAll("__SPIKE_REPO_ROOT__", process.cwd()));
 }
