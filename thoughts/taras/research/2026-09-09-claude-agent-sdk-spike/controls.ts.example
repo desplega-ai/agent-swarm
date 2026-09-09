@@ -1,0 +1,146 @@
+import { type Options, query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import { scrubSecrets } from "../../../../src/utils/secret-scrubber.ts";
+
+const dir = "/tmp/claude-sdk-spike-20260909/controls";
+await Bun.write(`${dir}/workspace/.keep`, "");
+await Bun.write(`${dir}/config/.keep`, "");
+if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) throw new Error("Missing OAuth token.");
+const abortController = new AbortController();
+const timer = setTimeout(() => abortController.abort(), 90000);
+const options: Options = {
+  cwd: `${dir}/workspace`,
+  env: {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    CLAUDE_CONFIG_DIR: `${dir}/config`,
+    CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  },
+  model: "claude-haiku-4-5",
+  tools: ["Bash"],
+  permissionMode: "bypassPermissions",
+  allowDangerouslySkipPermissions: true,
+  settingSources: [],
+  strictMcpConfig: true,
+  includePartialMessages: true,
+  maxBudgetUsd: 0.5,
+  maxTurns: 10,
+  abortController,
+  stderr: (text) => process.stderr.write(scrubSecrets(text)),
+};
+const pending: SDKUserMessage[] = [];
+let wake: (() => void) | undefined;
+let finished = false;
+function send(content: string) {
+  pending.push({
+    type: "user",
+    message: { role: "user", content },
+    parent_tool_use_id: null,
+    session_id: "",
+    uuid: crypto.randomUUID(),
+  });
+  wake?.();
+}
+async function* input(): AsyncGenerator<SDKUserMessage> {
+  while (!finished) {
+    if (!pending.length)
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+    wake = undefined;
+    const message = pending.shift();
+    if (message) yield message;
+  }
+}
+const summary: Record<string, unknown> = { results: [], events: {}, interruptCalled: false };
+const results = summary.results as Record<string, unknown>[];
+const counts = summary.events as Record<string, number>;
+const nonce = `MEMORY_${crypto.randomUUID().slice(0, 8)}`;
+send(`Remember ${nonce} for later. Reply with exactly FIRST_OK.`);
+const run = query({ prompt: input(), options });
+let interruptPromise: Promise<unknown> | undefined;
+let interruptTimer: ReturnType<typeof setTimeout> | undefined;
+try {
+  for await (const message of run) {
+    counts[message.type] = (counts[message.type] ?? 0) + 1;
+    if (message.type === "system" && message.subtype === "init")
+      summary.sessionId = message.session_id;
+    if (
+      results.length === 2 &&
+      message.type === "assistant" &&
+      message.message.content.some((block) => block.type === "tool_use" && block.name === "Bash") &&
+      !summary.interruptCalled
+    ) {
+      summary.interruptCalled = true;
+      interruptTimer = setTimeout(() => {
+        const started = Date.now();
+        interruptPromise = run.interrupt().then((receipt) => {
+          summary.interruptMs = Date.now() - started;
+          summary.interruptReceipt = receipt;
+        });
+      }, 700);
+    }
+    if (message.type !== "result") continue;
+    results.push({
+      subtype: message.subtype,
+      result: "result" in message ? message.result : undefined,
+      cost: message.total_cost_usd,
+      usage: message.modelUsage,
+      isError: message.is_error,
+    });
+    if (results.length === 1) {
+      const context = await run.getContextUsage({ detail: "summary" });
+      summary.context = {
+        totalTokens: context.totalTokens,
+        maxTokens: context.maxTokens,
+        apiUsage: context.apiUsage,
+      };
+      send("Reply with the exact memory token from my previous message.");
+    } else if (results.length === 2) {
+      send("Use Bash to run exactly sleep 15. After Bash completes, reply WAIT_DONE.");
+    } else if (results.length === 3) {
+      await interruptPromise;
+      send("Reply with exactly RECOVERED_OK.");
+    } else {
+      finished = true;
+      wake?.();
+      run.close();
+      break;
+    }
+  }
+  if (results[0]?.result !== "FIRST_OK" || !String(results[1]?.result).includes(nonce))
+    throw new Error("Conversation queue check failed.");
+  if (!summary.interruptCalled || results[3]?.result !== "RECOVERED_OK")
+    throw new Error("Interrupt recovery check failed.");
+  const resumed = query({
+    prompt: "Reply with the exact memory token from the earlier conversation.",
+    options: { ...options, resume: String(summary.sessionId), tools: [] },
+  });
+  try {
+    for await (const message of resumed) {
+      if (message.type === "result")
+        summary.resume = {
+          subtype: message.subtype,
+          result: "result" in message ? message.result : undefined,
+          sessionId: message.session_id,
+        };
+    }
+  } finally {
+    resumed.close();
+  }
+  if (!String((summary.resume as Record<string, unknown>)?.result).includes(nonce))
+    throw new Error("Resume check failed.");
+  summary.passed = true;
+} catch (error) {
+  summary.error = String(error);
+  process.exitCode = 1;
+} finally {
+  finished = true;
+  wake?.();
+  clearTimeout(timer);
+  clearTimeout(interruptTimer);
+  run.close();
+}
+const output = scrubSecrets(JSON.stringify(summary, null, 2));
+await Bun.write("/tmp/claude-sdk-spike-20260909/controls-result.json", output);
+console.log(output);
