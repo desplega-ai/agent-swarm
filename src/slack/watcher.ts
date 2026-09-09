@@ -1,11 +1,14 @@
 import {
   getAgentById,
   getChildTasks,
-  getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getPendingSlackRelayTasks,
   getSteeringMessagesForTask,
   getTaskAttachments,
   getTaskById,
+  markFinalizedSlackRelaysDelivered,
+  markSlackRelayAttempted,
+  markSlackRelayDelivered,
   setSlackMessageTracking,
 } from "../be/db";
 import type { AgentTask } from "../types";
@@ -272,6 +275,8 @@ async function cleanupCompletedTree(
     ),
   );
 
+  await Promise.all(allTaskIds.map((taskId) => markSlackRelayDelivered(taskId)));
+
   // Add all to notifiedCompletions so flat processing doesn't re-process
   for (const taskId of allTaskIds) {
     notifiedCompletions.set(taskId, now);
@@ -375,6 +380,8 @@ export async function processTreeMessages(): Promise<void> {
       for (const taskId of taskIds) {
         taskToTree.delete(taskId);
         taskMessages.delete(taskId);
+        notifiedCompletions.delete(taskId);
+        lastSendTime.delete(`completion:${taskId}`);
         try {
           await setSlackMessageTracking(taskId, {
             slackProgressMessageTs: null,
@@ -502,6 +509,113 @@ async function postInitialDMTreeMessage(task: AgentTask): Promise<string | undef
 }
 
 /**
+ * Deliver every pending terminal Slack relay and durably acknowledge only
+ * successful sends. Exported so restart/retry behavior can be tested without
+ * waiting for the watcher's interval.
+ */
+export async function processPendingSlackRelays(now = Date.now()): Promise<void> {
+  for (const task of await getPendingSlackRelayTasks()) {
+    const completionKey = `completion:${task.id}`;
+
+    if (notifiedCompletions.has(task.id) || pendingSends.has(completionKey)) continue;
+    const lastSent = lastSendTime.get(completionKey);
+    if (lastSent && now - lastSent < MIN_SEND_INTERVAL) continue;
+
+    try {
+      // Record every claimed delivery, including tree-owned ones, so a
+      // permanently failing row cannot occupy the bounded pending window.
+      await markSlackRelayAttempted(task.id);
+    } catch (error) {
+      console.error(`[Slack] Failed to claim pending completion:`, error);
+      continue;
+    }
+
+    // Pending delivery is paged, so a terminal tree root may not have been in
+    // the startup hydration batch. Reassert persisted tree ownership whenever
+    // the row reaches the consumer; never treat a shared tree message as a
+    // task-owned flat progress message.
+    if (
+      !taskToTree.has(task.id) &&
+      task.slackTreeRootMessageTs &&
+      task.slackChannelId &&
+      task.slackThreadTs
+    ) {
+      await registerTreeMessage(
+        task.id,
+        task.slackChannelId,
+        task.slackThreadTs,
+        task.slackTreeRootMessageTs,
+      );
+    }
+
+    // A tracked tree owns the compact terminal render. Long output is posted
+    // separately; cleanupCompletedTree acknowledges the durable obligation
+    // after the final tree update succeeds.
+    if (taskToTree.has(task.id)) {
+      if (!shouldPostInlineCompletionOutput(task)) {
+        notifiedCompletions.set(task.id, now);
+        continue;
+      }
+
+      pendingSends.add(completionKey);
+      notifiedCompletions.set(task.id, now);
+      lastSendTime.set(completionKey, now);
+      try {
+        const sent = await sendInlineTaskOutput(task);
+        if (!sent) throw new Error("sendInlineTaskOutput returned false");
+        console.log(
+          `[Slack] Sent inline output for tree-tracked completion ${task.id.slice(0, 8)}`,
+        );
+      } catch (error) {
+        notifiedCompletions.delete(task.id);
+        lastSendTime.delete(completionKey);
+        console.error(`[Slack] Failed to send tree-tracked completion:`, error);
+      } finally {
+        pendingSends.delete(completionKey);
+      }
+      continue;
+    }
+
+    pendingSends.add(completionKey);
+    notifiedCompletions.set(task.id, now);
+    lastSendTime.set(completionKey, now);
+    try {
+      const trackedMessageTs = taskMessages.get(task.id)?.messageTs ?? task.slackProgressMessageTs;
+      let sent: boolean;
+      if (trackedMessageTs) {
+        // Persisted progress tracking makes retries idempotent across process
+        // restarts: update the same Slack message instead of posting another.
+        const result = await updateToFinal(task, trackedMessageTs);
+        if (result === "not_found") {
+          taskMessages.delete(task.id);
+          await setSlackMessageTracking(task.id, {
+            slackProgressMessageTs: null,
+            slackTreeRootMessageTs: null,
+          });
+          sent = await sendTaskResponse(task);
+        } else {
+          sent = result === "ok";
+          if (sent) taskMessages.delete(task.id);
+        }
+      } else {
+        sent = await sendTaskResponse(task);
+      }
+      if (!sent) throw new Error("Slack did not accept the terminal task response");
+      await markSlackRelayDelivered(task.id);
+      sentProgress.delete(task.id);
+      await finalizeTerminalSlackReactions([task]);
+      console.log(`[Slack] Sent ${task.status} response for task ${task.id.slice(0, 8)}`);
+    } catch (error) {
+      notifiedCompletions.delete(task.id);
+      lastSendTime.delete(completionKey);
+      console.error(`[Slack] Failed to send completion:`, error);
+    } finally {
+      pendingSends.delete(completionKey);
+    }
+  }
+}
+
+/**
  * Start watching for Slack task updates and sending responses.
  */
 export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
@@ -510,17 +624,16 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     return;
   }
 
-  // Initialize with existing completed tasks to avoid re-notifying on restart
-  const existingCompleted = await getCompletedSlackTasks();
-  const now = Date.now();
-  for (const task of existingCompleted) {
-    notifiedCompletions.set(task.id, now);
-  }
-  console.log(`[Slack] Initialized with ${existingCompleted.length} existing completed tasks`);
-
   let hydratedTrees = 0;
   let hydratedFlat = 0;
-  for (const task of await getInProgressSlackTasks()) {
+  const hydrationTasks = new Map<string, AgentTask>();
+  for (const task of [
+    ...(await getInProgressSlackTasks()),
+    ...(await getPendingSlackRelayTasks()),
+  ]) {
+    hydrationTasks.set(task.id, task);
+  }
+  for (const task of hydrationTasks.values()) {
     if (!task.slackChannelId || !task.slackThreadTs) continue;
 
     const treeTs = task.slackTreeRootMessageTs;
@@ -570,6 +683,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
     try {
       if (isSlackRenderV2Enabled()) {
         await processSlackRenderV2();
+        await markFinalizedSlackRelaysDelivered();
         return;
       }
 
@@ -729,88 +843,7 @@ export async function startTaskWatcher(intervalMs = 3000): Promise<void> {
         }
       }
 
-      // Check for completed tasks
-      const completedTasks = await getCompletedSlackTasks();
-      for (const task of completedTasks) {
-        // Late-register descendant tasks into their ancestor's tree (walk up parent chain)
-        if (!taskToTree.has(task.id) && task.parentTaskId) {
-          let ancestorId: string | undefined = task.parentTaskId;
-          while (ancestorId) {
-            const treeMs = taskToTree.get(ancestorId);
-            if (treeMs) {
-              taskToTree.set(task.id, treeMs);
-              console.log(
-                `[Slack] Late-registered completed descendant ${task.id.slice(0, 8)} into ancestor tree`,
-              );
-              break;
-            }
-            const ancestor = await getTaskById(ancestorId);
-            ancestorId = ancestor?.parentTaskId ?? undefined;
-          }
-        }
-
-        const completionKey = `completion:${task.id}`;
-
-        // Skip if already notified or currently sending or sent recently
-        if (notifiedCompletions.has(task.id) || pendingSends.has(completionKey)) continue;
-        const lastSent = lastSendTime.get(completionKey);
-        if (lastSent && now - lastSent < MIN_SEND_INTERVAL) continue;
-
-        // Tasks tracked in a tree are still rendered by processTreeMessages().
-        // For truncated completions, add one inline output reply so the user
-        // sees the actual answer instead of only the compact tree preview.
-        if (taskToTree.has(task.id)) {
-          if (!shouldPostInlineCompletionOutput(task)) {
-            notifiedCompletions.set(task.id, now);
-            continue;
-          }
-
-          pendingSends.add(completionKey);
-          notifiedCompletions.set(task.id, now);
-          lastSendTime.set(completionKey, now);
-          try {
-            const sent = await sendInlineTaskOutput(task);
-            if (!sent) throw new Error("sendInlineTaskOutput returned false");
-            console.log(
-              `[Slack] Sent inline output for tree-tracked completion ${task.id.slice(0, 8)}`,
-            );
-          } catch (error) {
-            notifiedCompletions.delete(task.id);
-            lastSendTime.delete(completionKey);
-            console.error(`[Slack] Failed to send tree-tracked completion:`, error);
-          } finally {
-            pendingSends.delete(completionKey);
-          }
-          continue;
-        }
-
-        // Mark as pending and notified BEFORE sending
-        pendingSends.add(completionKey);
-        notifiedCompletions.set(task.id, now);
-        lastSendTime.set(completionKey, now);
-        try {
-          const tracked = taskMessages.get(task.id);
-          if (tracked) {
-            // Channel thread: update the same message to its final state
-            await updateToFinal(task, tracked.messageTs);
-            taskMessages.delete(task.id);
-          } else {
-            // DM or untracked: post completion as a new message
-            await sendTaskResponse(task);
-          }
-          // Clean up progress tracking
-          sentProgress.delete(task.id);
-          await finalizeTerminalSlackReactions([task]);
-          console.log(`[Slack] Sent ${task.status} response for task ${task.id.slice(0, 8)}`);
-        } catch (error) {
-          // If send fails, remove from notified so we can retry
-          notifiedCompletions.delete(task.id);
-          lastSendTime.delete(completionKey);
-          console.error(`[Slack] Failed to send completion:`, error);
-        } finally {
-          pendingSends.delete(completionKey);
-        }
-      }
+      await processPendingSlackRelays(now);
     } finally {
       isProcessing = false;
     }

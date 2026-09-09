@@ -26,15 +26,15 @@ Each row shows a source chip when the underlying environment variable is set on 
 | Steering | `STEERING_ENABLED`, `SLACK_THREAD_STEERING`, `SLACK_THREAD_STEERING_MODE` |
 | Memory | `MEMORY_HYBRID_SEARCH`, `MEMORY_GRAPH_EXPANSION`, `MEMORY_RATERS`, `EMBEDDING_MODEL` |
 | Heartbeat & crash recovery | `HEARTBEAT_INTERVAL_MS`, `HEARTBEAT_STALL_THRESHOLD_MIN`, `RUNTIME_STALE_THRESHOLD_MIN`, `HEARTBEAT_PIN_CRASH_RESUME` |
-| Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `WORKER_API_READY_TIMEOUT_SECONDS` |
+| Harness & tools | `SCRIPTS_ONLY_MCP`, `MULTI_RUNTIME_ENABLED`, `CAPABILITIES`, `OPENROUTER_BASE_URL`, `WORKER_API_READY_TIMEOUT_SECONDS` |
 | Database | `DB_QUERY_BOUNDED_ENABLED`, `DB_QUERY_HTTP_BUDGET_MS`, `DB_QUERY_HTTP_MAX_ROWS`, `DB_QUERY_MCP_BUDGET_MS`, `DB_QUERY_MCP_MAX_ROWS`, `DB_QUERY_CONCURRENCY_CAP`, `SESSION_LOG_RETENTION_DAYS`, `AGENT_LOG_RETENTION_DAYS`, `EVENTS_RETENTION_DAYS`, `DB_RETENTION_DRY_RUN`, `DB_RETENTION_TICK_BUDGET_MS`, `DB_RETENTION_CATCHUP_INTERVAL_MS`, `DB_RETENTION_MAX_STATEMENT_MS` |
-| Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS` |
+| Integrations | `SLACK_DISABLE`, `SLACK_ALLOW_DEV_SOCKET_MODE`, `SLACK_RENDER_V2`, `SLACK_RENDER_V2_DELEGATION`, `SLACK_CONCLUSION_SETTLE_SEC`, `SLACK_CONCLUSION_TIMEOUT_MIN`, `SLACK_TREE_STALL_MIN`, `GITHUB_DISABLE`, `LINEAR_DISABLE`, `SLACK_ALERTS_CHANNEL`, `AGENT_FS_REQUEST_TIMEOUT_MS`, `SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`, `SLACK_REACTION_COMPLETED`, `SLACK_REACTION_FAILED` |
 | Security & access | `RBAC_ENABLED`, `BUDGET_ADMISSION_DISABLED`, `MCP_OAUTH_ALLOW_PRIVATE_HOSTS` |
 | Workflows & scheduler | `WORKFLOW_MAX_ITERATIONS`, `SCHEDULER_INTERVAL_MS` |
 | Telemetry & observability | `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, `ANONYMIZED_TELEMETRY` |
 | Branding & URLs | `SWARM_ORG_NAME`, `SWARM_BRAND_COLOR`, `DASHBOARD_URL` |
 
-Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead.
+Harness **provider and model selection are deliberately absent** from this page — they are configured per agent. A global value would silently become the default for every agent in the swarm, so those knobs live on each agent's own configuration instead. `OPENROUTER_BASE_URL` is a deployment-wide routing endpoint rather than a model choice, which is why it does belong here.
 
 Settings with deeper behavior link out to the relevant guide (for example the [task steering](/docs/guides/task-steering) and [harness providers](/docs/guides/harness-providers) guides) directly from the row.
 
@@ -64,6 +64,14 @@ Every row shows its default, and rows with a stored value offer a **Reset** acti
   Workers must be updated before enabling it: with the flag on, a worker that does not identify its runtime is rejected at registration and shutdown. A worker that stops reporting for `RUNTIME_STALE_THRESHOLD_MIN` (default 5 minutes) stops counting toward its agent, and an agent whose last live worker expires is marked offline. See the [multi-runtime agents guide](/docs/guides/multi-runtime-agents) for the rollout order, shared-workspace Compose example, rollback behavior, and the [heartbeat and crash recovery runbook](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/heartbeat-crash-recovery.md).
 
   **Workspace state is not shared for you.** Work for one agent can continue on a different process than the one that started it, so runtimes sharing an `AGENT_ID` need compatible workspace state. In Docker Compose or similar deployments, give them the same persistent workspace/repository volume when continuation depends on local files. If their workspaces are independent, task continuation must rely only on state that can be reconstructed from shared sources — the repository, the control plane, or attachments — because enabling this setting does not synchronize arbitrary local filesystem state between workers.
+</Callout>
+
+<Callout type="info" title="OPENROUTER_BASE_URL points the harnesses at a model gateway">
+  This is the one exception to the "no model knobs here" rule above, and it is not a model choice: it sets *where* OpenRouter-shaped requests go, not *which* model runs. Point it at any gateway serving OpenRouter-compatible `GET /models` and `POST /chat/completions` — openrouter.ai, OrcaRouter, or a self-hosted proxy — and the OpenCode and pi-mono harnesses, model refreshes, and internal summarizers all route through it. Leave it blank for openrouter.ai.
+
+  A saved value reaches both sides without a restart. The API server re-injects it over its process environment on the debounced config reload. Each worker fetches the resolved config before starting a task and passes it into the harness adapter, so the change lands on that worker's next task; a task already running keeps the gateway it started with.
+
+  The gateway credential is **not** set here — `OPENROUTER_API_KEY` belongs on the Secrets page or in the worker environment. Setup for each harness, model-string rules, and which harnesses this cannot redirect: [Model Gateways](/docs/guides/provider-auth/model-gateways).
 </Callout>
 
 <Callout type="warn" title="WORKER_API_READY_TIMEOUT_SECONDS is bootstrap-only">

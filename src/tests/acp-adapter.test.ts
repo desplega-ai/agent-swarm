@@ -2,6 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { normalizeSessionLogs } from "../../apps/ui/src/logs-parser";
+import {
+  closeDb,
+  createSessionLogs,
+  createTaskExtended,
+  getSessionLogsByTaskId,
+  initDb,
+} from "../be/db";
 import { createProviderAdapter } from "../providers";
 import {
   ACPAdapter,
@@ -60,7 +68,7 @@ describe("ACPAdapter", () => {
     );
   });
 
-  test("runs a configured ACP target through initialize, session/new, and session/prompt", async () => {
+  test("redacts credential headers from arrays and nested maps before persistence", async () => {
     const cwd = makeTempDir();
     const agentPath = join(cwd, "fake-acp-agent.ts");
     const sdkPath = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
@@ -88,6 +96,10 @@ class FakeAgent {
     if (!params.mcpServers.some((server) => server.name === "swarm" && server.type === "http")) {
       throw new Error("missing swarm MCP server");
     }
+    await this.connection.sessionUpdate({
+      sessionId: "acp-session-1",
+      update: { sessionUpdate: "current_mode_update", currentModeId: "code" },
+    });
     return {
       sessionId: "acp-session-1",
       configOptions: [
@@ -140,6 +152,15 @@ class FakeAgent {
       update: {
         sessionUpdate: "agent_message_chunk",
         content: { type: "text", text: "done" },
+        messageId: "assistant-1",
+      },
+    });
+    await this.connection.sessionUpdate({
+      sessionId: params.sessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        content: { type: "text", text: "x".repeat(31_000) },
+        messageId: "user-1",
       },
     });
     await this.connection.sessionUpdate({
@@ -149,7 +170,46 @@ class FakeAgent {
         toolCallId: "tool-1",
         title: "Run command",
         kind: "execute",
-        rawInput: { command: "true" },
+        rawInput: {
+          command: "true",
+          headers: [
+            { name: "Authorization", value: "opaque-array-authorization-credential" },
+            {
+              name: "Proxy-Authorization",
+              value: "opaque-array-proxy-authorization-credential",
+            },
+            { name: "Cookie", value: "opaque-array-cookie-credential" },
+            { name: "Set-Cookie", value: "opaque-array-set-cookie-credential" },
+            { name: "WWW-Authenticate", value: "opaque-array-www-authenticate-credential" },
+            { name: "Proxy-Authenticate", value: "opaque-array-proxy-authenticate-credential" },
+            { name: "X-API-Key", value: "opaque-array-x-api-key-credential" },
+            { name: "API-Key", value: "opaque-array-api-key-credential" },
+            { name: "X-Auth-Token", value: "opaque-array-x-auth-token-credential" },
+            { name: "X-Access-Token", value: "opaque-array-x-access-token-credential" },
+            { name: "X-Session-Token", value: "opaque-array-x-session-token-credential" },
+            { name: "X-Debug", value: "kept" },
+          ],
+          metadata: {
+            nested: {
+              headers: {
+                AUTHORIZATION: "opaque-map-authorization-credential",
+                "proxy-authorization": "opaque-map-proxy-authorization-credential",
+                COOKIE: "opaque-map-cookie-credential",
+                "set-cookie": "opaque-map-set-cookie-credential",
+                "www-authenticate": "opaque-map-www-authenticate-credential",
+                "proxy-authenticate": "opaque-map-proxy-authenticate-credential",
+                "x-api-key": "opaque-map-x-api-key-credential",
+                "api-key": "opaque-map-api-key-credential",
+                "x-auth-token": "opaque-map-x-auth-token-credential",
+                "x-access-token": "opaque-map-x-access-token-credential",
+                "x-session-token": "opaque-map-x-session-token-credential",
+                "X-Debug-Map": "kept-too",
+              },
+            },
+          },
+          diagnosticToken: "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+          chunks: Array.from({ length: 20 }, () => "y".repeat(2_000)),
+        },
       },
     });
     await this.connection.sessionUpdate({
@@ -158,8 +218,8 @@ class FakeAgent {
         sessionUpdate: "tool_call_update",
         toolCallId: "tool-1",
         title: "Run command",
-        status: "completed",
-        rawOutput: "ok",
+        status: "failed",
+        rawOutput: { chunks: Array.from({ length: 20 }, () => "z".repeat(2_000)) },
       },
     });
     return { stopReason: "end_turn" };
@@ -213,6 +273,96 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
     expect(events.some((event) => event.type === "tool_start")).toBe(true);
     expect(events.some((event) => event.type === "tool_end")).toBe(true);
     expect(events.some((event) => event.type === "result")).toBe(true);
+
+    const rawLogs = events
+      .filter(
+        (event): event is Extract<ProviderEvent, { type: "raw_log" }> => event.type === "raw_log",
+      )
+      .map((event) => event.content);
+    expect(rawLogs.length).toBeGreaterThan(0);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        const update = event.update as Record<string, unknown> | undefined;
+        return update?.sessionUpdate === "agent_message_chunk";
+      }),
+    ).toBe(true);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        const update = event.update as Record<string, unknown> | undefined;
+        return update?.sessionUpdate === "current_mode_update";
+      }),
+    ).toBe(true);
+    expect(
+      rawLogs.some((content) => {
+        const event = JSON.parse(content) as Record<string, unknown>;
+        return event.type === "message" && event.content === "done";
+      }),
+    ).toBe(true);
+    expect(rawLogs.every((content) => content.length <= 30_000)).toBe(true);
+
+    initDb(":memory:");
+    try {
+      const task = await createTaskExtended("ACP persistence test");
+      await createSessionLogs({
+        taskId: task.id,
+        sessionId: session.sessionId,
+        iteration: 1,
+        cli: "acp",
+        lines: rawLogs,
+      });
+      const persisted = await getSessionLogsByTaskId(task.id);
+      expect(persisted).toHaveLength(rawLogs.length);
+      expect(persisted.map((entry) => entry.content)).toEqual(rawLogs);
+      expect(persisted.every((entry) => entry.cli === "acp")).toBe(true);
+      const persistedJson = persisted.map((entry) => entry.content).join("\n");
+      const credentialHeaderNames = [
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie",
+        "www-authenticate",
+        "proxy-authenticate",
+        "x-api-key",
+        "api-key",
+        "x-auth-token",
+        "x-access-token",
+        "x-session-token",
+      ];
+      for (const headerName of credentialHeaderNames) {
+        expect(persistedJson.toLowerCase()).not.toContain(headerName);
+      }
+      const credentialValues = credentialHeaderNames.flatMap((headerName) => [
+        `opaque-array-${headerName}-credential`,
+        `opaque-map-${headerName}-credential`,
+      ]);
+      for (const credentialValue of credentialValues) {
+        expect(persistedJson).not.toContain(credentialValue);
+      }
+      expect(persistedJson).toContain("X-Debug");
+      expect(persistedJson).toContain("X-Debug-Map");
+      expect(persistedJson).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+      expect(persistedJson).toContain("[REDACTED:github_token]");
+      expect(persistedJson).toContain("… [truncated]");
+      expect(persistedJson).not.toContain("x".repeat(30_001));
+      const transcript = normalizeSessionLogs(persisted);
+      expect(transcript.items.some((item) => item.kind === "unknown")).toBe(false);
+      expect(
+        transcript.items.some(
+          (item) => item.kind === "text" && item.role === "assistant" && item.text === "done",
+        ),
+      ).toBe(true);
+      expect(
+        transcript.items.some((item) => item.kind === "tool_call" && item.tool?.id === "tool-1"),
+      ).toBe(true);
+      expect(
+        transcript.items.find((item) => item.kind === "tool_result" && item.result?.id === "tool-1")
+          ?.result?.isError,
+      ).toBe(true);
+    } finally {
+      closeDb();
+    }
   });
 
   test("OpenCode preset supplies command, credentials, and a model environment fallback", () => {
@@ -308,6 +458,63 @@ new AgentSideConnection((connection) => new FakeAgent(connection), stream);
         },
       ]),
     ).toEqual([{ type: "boolean", id: "flag", name: "Flag", currentValue: true }]);
+
+    const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    const redacted = "[REDACTED:github_token]";
+    const sanitized = sanitizeAcpConfigOptions([
+      {
+        type: "select",
+        id: "model",
+        name: secret,
+        description: "Choose a model",
+        category: "model",
+        currentValue: secret,
+        options: [
+          { value: secret, name: secret, description: secret },
+          { value: "openai/gpt-5", name: "GPT-5", description: "A plain model" },
+          {
+            group: secret,
+            name: secret,
+            options: [{ value: secret, name: secret, description: secret }],
+          },
+        ],
+      },
+      {
+        type: "boolean",
+        id: secret,
+        name: secret,
+        description: secret,
+        category: secret,
+        currentValue: false,
+      },
+    ]);
+    expect(sanitized).toEqual([
+      {
+        type: "select",
+        id: "model",
+        name: redacted,
+        description: "Choose a model",
+        category: "model",
+        currentValue: redacted,
+        options: [
+          { value: redacted, name: redacted, description: redacted },
+          { value: "openai/gpt-5", name: "GPT-5", description: "A plain model" },
+          {
+            group: redacted,
+            name: redacted,
+            options: [{ value: redacted, name: redacted, description: redacted }],
+          },
+        ],
+      },
+      {
+        type: "boolean",
+        id: redacted,
+        name: redacted,
+        description: redacted,
+        category: redacted,
+        currentValue: false,
+      },
+    ]);
   });
 
   test("toAcpMcpServers converts installed stdio and http/sse servers to ACP's array shape", () => {

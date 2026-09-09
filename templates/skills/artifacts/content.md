@@ -122,7 +122,7 @@ misc/<agent-id>/<task-id>-<description>.ext
 
 - **PR body** — embed `![caption](<resolved-share-url>)` after resolving and
   printing the concrete URL as shown above.
-- **Slack** — link the agent-fs URL (public, no auth required).
+- **Slack** — link the agent-fs URL (team members only, the live viewer needs a login). Use a signed URL (`agent-fs signed-url`, up to 7 days) for anyone else.
 - **`store-progress`** — use the `attachments` field with `kind: "agent-fs"` and the path.
 - **Linear comments** — paste the live URL in the comment body.
 

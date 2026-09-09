@@ -1,6 +1,6 @@
 {
   "name": "@desplega.ai/agent-swarm",
-  "version": "1.141.0",
+  "version": "1.143.0",
   "description": "agent-swarm.dev — an open-source operating system for AI work: a lead agent breaks goals into tasks, routes them to specialized workers such as Claude Code or Codex, runs each worker in an isolated container, and preserves shared memory, tools, schedules, and review gates so delegated work compounds across sessions.",
   "keywords": [
     "agent-swarm.dev",
@@ -78,6 +78,7 @@
     "sync:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts",
     "check:ai-toolbox-skills": "bun scripts/sync-ai-toolbox-skills.ts --check",
     "check:skill-sources": "bun scripts/check-skill-sources.ts",
+    "check:operator-skill": "bun scripts/check-operator-skill.ts",
     "build:script-types": "bun scripts/bundle-script-types.ts",
     "build:cli": "bun run scripts/build-cli.ts",
     "mono:build": "turbo run build",
@@ -187,7 +188,7 @@
     "@inkjs/ui": "^2.0.0",
     "@linear/sdk": "^77.0.0",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@openai/codex-sdk": "0.153.4",
+    "@openai/codex": "0.153.4",
     "@opencode-ai/sdk": "^1.18.29",
     "@openfort/openfort-node": "^0.9.1",
     "@opentelemetry/api": "^1.9.1",

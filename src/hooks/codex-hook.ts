@@ -3,10 +3,9 @@
 /**
  * Codex lifecycle hook — harness-side steering delivery.
  *
- * Codex has no in-process steering channel: `@openai/codex-sdk` drives
- * `codex exec` with stdin written once and closed, and the app-server's
- * native `turn/steer` is not reachable through the SDK (issue #1034). So
- * delivery happens here instead: this hook runs inside the codex lifecycle
+ * Legacy exec sessions use this hook for queue delivery. App-server sessions
+ * disable this hook because the worker delivers steering through JSON-RPC.
+ * This hook runs inside the codex lifecycle
  * (registered for SessionStart / PostToolUse / Stop via the managed
  * `/etc/codex/requirements.toml` in the worker image), polls the API for
  * pending steering rows, marks them `delivered`, and injects the rendered
@@ -22,8 +21,6 @@
  * `/delivered` POST succeeded, so a message is injected at most once. A
  * failed POST leaves the row `pending` for the next lifecycle event; rows a
  * dying session never picks up are promoted by the server's terminal sweep.
- * The runner's dispatch poll skips codex sessions entirely
- * (`ProviderSession.steeringDeliveredExternally`).
  */
 
 import { renderSteeringDelivery } from "../prompts/steering-delivery.ts";
@@ -119,6 +116,7 @@ export async function handleCodexHookEvent(
   fetchImpl: typeof fetch = fetch,
 ): Promise<Record<string, unknown> | null> {
   const event = msg.hook_event_name;
+  if (env.SWARM_CODEX_APP_SERVER === "1") return null;
   if (!event || !config || !isSteeringEnabled(env)) return null;
   if (event !== "SessionStart" && event !== "PostToolUse" && event !== "Stop") return null;
 

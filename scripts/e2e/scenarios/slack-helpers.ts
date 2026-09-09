@@ -140,6 +140,23 @@ export async function waitForReaction(
   expect(found, `Message ${ts} in general never got a ${name} reaction within ${timeoutMs}ms`);
 }
 
+export async function waitForReactionAbsence(
+  ctx: ScenarioContext,
+  ts: string,
+  name: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const gone = await pollUntil(() => {
+    const message = ctx.slack.messages("general").find((candidate) => candidate.ts === ts);
+    expect(
+      message !== undefined,
+      `Message ${ts} not found in general while waiting for the ${name} reaction to clear`,
+    );
+    return message.reactions?.some((reaction) => reaction.name === name) !== true;
+  }, timeoutMs);
+  expect(gone, `Message ${ts} in general still had a ${name} reaction after ${timeoutMs}ms`);
+}
+
 export async function waitForEyes(ctx: ScenarioContext, ts: string): Promise<void> {
   const reaction = await ctx.slack
     .waitForApiCall("reactions.add", {

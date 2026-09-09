@@ -2,6 +2,12 @@ import { Database } from "bun:sqlite";
 import { parseProviderMeta } from "@/utils/provider-metadata.ts";
 import pkg from "../../package.json";
 import { defaultAssetKey, normalizeAssetKey } from "../assets/key";
+import {
+  generateDefaultClaudeMd,
+  generateDefaultIdentityMd,
+  matchesDefaultClaudeMd,
+  matchesDefaultIdentityMd,
+} from "../prompts/defaults";
 import { configureDbResolver } from "../prompts/resolver";
 import { slackChannelFromContextKey } from "../tasks/slack-routing";
 import { _resolveIntegrationType, emitIntegrationConnected, telemetry } from "../telemetry";
@@ -2656,6 +2662,69 @@ export async function getCompletedSlackTasks(): Promise<AgentTask[]> {
        LIMIT 200`,
   );
   return rows.map(rowToAgentTask);
+}
+
+/**
+ * Return terminal Slack-rooted tasks whose durable relay obligation is pending.
+ * The obligation is inserted by a DB trigger in the same transaction as the
+ * terminal status transition, so a process restart cannot lose the send.
+ */
+export async function getPendingSlackRelayTasks(): Promise<AgentTask[]> {
+  const rows = await getDbClient().query<AgentTaskRow>(
+    `SELECT task.* FROM slack_relay_obligations obligation
+       JOIN agent_tasks task ON task.id = obligation.task_id
+       WHERE obligation.delivered_at IS NULL
+       AND task.status IN ('completed', 'failed', 'cancelled')
+       ORDER BY obligation.last_attempt_at IS NOT NULL,
+                obligation.last_attempt_at ASC,
+                obligation.created_at ASC
+       LIMIT 200`,
+  );
+  return rows.map(rowToAgentTask);
+}
+
+/** Rotate attempted rows behind fresh obligations so poison rows cannot starve the queue. */
+export async function markSlackRelayAttempted(taskId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations
+       SET attempt_count = attempt_count + 1,
+           last_attempt_at = ?,
+           updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [now, now, taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Mark a relay obligation delivered only after Slack accepted the final result. */
+export async function markSlackRelayDelivered(taskId: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations
+       SET delivered_at = ?, updated_at = ?
+       WHERE task_id = ? AND delivered_at IS NULL`,
+    [now, now, taskId],
+  );
+  return result.changes > 0;
+}
+
+/** Discharge obligations already fulfilled by renderer v2's durable outcome record. */
+export async function markFinalizedSlackRelaysDelivered(): Promise<number> {
+  const now = new Date().toISOString();
+  const result = await getDbClient().run(
+    `UPDATE slack_relay_obligations AS obligation
+       SET delivered_at = ?, updated_at = ?
+       WHERE obligation.delivered_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM slack_messages message
+         WHERE message.kind = 'outcome'
+         AND message.task_id = obligation.task_id
+         AND message.finalized_at IS NOT NULL
+       )`,
+    [now, now],
+  );
+  return result.changes;
 }
 
 /**
@@ -5975,6 +6044,38 @@ export async function updateAgentProfile(
     // Get current agent state for version comparison
     const current = await tx.get<AgentRow>("SELECT * FROM agents WHERE id = ?", [id]);
     if (!current) return null;
+
+    // Compare with the old metadata before replacing it. Persist refreshed defaults
+    // atomically so both running workers and restarted workers see matching blobs.
+    const previous = rowToAgent(current);
+    const next = {
+      name: updates.name ?? previous.name,
+      description: updates.description ?? previous.description,
+      role: updates.role ?? previous.role,
+      capabilities: updates.capabilities ?? previous.capabilities,
+    };
+    const metadataChanged =
+      next.name !== previous.name ||
+      next.description !== previous.description ||
+      next.role !== previous.role ||
+      JSON.stringify(next.capabilities) !== JSON.stringify(previous.capabilities);
+    if (metadataChanged) {
+      updates = { ...updates };
+      if (
+        updates.identityMd === undefined &&
+        previous.identityMd &&
+        matchesDefaultIdentityMd(previous.identityMd, previous)
+      ) {
+        updates.identityMd = generateDefaultIdentityMd(next);
+      }
+      if (
+        updates.claudeMd === undefined &&
+        previous.claudeMd &&
+        matchesDefaultClaudeMd(previous.claudeMd, previous)
+      ) {
+        updates.claudeMd = generateDefaultClaudeMd(next);
+      }
+    }
 
     for (const field of BUDGETED_IDENTITY_FIELDS) {
       const nextValue = updates[field];

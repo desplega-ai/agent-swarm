@@ -3,7 +3,8 @@
 # which only exist under v2), renders one PNG per Slack event from the slack-mock journal, and
 # upserts one sticky PR comment with both columns side by side.
 # Images live on the single-commit `ci-visuals` branch (rebuilt on every run, so history never
-# grows). Fork PRs have a read-only token and only get the artifact.
+# grows). Fork PRs run with a read-only token: they still run the E2E and upload the artifact,
+# but the two write steps (publish to `ci-visuals`, post the PR comment) are skipped.
 name: Slack Visuals
 
 on:
@@ -23,7 +24,7 @@ concurrency:
 
 jobs:
   visuals:
-    if: github.repository == 'desplega-ai/agent-swarm' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: github.repository == 'desplega-ai/agent-swarm'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -76,8 +77,10 @@ jobs:
           path: visuals/
           if-no-files-found: warn
 
+      # Both write steps need a token with `contents: write` + `pull-requests: write`. GitHub
+      # downgrades the token to read-only on fork PRs, so gate them on a same-repo head.
       - name: Publish Slack visuals
-        if: always() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         id: publish
         env:
           PR: ${{ github.event.pull_request.number }}
@@ -90,7 +93,7 @@ jobs:
           echo "base_url=${base_url#base_url=}" >> "$GITHUB_OUTPUT"
 
       - name: Post Slack visual preview
-        if: always() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

@@ -10,7 +10,7 @@ Three workflows live in `.github/workflows/`:
 |---|---|---|
 | `merge-gate.yml` | PR → `main` | **The gate.** All jobs below must pass for merge. |
 | `ci.yml` | Push → `main` | Lint + tsc + test (subset of merge-gate). |
-| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`; push → `main` | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
+| `ui-e2e.yml` | PR touching `apps/ui/`, `packages/ui-e2e/`, `scripts/e2e/`, `src/http/`, `src/be/`, `bun.lock`, `package.json`, `bunfig.toml`. Push → `main`. Nightly cron `0 3 * * *` UTC. Manual dispatch. | Playwright UI suite (`bun run e2e:ui`) in 2 shards against a seeded API per worker. Uploads artifacts to agent-fs and ingests into the UI E2E tracker for every same-repo event. **Informational**, not a required check: merged HTML report artifact (`ui-e2e-html-report`) plus one sticky PR comment (`<!-- ui-e2e -->`). See [LOCAL_TESTING.md § UI E2E](../LOCAL_TESTING.md#ui-e2e-bun-run-e2eui). |
 | `docker-and-deploy.yml` | Push → `main` | Build images (API + worker-full + worker-slim, each amd64+arm64 with multi-arch manifest merges; slim publishes as `:slim` / `:{VERSION}-slim` / `:sha-*-slim`), publish release E2B templates, deploy, and publish npm/GitHub releases (only when `package.json` `version` changed). Not part of PR gate — see [release.md](./release.md). |
 
 Both PR-blocking workflows path-ignore `docs-site/**`. PRs that touch only those don't run code jobs (but Vercel deploys docs-site separately).
@@ -27,6 +27,7 @@ CI detects what changed and runs the matching jobs:
 | **Restore test timings** + **Run Tests (1/2, 2/2)** + **Save test timings** | `bun run test:root -- --parallel=4 --shard=1/2` and `--shard=2/2`. `restore-timings` resolves the latest per-file durations from the actions cache once and hands them to both shards as one artifact (two independent restores could pick different snapshots and split different file lists); `save-timings` merges the shards' `--update-timings` output into the next cache entry after a green matrix | New test or test that depends on undocumented setup; a hard-coded test port colliding under `--parallel` (use `getFreePort()` / `port: 0`, see [LOCAL_TESTING.md](../LOCAL_TESTING.md)) |
 | **Pi-Skills Freshness** | `bun run build:pi-skills` (must produce zero diff in `plugin/pi-skills/`) | Edited `plugin/commands/*.md` without rebuilding |
 | **Seeded Skills Check** | `bun run check:skill-sources && bun run check:ai-toolbox-skills && bun run check:skill-md && bun run check:seed-skill-files` | Edited a generated skill source without rebuilding its `SKILL.md`, drifted a vendored ai-toolbox skill from its manifest, left a seeded skill unwired, or introduced a delivery-path collision |
+| **Operator Skill Check** | `bun run check:operator-skill` | Missing public skill, invalid frontmatter, untracked GitHub target, or documentation URL without HTTP 200 after three HEAD attempts. Runs on every PR because any tracked target can disappear. Documentation outages can fail this check. |
 | **Script SDK Types Freshness** | `bun run check:script-types` (regenerates `src/scripts-runtime/types/*.d.ts`, must produce zero diff) | Edited `src/be/scripts/typecheck.ts` (the source of truth) without `bun run build:script-types`, or edited the generated `.d.ts` files directly (never do that) |
 | **OpenAPI Spec Freshness** | `bun run docs:openapi` (must produce zero diff in `openapi.json` AND `docs-site/content/docs/api-reference/`) | Edited an HTTP route or bumped `package.json` `version` without regenerating |
 | **Raw matchRoute check** | `! grep -rn 'matchRoute(' src/http/ --include='*.ts' \| grep -v 'route-def.ts' \| grep -v 'utils.ts'` | Used `matchRoute` directly instead of the `route()` factory |
@@ -41,6 +42,18 @@ ui's dependency tree resolves from the **root** lockfile since the workspace mig
 | **UI Lint and Type Check** | `bun install --frozen-lockfile && bun run lint && bunx tsc -b`, then from the repo root `bun run e2e:ui:tsc && bunx biome check packages/ui-e2e` |
 
 > **Note:** CI uses `tsc -b` (project-references build mode), **not** `tsc --noEmit`. Use `tsc -b` locally to match.
+
+### ui-e2e.yml secrets and variables
+
+| Name | Kind | Owner | Feeds | When absent |
+|---|---|---|---|---|
+| `E2E_AGENT_FS_API_URL` | secret | Taras | agent-fs upload of screenshots and traces | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_API_KEY` | secret | Taras | agent-fs upload | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_ORG_ID` | secret | Taras | agent-fs upload target org | Uploads skipped, comment stays text-only |
+| `E2E_AGENT_FS_DRIVE_ID` | secret | Taras | agent-fs upload target drive | Uploads skipped, comment stays text-only |
+| `UI_E2E_INGEST_URL` | secret | Taras | tracker ingest endpoint | Ingest skipped |
+| `UI_E2E_INGEST_BEARER` | secret | Taras | tracker ingest bearer | Ingest skipped |
+| `UI_E2E_TRACKER_URL` | repository variable | Taras | sticky comment tracker link | No tracker link in the comment |
 
 ## The full local pre-push command
 
@@ -60,6 +73,7 @@ bash scripts/check-audit-columns.sh
 bun run check:rbac-coverage
 bun run check:openapi-response-coverage
 bun run check:dep-graph
+bun run check:operator-skill
 
 # Drift checks (run if you touched the relevant files)
 bun run build:pi-skills && git diff --quiet plugin/pi-skills/ || echo "pi-skills drift — commit the regenerated files"

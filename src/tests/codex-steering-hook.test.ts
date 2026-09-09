@@ -67,6 +67,22 @@ afterAll(() => {
 });
 
 describe("codex steering hook", () => {
+  test("app-server sessions leave steering delivery to the worker", async () => {
+    let fetched = false;
+    for (const event of ["SessionStart", "PostToolUse", "Stop"]) {
+      const output = await handleCodexHookEvent(
+        { hook_event_name: event },
+        config,
+        { ...enabledEnv, SWARM_CODEX_APP_SERVER: "1" },
+        (async () => {
+          fetched = true;
+          return Response.json({ messages: [message()] });
+        }) as typeof fetch,
+      );
+      expect(output).toBeNull();
+    }
+    expect(fetched).toBe(false);
+  });
   test(
     "standalone hook rendering loads the delivery template defaults",
     async () => {

@@ -116,7 +116,7 @@ RUN if ! gh extension install github/gh-stack; then \
     fi
 
 # Install Claude CLI (pinned version — bump ARG to update)
-ARG CLAUDE_CODE_VERSION=2.1.263
+ARG CLAUDE_CODE_VERSION=2.1.266
 USER root
 RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
     npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
@@ -140,7 +140,7 @@ RUN mkdir -p /home/worker/.pi/agent
 ENV PI_PACKAGE_DIR=/usr/lib/node_modules/@earendil-works/pi-coding-agent
 
 # Install Codex CLI (alternative harness, selected via HARNESS_PROVIDER=codex)
-# Pinned version must match @openai/codex-sdk in package.json — enforced by
+# Pinned version must match direct @openai/codex in package.json. Enforced by
 # scripts/check-codex-default-model.sh and the CI merge gate.
 ARG CODEX_VERSION=0.153.4
 USER root
@@ -150,12 +150,9 @@ RUN HOME=/root NPM_CONFIG_CACHE=/tmp/npm-cache \
 USER worker
 RUN which codex && codex --version
 
-# The @openai/codex-sdk bundled inside the compiled agent-swarm binary cannot
-# resolve `require.resolve("@openai/codex")` at runtime because the globally-
-# installed package is not part of the Bun bundle. Point the SDK at the global
-# Codex CLI wrapper via CODEX_PATH_OVERRIDE so `src/providers/codex-adapter.ts`
-# forwards it to `new Codex({ codexPathOverride })`. The wrapper is a node
-# shebang script that resolves the platform-specific native binary itself.
+# Point the app-server transport at the global Codex CLI wrapper. The adapter
+# invokes CODEX_PATH_OVERRIDE with `app-server --listen stdio://`. The wrapper
+# is a Node shebang script that resolves the platform-specific native binary.
 ENV CODEX_PATH_OVERRIDE=/usr/bin/codex
 
 # Baseline ~/.codex/config.toml for the worker user. The `model` key must stay
@@ -519,7 +516,7 @@ RUN mkdir -p /opt/global-deps-full && cat > /opt/global-deps-full/package.json <
     "@sentry/cli": "3.3.4",
     "@desplega.ai/localtunnel": "2.2.0",
     "@desplega.ai/claude-bridge": "0.2.2",
-    "agent-browser": "0.36.0",
+    "agent-browser": "0.37.0",
     "playwright": "1.58.0"
   },
   "overrides": {

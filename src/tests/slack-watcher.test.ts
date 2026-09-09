@@ -11,6 +11,7 @@ import {
   getChildTasks,
   getCompletedSlackTasks,
   getInProgressSlackTasks,
+  getPendingSlackRelayTasks,
   getTaskById,
   initDb,
   insertTaskAttachment,
@@ -28,6 +29,7 @@ import {
   _isDMChannel,
   _postInitialDMTreeMessage,
   buildTreeNodes,
+  processPendingSlackRelays,
   processTreeMessages,
   registerTreeMessage,
   startTaskWatcher,
@@ -118,8 +120,7 @@ describe("watcher DB queries", () => {
     expect(Array.isArray(completed)).toBe(true);
   });
 
-  test("initializes notifiedCompletions on start to skip existing completed tasks", async () => {
-    // Starting the watcher with existing data should not crash
+  test("starts with existing completed tasks without discarding durable relay state", async () => {
     await startTaskWatcher(60000);
     stopTaskWatcher();
   });
@@ -527,6 +528,175 @@ mock.module("../slack/app", () => ({
     },
   }),
 }));
+
+describe("durable terminal relay", () => {
+  test("posts a pending obligation and marks it delivered", async () => {
+    const agent = await createAgent({ name: "DurableRelayLead", isLead: true, status: "idle" });
+    const task = await createTaskExtended("durable relay delivery", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_RELAY",
+      slackThreadTs: "2121212121.000001",
+    });
+    await completeTask(task.id, "result that must survive restart");
+
+    mockChatPostMessage.mockClear();
+    await processPendingSlackRelays();
+
+    expect(mockChatPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "C_DURABLE_RELAY",
+        thread_ts: "2121212121.000001",
+      }),
+    );
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).not.toContain(task.id);
+  });
+
+  test("keeps the obligation pending when Slack rejects the send", async () => {
+    const agent = await createAgent({ name: "DurableRelayRetry", isLead: true, status: "idle" });
+    const task = await createTaskExtended("retry durable relay", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_RETRY",
+      slackThreadTs: "2222222222.000010",
+    });
+    await completeTask(task.id, "retry me");
+
+    mockChatPostMessage.mockRejectedValueOnce(new Error("temporary Slack failure"));
+    await processPendingSlackRelays();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).toContain(task.id);
+
+    await processPendingSlackRelays();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).not.toContain(task.id);
+  });
+
+  test("reuses persisted progress tracking after a restart", async () => {
+    const agent = await createAgent({ name: "DurableRelayUpdate", isLead: true, status: "idle" });
+    const task = await createTaskExtended("update durable relay", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_UPDATE",
+      slackThreadTs: "2222222222.000020",
+    });
+    await setSlackMessageTracking(task.id, { slackProgressMessageTs: "2222222222.000021" });
+    await completeTask(task.id, "update me after restart");
+
+    mockChatUpdate.mockClear();
+    mockChatPostMessage.mockClear();
+    await processPendingSlackRelays();
+
+    expect(mockChatUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "C_DURABLE_UPDATE",
+        ts: "2222222222.000021",
+      }),
+    );
+    expect(mockChatPostMessage).not.toHaveBeenCalled();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).not.toContain(task.id);
+  });
+
+  test("reposts when persisted progress tracking points to a missing message", async () => {
+    const agent = await createAgent({ name: "DurableRelayRepost", isLead: true, status: "idle" });
+    const task = await createTaskExtended("repost durable relay", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_REPOST",
+      slackThreadTs: "2222222222.000030",
+    });
+    await setSlackMessageTracking(task.id, {
+      slackProgressMessageTs: "2222222222.000031",
+    });
+    await completeTask(task.id, "repost me after restart");
+
+    mockChatUpdate.mockRejectedValueOnce({ data: { error: "message_not_found" } });
+    mockChatPostMessage.mockClear();
+    await processPendingSlackRelays();
+
+    expect(mockChatPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "C_DURABLE_REPOST",
+        thread_ts: "2222222222.000030",
+      }),
+    );
+    const reloaded = await getTaskById(task.id);
+    expect(reloaded?.slackProgressMessageTs).toBeUndefined();
+    expect(reloaded?.slackTreeRootMessageTs).toBeUndefined();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).not.toContain(task.id);
+  });
+
+  test("rehydrates a terminal root into its still-active shared tree", async () => {
+    const agent = await createAgent({ name: "DurableRelayTree", isLead: true, status: "idle" });
+    const terminal = await createTaskExtended("terminal shared root", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_TREE",
+      slackThreadTs: "2222222222.000040",
+    });
+    const active = await createTaskExtended("active shared root", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_TREE",
+      slackThreadTs: "2222222222.000040",
+    });
+    await startTask(terminal.id);
+    await startTask(active.id);
+    const sharedMessageTs = "2222222222.000041";
+    await registerTreeMessage(terminal.id, "C_DURABLE_TREE", "2222222222.000040", sharedMessageTs);
+    await registerTreeMessage(active.id, "C_DURABLE_TREE", "2222222222.000040", sharedMessageTs);
+    await completeTask(terminal.id, "terminal result in shared tree");
+
+    _getTreeMessages().clear();
+    _getTaskToTree().clear();
+    _getTaskMessages().clear();
+    await startTaskWatcher(60000);
+    stopTaskWatcher();
+
+    expect(_getTaskToTree().get(terminal.id)).toBe(sharedMessageTs);
+    expect(_getTaskToTree().get(active.id)).toBe(sharedMessageTs);
+    mockChatUpdate.mockClear();
+    await processPendingSlackRelays();
+    expect(mockChatUpdate).not.toHaveBeenCalled();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).toContain(terminal.id);
+  });
+
+  test("restores persisted tree ownership when a pending page reaches the consumer", async () => {
+    const agent = await createAgent({ name: "DurableRelayLateTree", isLead: true, status: "idle" });
+    const task = await createTaskExtended("late paged tree root", {
+      agentId: agent.id,
+      source: "slack",
+      slackChannelId: "C_DURABLE_LATE_TREE",
+      slackThreadTs: "2222222222.000050",
+    });
+    await startTask(task.id);
+    const treeMessageTs = "2222222222.000051";
+    await registerTreeMessage(task.id, "C_DURABLE_LATE_TREE", "2222222222.000050", treeMessageTs);
+    await completeTask(task.id, "terminal result in a later page");
+
+    _getTreeMessages().clear();
+    _getTaskToTree().clear();
+    _getTaskMessages().clear();
+    mockChatUpdate.mockClear();
+    await processPendingSlackRelays();
+
+    expect(_getTaskToTree().get(task.id)).toBe(treeMessageTs);
+    expect(mockChatUpdate).not.toHaveBeenCalled();
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).toContain(task.id);
+
+    mockChatUpdate.mockRejectedValueOnce({ data: { error: "message_not_found" } });
+    await processTreeMessages();
+    expect(_getTaskToTree().has(task.id)).toBe(false);
+
+    mockChatPostMessage.mockClear();
+    await processPendingSlackRelays();
+    expect(mockChatPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "C_DURABLE_LATE_TREE",
+        thread_ts: "2222222222.000050",
+      }),
+    );
+    expect((await getPendingSlackRelayTasks()).map((pending) => pending.id)).not.toContain(task.id);
+  });
+});
 
 describe("processTreeMessages", () => {
   test("renders tree and updates Slack message for active tree", async () => {

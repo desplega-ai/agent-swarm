@@ -75,6 +75,12 @@ create-schedule(
 | `modelTier` | Portable model intent for created agent tasks: `smol`, `regular`, `smart`, or `ultra` |
 | `enabled` | Whether the schedule is active (default: true) |
 
+## Automation setup checks
+
+Bundled schedules can declare `requiredParams` and `requires` metadata. `requiredParams` names values that must be present in the schedule's `params` object. `requires` names integrations, such as Slack or GitHub, that must be configured before the automation can run.
+
+The scheduler checks these requirements immediately before dispatch. An incomplete automation reports `needs_setup` with its missing parameters, missing integrations, and a dashboard fix URL; it does not create a task, start a workflow, or run a script. The schedules dashboard exposes the same status and lets operators supply the missing values, so the UI and dispatcher use one preflight result.
+
 ## Choosing `targetType`
 
 Pick the schedule target that matches the work you actually want to fire:

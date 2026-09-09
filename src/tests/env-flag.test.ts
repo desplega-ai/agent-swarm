@@ -61,12 +61,87 @@ describe("swarm-config-guard: Configuration-page value validation", () => {
     expect(validateConfigValue("SLACK_THREAD_STEERING_MODE", "now")).toContain("must be one of");
   });
 
+  test("Slack reaction shortcode keys accept bare and colon-wrapped names", () => {
+    const keys = [
+      "SLACK_REACTION_ACCEPTED",
+      "SLACK_REACTION_BUFFERED",
+      "SLACK_REACTION_NOW",
+      "SLACK_REACTION_STEERED",
+      "SLACK_REACTION_COMPLETED",
+      "SLACK_REACTION_FAILED",
+    ];
+    for (const key of keys) {
+      expect(validateConfigValue(key, "thumbsup")).toBeNull();
+      expect(validateConfigValue(key, ":thumbsup:")).toBeNull();
+      expect(validateConfigValue(key, "+1")).toBeNull();
+    }
+  });
+
+  test("Slack reaction shortcode keys accept a skin-tone suffix, bare or colon-wrapped", () => {
+    expect(validateConfigValue("SLACK_REACTION_ACCEPTED", "thumbsup::skin-tone-6")).toBeNull();
+    expect(validateConfigValue("SLACK_REACTION_ACCEPTED", ":thumbsup::skin-tone-6:")).toBeNull();
+    expect(validateConfigValue("SLACK_REACTION_ACCEPTED", "+1::skin-tone-2")).toBeNull();
+  });
+
+  test("Slack reaction shortcode keys reject an out-of-range or malformed skin-tone suffix", () => {
+    for (const value of [
+      "thumbsup::skin-tone-1",
+      "thumbsup::skin-tone-7",
+      "thumbsup:::skin-tone-6",
+      "thumbsup::skin-tone-6::skin-tone-6",
+    ]) {
+      expect(validateConfigValue("SLACK_REACTION_ACCEPTED", value)).toContain(
+        "Invalid SLACK_REACTION_ACCEPTED",
+      );
+    }
+  });
+
+  test("Slack reaction shortcode keys reject spaces, upper case, unicode and empty", () => {
+    // "Heavy Check" (not "Heavy" alone): normalisation lowercases before the format
+    // check (section 2.3), so a bare case difference alone is not rejected — only
+    // the space is. Matches T4's own acceptance check value.
+    for (const value of ["heavy check", "Heavy Check", "✅", "", ":"]) {
+      expect(validateConfigValue("SLACK_REACTION_COMPLETED", value)).toContain(
+        "Invalid SLACK_REACTION_COMPLETED",
+      );
+    }
+  });
+
   test("interval and count keys require positive integers", () => {
     expect(validateConfigValue("HEARTBEAT_INTERVAL_MS", "90000")).toBeNull();
     expect(validateConfigValue("HEARTBEAT_INTERVAL_MS", "0")).toContain("integer >= 1");
     expect(validateConfigValue("HEARTBEAT_INTERVAL_MS", "-5")).toContain("integer >= 1");
     expect(validateConfigValue("WORKFLOW_MAX_ITERATIONS", "abc")).toContain("integer >= 1");
     expect(validateConfigValue("RBAC_AUDIT_RETENTION_DAYS", "30")).toBeNull();
+  });
+
+  test("OPENROUTER_BASE_URL accepts any http(s) gateway and blank, rejects broken URLs", () => {
+    // Vendor-neutral: the swarm redirects its OpenRouter provider at whatever
+    // OpenAI-compatible gateway the operator names.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")).toBeNull();
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://api.orcarouter.ai/v1")).toBeNull();
+    expect(
+      validateConfigValue("OPENROUTER_BASE_URL", "http://gateway.internal:8080/v1"),
+    ).toBeNull();
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "  https://gw.example.com/v1  ")).toBeNull();
+    // Blank is how an operator reverts to openrouter.ai without deleting the row.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "")).toBeNull();
+
+    // Call sites append `/models` and `/chat/completions`, so a query string or
+    // fragment would build a nonsense URL.
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://gw.example.com/v1?key=x")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "https://gw.example.com/v1#a")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "openrouter.ai/api/v1")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", "ftp://gw.example.com/v1")).toContain(
+      "Invalid OPENROUTER_BASE_URL",
+    );
+    expect(validateConfigValue("OPENROUTER_BASE_URL", 42)).toContain("Invalid OPENROUTER_BASE_URL");
   });
 
   test("WORKER_API_READY_TIMEOUT_SECONDS requires a positive integer", () => {

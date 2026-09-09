@@ -1,3 +1,4 @@
+import { normalizeSlackReactionShortcode } from "../slack/reaction-shortcode";
 import { ProviderNameSchema } from "../types";
 
 /**
@@ -84,6 +85,18 @@ function enumValidator(key: string, options: string[]): Record<string, ConfigVal
   };
 }
 
+/** Build `{ KEY: validator }` entries accepting a Slack emoji shortcode. */
+function shortcodeValidators(keys: string[]): Record<string, ConfigValidator> {
+  const message = (key: string) =>
+    `Invalid ${key} (must be a Slack emoji shortcode: lowercase letters, digits, _ + ' -, with optional surrounding colons)`;
+  return Object.fromEntries(
+    keys.map((key) => [
+      key,
+      (value: unknown) => (normalizeSlackReactionShortcode(value) !== null ? null : message(key)),
+    ]),
+  );
+}
+
 /** Build `{ KEY: validator }` entries accepting integers >= `min`. */
 function integerValidators(keys: string[], min: number): Record<string, ConfigValidator> {
   return Object.fromEntries(
@@ -163,6 +176,28 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
 
     return "Invalid FEEDBACK_ENDPOINT (must use HTTPS, or HTTP on a loopback host)";
   },
+  // OpenAI-compatible model gateway for every OpenRouter consumer (OpenCode and
+  // pi-mono sessions, model refreshes, internal summarizers). Call sites append
+  // `/models` and `/chat/completions` to it, so a value carrying a query string
+  // or a fragment would build a nonsense URL — reject those here rather than
+  // letting workers fail one request at a time. Blank is meaningful and allowed:
+  // it is how an operator reverts to openrouter.ai without deleting the row.
+  OPENROUTER_BASE_URL: (value) => {
+    const invalid =
+      "Invalid OPENROUTER_BASE_URL (must be an http(s) URL with no query string or fragment, e.g. https://api.example.com/v1 — leave blank for openrouter.ai)";
+    if (typeof value !== "string") return invalid;
+    const trimmed = value.trim();
+    if (trimmed.length === 0) return null;
+
+    try {
+      const url = new URL(trimmed);
+      if (url.protocol !== "https:" && url.protocol !== "http:") return invalid;
+      if (url.search || url.hash) return invalid;
+    } catch {
+      return invalid;
+    }
+    return null;
+  },
   HARNESS_PROVIDER: (value) => {
     const parsed = ProviderNameSchema.safeParse(value);
     if (parsed.success) return null;
@@ -235,6 +270,14 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
   ]),
   ...enumValidator("SLACK_THREAD_STEERING", ["lead", "all"]),
   ...enumValidator("SLACK_THREAD_STEERING_MODE", ["steer", "queue"]),
+  ...shortcodeValidators([
+    "SLACK_REACTION_ACCEPTED",
+    "SLACK_REACTION_BUFFERED",
+    "SLACK_REACTION_NOW",
+    "SLACK_REACTION_STEERED",
+    "SLACK_REACTION_COMPLETED",
+    "SLACK_REACTION_FAILED",
+  ]),
   // Counts, minutes, and intervals: positive integers. Deliberately permissive
   // on the upper bound — an operator raising a sweep cap is legitimate.
   ...integerValidators(

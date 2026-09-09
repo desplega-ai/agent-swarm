@@ -436,13 +436,8 @@ export const PROVIDER_STEER_CAPABILITIES: Record<ProviderName, SteerMode[]> = {
   // only what we can honor; revisit if the abort+prompt path is fixed.
   opencode: ["queue"],
   claude: ["queue"],
-  // Codex has no in-process delivery primitive (`@openai/codex-sdk` drives
-  // `codex exec` with stdin closed; `turn/steer` is app-server-only, see
-  // issue #1034). Delivery happens harness-side instead: the codex-hook
-  // (SessionStart/PostToolUse/Stop) polls pending rows and injects them as
-  // hook `additionalContext`, so the runner must leave codex rows `pending`
-  // (`ProviderSession.steeringDeliveredExternally`).
-  codex: ["queue"],
+  // App-server steers the active turn and starts queued prompts in later turns.
+  codex: ["steer", "queue"],
   // The ACP adapter implements no steering primitive: `session/prompt` is a
   // single in-flight turn and the only interrupt is `session/cancel` (abort).
   // Advertise nothing rather than promise semantics we can't honor.

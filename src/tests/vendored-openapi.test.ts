@@ -26,7 +26,6 @@ import {
 import { getPathSegments, parseQueryParams } from "../http/utils";
 
 const TEST_DB_PATH = "./test-vendored-openapi.sqlite";
-const MIGRATION_DB_PATH = "./test-vendored-openapi-migration.sqlite";
 const originalFetch = globalThis.fetch;
 let leadAgentId: string;
 
@@ -95,7 +94,6 @@ afterEach(async () => {
 afterAll(() => {
   closeDb();
   removeDbFiles(TEST_DB_PATH);
-  removeDbFiles(MIGRATION_DB_PATH);
 });
 
 describe("vendored OpenAPI", () => {
@@ -234,8 +232,9 @@ describe("vendored OpenAPI", () => {
   });
 
   test("migration 117 preserves rows while widening the source-kind check", () => {
-    removeDbFiles(MIGRATION_DB_PATH);
-    const database = new Database(MIGRATION_DB_PATH);
+    // This checks schema and row preservation within one connection.
+    // Avoid disk synchronization for every migration in this isolated fixture.
+    const database = new Database(":memory:");
     try {
       database.run(`
         CREATE TABLE _migrations (

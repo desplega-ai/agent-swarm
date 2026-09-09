@@ -9,9 +9,12 @@ export type Sut = {
   apiKey: string;
   dbPath: string;
   logPath: string;
+  logPaths: string[];
   tempPaths: string[];
   process: Bun.Subprocess<"ignore", "pipe", "pipe">;
   flushLog: () => void;
+  drains: Promise<void>;
+  env: Record<string, string>;
 };
 
 export function minimalEnv(): Record<string, string> {
@@ -44,6 +47,66 @@ function drain(stream: ReadableStream<Uint8Array>, writer: Bun.FileSink) {
   return (async () => {
     for await (const chunk of stream) writer.write(chunk);
   })();
+}
+
+function spawnSutProcess(logPath: string, env: Record<string, string>) {
+  const writer = Bun.file(logPath).writer();
+  const child = Bun.spawn(["bun", "run", "src/http.ts"], {
+    cwd: repoRoot,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const drains = Promise.all([drain(child.stdout, writer), drain(child.stderr, writer)])
+    .then(() => undefined)
+    .finally(() => writer.end());
+  return { child, drains, flushLog: () => writer.flush() };
+}
+
+async function waitForHealth(sut: Sut, keep: boolean): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    if (sut.process.exitCode !== null) break;
+    try {
+      const response = await fetch(`${sut.baseUrl}/health`);
+      if (response.status === 200) return;
+    } catch {}
+    await Bun.sleep(250);
+  }
+  sut.flushLog();
+  const tail = await tailLog(sut.logPath, 40);
+  sut.process.kill("SIGKILL");
+  await sut.process.exited.catch(() => {});
+  await sut.drains.catch(() => {});
+  if (keep) {
+    console.log(`KEEP db: ${sut.dbPath}`);
+    for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
+    for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
+  } else {
+    await deleteSutState(sut);
+  }
+  throw new Error(`API server did not become healthy within 60 seconds\n${tail}`);
+}
+
+async function stopSutProcess(sut: Sut): Promise<void> {
+  if (sut.process.exitCode === null) {
+    sut.process.kill("SIGTERM");
+    await Promise.race([sut.process.exited, Bun.sleep(5_000)]);
+  }
+  if (sut.process.exitCode === null) {
+    sut.process.kill("SIGKILL");
+    await sut.process.exited.catch(() => {});
+  }
+  await sut.drains.catch(() => {});
+}
+
+async function deleteSutState(sut: Sut): Promise<void> {
+  for (const path of [sut.dbPath, `${sut.dbPath}-wal`, `${sut.dbPath}-shm`, ...sut.logPaths]) {
+    await Bun.file(path)
+      .delete()
+      .catch(() => {});
+  }
+  for (const path of sut.tempPaths) await Bun.$`rm -rf ${path}`.quiet().catch(() => {});
 }
 
 export async function tailLog(path: string, lines: number): Promise<string> {
@@ -91,76 +154,43 @@ export async function startSut(
     ANONYMIZED_TELEMETRY: "false",
     ...extraEnv,
   };
-  const writer = Bun.file(logPath).writer();
-  const child = Bun.spawn(["bun", "run", "src/http.ts"], {
-    cwd: repoRoot,
-    env,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const drains = Promise.all([drain(child.stdout, writer), drain(child.stderr, writer)]).finally(
-    () => writer.end(),
-  );
+  const spawned = spawnSutProcess(logPath, env);
   const sut: Sut = {
     port,
     baseUrl: `http://127.0.0.1:${port}`,
     apiKey,
     dbPath,
     logPath,
+    logPaths: [logPath],
     tempPaths: [fsDir, secretsDir],
-    process: child,
-    flushLog: () => writer.flush(),
+    process: spawned.child,
+    flushLog: spawned.flushLog,
+    drains: spawned.drains,
+    env,
   };
+  await waitForHealth(sut, keep);
+  return sut;
+}
 
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) break;
-    try {
-      const response = await fetch(`${sut.baseUrl}/health`);
-      if (response.status === 200) return sut;
-    } catch {}
-    await Bun.sleep(250);
-  }
-  writer.flush();
-  const tail = await tailLog(logPath, 40);
-  child.kill("SIGKILL");
-  await drains.catch(() => {});
-  if (keep) {
-    console.log(`KEEP db: ${dbPath}`);
-    console.log(`KEEP API log: ${logPath}`);
-    console.log(`KEEP temp: ${fsDir}`);
-    console.log(`KEEP temp: ${secretsDir}`);
-  } else {
-    for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, logPath]) {
-      await Bun.file(path)
-        .delete()
-        .catch(() => {});
-    }
-    await Bun.$`rm -rf ${fsDir} ${secretsDir}`.quiet().catch(() => {});
-  }
-  throw new Error(`API server did not become healthy within 60 seconds\n${tail}`);
+/** Restart only the API process while preserving every externalized SUT resource. */
+export async function restartSut(sut: Sut): Promise<void> {
+  await stopSutProcess(sut);
+  sut.logPath = `${sut.logPaths[0]}.restart-${sut.logPaths.length}`;
+  sut.logPaths.push(sut.logPath);
+  const spawned = spawnSutProcess(sut.logPath, sut.env);
+  sut.process = spawned.child;
+  sut.flushLog = spawned.flushLog;
+  sut.drains = spawned.drains;
+  await waitForHealth(sut, true);
 }
 
 export async function stopSut(sut: Sut, keep: boolean): Promise<void> {
-  if (sut.process.exitCode === null) {
-    sut.process.kill("SIGTERM");
-    await Promise.race([sut.process.exited, Bun.sleep(5_000)]);
-  }
-  if (sut.process.exitCode === null) {
-    sut.process.kill("SIGKILL");
-    await sut.process.exited.catch(() => {});
-  }
-  sut.flushLog();
+  await stopSutProcess(sut);
   if (keep) {
     console.log(`KEEP db: ${sut.dbPath}`);
-    console.log(`KEEP API log: ${sut.logPath}`);
+    for (const path of sut.logPaths) console.log(`KEEP API log: ${path}`);
     for (const path of sut.tempPaths) console.log(`KEEP temp: ${path}`);
     return;
   }
-  for (const path of [sut.dbPath, `${sut.dbPath}-wal`, `${sut.dbPath}-shm`, sut.logPath]) {
-    await Bun.file(path)
-      .delete()
-      .catch(() => {});
-  }
-  for (const path of sut.tempPaths) await Bun.$`rm -rf ${path}`.quiet().catch(() => {});
+  await deleteSutState(sut);
 }

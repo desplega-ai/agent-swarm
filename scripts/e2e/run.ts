@@ -4,7 +4,7 @@ import type { SlackMock } from "@desplega.ai/slack-mock";
 import { type Coverage, computeCoverage } from "./coverage";
 import { openReadOnlyDb, type ReadOnlyDb } from "./db";
 import { runHarnessLeg, stopHarnessChildren } from "./harness";
-import { type ApiClient, createApiClient, recordedHttpCalls } from "./http";
+import { type ApiClient, createApiClient, pollUntil, recordedHttpCalls } from "./http";
 import { calledMcpTools, createMcpConnector, listedMcpTools } from "./mcp";
 import {
   type E2eResult,
@@ -26,10 +26,12 @@ import { slackDelegationLateChild } from "./scenarios/slack-delegation-late-chil
 import { slackFailedTask } from "./scenarios/slack-failed-task";
 import { slackFollowUp } from "./scenarios/slack-follow-up";
 import { slackMention } from "./scenarios/slack-mention";
+import { slackReactionOverride } from "./scenarios/slack-reaction-override";
+import { slackRelayRestart } from "./scenarios/slack-relay-restart";
 import { taskLifecycle } from "./scenarios/task-lifecycle";
 import { workflowScriptNode } from "./scenarios/workflow-script-node";
 import { type SlackHarness, startSlackMock, stopSlackMock } from "./slack";
-import { repoRoot, type Sut, startSut, stopSut, tailLog } from "./sut";
+import { repoRoot, restartSut, type Sut, startSut, stopSut, tailLog } from "./sut";
 
 export type ScenarioContext = {
   api: ApiClient;
@@ -40,6 +42,7 @@ export type ScenarioContext = {
   slack: SlackMock;
   log: (message: string) => void;
   markThread: (label: string, channel: string, ts: string) => void;
+  restartSut: () => Promise<void>;
   nonce: string;
 };
 export type Scenario = { name: string; run: (ctx: ScenarioContext) => Promise<void> };
@@ -54,6 +57,8 @@ const scenarios: Scenario[] = [
   slackMention,
   slackFollowUp,
   slackFailedTask,
+  slackReactionOverride,
+  slackRelayRestart,
   // Delegated-delivery coverage (PR #1272). These enable
   // SLACK_RENDER_V2_DELEGATION via the config API and leave it on for the
   // rest of the run, so they stay last.
@@ -148,6 +153,20 @@ async function main(): Promise<number> {
     apiKey: activeSut.apiKey,
     db: activeDb,
     slack: activeSlack.mock,
+    async restartSut() {
+      if (!activeSut || !activeSlack) throw new Error("E2E harness is not running");
+      const connectionCalls = activeSlack.mock.apiCalls("apps.connections.open").length;
+      activeDb?.close();
+      await restartSut(activeSut);
+      const reconnected = await pollUntil(
+        () => activeSlack!.mock.apiCalls("apps.connections.open").length > connectionCalls,
+        60_000,
+      );
+      if (!reconnected) {
+        throw new Error("Restarted API did not request a new Slack socket-mode connection");
+      }
+      await activeSlack.mock.waitForConnection(60_000);
+    },
     log: console.log,
     nonce: randomBytes(6).toString("hex"),
   };
@@ -170,9 +189,10 @@ async function main(): Promise<number> {
   }
   if (scenarioResults.some((result) => result.status === "fail")) {
     activeSut.flushLog();
-    console.error(
-      `Last 40 lines of ${activeSut.logPath}:\n${await tailLog(activeSut.logPath, 40)}`,
+    const tails = await Promise.all(
+      activeSut.logPaths.map(async (path) => `Last 40 lines of ${path}:\n${await tailLog(path, 40)}`),
     );
+    console.error(tails.join("\n"));
   }
 
   const harnessResults = [];

@@ -1,32 +1,30 @@
 /**
  * Codex session subprocess runner.
  *
- * Entry point for the `codex-session-runner` CLI subcommand. Reads a
- * `CodexSubprocessInput` payload from stdin, drives a fresh in-process
- * `CodexSession`, and pipes the session's `ProviderEvent` stream + final
- * `ProviderResult` back to its parent over stdout as line-delimited JSON.
+ * The first stdin line contains the session configuration. Subsequent lines
+ * carry steering and cancellation commands. Each session owns one fresh
+ * app-server process and emits provider events and its final result.
  *
- * Why this exists: the previous architecture ran every codex session
- * directly inside the long-lived worker runner. The `@openai/codex-sdk`
- * leaks SDK state (parsers, transcript buffers, JSON-RPC plumbing) into
- * the runner's heap, and after ~1,500 task completions on a hot worker
- * (Picateclas, 2026-05-28) the runner's VSZ ballooned to 74 GB / RSS to
- * 7.5 GB, causing every subsequent `fork()` to fail ENOMEM regardless of
- * current RSS (the kernel reserves CoW for the full VSZ at fork time).
- *
- * Moving each session into its own subprocess means the SDK state dies
- * with the subprocess. The runner stays at the ~234 MB baseline observed
- * on Reviewer (the cohort partner that did 481 task completions without
- * the OOM symptom). See task `fa0c0681` for the byte-by-byte breakdown.
+ * Per-task process isolation bounds the worker heap across task completions.
+ * The app-server migration preserves the isolation introduced after the
+ * Picateclas memory exhaustion incident on 2026-05-28.
  *
  * Wire protocol over stdout (one JSON object per line):
  *   {"kind":"event", "event": <ProviderEvent>}
  *   {"kind":"result", "result": <ProviderResult>}
  *   {"kind":"error", "message": "..."}
+ *   {"kind":"steering-result", "id": <requestId>, "delivery": <SteerDeliveryResult>}
  */
 
 import { createInProcessCodexSession } from "../providers/codex-adapter";
-import type { ProviderEvent, ProviderResult, ProviderSessionConfig } from "../providers/types";
+import type {
+  ProviderEvent,
+  ProviderResult,
+  ProviderSessionConfig,
+  SteerDelivery,
+  SteerDeliveryResult,
+} from "../providers/types";
+import { scrubSecrets } from "../utils/secret-scrubber";
 
 interface CodexSubprocessInput {
   config: ProviderSessionConfig;
@@ -34,38 +32,33 @@ interface CodexSubprocessInput {
   parentOtelEnv?: Record<string, string>;
 }
 
-async function readAllStdin(): Promise<string> {
-  // Bun.stdin is a BunFile in some versions, Web stream in others.
-  // The safest path is to read the readable stream directly.
+async function* readStdinLines(): AsyncGenerator<string> {
   const decoder = new TextDecoder();
-  let out = "";
-  const stream = (Bun.stdin as unknown as { stream?: () => ReadableStream<Uint8Array> }).stream
-    ? (Bun.stdin as unknown as { stream: () => ReadableStream<Uint8Array> }).stream()
-    : null;
-  if (stream) {
-    const reader = stream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) out += decoder.decode(value, { stream: true });
+  let partial = "";
+  for await (const chunk of Bun.stdin.stream()) {
+    partial += decoder.decode(chunk, { stream: true });
+    let newline = partial.indexOf("\n");
+    while (newline !== -1) {
+      const line = partial.slice(0, newline);
+      partial = partial.slice(newline + 1);
+      if (line.trim()) yield line;
+      newline = partial.indexOf("\n");
     }
-    out += decoder.decode();
-    return out;
   }
-  // Fallback: read via Bun.file (file-like access works for piped stdin too)
-  return await Bun.file("/dev/stdin").text();
+  partial += decoder.decode();
+  if (partial.trim()) yield partial;
 }
 
 function writeLine(obj: unknown): void {
-  process.stdout.write(`${JSON.stringify(obj)}\n`);
+  process.stdout.write(`${scrubSecrets(JSON.stringify(obj))}\n`);
 }
 
 export async function runCodexSessionRunner(): Promise<void> {
   try {
     await runCodexSessionRunnerInner();
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
+    const stack = err instanceof Error && err.stack ? scrubSecrets(err.stack) : undefined;
     console.error(`[codex-session-runner] top-level crash: ${message}`);
     if (stack) console.error(stack);
     writeLine({ kind: "error", message: `codex-session-runner: unexpected crash: ${message}` });
@@ -74,12 +67,14 @@ export async function runCodexSessionRunner(): Promise<void> {
 }
 
 async function runCodexSessionRunnerInner(): Promise<void> {
+  const lines = readStdinLines();
   let input: CodexSubprocessInput;
   try {
-    const raw = await readAllStdin();
+    const { value: raw } = await lines.next();
+    if (!raw) throw new Error("Missing Codex session configuration");
     input = JSON.parse(raw) as CodexSubprocessInput;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     console.error(`[codex-session-runner] stdin parse failed: ${message}`);
     writeLine({
       kind: "error",
@@ -103,20 +98,17 @@ async function runCodexSessionRunnerInner(): Promise<void> {
       skillsDir: input.skillsDir,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = scrubSecrets(err instanceof Error ? err.message : String(err));
     console.error(`[codex-session-runner] createSession failed: ${message}`);
     writeLine({ kind: "error", message: `codex-session-runner: createSession failed: ${message}` });
     process.exit(1);
   }
 
-  // Forward SIGTERM / SIGINT to the in-process session so the runner can
-  // gracefully cancel us. The parent `CodexSubprocessSession.abort()` sends
-  // SIGTERM here; the session's AbortController catches it and the codex
-  // CLI subprocess (a grandchild) gets cleaned up.
+  // Signals remain the fallback if the parent cannot send a control message.
   const onSignal = (signal: NodeJS.Signals) => {
     void session.abort().finally(() => {
       // give the session a beat to emit its cancellation result, then exit
-      setTimeout(() => process.exit(signal === "SIGINT" ? 130 : 143), 250);
+      setTimeout(() => process.exit(signal === "SIGINT" ? 130 : 143), 2_000).unref();
     });
   };
   process.on("SIGTERM", () => onSignal("SIGTERM"));
@@ -125,6 +117,34 @@ async function runCodexSessionRunnerInner(): Promise<void> {
   session.onEvent((event: ProviderEvent) => {
     writeLine({ kind: "event", event });
   });
+
+  // Keep stdin open for native steering and interruption during the turn.
+  void (async () => {
+    try {
+      for await (const line of lines) {
+        const command = JSON.parse(line) as
+          | { kind: "abort"; reason?: string }
+          | { kind: "steer"; id: number; delivery: SteerDelivery };
+        if (command.kind === "abort") {
+          await session.abort(command.reason);
+        } else if (command.kind === "steer") {
+          // Queue acknowledgements wait for a later turn. Keep reading controls
+          // so cancellation and active-turn steering can proceed during that wait.
+          const respond = (delivery: SteerDeliveryResult) =>
+            writeLine({ kind: "steering-result", id: command.id, delivery });
+          void session
+            .deliverSteering(command.delivery)
+            .then(respond, (error) =>
+              respond({ delivered: false, reason: scrubSecrets(String(error)) }),
+            );
+        }
+      }
+      await session.abort("Codex parent closed its control channel");
+    } catch (error) {
+      console.error(scrubSecrets(`[codex-session-runner] control channel failed: ${error}`));
+      await session.abort("Codex control channel failed");
+    }
+  })();
 
   const result: ProviderResult = await session.waitForCompletion();
   writeLine({ kind: "result", result });

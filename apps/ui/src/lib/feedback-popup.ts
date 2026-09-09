@@ -2,6 +2,7 @@ import type { CurrentUserState } from "@/contexts/current-user-context";
 import { isAdminLike } from "./user-role";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const FEEDBACK_POPUP_INSTALL_WINDOW_MS = 30 * DAY_MS;
 const STORAGE_VERSION = 1;
 
 /** A successful submission is enough feedback for one quarter. */
@@ -82,9 +83,8 @@ export function shouldShowFeedbackPopup(input: FeedbackEligibility): boolean {
   }
 
   const installedMs = input.installedAt ? Date.parse(input.installedAt) : Number.NaN;
-  if (!Number.isFinite(installedMs)) return input.hasFailedTask;
+  if (!input.hasFailedTask || !Number.isFinite(installedMs)) return false;
 
   const ageMs = nowMs - installedMs;
-  if (ageMs < 0) return false;
-  return input.hasFailedTask || ageMs >= 7 * DAY_MS;
+  return ageMs >= 0 && ageMs < FEEDBACK_POPUP_INSTALL_WINDOW_MS;
 }

@@ -63,7 +63,12 @@ export type ProviderEvent =
       harnessVariant?: string;
       harnessVariantMeta?: Record<string, unknown>;
     }
-  | { type: "message"; role: "assistant" | "user"; content: string }
+  | {
+      type: "message";
+      role: "assistant" | "user";
+      content: string;
+      messageId?: string;
+    }
   | { type: "tool_start"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool_end"; toolCallId: string; toolName: string; result: unknown }
   | { type: "result"; cost: CostData; output?: string; isError: boolean; errorCategory?: string }

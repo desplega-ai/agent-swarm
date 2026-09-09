@@ -126,6 +126,9 @@ and heartbeat-classified roots are omitted, and the metrics remain separate.
   `src/providers/codex-models.ts` is advisory only. The canonical price is the
   server-side recompute against the runtime-refreshed pricing table;
   `agentswarm.cost.drift.usd` watches for divergence between the two.
+- **Codex usage:** the app-server reports cumulative token counters, including cache writes.
+  The adapter calculates each turn's delta before adding it to the session total.
+  This prevents repeated billing of earlier turns when the adapter processes queued input.
 - **Claude breakdown validity is all-or-nothing:** the claude adapter drops the
   entire `modelUsage` breakdown when any entry carries a missing, non-finite,
   or negative token counter — zero-filling would let the server price a

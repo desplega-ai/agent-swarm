@@ -4,6 +4,7 @@ import type { FullConfig, Reporter, TestCase, TestResult } from "@playwright/tes
 
 interface SummaryResult {
   specId: string;
+  titlePath: string[];
   title: string;
   file: string;
   line: number;
@@ -15,6 +16,7 @@ interface SummaryResult {
   error: string | undefined;
   tags: string[];
   screenshots: Array<{ name: string; path: string }>;
+  attachments: Array<{ name: string; contentType: string; path: string }>;
 }
 
 class SummaryReporter implements Reporter {
@@ -33,6 +35,7 @@ class SummaryReporter implements Reporter {
     const packageRoot = resolve(import.meta.dirname, "..");
     this.results.push({
       specId: test.titlePath().slice(1).join(" > "),
+      titlePath: test.titlePath().slice(3),
       title: test.title,
       file: relative(packageRoot, test.location.file).split(sep).join("/"),
       line: test.location.line,
@@ -49,6 +52,15 @@ class SummaryReporter implements Reporter {
             attachment.contentType === "image/png" && Boolean(attachment.path),
         )
         .map((attachment) => ({ name: attachment.name, path: attachment.path })),
+      attachments: result.attachments
+        .filter((attachment): attachment is typeof attachment & { path: string } =>
+          Boolean(attachment.path),
+        )
+        .map((attachment) => ({
+          name: attachment.name,
+          contentType: attachment.contentType,
+          path: attachment.path,
+        })),
     });
   }
 

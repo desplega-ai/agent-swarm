@@ -59,9 +59,30 @@ If no agents are online, the message is queued as an unassigned task in the pool
 
 ### Acceptance reactions
 
-When the swarm accepts a Slack message, it adds an :eyes: reaction after it has successfully created or queued the task. The same acknowledgement appears when a thread message is accepted as steering for a running task. If ingestion fails before the request is accepted, the bot leaves the message unreacted instead of implying that work started; repeated delivery of an already-acknowledged event is treated as a harmless no-op.
+When the swarm accepts a Slack message, it adds an :eyes: reaction after it has successfully created or queued the task. A thread message accepted as steering for a running task receives :speech_balloon: by default. If ingestion fails before the request is accepted, the bot leaves the message unreacted instead of implying that work started; repeated delivery of an already-acknowledged event is treated as a harmless no-op.
 
 Additive thread buffering uses a slightly richer vocabulary: :eyes: for the first captured message, :heavy_plus_sign: for later messages appended to that buffer, and :zap: when `!now` triggers an immediate flush.
+
+Each of the 6 reactions is configurable through a `swarm_config` key, scope `global`. An unset key keeps the default shown below.
+
+| Key | Event | Default |
+|---|---|---|
+| `SLACK_REACTION_ACCEPTED` | Task accepted from a channel mention, thread reply, follow-up or assistant DM. Also the first message in an additive buffer. | `eyes` |
+| `SLACK_REACTION_BUFFERED` | Message 2 and later in an additive buffer window. | `heavy_plus_sign` |
+| `SLACK_REACTION_NOW` | The `!now` command flushes the buffer. | `zap` |
+| `SLACK_REACTION_STEERED` | A thread message is accepted as steering for a running task. | `speech_balloon` |
+| `SLACK_REACTION_COMPLETED` | Every task linked to the trigger message reached status `completed`. | `white_check_mark` |
+| `SLACK_REACTION_FAILED` | Any linked task reached `failed`, `cancelled` or `superseded`. | `x` |
+
+A value is trimmed, has at most one leading and one trailing colon stripped, and is lowercased before Slack sees it — `:ThumbsUp:` and `thumbsup` both resolve to `thumbsup`. A value that is empty afterward, or contains anything outside lowercase letters, digits, `_`, `+`, `'` and `-`, is rejected at write time and falls back to the default at read time.
+
+If Slack rejects a configured name with `invalid_name` (the emoji does not exist in the workspace), the bot logs one error-level line, increments an OTel counter, and retries once with the default for that event before giving up on the reaction. Task state and the outcome card never depend on a reaction landing. A terminal reaction (`completed` or `failed`) is never removed once added.
+
+When a task finalizes, the bot removes the acceptance-stage reactions and adds the terminal reaction. The removal list is the configured name for each of the four acceptance-stage events (`SLACK_REACTION_ACCEPTED`, `SLACK_REACTION_BUFFERED`, `SLACK_REACTION_NOW`, `SLACK_REACTION_STEERED`). With no configuration, that list is `eyes`, `heavy_plus_sign`, `zap` and `speech_balloon`, the same fixed list the bot removed before these keys existed. The bot keeps no record of which reaction it applied to which message, so an API restart between acceptance and finalization does not change the result. `reactions.remove` only removes the bot's own reaction, so a reaction that a person or another bot applied with the same name stays in place. If you change an acceptance-stage key while a task is active, the bot removes the new name at finalization and the old reaction stays on the message.
+
+### Terminal reply recovery
+
+Pending terminal replies are stored in the database and retried after API restarts. The watcher marks a reply delivered only after Slack accepts it. When a persisted progress message is available, it updates that message to the final result; if Slack reports that the message no longer exists, it sends a replacement. Task-tree messages retain their own final update path.
 
 ### Thread Follow-up Routing
 

@@ -31,6 +31,7 @@ import {
   finalizeSlackMessageReaction,
   finalizeSlackSteerReactions,
   finalizeTerminalSlackReactions,
+  type SlackReactionChoice,
 } from "./ack";
 import { getSlackApp } from "./app";
 import {
@@ -41,6 +42,7 @@ import {
   splitSlackSectionText,
 } from "./blocks";
 import { buildAskClosure, type ClosureState, closureState } from "./closure";
+import { reactionName, type SlackReactionEvent } from "./reaction-shortcode";
 import { getAgentDisplayName, getAgentEmoji } from "./responses";
 
 const TREE_UPDATE_DEBOUNCE_MS = 500;
@@ -796,13 +798,22 @@ async function askConclusionContent(
 }
 
 /** Reaction gate mapping (plan section 3.5): a cancel is not a failure. */
-function conclusionReactionOutcome(
+/**
+ * The reaction for an ask's conclusion. `settled` maps onto the operator-
+ * configurable `completed` / `failed` events; `timedOut` has no configurable
+ * event, so it sends the fixed built-in `warning` shortcode with no event and
+ * therefore no `invalid_name` config fallback.
+ */
+function conclusionReactionChoice(
   state: Extract<ClosureState, "settled" | "timedOut">,
   ask: AgentTask,
   closure: AgentTask[],
-): "white_check_mark" | "x" | "warning" {
-  if (state === "timedOut") return "warning";
-  return [ask, ...closure].some((member) => member.status === "failed") ? "x" : "white_check_mark";
+): SlackReactionChoice {
+  if (state === "timedOut") return { name: "warning" };
+  const event: SlackReactionEvent = [ask, ...closure].some((member) => member.status === "failed")
+    ? "failed"
+    : "completed";
+  return { name: reactionName(event), event };
 }
 
 /** Observability signals from plan section 3.10, emitted after a successful finalize. */
@@ -1251,14 +1262,15 @@ export async function processSlackRenderV2(): Promise<void> {
         if (outcome) {
           const app = getSlackApp();
           if (app && task.slackChannelId && task.slackTriggerMessageTs) {
-            const reactionOutcome = conclusionReactionOutcome(state, task, closure);
+            const reaction = conclusionReactionChoice(state, task, closure);
             await finalizeSlackMessageReaction(
               app.client,
               task.slackChannelId,
               task.slackTriggerMessageTs,
-              reactionOutcome,
+              reaction.name,
+              reaction.event,
             );
-            await finalizeSlackSteerReactions([task], () => reactionOutcome);
+            await finalizeSlackSteerReactions([task], () => reaction);
           }
           await recordSlackDelivery(
             task,

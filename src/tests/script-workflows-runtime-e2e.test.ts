@@ -1,6 +1,16 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { rm, unlink } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { Server as NetServer, type Socket } from "node:net";
 import {
   closeDb,
   createAgent,
@@ -18,6 +28,7 @@ import { pauseScriptRunProcess } from "../script-workflows/supervisor";
 import { refreshSecretScrubberCache } from "../utils/secret-scrubber";
 import { SKIP_SANDBOX_SPAWN_TESTS } from "./sandbox-spawn-test-helpers";
 import { listenOnFreePort } from "./test-net";
+import { CHILD_PROCESS_TEST_BUDGET_MS } from "./test-proc";
 
 const TEST_DB_PATH = "./test-script-workflows-runtime-e2e.sqlite";
 const WORKFLOW_RUNTIME_DIR = "./test-script-workflows-runtime";
@@ -481,6 +492,65 @@ describe("script workflow runtime", () => {
       expect((await getScriptRun(id))?.status).toBe("paused");
       expect(await listScriptRunJournalSteps(id)).toHaveLength(0);
     },
+  );
+
+  spawnTest(
+    "handles a capability socket error while host polling is active",
+    async () => {
+      holdAgentTaskResponses = true;
+      let capabilitySocket: Socket | undefined;
+      const originalEmit = NetServer.prototype.emit;
+      const emitSpy = spyOn(NetServer.prototype, "emit").mockImplementation(function (
+        this: NetServer,
+        event,
+        ...args
+      ) {
+        const address = this.address();
+        if (
+          event === "connection" &&
+          typeof address === "string" &&
+          address.endsWith("/capability.sock")
+        ) {
+          capabilitySocket = args[0] as Socket;
+        }
+        return originalEmit.call(this, event, ...args);
+      });
+      let runId: string | undefined;
+      try {
+        const created = await api("/api/script-runs", {
+          method: "POST",
+          body: JSON.stringify({
+            source: `export default async function main(_args, ctx) {
+              return await ctx.step.agentTask("broken-pipe", { task: "stay pending" });
+            }`,
+            background: true,
+          }),
+        });
+        expect(created.status).toBe(201);
+        const { id } = (await created.json()) as { id: string };
+        runId = id;
+        await waitUntil(() => agentTaskRequestCount === 1, "Agent task poll did not start");
+        expect(capabilitySocket).toBeDefined();
+
+        // A failed socket write also emits an error event after its callback.
+        // Inject that event deterministically instead of racing the guest exit.
+        const error = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
+        expect(() => capabilitySocket!.emit("error", error)).not.toThrow();
+
+        const run = await waitForRun(id);
+        expect(run.status).toBe("failed");
+        expect(run.error).toBe("write EPIPE");
+        await waitUntil(
+          () => agentTaskClosedCount === 1,
+          "Host-side agent task poll was not aborted",
+        );
+        expect(await listScriptRunJournalSteps(id)).toHaveLength(0);
+      } finally {
+        emitSpy.mockRestore();
+        if (runId) await pauseScriptRunProcess(runId);
+      }
+    },
+    CHILD_PROCESS_TEST_BUDGET_MS,
   );
 
   // macOS cannot enforce the runtime's ulimit preamble (no usable RLIMIT_AS);

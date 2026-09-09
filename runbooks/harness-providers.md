@@ -7,7 +7,7 @@ Operational rules for editing or adding harness providers (claude, codex, openco
 | Provider | `HARNESS_PROVIDER` | Adapter | Notes |
 |----------|--------------------|---------|-------|
 | Claude Code | `claude` | `ClaudeAdapter` | Default; spawns `claude` CLI |
-| Codex | `codex` | `CodexAdapter` | Spawns `codex` CLI; OpenAI/ChatGPT OAuth |
+| Codex | `codex` | `CodexAdapter` | Starts a fresh `codex app-server` for each task. OpenAI/ChatGPT OAuth |
 | opencode | `opencode` | `OpencodeAdapter` | Spawns `opencode` CLI; OpenRouter primary; agent-swarm plugin auto-injected. See [harness-configuration § Opencode](/docs/guides/harness-configuration#opencode) |
 | pi-mono | `pi` | `PiMonoAdapter` | In-process library; OpenRouter, Anthropic, or Amazon Bedrock (via `MODEL_OVERRIDE=amazon-bedrock/*` — see Bedrock auth below) |
 | Devin | `devin` | `DevinAdapter` | Cloud-managed via Cognition `/sessions` API |
@@ -39,6 +39,8 @@ OpenCode runs `opencode acp`. Before the first prompt, the adapter applies `MODE
 
 Custom targets use `ACP_TARGET_COMMAND` plus JSON-array `ACP_TARGET_ARGS`. `ACP_TARGET_ENV_KEYS` is a JSON array of environment/config keys explicitly allowed into the child process; the adapter never forwards the complete resolved environment. `ACP_MODEL_ENV_KEY` optionally maps `MODEL_OVERRIDE` into a target-specific environment variable as its model fallback. `ACP_CONFIG_OPTIONS` is a JSON object of additional string or boolean ACP option values.
 
+All projected config-option strings pass through `scrubSecrets` before the adapter emits session metadata, including grouped choices. Boolean values and non-secret model IDs and descriptions retain their values. This protects both credential-status persistence and the diagnostic mirror.
+
 The latest sanitized `configOptions` advertised by a target are stored in the agent's credential-status telemetry and shown read-only in the dashboard. No report means no ACP session has reported options yet; an empty list means a session explicitly advertised none.
 
 The `docker-entrypoint.sh` swarm_config-fetch step explicitly **skips** `HARNESS_PROVIDER` when exporting config to env. Baking it would shadow swarm_config deletes with the stale value persisted in `process.env`.
@@ -62,7 +64,7 @@ MCP tools return `isError` on the wire `CallToolResult` (see [runbooks/mcp-tool-
 | `opencode` | Lossy: SDK abort, then `promptAsync` | Native `promptAsync` | Interrupt discards the in-flight turn before re-prompting; queue is the zero-loss path. |
 | `devin` | No | Yes | `sendMessage` accepts a working session but does not guarantee interruption, so the adapter always reports `mode: "queue"`. |
 | `claude` | No | Conditional | Raw CLI stream-json queues input at a turn boundary; it does not interrupt. See the gate below. |
-| `codex` | No | Yes (harness-side) | No in-process channel exists (`@openai/codex-sdk` drives `codex exec` with stdin closed; native `turn/steer` is app-server-only — issue #1034). The codex-hook delivers instead. See below. |
+| `codex` | Native `turn/steer` | Adapter queue | The per-task app-server receives steering over JSON-RPC. `steer` interrupts the active turn. `queue` starts after that turn ends. See below. |
 | `acp` | No | No | ACP has one in-flight `session/prompt` and no queue primitive; `session/cancel` is a full abort, not an interrupt. Advertises `[]`. |
 
 The server-side `PROVIDER_STEER_CAPABILITIES` map in `src/types.ts` must deep-equal each adapter's `traits.steerModes ?? []`. `src/tests/provider-steering-capabilities.test.ts` iterates the canonical `ProviderNameSchema` list through `createProviderAdapter()` and names the offending provider on drift. Adding a provider requires updating the schema, factory, adapter traits, and capability map together.
@@ -82,14 +84,24 @@ With `CLAUDE_QUEUE_STEERING` unset, the adapter enables stream-json input only w
 
 When disabled, the adapter keeps `-p <prompt>` and the live session exposes no `deliverSteering`; an undeliverable message is promoted to a follow-up task. The provider trait remains queue-capable because the stock, supported Claude runtime implements that mode; the per-session gate is an operational availability check.
 
-### Codex harness-side delivery (codex-hook)
+### Codex app-server delivery
 
-Codex sessions have no in-process delivery seam, so `CodexSession`/`CodexSubprocessSession` set `steeringDeliveredExternally: true` and the runner's dispatch poll (`pollAndDispatchSteering`) leaves their rows `pending` instead of synthesizing an undeliverable report. Delivery happens inside the codex lifecycle:
+Production Codex sessions start a fresh `codex app-server` inside the existing isolated per-task runner. The parent adapter and task runner keep their JSONL control channel open. The task runner uses JSON-RPC with the app-server.
 
-- The worker image bakes `/etc/codex/requirements.toml` (Dockerfile.worker, worker-base) registering `agent-swarm codex-hook` for `SessionStart`, `PostToolUse`, and `Stop`. Requirements-managed hooks are "trusted by policy" — user-level `hooks.json` would be silently skipped without a per-hook `trusted_hash` review, which never happens in a headless worker.
-- `src/hooks/codex-hook.ts` polls `GET /api/steering-messages` (agent-scoped), POSTs `/delivered` per row, and only then injects the rendered envelope (`src/prompts/steering-delivery.ts`) as `hookSpecificOutput.additionalContext` (SessionStart/PostToolUse) or a one-shot `{"decision":"block","reason":...}` on Stop. Delivered-before-inject is the one-shot guarantee; a failed POST leaves the row pending for the next event.
-- `PreToolUse` is deliberately not registered: codex drops its `additionalContext` (openai/codex#19385). Empirical per-event matrix at codex-cli 0.146.0: `thoughts/taras/research/2026-07-30-steering-transport-hooks-and-artificial-steering.md` §4a-bis.
-- Rows a dying session never picks up are promoted by the terminal sweep, same as every other provider. Local dev outside Docker has no `/etc/codex/requirements.toml`, so steers on local codex tasks sit pending until terminal promotion unless you install the hooks yourself.
+- `steer` sends native `turn/steer`. Codex adds the input to the active turn.
+- `queue` stores the message in the adapter. Delivery succeeds only after Codex accepts the next native turn.
+- If the session ends before that turn starts, delivery fails and the pending message remains eligible for follow-up promotion.
+- Queue acknowledgements do not block cancellation or polling other tasks.
+- A message accepted before app-server readiness remains pending until the connection is ready.
+- `abort()` sends the native turn interrupt request. If it cannot complete within the bounded grace period, the runner terminates the task process group.
+
+The adapter creates no shared app-server daemon and never resumes a native Codex thread. Task continuity still uses the swarm context preamble.
+
+### Codex hook delivery for legacy exec sessions
+
+`src/hooks/codex-hook.ts` remains for legacy `codex exec` sessions. The worker image registers it for `SessionStart`, `PostToolUse`, and `Stop` through `/etc/codex/requirements.toml`. It polls pending steering messages, marks each row delivered, then injects the rendered envelope through hook output.
+
+App-server sessions set `SWARM_CODEX_APP_SERVER=1`. The hook exits before polling in that mode. This prevents a hook and the worker from delivering the same message. `PreToolUse` remains unregistered because Codex drops its `additionalContext`.
 
 ## Per-task `outputSchema` support
 

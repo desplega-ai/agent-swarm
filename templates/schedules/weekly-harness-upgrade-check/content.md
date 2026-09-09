@@ -17,14 +17,14 @@ The worker image pins these harnesses via `ARG`. Each week, check upstream for n
 |---|---|---|
 | `CLAUDE_CODE_VERSION` | npm `@anthropic-ai/claude-code` | none |
 | `PI_CODING_AGENT_VERSION` | npm `@earendil-works/pi-coding-agent` | MUST match `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` in `package.json` (family-pin, all same version) — bump all together |
-| `CODEX_VERSION` | npm `@openai/codex` | MUST match `@openai/codex-sdk` in `package.json` (enforced by `scripts/check-codex-default-model.sh`) — bump both |
+| `CODEX_VERSION` | npm `@openai/codex` | MUST match direct `@openai/codex` in `package.json` (enforced by `scripts/check-codex-default-model.sh`) |
 | `OPENCODE_VERSION` | https://opencode.ai (latest release) | MUST match `OPENCODE_SDK_VERSION` |
 | `OPENCODE_SDK_VERSION` | npm `@opencode-ai/sdk` | MUST match `OPENCODE_VERSION` — bump both together |
 
 ## Steps
 
 1. `cd /workspace/repo && git fetch origin && git checkout main && git pull --ff-only`
-2. Read current pinned versions from `Dockerfile.worker` (the `ARG` lines) and from `package.json` (for the pi family + `@openai/codex-sdk` + `@opencode-ai/sdk`).
+2. Read current pinned versions from `Dockerfile.worker` (the `ARG` lines) and from `package.json` (for the pi family + `@openai/codex` + `@opencode-ai/sdk`).
 3. For each harness, fetch the latest version:
    - npm claude-code: `npm view @anthropic-ai/claude-code version`
    - npm pi: `npm view @earendil-works/pi-coding-agent version` (use the SAME version for `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` — they're a family pin)
@@ -35,7 +35,7 @@ The worker image pins these harnesses via `ARG`. Each week, check upstream for n
 5. Collect ALL outdated harnesses. If none are outdated, complete with output `"All harnesses up to date as of YYYY-MM-DD"` (no PR).
 6. Branch: `harness-upgrade/weekly-YYYY-MM-DD` (e.g. `harness-upgrade/weekly-2026-06-03`).
 7. Edit `Dockerfile.worker` — bump every outdated ARG. Also update `package.json`:
-   - Codex: bump `@openai/codex-sdk` to match `CODEX_VERSION`.
+   - Codex: bump direct `@openai/codex` to match `CODEX_VERSION`.
    - Pi family: bump `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@earendil-works/pi-coding-agent` to the same new version as `PI_CODING_AGENT_VERSION`.
    - Opencode: bump `OPENCODE_SDK_VERSION` and `@opencode-ai/sdk` to match `OPENCODE_VERSION`.
    Then re-run `bun install` so `bun.lock` updates.
@@ -79,4 +79,3 @@ This schedule has a sibling — `weekly-harness-upgrade-check-wed` (Wednesday 05
 - The PR URL (if one was opened) + the table of harnesses bumped, OR
 - "No-op: all harnesses up to date as of YYYY-MM-DD" with the version table, OR
 - "Skipped: sibling harness upgrade PR already open" with the existing PR URL.
-

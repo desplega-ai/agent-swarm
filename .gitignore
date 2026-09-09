@@ -95,3 +95,5 @@ packages/ui-e2e/all-blob-reports/
 packages/ui-e2e/all-results/
 packages/ui-e2e/images.json
 packages/ui-e2e/comment.md
+packages/ui-e2e/ingest-payloads/
+packages/ui-e2e/artifacts.json

@@ -1,5 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { parseFlags } from "./cli.ts";
 
 interface SummaryResult {
   specId: string;
@@ -24,6 +25,7 @@ interface Options {
   images: string;
   runUrl: string;
   reportArtifact: string;
+  trackerUrl: string | undefined;
   out: string;
 }
 
@@ -45,35 +47,19 @@ const STATUS_ORDER = new Map([
 
 function parseArgs(argv: string[]): Options {
   const required = ["summaries", "images", "run-url", "report-artifact", "out"];
-  if (argv.length !== required.length * 2) {
-    throw new Error("Expected five option and value pairs");
-  }
-  const values = new Map<string, string>();
-  for (let index = 0; index < argv.length; index += 2) {
-    const key = argv[index];
-    const value = argv[index + 1];
-    if (!key?.startsWith("--") || value === undefined) {
-      throw new Error(`Invalid argument near ${key ?? "end of arguments"}`);
-    }
-    values.set(key.slice(2), value);
-  }
+  const values = parseFlags(argv, { required, optional: ["tracker-url"] });
 
   for (const key of required) {
     if (!values.get(key)) throw new Error(`Missing required argument --${key}`);
   }
-  if (
-    values.size !== required.length ||
-    [...values.keys()].some((key) => !required.includes(key))
-  ) {
-    throw new Error("Unknown or duplicate arguments were provided");
-  }
 
   return {
-    summaries: values.get("summaries")!,
-    images: values.get("images")!,
-    runUrl: values.get("run-url")!,
-    reportArtifact: values.get("report-artifact")!,
-    out: values.get("out")!,
+    summaries: values.get("summaries") as string,
+    images: values.get("images") as string,
+    runUrl: values.get("run-url") as string,
+    reportArtifact: values.get("report-artifact") as string,
+    trackerUrl: values.get("tracker-url") as string | undefined,
+    out: values.get("out") as string,
   };
 }
 
@@ -239,8 +225,9 @@ function renderComment(
   lines.push(
     "",
     `Run: [GitHub Actions](${options.runUrl}) | HTML report artifact: \`${escapeTable(options.reportArtifact)}\``,
-    "",
   );
+  if (options.trackerUrl) lines.push(`Tracker: ${options.trackerUrl}`);
+  lines.push("");
   return lines.join("\n");
 }
 
