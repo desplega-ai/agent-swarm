@@ -1,4 +1,4 @@
-import type { AgentCredStatus, ProviderName } from "@/api/types";
+import type { AgentCredStatus, ClaudeTransport, ProviderName } from "@/api/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { HarnessIcon } from "./harness-icon";
@@ -56,15 +56,23 @@ function formatRelative(ms: number): string {
 export interface HarnessCellProps {
   harnessProvider: ProviderName | string | null | undefined;
   credStatus: AgentCredStatus | null | undefined;
+  /** Effective Claude transport from the agents API. Only `sdk` renders a chip; CLI is the default. */
+  claudeTransport?: ClaudeTransport | null;
   className?: string;
 }
 
-export function HarnessCell({ harnessProvider, credStatus, className }: HarnessCellProps) {
+export function HarnessCell({
+  harnessProvider,
+  credStatus,
+  claudeTransport,
+  className,
+}: HarnessCellProps) {
   if (!harnessProvider) {
     return <span className="text-muted-foreground">—</span>;
   }
   const label = HARNESS_LABEL[harnessProvider] ?? harnessProvider;
   const health = classifyCred(credStatus);
+  const transport = harnessProvider === "claude" ? (claudeTransport ?? null) : null;
 
   return (
     <Tooltip>
@@ -77,6 +85,14 @@ export function HarnessCell({ harnessProvider, credStatus, className }: HarnessC
         >
           <HarnessIcon harness={String(harnessProvider)} />
           <span className="font-medium">{label}</span>
+          {transport === "sdk" ? (
+            <span
+              data-testid="harness-transport-chip"
+              className="rounded border border-border px-1 text-[9px] font-medium uppercase leading-4 text-muted-foreground"
+            >
+              sdk
+            </span>
+          ) : null}
           <span
             aria-hidden
             className={cn("h-1.5 w-1.5 rounded-full shrink-0", HEALTH_DOT[health])}
@@ -93,6 +109,7 @@ export function HarnessCell({ harnessProvider, credStatus, className }: HarnessC
           providerLabel={label}
           credStatus={credStatus ?? null}
           health={health}
+          transport={transport}
         />
       </TooltipContent>
     </Tooltip>
@@ -104,11 +121,13 @@ function CredBreakdown({
   providerLabel,
   credStatus,
   health,
+  transport,
 }: {
   provider: string;
   providerLabel: string;
   credStatus: AgentCredStatus | null;
   health: CredHealth;
+  transport: ClaudeTransport | null;
 }) {
   return (
     <div className="text-xs leading-relaxed space-y-1.5">
@@ -121,6 +140,15 @@ function CredBreakdown({
         <span className={cn("h-1.5 w-1.5 rounded-full", HEALTH_DOT[health])} />
         <span className="font-medium">{HEALTH_LABEL[health]}</span>
       </div>
+
+      {transport ? (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 opacity-90">
+          <dt className="opacity-60">Transport</dt>
+          <dd className="font-mono">
+            {transport === "sdk" ? "sdk · Claude Agent SDK" : "cli · Claude Code CLI"}
+          </dd>
+        </dl>
+      ) : null}
 
       {!credStatus ? (
         <p className="opacity-80">

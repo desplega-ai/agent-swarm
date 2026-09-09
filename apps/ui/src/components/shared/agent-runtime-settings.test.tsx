@@ -307,4 +307,27 @@ describe("ACP harness presentation", () => {
     expect(html).toContain("ACP");
     expect(html).toContain("<svg");
   });
+
+  test("flags Claude agents on the SDK transport and stays quiet for CLI or other harnesses", () => {
+    const sdk = renderToStaticMarkup(
+      <TooltipProvider>
+        <HarnessCell harnessProvider="claude" credStatus={null} claudeTransport="sdk" />
+      </TooltipProvider>,
+    );
+    expect(sdk).toContain('data-testid="harness-transport-chip"');
+
+    const cli = renderToStaticMarkup(
+      <TooltipProvider>
+        <HarnessCell harnessProvider="claude" credStatus={null} claudeTransport="cli" />
+      </TooltipProvider>,
+    );
+    expect(cli).not.toContain('data-testid="harness-transport-chip"');
+
+    const codex = renderToStaticMarkup(
+      <TooltipProvider>
+        <HarnessCell harnessProvider="codex" credStatus={null} claudeTransport="sdk" />
+      </TooltipProvider>,
+    );
+    expect(codex).not.toContain('data-testid="harness-transport-chip"');
+  });
 });
