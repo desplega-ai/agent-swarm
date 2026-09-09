@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,6 +66,26 @@ describe("ACPAdapter", () => {
     expect(() => resolveAcpTarget(baseConfig()).command(baseConfig())).toThrow(
       "No ACP target configured",
     );
+  });
+
+  test("custom target warns that the full swarm bearer goes to the arbitrary executable (#1322)", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const config = baseConfig({
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          ACP_TARGET_COMMAND: "my-agent",
+        },
+      });
+      expect(resolveAcpTarget(config).command(config)).toEqual(["my-agent"]);
+      expect(warn).toHaveBeenCalled();
+      const message = warn.mock.calls.map((args) => String(args[0])).join("\n");
+      expect(message).toContain("ACP_TARGET_COMMAND");
+      expect(message).toContain("swarm API key");
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("redacts credential headers from arrays and nested maps before persistence", async () => {

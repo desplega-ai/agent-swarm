@@ -359,7 +359,7 @@ Because the target process owns its own model credentials, `acp` reports `ready:
 |----------|----------|---------|-------------|
 | `HARNESS_PROVIDER` | Yes | — | Must be set to `acp` |
 | `ACP_TARGET` | No | `custom` | `opencode` for the curated OpenCode preset, or `custom` for an operator-supplied command |
-| `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path |
+| `ACP_TARGET_COMMAND` | Custom only | — | Executable to spawn as the custom ACP agent (also accepts the shorter `ACP_COMMAND` alias). Must resolve on `$PATH` or be an absolute path. It receives the worker's full swarm API key as the swarm MCP bearer — point it only at a binary you trust (see [ACP Specifics](#acp-specifics)) |
 | `ACP_TARGET_ARGS` | No | — | Arguments to the target command. Accepts a JSON array (`["acp", "--flag"]`) or a plain whitespace-separated string |
 | `ACP_TARGET_ENV_KEYS` | No | `[]` | JSON array (or comma-separated list for hand-authored config) of environment/config keys explicitly allowed into a custom target process |
 | `ACP_MODEL_ENV_KEY` | No | — | Custom target environment variable that receives `MODEL_OVERRIDE` when the ACP `model` option is unavailable |

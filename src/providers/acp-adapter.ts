@@ -373,6 +373,11 @@ export class ACPAdapter implements ProviderAdapter {
       // (mcp/connect, mcp/message, mcp/disconnect) instead of a network hop — the
       // shape for an ACP agent with no network route to the swarm API. Gated on
       // `mcpCapabilities.acp` and UNSTABLE; not adopted here.
+      // Residual risk (#1322): the swarm entry below carries the worker's
+      // FULL-privilege bearer to an arbitrary target executable — it can read,
+      // retain, or forward it. Custom targets log an explicit trust warning at
+      // resolution (see acp-targets.ts); the durable fix is ephemeral,
+      // least-privilege tokens, not more warning text.
       const newSession = await connection.newSession({
         cwd: config.cwd,
         mcpServers: [

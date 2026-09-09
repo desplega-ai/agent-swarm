@@ -144,6 +144,14 @@ const customTargetProfile: AcpTargetProfile = {
         "No ACP target configured. Set ACP_TARGET_COMMAND to an ACP-compatible executable before using HARNESS_PROVIDER=acp.",
       );
     }
+    // Interim trust disclosure for #1322: the adapter hands this arbitrary
+    // executable the worker's full-privilege swarm API key as the swarm MCP
+    // bearer (see acp-adapter.ts newSession). There is no scoped-token
+    // mechanism yet, so the opt-in is explicit and loud: only binaries the
+    // operator trusts with that credential may be configured here.
+    console.warn(
+      "\x1b[33m[acp]\x1b[0m Custom ACP target: the worker's full-privilege swarm API key is handed to ACP_TARGET_COMMAND as the swarm MCP bearer. Point it only at a binary you trust with that credential (#1322).",
+    );
     return parseCommand(command, readEnv(config, "ACP_TARGET_ARGS"));
   },
   env(config) {
