@@ -116,6 +116,19 @@ for attempt in 1 2 3; do
       fi
     done
 
+    # Vercel deploys every ci-visuals push, which fails ROOTDIR_NOT_EXIST.
+    # Root-directory resolution precedes the Ignored Build Step, so disable
+    # deployments at both the repo root and each Vercel project root instead.
+    for vercel_root in . apps/ui apps/templates-ui docs-site; do
+      mkdir -p "$vercel_root"
+      cat > "$vercel_root/vercel.json" <<'JSON'
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": { "deploymentEnabled": { "ci-visuals": false } }
+}
+JSON
+    done
+
     git add -A
     git -c user.name='github-actions[bot]' \
       -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
