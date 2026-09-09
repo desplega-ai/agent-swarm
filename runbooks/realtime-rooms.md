@@ -22,6 +22,8 @@ The [REST reference](https://docs.agent-swarm.dev/docs/api-reference/rooms) desc
 User-token page launches sign `uid` and `name` into the page session.
 The API resolves the signed user again during proxy authentication. Inactive users cannot use these sessions.
 Operator launches and password unlocks create guest sessions. They do not inherit the page author's agent ID.
+Legacy browser SDK memory operations use the page owner's agent scope through verified page execution context.
+The server loads this context from the signed session's page record. It preserves the viewer's authentication, permissions, and audit identity.
 Guest proxy calls retain deployment-level API access. Review a page before granting external people a password.
 Public pages admit anonymous room peers through the dedicated socket path. They do not receive a general API cookie.
 

@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { getPage } from "../be/db";
 import { findUserById, fingerprintApiKey, resolveUserByToken } from "../be/users";
 import type { User } from "../types";
 import { verifyPageSession } from "../utils/page-session";
@@ -31,11 +32,15 @@ export async function resolveHttpRequestAuth(
       if (!pageId) return null;
       const payload = await verifyPageSession(pageSession);
       if (!payload || payload.pageId !== pageId) return null;
+      const storedPage = await getPage(payload.pageId);
+      if (!storedPage) return null;
+      const page = { id: storedPage.id, executionAgentId: storedPage.agentId };
       if (payload.uid) {
         const user = await findUserById(payload.uid);
         if (!isActiveUser(user)) return null;
-        return { kind: "user", userId: user.id, user };
+        return { kind: "user", userId: user.id, user, page };
       }
+      return { kind: "operator", fingerprint: fingerprintApiKey(bearer), page };
     }
     return { kind: "operator", fingerprint: fingerprintApiKey(bearer) };
   }

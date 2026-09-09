@@ -3,8 +3,9 @@
 // Exposes a domain-grouped API on `window.SwarmSDK` (class) and a ready-to-use
 // singleton `window.swarmSdk`. All calls route through the `/@swarm/api/*`
 // proxy, which strips the page-session cookie and forwards to `/api/*` with
-// a server-side bearer + agent-id. From the page's perspective, the SDK is
-// authenticated automatically — no token handling on the client.
+// a server-side bearer and signed page session. Memory operations use the
+// page owner's agent scope. Viewer identity and permissions remain separate.
+// The browser never handles the server bearer.
 //
 // Domains exposed:
 //   - tasks            create, list, get, storeProgress

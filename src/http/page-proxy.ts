@@ -220,6 +220,7 @@ export async function handlePageProxy(req: IncomingMessage, res: ServerResponse)
   };
   // The page owner is not the browser viewer. The receiving auth layer
   // verifies this original signed token before resolving any user identity.
+  // It also loads the page's execution context for agent-scoped memory operations.
 
   // Forward content-type / accept verbatim for non-GET so JSON bodies work.
   const reqContentType = req.headers["content-type"];

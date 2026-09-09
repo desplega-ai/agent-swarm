@@ -2,8 +2,8 @@
  * Integration tests for the page-session cookie flow:
  *   1. Create a page (bearer-auth) → POST /api/pages
  *   2. Launch it → POST /api/pages/:id/launch → captures Set-Cookie
- *   3. Hit /@swarm/api/me with the cookie → server-side bearer is injected,
- *      X-Agent-ID is rewritten to the page owner's id → 200 with /me payload.
+ *   3. Hit /@swarm/api/* with the cookie. The proxy injects the server bearer
+ *      and verified page context while preserving the viewer's identity.
  *
  * Spawns the real `src/http.ts` server with API_KEY set so we exercise the
  * full bearer + cookie + proxy chain, not the in-process handler in
@@ -13,7 +13,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import net from "node:net";
+import { runInNewContext } from "node:vm";
 import type { Subprocess } from "bun";
+import { BROWSER_SDK_JS } from "../artifact-sdk/browser-sdk";
 import { signPageSession, verifyPageSession } from "../utils/page-session";
 import { getFreePort, SERVER_BOOT_HOOK_TIMEOUT_MS, waitForServer } from "./test-net";
 
@@ -25,6 +27,29 @@ const PAGE_SECRET = "test-page-proxy-page-secret-67890";
 
 let serverProc: Subprocess;
 const agentId = randomUUID();
+const otherAgentId = randomUUID();
+
+async function registerAgent(id: string, name: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/agents`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+      "X-Agent-ID": id,
+    },
+    body: JSON.stringify({
+      name,
+      isLead: false,
+      description: `${name} for page proxy tests`,
+      role: "worker",
+      capabilities: ["core"],
+      maxTasks: 1,
+    }),
+  });
+  if (res.status !== 201 && res.status !== 200) {
+    throw new Error(`Failed to register agent: ${res.status} ${await res.text()}`);
+  }
+}
 
 beforeAll(async () => {
   TEST_PORT = await getFreePort();
@@ -47,12 +72,15 @@ beforeAll(async () => {
       PORT: String(TEST_PORT),
       DATABASE_PATH: TEST_DB_PATH,
       API_KEY,
+      AGENT_SWARM_API_KEY: API_KEY,
       PAGE_SESSION_SECRET: PAGE_SECRET,
       // Pin the upstream URL the proxy forwards to. Even though the proxy now
       // talks to 127.0.0.1:$PORT directly (not deriveApiBaseUrl), strip any
       // ambient ngrok/external MCP_BASE_URL to keep the test env minimal.
       MCP_BASE_URL: `http://127.0.0.1:${TEST_PORT}`,
       CAPABILITIES: "core,task-pool,messaging,profiles,services,scheduling,memory",
+      EMBEDDING_API_KEY: "",
+      OPENAI_API_KEY: "",
       SLACK_BOT_TOKEN: "",
       GITHUB_WEBHOOK_SECRET: "",
       AGENTMAIL_API_KEY: "",
@@ -62,27 +90,8 @@ beforeAll(async () => {
   });
   await waitForServer(`${BASE}/health`);
 
-  // Register the page-owner agent (so /me succeeds after the proxy rewrites
-  // X-Agent-ID to this id).
-  const reg = await fetch(`${BASE}/api/agents`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${API_KEY}`,
-      "X-Agent-ID": agentId,
-    },
-    body: JSON.stringify({
-      name: "PageOwner",
-      isLead: false,
-      description: "Owner of the test page",
-      role: "worker",
-      capabilities: ["core"],
-      maxTasks: 1,
-    }),
-  });
-  if (reg.status !== 201 && reg.status !== 200) {
-    throw new Error(`Failed to register agent: ${reg.status} ${await reg.text()}`);
-  }
+  await registerAgent(agentId, "PageOwner");
+  await registerAgent(otherAgentId, "OtherAgent");
 }, SERVER_BOOT_HOOK_TIMEOUT_MS);
 
 afterAll(async () => {
@@ -144,6 +153,84 @@ async function createUserToken(name: string): Promise<{ id: string; token: strin
   expect(mint.status).toBe(200);
   const minted = (await mint.json()) as { plaintext: string };
   return { id: created.user.id, token: minted.plaintext };
+}
+
+type BrowserSdk = {
+  memory: {
+    search(body: Record<string, unknown>): Promise<{
+      results: Array<{ id: string; name: string; content: string }>;
+    }>;
+    get(id: string): Promise<{ memory: { id: string; content: string } }>;
+    rate(body: Record<string, unknown>): Promise<{
+      applied: number;
+      rejected: Array<{ memoryId: string; reason: string }>;
+    }>;
+  };
+  tasks: {
+    create(body: Record<string, unknown>): Promise<{
+      id: string;
+      creatorAgentId?: string;
+      requestedByUserId?: string;
+    }>;
+    get(id: string): Promise<{
+      id: string;
+      progress?: string;
+      creatorAgentId?: string;
+      requestedByUserId?: string;
+    }>;
+    storeProgress(id: string, body: { progress: string }): Promise<{ success: true }>;
+  };
+};
+
+function browserSdk(cookie: string, spoofedAgentId?: string): BrowserSdk {
+  const window: { swarmSdk?: BrowserSdk } = {};
+  const pageFetch = (input: string, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    headers.set("Cookie", `page_session=${cookie}`);
+    if (spoofedAgentId) headers.set("X-Agent-ID", spoofedAgentId);
+    return fetch(new URL(input, BASE), { ...init, headers });
+  };
+
+  runInNewContext(BROWSER_SDK_JS, {
+    encodeURIComponent,
+    fetch: pageFetch,
+    URLSearchParams,
+    window,
+  });
+  if (!window.swarmSdk) throw new Error("browser SDK did not initialize");
+  return window.swarmSdk;
+}
+
+async function launchPageCookie(id: string, bearer = API_KEY): Promise<string> {
+  const launch = await fetch(`${BASE}/api/pages/${id}/launch`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer}` },
+  });
+  expect(launch.status).toBe(204);
+  const cookie = /page_session=([^;]+)/.exec(launch.headers.get("set-cookie") ?? "")?.[1];
+  if (!cookie) throw new Error("failed to mint page session cookie");
+  return cookie;
+}
+
+async function indexPrivateMemory(ownerAgentId: string, token: string): Promise<string> {
+  const res = await fetch(`${BASE}/api/memory/index`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${API_KEY}`,
+      "X-Agent-ID": ownerAgentId,
+    },
+    body: JSON.stringify({
+      content: `Private memory containing ${token}`,
+      name: `Memory ${token}`,
+      scope: "agent",
+      source: "manual",
+    }),
+  });
+  expect(res.status).toBe(202);
+  const body = (await res.json()) as { memoryIds: string[] };
+  expect(body.memoryIds).toHaveLength(1);
+  return body.memoryIds[0]!;
 }
 
 describe("/api/pages/:id/launch", () => {
@@ -310,6 +397,64 @@ describe("/@swarm/api/* proxy", () => {
     expect(res.status).toBe(200);
     const agent = (await res.json()) as { id: string };
     expect(agent.id).toBe(agentId);
+  });
+});
+
+describe("/@swarm/api/* page execution context", () => {
+  test("browser SDK memory calls use the page owner's private scope for guests", async () => {
+    const searchToken = `scopeprobe${randomUUID().replaceAll("-", "")}`;
+    const ownerMemoryId = await indexPrivateMemory(agentId, searchToken);
+    const otherMemoryId = await indexPrivateMemory(otherAgentId, searchToken);
+    const pageId = await createPage();
+    const cookie = await launchPageCookie(pageId);
+
+    // Execute the shipped browser SDK with a forged client identity. The
+    // proxy must ignore that header and derive memory scope from the page.
+    const sdk = browserSdk(cookie, otherAgentId);
+    const search = await sdk.memory.search({ query: searchToken, scope: "agent", limit: 10 });
+    expect(search.results.map((memory) => memory.id)).toContain(ownerMemoryId);
+    expect(search.results.map((memory) => memory.id)).not.toContain(otherMemoryId);
+
+    const details = await sdk.memory.get(ownerMemoryId);
+    expect(details.memory.id).toBe(ownerMemoryId);
+    expect(details.memory.content).toContain(searchToken);
+    await expect(sdk.memory.get(otherMemoryId)).rejects.toMatchObject({ status: 403 });
+
+    const rating = await sdk.memory.rate({
+      events: [{ memoryId: ownerMemoryId, signal: 1, weight: 0.25, source: "llm" }],
+    });
+    expect(rating).toEqual({ applied: 1, rejected: [] });
+  });
+
+  test("signed viewers retain identity while browser SDK memory and task calls remain operational", async () => {
+    const searchToken = `viewerprobe${randomUUID().replaceAll("-", "")}`;
+    const ownerMemoryId = await indexPrivateMemory(agentId, searchToken);
+    const viewer = await createUserToken(`Page Viewer ${randomUUID().slice(0, 8)}`);
+    const pageId = await createPage();
+    const cookie = await launchPageCookie(pageId, viewer.token);
+    const sdk = browserSdk(cookie);
+
+    const search = await sdk.memory.search({ query: searchToken, scope: "agent", limit: 5 });
+    expect(search.results.map((memory) => memory.id)).toContain(ownerMemoryId);
+
+    const whoami = await fetch(`${BASE}/@swarm/api/whoami`, {
+      headers: { Cookie: `page_session=${cookie}` },
+    });
+    expect(whoami.status).toBe(200);
+    const identity = (await whoami.json()) as { kind: string; user: { id: string } };
+    expect(identity.kind).toBe("user");
+    expect(identity.user.id).toBe(viewer.id);
+
+    const task = await sdk.tasks.create({ task: `Viewer task ${searchToken}` });
+    expect(task.creatorAgentId).toBeUndefined();
+    expect(task.requestedByUserId).toBe(viewer.id);
+
+    const progress = `Progress from ${searchToken}`;
+    expect(await sdk.tasks.storeProgress(task.id, { progress })).toEqual({ success: true });
+    const storedTask = await sdk.tasks.get(task.id);
+    expect(storedTask.progress).toBe(progress);
+    expect(storedTask.creatorAgentId).toBeUndefined();
+    expect(storedTask.requestedByUserId).toBe(viewer.id);
   });
 });
 

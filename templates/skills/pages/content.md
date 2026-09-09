@@ -464,6 +464,8 @@ See the `@json-render/core` docs for the supported node types (`text`,
 - User-token launches retain the signed viewer identity and its API permissions.
 - Operator and password sessions are guests with deployment-level API access.
   They do not inherit the page author's agent identity. Review actions before sharing these pages.
+- Browser SDK memory operations use the page owner's agent scope through verified page execution context.
+  Viewer authentication, permissions, and audit identity remain separate from this resource scope.
 - Treat agent-generated HTML / JSON like trusted code — the agent already
   has equivalent MCP access, so a malicious page is no worse than a
   malicious tool call. But: don't ship pages to **external** users (via

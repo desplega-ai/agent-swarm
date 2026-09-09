@@ -5,7 +5,7 @@ import { JsonViewer } from "@/components/shared/json-viewer";
 import { AlertCallout } from "@/components/ui/alert-callout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { SettingsRow } from "@/components/ui/settings-row";
 
 export function RoomInspector({ pageId }: { pageId: string }) {
   const [name, setName] = useState("default");
@@ -25,8 +25,7 @@ export function RoomInspector({ pageId }: { pageId: string }) {
           to save.
         </p>
         <div className="flex flex-wrap items-end gap-2">
-          <div className="space-y-1">
-            <Label htmlFor={inputId}>Room name</Label>
+          <SettingsRow label="Room name" htmlFor={inputId} className="space-y-1">
             <Input
               id={inputId}
               value={name}
@@ -38,7 +37,7 @@ export function RoomInspector({ pageId }: { pageId: string }) {
                 inspection.reset();
               }}
             />
-          </div>
+          </SettingsRow>
           <Button type="submit" variant="outline" disabled={inspection.isPending}>
             {inspection.isPending ? "Reading…" : "Inspect saved state"}
           </Button>
