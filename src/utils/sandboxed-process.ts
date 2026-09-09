@@ -106,9 +106,15 @@ function withBunNoOrphans(innerCommand: readonly string[]): string[] {
  *     token / API key in `env`; pass secrets over stdin instead so they
  *     never appear in `/proc/<pid>/environ` or a child's `process.env`.
  *
- * JavaScript-capable runtime trees use Bash intentionally: Ubuntu's `/bin/sh` is
- * dash, whose `ulimit` does not implement `-u` (RLIMIT_NPROC). Other commands
- * retain the existing POSIX-sh sandbox behavior and its strict profile. No-ops
+ * Always uses Bash for the prelude, regardless of what `innerCommand` runs:
+ * Ubuntu's (and Debian's) `/bin/sh` is dash, whose `ulimit` does not implement
+ * `-u` (RLIMIT_NPROC) — it silently no-ops behind this module's
+ * `2>/dev/null || true`, so any non-JS/non-shell inner command (e.g.
+ * `python3`) would otherwise render a `ulimit -u` that is never enforced
+ * (issue #1394). Every target that runs this (worker-slim, worker-full, the
+ * API image, macOS dev) ships bash, so this has no availability fallback to
+ * degrade to. The interpreter resource floor (`applyInterpreterFloor`) stays
+ * keyed on the inner command, independently of the shell choice. No-ops
  * (returns `innerCommand` unchanged) on win32, where `ulimit`/`env -i`
  * don't exist — matches the existing native.ts behavior. Because this no-op
  * means `env` is never applied on win32, callers MUST pass `env` itself
@@ -165,33 +171,36 @@ export function buildSandboxedCommand(
   env: Readonly<Record<string, string>>,
   limits: SandboxResourceLimits = DEFAULT_SANDBOX_LIMITS,
 ): string[] {
-  const usesInterpreterProfile = usesInterpreterSandboxProfile(innerCommand);
   return buildSandboxedCommandCore(innerCommand, env, limits, {
-    useBashShell: usesInterpreterProfile,
-    applyInterpreterFloor: usesInterpreterProfile,
+    useBashShell: true,
+    applyInterpreterFloor: usesInterpreterSandboxProfile(innerCommand),
   });
 }
 
 /**
  * TEST-ONLY escape hatch — never call this from production code.
  *
- * `ulimit -u` (RLIMIT_NPROC) can only be *enforced*, not just rendered,
- * through bash: Ubuntu's `/bin/sh` is dash, and dash's `ulimit` does not
- * implement `-u` at all (`sh -c 'ulimit -u 8'` fails with "Illegal option
- * -u", silently swallowed by this module's `2>/dev/null || true`). But
- * `buildSandboxedCommand` only ever selects the bash shell for an inner
- * command it recognizes as a shell/JS runtime — and recognizing one also
- * floors `maxProcs` to `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` (4096). So
- * through the public API there is no way to combine "the ulimit mechanism
- * is actually constraining the process tree" with "the ceiling is the
- * caller's own small value, small enough for a test to hit in a few
- * seconds" — one or the other is always true, never both.
+ * `buildSandboxedCommand` now always renders the prelude through bash (issue
+ * #1394), so shell choice alone is no longer the obstacle. The obstacle is
+ * the interpreter floor: `applyInterpreterFloor` is still keyed off the same
+ * `usesInterpreterSandboxProfile` detection, and a regression test for
+ * "`ulimit -u` actually contains a runaway process tree" necessarily runs its
+ * fork-bomb-shaped probe script via a shell inner command (`["bash", "-c",
+ * script]`) — there is no way to execute shell script text without going
+ * through bash/sh as the inner command's runtime. That inner command is
+ * itself recognized as a shell runtime, so the public API always floors
+ * `maxProcs` to `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS` (4096) for it. So
+ * through the public API there is no way to combine "the ulimit mechanism is
+ * actually constraining the process tree" with "the ceiling is the caller's
+ * own small value, small enough for a test to hit in a few seconds" — one or
+ * the other is always true, never both.
  *
- * This bypasses only the floor (forces the bash shell so `-u` is real,
- * without raising `limits.maxProcs`), purely so a regression test can prove
- * the underlying ulimit mechanism actually contains a runaway process tree
- * (DES issue #1332) instead of asserting on behavior that would pass
- * identically whether or not the limit did anything.
+ * This bypasses only the floor (bash was already unconditional, so this only
+ * disables `applyInterpreterFloor`, without raising `limits.maxProcs`),
+ * purely so a regression test can prove the underlying ulimit mechanism
+ * actually contains a runaway process tree (DES issue #1332) instead of
+ * asserting on behavior that would pass identically whether or not the limit
+ * did anything.
  */
 export function buildSandboxedCommandForNprocEnforcementTest(
   innerCommand: readonly string[],

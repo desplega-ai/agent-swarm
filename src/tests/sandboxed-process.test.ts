@@ -95,11 +95,23 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
     expect(sandboxPrelude(["git", "status"])).not.toContain(BUN_NO_ORPHANS_FLAG);
   });
 
-  test("keeps strict defaults for direct non-interpreter commands", () => {
+  test("keeps strict resource defaults for direct non-interpreter commands, still rendered through bash", () => {
     const command = buildSandboxedCommand(["git", "status", "--short"], TEST_ENV);
-    expect(command[0]).toBe("sh");
+    expect(command[0]).toBe("bash");
     const prelude = command[2] ?? "";
     expect(prelude).toContain(`ulimit -v ${DEFAULT_SANDBOX_LIMITS.virtualMemoryMb * 1024}`);
+    expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
+  });
+
+  // Issue #1394: a non-JS, non-shell inner command (e.g. the script-workflow
+  // executor's `python3` runtime, src/workflows/executors/script.ts) used to
+  // fall through to the `sh` branch, where dash's `ulimit` doesn't implement
+  // `-u` at all and the limit was silently discarded. It must now render
+  // through bash like every other command, so `-u` is real.
+  test("renders a real ulimit -u for a non-JS, non-shell command (python3) via bash", () => {
+    const command = buildSandboxedCommand(["python3", "-c", "print('hi')"], TEST_ENV);
+    expect(command[0]).toBe("bash");
+    const prelude = command[2] ?? "";
     expect(prelude).toContain(`ulimit -u ${DEFAULT_SANDBOX_LIMITS.maxProcs}`);
   });
 
@@ -161,12 +173,12 @@ describe("buildSandboxedCommand runtime-aware limits", () => {
       // Plain `buildSandboxedCommand` cannot exercise this: passing
       // `["bash", "-c", script]` gets `tinyLimits.maxProcs: 8` silently
       // discarded in favor of the `JAVASCRIPT_RUNTIME_SANDBOX_MAX_PROCS`
-      // (4096) interpreter floor (Codex PRRT_kwDOQr3Tmc6gX9f1), and routing
-      // through a non-shell inner command instead gets the "sh" branch,
-      // whose dash `ulimit` silently no-ops on `-u` — so nothing would ever
-      // actually be enforced either way. Use the test-only helper that
-      // forces bash (so `-u` is real) while skipping only the floor, so
-      // `tinyLimits.maxProcs` is both the rendered AND the enforced ceiling.
+      // (4096) interpreter floor (Codex PRRT_kwDOQr3Tmc6gX9f1) — bash is now
+      // unconditional (issue #1394), but the floor is still keyed to the
+      // same shell-runtime detection, and there is no way to run this
+      // fork-bomb-shaped shell script without a shell inner command. Use the
+      // test-only helper that skips only the floor, so `tinyLimits.maxProcs`
+      // is both the rendered AND the enforced ceiling.
       const command = buildSandboxedCommandForNprocEnforcementTest(
         ["bash", "-c", script],
         TEST_ENV,
