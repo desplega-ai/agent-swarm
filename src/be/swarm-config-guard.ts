@@ -203,6 +203,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     if (parsed.success) return null;
     return `Invalid HARNESS_PROVIDER value (must be one of: ${ProviderNameSchema.options.join(", ")})`;
   },
+  ...enumValidator("CLAUDE_TRANSPORT", ["cli", "sdk"]),
   // Codex credits-exhausted cooldown (ms). Permissive on range here (positive
   // integer) — the worker clamps to [5m, 7d] via resolveCodexCreditsExhaustedCooldownMs.
   CODEX_CREDITS_EXHAUSTED_COOLDOWN_MS: (value) => {
@@ -250,6 +251,7 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
     "SCRIPTS_ONLY_MCP",
     "SLACK_DISABLE",
     "SLACK_RENDER_V2",
+    "SLACK_RENDER_V2_DELEGATION",
     "GITHUB_DISABLE",
     "GITLAB_DISABLE",
     "LINEAR_DISABLE",
@@ -299,6 +301,9 @@ const VALIDATED_KEYS: Record<string, ConfigValidator> = {
       "DB_QUERY_MCP_BUDGET_MS",
       "DB_QUERY_MCP_MAX_ROWS",
       "AGENT_FS_REQUEST_TIMEOUT_MS",
+      "SLACK_CONCLUSION_SETTLE_SEC",
+      "SLACK_CONCLUSION_TIMEOUT_MIN",
+      "SLACK_TREE_STALL_MIN",
     ],
     1,
   ),

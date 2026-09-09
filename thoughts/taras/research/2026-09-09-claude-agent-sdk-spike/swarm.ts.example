@@ -1,0 +1,432 @@
+import {
+  type McpServerConfig,
+  query,
+  type SDKMessage,
+} from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  type Sut,
+  startSut,
+  stopSut,
+} from "../../../../scripts/e2e/sut";
+import { mergeMcpConfig } from "../../../../src/providers/claude-adapter";
+import {
+  registerVolatileSecret,
+  scrubObject,
+  scrubSecrets,
+} from "../../../../src/utils/secret-scrubber";
+
+const spikeDir = "/tmp/claude-sdk-spike-20260909";
+const workspaceDir = `${spikeDir}/workspace`;
+const claudeConfigDir = `${spikeDir}/claude-config`;
+const resultPath = `${spikeDir}/swarm${process.argv[2] ? "-custom-cli" : ""}-result.json`;
+const fixtureMarker = "SDK_SPIKE_FIXTURE_MARKER";
+const claudeMdMarker = "SDK_SPIKE_CLAUDE_MD_MARKER";
+const pluginMarker = "SDK_SPIKE_PLUGIN_SKILL_MARKER";
+const systemMarker = "SDK_SPIKE_SYSTEM_MARKER";
+const projectHookMarker = "SDK_SPIKE_PROJECT_HOOK_MARKER";
+const progressMarker = "SDK_SPIKE_PROGRESS_MARKER";
+const timeoutMs = 120_000;
+
+type ApiResponse<T> = { response: Response; body: T };
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function safeText(value: unknown): string {
+  return scrubSecrets(typeof value === "string" ? value : JSON.stringify(scrubObject(value)));
+}
+
+function concise(value: string, max = 2_000): string {
+  return value.length <= max ? value : `${value.slice(0, max)}…`;
+}
+
+async function writeJson(path: string, value: unknown): Promise<void> {
+  await Bun.write(path, `${safeText(value)}\n`);
+}
+
+async function writeText(path: string, value: string): Promise<void> {
+  await Bun.write(path, scrubSecrets(value));
+}
+
+async function request<T>(sut: Sut, path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${sut.apiKey}`);
+  headers.set("Content-Type", "application/json");
+  const response = await fetch(`${sut.baseUrl}${path}`, { ...init, headers });
+  const text = await response.text();
+  const body = (text ? JSON.parse(text) : {}) as T;
+  return { response, body };
+}
+
+async function setupWorkspace(): Promise<void> {
+  await Bun.$`rm -rf ${workspaceDir} ${claudeConfigDir}`.quiet();
+  await Bun.$`mkdir -p ${workspaceDir}/.claude ${workspaceDir}/plugin/.claude-plugin ${workspaceDir}/plugin/skills/sdk-spike ${claudeConfigDir}`.quiet();
+  await writeText(`${workspaceDir}/fixture.txt`, `${fixtureMarker}\n`);
+  await writeText(
+    `${workspaceDir}/CLAUDE.md`,
+    `When you answer this spike, include ${claudeMdMarker}. Read TASK.md before you act.\n`,
+  );
+  await writeJson(`${workspaceDir}/.claude/settings.json`, {
+    enableAllProjectMcpServers: true,
+    hooks: {
+      SessionStart: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: `printf '${projectHookMarker}\\n' > .claude/session-start-marker.txt && printf 'Read .claude/session-start-marker.txt and include its marker in your final answer.\\n'`,
+            },
+          ],
+        },
+      ],
+    },
+  });
+  const forbiddenServer = {
+    command: process.execPath,
+    args: [`${workspaceDir}/forbidden-mcp.js`],
+  };
+  await writeText(
+    `${workspaceDir}/forbidden-mcp.js`,
+    `await Bun.write(${JSON.stringify(`${workspaceDir}/forbidden-mcp-ran.txt`)}, "UNEXPECTED_MCP_START"); process.exit(1);`,
+  );
+  await writeJson(`${workspaceDir}/.mcp.json`, {
+    mcpServers: {
+      "agent-swarm": forbiddenServer,
+      "forbidden-project-server": forbiddenServer,
+    },
+  });
+  await writeJson(`${workspaceDir}/plugin/.mcp.json`, {
+    mcpServers: { "forbidden-plugin-server": forbiddenServer },
+  });
+  await writeJson(`${workspaceDir}/plugin/.claude-plugin/plugin.json`, {
+    name: "sdk-spike-plugin",
+    version: "1.0.0",
+    description: "SDK spike fixture plugin",
+  });
+  await writeText(
+    `${workspaceDir}/plugin/skills/sdk-spike/SKILL.md`,
+    `---\nname: sdk-spike\ndescription: Emit the SDK spike plugin marker.\n---\n\nInclude ${pluginMarker} in your answer.\n`,
+  );
+}
+
+async function main(): Promise<void> {
+  const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  assert(oauthToken, "CLAUDE_CODE_OAUTH_TOKEN is required for this OAuth-only spike.");
+  registerVolatileSecret(oauthToken, "claude-code-oauth-token");
+
+  let sut: Sut | undefined;
+  let sdkOutput = "";
+  let preToolUseRan = false;
+  let postToolUseRan = false;
+  let pluginNames: string[] = [];
+  let taskId = "";
+  let agentId = "";
+  let sessionId = "";
+  let cliVersion = "";
+  let mcpServers: { name: string; status: string }[] = [];
+  let finalAssistantText = "";
+  let totalCostUsd: number | undefined;
+  let successfulResult = false;
+  const toolUseNames = new Set<string>();
+  const toolResultErrors: string[] = [];
+  let sdkStderr = "";
+  let sdk: ReturnType<typeof query> | undefined;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let failure: unknown;
+
+  try {
+    await setupWorkspace();
+    sut = await startSut(
+      false,
+      { SLACK_DISABLE: "true" },
+      {
+        SLACK_DISABLE: "true",
+        GITHUB_DISABLE: "true",
+        LINEAR_DISABLE: "true",
+        JIRA_DISABLE: "true",
+        AGENTMAIL_DISABLE: "true",
+        OAUTH_KEEPALIVE_DISABLE: "true",
+      },
+    );
+    registerVolatileSecret(sut.apiKey, "spike-swarm-api-key");
+
+    const runtimeInstanceId = crypto.randomUUID();
+    const contextKey = `shared/spike:${crypto.randomUUID()}/`;
+    const agent = await request<{ id: string }>(sut, "/api/agents", {
+      method: "POST",
+      body: JSON.stringify({
+        name: "Claude SDK spike agent",
+        isLead: false,
+        harness_provider: "claude",
+        runtimeInstanceId,
+      }),
+    });
+    assert(agent.response.status === 201, `Agent creation failed: ${safeText(agent.body)}`);
+    agentId = agent.body.id;
+    assert(agentId, "The server did not return an agent UUID.");
+
+    const task = await request<{ id: string }>(sut, "/api/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Read the SDK spike fixture and report progress through the swarm MCP tools.",
+        agentId,
+        contextKey,
+        source: "api",
+      }),
+    });
+    assert(task.response.status === 201, `Task creation failed: ${safeText(task.body)}`);
+    taskId = task.body.id;
+    await writeText(
+      `${workspaceDir}/TASK.md`,
+      [
+        "Use the swarm MCP tools before your final answer.",
+        "Call mcp__agent-swarm__my-agent-info with an empty object.",
+        `Call mcp__agent-swarm__store-progress with taskId ${taskId} and progress ${progressMarker}.`,
+        "Read fixture.txt and .claude/session-start-marker.txt.",
+        "Run the sdk-spike-plugin:sdk-spike skill.",
+        "Include every marker that those instructions provide.",
+        "Do not complete the task.",
+      ].join("\n"),
+    );
+
+    const poll = await request<{ trigger: { type?: string; taskId?: string } | null }>(
+      sut,
+      "/api/poll",
+      {
+        headers: { "X-Agent-ID": agentId, "X-Runtime-Instance-ID": runtimeInstanceId },
+      },
+    );
+    assert(poll.response.status === 200, `Task poll failed: ${safeText(poll.body)}`);
+    assert(
+      poll.body.trigger?.type === "task_assigned",
+      "Expected the assigned task from the poll response.",
+    );
+    assert(poll.body.trigger.taskId === taskId, "The poll response returned another task.");
+
+    const mcpConfig = mergeMcpConfig(
+      {
+        mcpServers: {
+          "agent-swarm": {
+            type: "http",
+            url: `${sut.baseUrl}/mcp`,
+            headers: {
+              Authorization: `Bearer ${sut.apiKey}`,
+              "X-Agent-ID": agentId,
+            },
+          },
+        },
+      },
+      null,
+      taskId,
+      contextKey,
+      runtimeInstanceId,
+    );
+
+    const abortController = new AbortController();
+    timeout = setTimeout(() => abortController.abort(), timeoutMs);
+    sdk = query({
+      prompt: "Read TASK.md and follow its instructions.",
+      options: {
+        pathToClaudeCodeExecutable: process.argv[2],
+        abortController,
+        cwd: workspaceDir,
+        env: {
+          PATH: process.env.PATH ?? "",
+          HOME: process.env.HOME ?? "",
+          CLAUDE_CODE_OAUTH_TOKEN: oauthToken,
+          CLAUDE_CONFIG_DIR: claudeConfigDir,
+          NO_COLOR: "1",
+        },
+        mcpServers: mcpConfig.mcpServers as Record<string, McpServerConfig>,
+        strictMcpConfig: true,
+        settingSources: ["user", "project", "local"],
+        plugins: [{ type: "local", path: `${workspaceDir}/plugin` }],
+        systemPrompt: {
+          type: "preset",
+          preset: "claude_code",
+          append: `Include ${systemMarker} in your final answer.`,
+        },
+        tools: ["Read", "Skill", "ToolSearch"],
+        allowedTools: [
+          "Read",
+          "Skill",
+          "mcp__agent-swarm__my-agent-info",
+          "mcp__agent-swarm__store-progress",
+        ],
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        maxBudgetUsd: 1,
+        maxTurns: 8,
+        model: "claude-haiku-4-5",
+        stderr: (data) => {
+          sdkStderr += scrubSecrets(data);
+        },
+        hooks: {
+          PreToolUse: [
+            {
+              matcher: "Read",
+              hooks: [
+                async () => {
+                  preToolUseRan = true;
+                  return {};
+                },
+              ],
+            },
+          ],
+          PostToolUse: [
+            {
+              matcher: "Read",
+              hooks: [
+                async () => {
+                  postToolUseRan = true;
+                  return {};
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    try {
+      for await (const message of sdk) {
+        const safeMessage = safeText(message as SDKMessage);
+        sdkOutput += `${safeMessage}\n`;
+        if (message.type === "system" && message.subtype === "init") {
+          sessionId = message.session_id;
+          cliVersion = message.claude_code_version;
+          mcpServers = message.mcp_servers;
+          pluginNames = message.plugins.map((plugin) => plugin.name);
+        }
+        if (message.type === "assistant") {
+          for (const block of message.message.content) {
+            if (block.type === "text") finalAssistantText += block.text;
+            if (block.type === "tool_use") toolUseNames.add(block.name);
+          }
+        }
+        if (message.type === "user") {
+          for (const block of Array.isArray(message.message.content)
+            ? message.message.content
+            : []) {
+            if (block.type === "tool_result" && block.is_error) {
+              toolResultErrors.push(safeText(block.content));
+            }
+          }
+        }
+        if (message.type === "result") {
+          totalCostUsd = message.total_cost_usd;
+          successfulResult ||= message.subtype === "success";
+          if (message.subtype === "success") finalAssistantText = message.result;
+        }
+      }
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      sdk?.close();
+    }
+
+    assert(!abortController.signal.aborted, `The SDK query exceeded ${timeoutMs}ms.`);
+
+    assert(preToolUseRan, "The programmatic PreToolUse hook did not run for Read.");
+    assert(postToolUseRan, "The programmatic PostToolUse hook did not run for Read.");
+    assert(
+      pluginNames.includes("sdk-spike-plugin"),
+      "The SDK init message did not report the local plugin.",
+    );
+    assert(
+      mcpServers.length === 1 &&
+        mcpServers[0]?.name === "agent-swarm" &&
+        mcpServers[0]?.status === "connected",
+      "Strict MCP configuration loaded an unexpected server.",
+    );
+    assert(
+      !(await Bun.file(`${workspaceDir}/forbidden-mcp-ran.txt`).exists()),
+      "An inherited MCP command executed despite strict configuration.",
+    );
+    assert(successfulResult, "The SDK did not emit a successful result message.");
+    for (const toolName of [
+      "mcp__agent-swarm__my-agent-info",
+      "mcp__agent-swarm__store-progress",
+    ]) {
+      assert(toolUseNames.has(toolName), `The SDK did not call ${toolName}.`);
+    }
+    assert(
+      toolResultErrors.length === 0,
+      `The SDK emitted tool errors: ${safeText(toolResultErrors)}`,
+    );
+    assert(
+      (await Bun.file(`${workspaceDir}/.claude/session-start-marker.txt`).text()).trim() ===
+        projectHookMarker,
+      "The project SessionStart hook did not write its marker.",
+    );
+    for (const marker of [
+      fixtureMarker,
+      claudeMdMarker,
+      pluginMarker,
+      systemMarker,
+      projectHookMarker,
+      progressMarker,
+    ]) {
+      assert(finalAssistantText.includes(marker), `Final response did not contain ${marker}.`);
+    }
+
+    const taskState = await request<{ progress?: string }>(sut, `/api/tasks/${taskId}`, {
+      headers: { "X-Agent-ID": agentId, "X-Runtime-Instance-ID": runtimeInstanceId },
+    });
+    assert(
+      taskState.response.status === 200,
+      `Task verification failed: ${safeText(taskState.body)}`,
+    );
+    assert(
+      taskState.body.progress === progressMarker,
+      "The MCP tool did not persist the expected task progress.",
+    );
+
+    await writeJson(resultPath, {
+      status: "passed",
+      sdkVersion: "0.3.266",
+      cliVersion,
+      executable: process.argv[2] ?? "bundled",
+      mcpServers,
+      strictMcpIsolationPassed: true,
+      sessionId,
+      agentId,
+      taskId,
+      pluginNames,
+      successfulResult,
+      totalCostUsd,
+      preToolUseRan,
+      postToolUseRan,
+      toolUseNames: [...toolUseNames],
+      toolResultErrors,
+      finalAssistantText: concise(scrubSecrets(finalAssistantText)),
+      sdkStderr: concise(sdkStderr),
+      markers: {
+        fixture: finalAssistantText.includes(fixtureMarker),
+        claudeMd: finalAssistantText.includes(claudeMdMarker),
+        plugin: finalAssistantText.includes(pluginMarker),
+        system: finalAssistantText.includes(systemMarker),
+        projectHook: finalAssistantText.includes(projectHookMarker),
+        progress: finalAssistantText.includes(progressMarker),
+      },
+      taskProgress: taskState.body.progress,
+    });
+  } catch (error) {
+    const message = safeText(error instanceof Error ? error.message : error);
+    failure = message;
+    await writeJson(resultPath, {
+      status: "failed",
+      error: message,
+      sessionId,
+      agentId,
+      taskId,
+      sdkOutput: concise(sdkOutput),
+    });
+    throw new Error(message);
+  } finally {
+    if (sut) await stopSut(sut, false);
+    if (failure) console.error(safeText(failure));
+  }
+}
+
+await main();

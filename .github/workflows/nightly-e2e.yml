@@ -61,10 +61,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [claude, codex, pi, opencode]
+        include:
+          - provider: claude
+            leg: claude
+            transport: cli
+          - provider: claude
+            leg: claude-sdk
+            transport: sdk
+          - provider: codex
+            leg: codex
+          - provider: pi
+            leg: pi
+          - provider: opencode
+            leg: opencode
+    name: harness (${{ matrix.leg }})
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/desplega-ai/agent-swarm-worker:slim
+      options: --init
     timeout-minutes: 30
     permissions:
       contents: read
@@ -73,6 +87,8 @@ jobs:
     # boundary is write access to main; scoping keeps a single leg from seeing
     # the other provider credentials.
     env:
+      E2E_CLAUDE_TRANSPORT: ${{ matrix.transport || '' }}
+      E2E_MODEL_CLAUDE: claude-haiku-4-5
       CLAUDE_CODE_OAUTH_TOKEN: ${{ matrix.provider == 'claude' && secrets.E2E_CLAUDE_CODE_OAUTH_TOKEN || '' }}
       CODEX_OAUTH: ${{ matrix.provider == 'codex' && secrets.E2E_CODEX_OAUTH || '' }}
       OPENROUTER_API_KEY: ${{ (matrix.provider == 'pi' || matrix.provider == 'opencode') && secrets.E2E_OPENROUTER_API_KEY || '' }}
@@ -108,7 +124,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: nightly-e2e-${{ matrix.provider }}
+          name: nightly-e2e-${{ matrix.leg }}
           path: out/
           if-no-files-found: warn
 

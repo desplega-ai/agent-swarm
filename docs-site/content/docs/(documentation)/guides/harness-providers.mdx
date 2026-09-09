@@ -22,6 +22,23 @@ For an operator-facing comparison of the install choices, see the [Provider Capa
 
 ## 1. The `ProviderAdapter` contract
 
+### Claude execution transports
+
+`ClaudeAdapter` supports `CLAUDE_TRANSPORT=cli|sdk`, with CLI as the default.
+The SDK transport uses pinned `@anthropic-ai/claude-agent-sdk` and the existing installed Claude executable.
+It still starts a Claude Code child process.
+Both transports share credential selection, session configuration, event normalization, summaries, costs, and context tracking.
+Both transports remove the legacy `AGENT_SWARM_CLAUDE_OAUTH_TOKEN` mirror from the Claude child environment.
+Adapter-owned summaries retain their selected credentials outside that child.
+Claude filters its standard OAuth variable from command hooks, but retains API keys. Only enable trusted project hooks.
+Session initialization persists the selected transport in `providerMeta.transport`.
+
+Transport selection occurs for each new session.
+The agent runtime editor stores an optional agent-scoped `CLAUDE_TRANSPORT` configuration row.
+An omitted value preserves that row, `null` deletes it, and `cli` or `sdk` assigns it.
+The worker independently rejects an effective bridge under SDK selection.
+It preserves Swarm context preambles instead of native SDK resume.
+
 Source of truth: [`src/providers/types.ts`](https://github.com/desplega-ai/agent-swarm/blob/main/src/providers/types.ts).
 
 ```ts

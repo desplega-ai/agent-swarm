@@ -1,0 +1,95 @@
+import { query } from "@anthropic-ai/claude-agent-sdk@0.3.266";
+import {
+  buildClaudeCodeOtelEnv,
+  buildClaudeCodeRuntimeEnv,
+} from "__SPIKE_REPO_ROOT__/src/providers/claude-adapter";
+import { resolveCredentialPools } from "__SPIKE_REPO_ROOT__/src/utils/credentials";
+import { scrubSecrets } from "__SPIKE_REPO_ROOT__/src/utils/secret-scrubber";
+
+const result: Record<string, unknown> = {
+  scope: "Synthetic credential selection and SDK process options, without a model call",
+};
+const assert = (condition: unknown, message: string) => {
+  if (!condition) throw new Error(message);
+};
+const executable = process.argv[2] ?? Bun.which("claude");
+assert(executable, "A Claude executable is required.");
+const runtime = buildClaudeCodeRuntimeEnv({});
+const otel = buildClaudeCodeOtelEnv({ SWARM_ENABLE_HARNESS_OTEL: "1" });
+for (const selectedIndex of [0, 1]) {
+  const env = {
+    PATH: process.env.PATH,
+    HOME: "/private/tmp/claude-sdk-parity-20260909/synthetic-home",
+    ANTHROPIC_API_KEY: "synthetic-api-one,synthetic-api-two",
+    CLAUDE_CODE_OAUTH_TOKEN: "synthetic-oauth-one,synthetic-oauth-two",
+    CLAUDE_CODE_EFFORT_LEVEL: "low",
+    MAX_THINKING_TOKENS: "0",
+    ENABLE_PROMPT_CACHING_1H: "1",
+    TASK_FILE: "/private/tmp/sdk-synthetic-task.json",
+    AGENT_SWARM_TASK_ID: crypto.randomUUID(),
+    ...runtime,
+    ...otel,
+  };
+  await resolveCredentialPools(env, {
+    provider: "claude",
+    availableIndicesMap: {
+      ANTHROPIC_API_KEY: [selectedIndex],
+      CLAUDE_CODE_OAUTH_TOKEN: [selectedIndex],
+    },
+  });
+  const suffix = selectedIndex === 0 ? "one" : "two";
+  assert(env.ANTHROPIC_API_KEY === `synthetic-api-${suffix}`, "API pool selection was incorrect.");
+  assert(
+    env.CLAUDE_CODE_OAUTH_TOKEN === `synthetic-oauth-${suffix}`,
+    "OAuth pool selection was incorrect.",
+  );
+  let captured = false;
+  let run: ReturnType<typeof query> | undefined;
+  try {
+    run = query({
+      prompt: "No process will start.",
+      options: {
+        pathToClaudeCodeExecutable: executable!,
+        env,
+        settingSources: ["user", "project", "local"],
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        extraArgs: { "append-system-prompt-file": "/private/tmp/sdk-synthetic-prompt.md" },
+        spawnClaudeCodeProcess(options) {
+          for (const [key, value] of Object.entries(env))
+            assert(options.env[key] === value, `SDK changed ${key}.`);
+          assert(
+            options.args.includes("--setting-sources=user,project,local"),
+            "SDK omitted the settings sources.",
+          );
+          assert(
+            options.args.includes("--append-system-prompt-file"),
+            "SDK omitted the custom flag.",
+          );
+          captured = true;
+          throw new Error("PROBE_EXPECTED_STOP");
+        },
+      },
+    });
+    for await (const _message of run) {
+      /* The callback stops before process creation. */
+    }
+  } catch (error) {
+    assert(String(error).includes("PROBE_EXPECTED_STOP"), scrubSecrets(String(error)));
+  } finally {
+    run?.close();
+  }
+  assert(captured, "SDK process creation was not observed.");
+}
+result.passed = true;
+result.credentialSelectionCases = 2;
+result.runtimeEnvironmentPreserved = true;
+result.otelPrivacyEnvironmentPreserved = true;
+result.effortEnvironmentPreserved = true;
+result.taskIdentityPreserved = true;
+result.singleExtraArgumentPreserved = true;
+result.limits =
+  "No real credential rotation, authentication precedence, telemetry export, or arbitrary repeated argument semantics were tested.";
+const output = scrubSecrets(JSON.stringify(result, null, 2));
+await Bun.write("/private/tmp/claude-sdk-parity-20260909/environment-result.json", output);
+console.log(output);

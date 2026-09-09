@@ -1,6 +1,7 @@
-# Informational job, not part of the merge gate. It runs the three Slack E2E scenarios twice
-# (legacy renderer, then SLACK_RENDER_V2=true), renders one PNG per Slack event from the
-# slack-mock journal, and upserts one sticky PR comment with both columns side by side.
+# Informational job, not part of the merge gate. It runs the legacy-renderer scenarios twice
+# (once as-is, once again under SLACK_RENDER_V2=true plus the delegated-delivery scenarios,
+# which only exist under v2), renders one PNG per Slack event from the slack-mock journal, and
+# upserts one sticky PR comment with both columns side by side.
 # Images live on the single-commit `ci-visuals` branch (rebuilt on every run, so history never
 # grows). Fork PRs run with a read-only token: they still run the E2E and upload the artifact,
 # but the two write steps (publish to `ci-visuals`, post the PR comment) are skipped.
@@ -59,7 +60,7 @@ jobs:
       - name: Run v2 Slack E2E
         id: v2
         continue-on-error: true
-        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task --sut-env SLACK_RENDER_V2=true --visuals visuals/v2 --json visuals/v2.json
+        run: bun run e2e --only slack-mention,slack-follow-up,slack-failed-task,slack-delegation-child-result,slack-delegation-failed-child,slack-delegation-late-child --sut-env SLACK_RENDER_V2=true --visuals visuals/v2 --json visuals/v2.json
 
       - name: Render Slack visuals
         if: always()

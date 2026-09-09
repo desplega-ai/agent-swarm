@@ -455,7 +455,7 @@ type NoProviderMeta = Record<string, never>;
 
 export type ProviderMetaMap = {
   devin: DevinProviderMeta;
-  claude: NoProviderMeta;
+  claude: { transport?: "cli" | "sdk" };
   codex: NoProviderMeta;
   pi: NoProviderMeta;
   "claude-managed": NoProviderMeta;
@@ -1382,6 +1382,8 @@ export const AgentLogEventTypeSchema = z.enum([
   "pricing.refresh.failed",
   // Graceful pause/resume via follow-up
   "task_superseded",
+  // Slack render v2 delegated-delivery observability (plan section 3.10)
+  "slack_delivery",
 ]);
 
 // Reasons a task can be superseded (terminal) and replaced by a "resume" follow-up.

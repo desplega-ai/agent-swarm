@@ -109,6 +109,9 @@ describe("GET /p/:id — HTML public path", () => {
     const text = await res.text();
     expect(text).toContain("<h1>Hello</h1>");
     expect(text).toContain("class SwarmSDK"); // BROWSER_SDK_JS sentinel
+    expect(text).toContain("color-scheme: light");
+    expect(text).toContain("--swarm-bg: #fbfbfa");
+    expect(text).toContain("--swarm-text: #111827");
   });
 
   test("CSP frame ancestors include deprecated DASHBOARD_URL alias", async () => {

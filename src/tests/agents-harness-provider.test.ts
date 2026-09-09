@@ -523,6 +523,190 @@ describe("PATCH /api/agents/:id/runtime", () => {
     expect((await getAgentById(a.id))?.harnessProvider).toBeNull();
     expect(await getSwarmConfigs({ scope: "agent", scopeId: a.id })).toHaveLength(0);
   });
+
+  test("sets, preserves, and clears the Claude transport override", async () => {
+    const a = await createAgent({
+      name: "runtime-claude-transport",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+
+    const setRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", claude: { transport: "sdk" } }),
+    });
+    expect(setRes.status).toBe(200);
+    expect(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
+        (config) => config.key === "CLAUDE_TRANSPORT",
+      )?.value,
+    ).toBe("sdk");
+
+    const switchRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "codex" }),
+    });
+    expect(switchRes.status).toBe(200);
+    expect(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
+        (config) => config.key === "CLAUDE_TRANSPORT",
+      )?.value,
+    ).toBe("sdk");
+
+    const clearRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", claude: { transport: null } }),
+    });
+    expect(clearRes.status).toBe(200);
+    expect(
+      (await getSwarmConfigs({ scope: "agent", scopeId: a.id })).find(
+        (config) => config.key === "CLAUDE_TRANSPORT",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("reports explicit, effective, and inherited Claude transports without credentials", async () => {
+    const a = await createAgent({
+      name: "runtime-claude-metadata",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await upsertSwarmConfig({ scope: "global", key: "CLAUDE_TRANSPORT", value: "sdk" });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "secret-test-token",
+      isSecret: true,
+    });
+
+    const inheritedRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`);
+    expect(inheritedRes.status).toBe(200);
+    const inheritedBody = await inheritedRes.json();
+    expect(inheritedBody).toEqual({
+      claude: {
+        transport: null,
+        effectiveTransport: "sdk",
+        inheritedTransport: "sdk",
+        bridgeEffective: false,
+      },
+    });
+    expect(JSON.stringify(inheritedBody)).not.toContain("secret-test-token");
+
+    const setRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", claude: { transport: "cli" } }),
+    });
+    expect(setRes.status).toBe(200);
+
+    const explicitRes = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`);
+    expect(await explicitRes.json()).toEqual({
+      claude: {
+        transport: "cli",
+        effectiveTransport: "cli",
+        inheritedTransport: "sdk",
+        bridgeEffective: false,
+      },
+    });
+  });
+
+  test("rejects SDK when configured Claude Bridge is effective and rolls back the PATCH", async () => {
+    const a = await createAgent({
+      name: "runtime-claude-bridge-conflict",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_USE_CLAUDE_BRIDGE", value: "true" });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "secret-test-token",
+      isSecret: true,
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", claude: { transport: "sdk" } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error:
+        "SDK transport cannot run while Claude Bridge is active. Choose CLI, or disable the bridge configuration.",
+    });
+    expect((await getAgentById(a.id))?.harnessProvider).toBeNull();
+    expect(await getSwarmConfigs({ scope: "agent", scopeId: a.id })).toHaveLength(0);
+  });
+
+  test("rejects an omitted Claude transport when the effective SDK setting conflicts with Bridge", async () => {
+    const a = await createAgent({
+      name: "runtime-claude-existing-conflict",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await upsertSwarmConfig({
+      scope: "agent",
+      scopeId: a.id,
+      key: "CLAUDE_TRANSPORT",
+      value: "sdk",
+    });
+    await upsertSwarmConfig({ scope: "global", key: "SWARM_USE_CLAUDE_BRIDGE", value: "true" });
+    await upsertSwarmConfig({
+      scope: "global",
+      key: "CLAUDE_CODE_OAUTH_TOKEN",
+      value: "secret-test-token",
+      isSecret: true,
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", model: "claude-opus-4-8" }),
+    });
+    expect(res.status).toBe(400);
+    expect((await getAgentById(a.id))?.harnessProvider).toBeNull();
+    const rows = await getSwarmConfigs({ scope: "agent", scopeId: a.id });
+    expect(rows.find((config) => config.key === "CLAUDE_TRANSPORT")?.value).toBe("sdk");
+    expect(rows.find((config) => config.key === "MODEL_OVERRIDE")).toBeUndefined();
+  });
+
+  test("uses repository scope when validating an inherited Claude transport", async () => {
+    const a = await createAgent({
+      name: "runtime-claude-repo-conflict",
+      isLead: false,
+      status: "idle",
+      capabilities: [],
+    });
+    await upsertSwarmConfig({ scope: "global", key: "CLAUDE_TRANSPORT", value: "cli" });
+    await upsertSwarmConfig({
+      scope: "repo",
+      scopeId: "repo-runtime",
+      key: "CLAUDE_TRANSPORT",
+      value: "sdk",
+    });
+    await upsertSwarmConfig({
+      scope: "repo",
+      scopeId: "repo-runtime",
+      key: "CLAUDE_BINARY",
+      value: "claude-bridge",
+    });
+
+    const res = await fetch(`${baseUrl}/api/agents/${a.id}/runtime?repoId=repo-runtime`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ harness_provider: "claude", claude: { transport: null } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await getAgentById(a.id))?.harnessProvider).toBeNull();
+    expect(await getSwarmConfigs({ scope: "agent", scopeId: a.id })).toHaveLength(0);
+  });
 });
 
 // ─── PATCH /api/agents/:id/runtime — reasoning_effort (Phase 2) ─────────────

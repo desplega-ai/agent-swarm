@@ -455,6 +455,7 @@ describe("DB retention", () => {
   // timeout is required — 5 ticks at a 1000ms budget each exceeds bun:test's
   // default 5000ms, and a timed-out test's dangling background loop was
   // observed to corrupt later tests' module state.
+  // Setup inserts 500,000 indexed rows before five one-second ticks. Allow CI contention.
   test("adaptive batch size never leaves [floor, ceiling] under a strict target", async () => {
     process.env.EVENTS_RETENTION_DAYS = "1";
     process.env.DB_RETENTION_MAX_STATEMENT_MS = "25"; // the valid minimum (Section 5)
@@ -481,7 +482,7 @@ describe("DB retention", () => {
     expect(sizes.length).toBeGreaterThan(0);
     expect(Math.min(...sizes)).toBeGreaterThanOrEqual(50);
     expect(Math.max(...sizes)).toBeLessThanOrEqual(2000);
-  }, 10_000);
+  }, 30_000);
 
   test("slowestStatementMs and batch sizing reflect execution-only time under in-process lock contention, not the FIFO-lock wait", async () => {
     // Regression this guards: DbClient.runTimed's own unit tests exercise the

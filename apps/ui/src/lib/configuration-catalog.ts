@@ -283,6 +283,16 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
     icon: Cpu,
     entries: [
       {
+        key: "CLAUDE_TRANSPORT",
+        label: "Default Claude transport",
+        description:
+          "Choose the default Claude execution transport. Agent runtime settings can override it. Existing agents inherit CLI unless you change this value.",
+        kind: "enum",
+        options: ["cli", "sdk"],
+        defaultValue: "cli",
+        docsUrl: `${DOCS}guides/harness-providers`,
+      },
+      {
         key: "SCRIPTS_ONLY_MCP",
         label: "Scripts-only MCP",
         description:
@@ -492,6 +502,45 @@ export const CONFIGURATION_GROUPS: ConfigCatalogGroup[] = [
         kind: "boolean",
         defaultValue: "false",
         docsUrl: `${DOCS}integrations/slack`,
+      },
+      {
+        key: "SLACK_RENDER_V2_DELEGATION",
+        label: "Slack delegated-result delivery",
+        description:
+          "Master switch for deferred ask conclusion, child result cards, and the closure-based reaction gate. Requires SLACK_RENDER_V2. Off reverts to the legacy per-ask outcome card on the next tick.",
+        kind: "boolean",
+        defaultValue: "false",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_CONCLUSION_SETTLE_SEC",
+        label: "Conclusion settle window (sec)",
+        description:
+          "Quiet seconds after every member of an ask's closure goes terminal before the conclusion card posts. Absorbs the gap between a child's terminal write and its follow-up task.",
+        kind: "number",
+        defaultValue: "10",
+        placeholder: "10",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_CONCLUSION_TIMEOUT_MIN",
+        label: "Conclusion timeout (min)",
+        description:
+          "Idle minutes before an ask's closure concludes with unfinished work, posting a timeout card and a warning reaction. Last-resort backstop behind heartbeat stall remediation.",
+        kind: "number",
+        defaultValue: "240",
+        placeholder: "240",
+        docsUrl: `${DOCS}guides/slack-integration`,
+      },
+      {
+        key: "SLACK_TREE_STALL_MIN",
+        label: "Tree stall threshold (min)",
+        description:
+          "Minutes without a task update before the thread tree shows a stalled glyph for that task.",
+        kind: "number",
+        defaultValue: "15",
+        placeholder: "15",
+        docsUrl: `${DOCS}guides/slack-integration`,
       },
       {
         key: "SLACK_REACTION_ACCEPTED",

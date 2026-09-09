@@ -3612,7 +3612,8 @@
               "pricing.deleted",
               "pricing.refresh",
               "pricing.refresh.failed",
-              "task_superseded"
+              "task_superseded",
+              "slack_delivery"
             ]
           },
           "agentId": {
@@ -9287,9 +9288,9 @@
       }
     },
     "/api/agents/{id}/runtime": {
-      "patch": {
-        "summary": "Update an agent's runtime harness and default model",
-        "description": "Updates `agents.harness_provider` and upserts agent-scoped `swarm_config` rows for HARNESS_PROVIDER, MODEL_OVERRIDE, and REASONING_EFFORT_OVERRIDE. The settings apply to future provider sessions. For `model` and `reasoning_effort`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.",
+      "get": {
+        "summary": "Get an agent's runtime configuration",
+        "description": "Returns the agent's explicit Claude transport override, the effective transport after config precedence, and whether Claude Bridge is effective. Values never include credentials.",
         "tags": [
           "Agents"
         ],
@@ -9306,6 +9307,110 @@
             "required": true,
             "name": "id",
             "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "repoId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent runtime configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "claude": {
+                      "type": "object",
+                      "properties": {
+                        "transport": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "enum": [
+                            "cli",
+                            "sdk",
+                            null
+                          ]
+                        },
+                        "effectiveTransport": {
+                          "type": "string",
+                          "enum": [
+                            "cli",
+                            "sdk"
+                          ]
+                        },
+                        "inheritedTransport": {
+                          "type": "string",
+                          "enum": [
+                            "cli",
+                            "sdk"
+                          ]
+                        },
+                        "bridgeEffective": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "transport",
+                        "effectiveTransport",
+                        "inheritedTransport",
+                        "bridgeEffective"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "claude"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Agent not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update an agent's runtime harness and default model",
+        "description": "Updates `agents.harness_provider` and agent-scoped runtime config. The settings apply to future provider sessions. For `model`, `reasoning_effort`, and `claude.transport`: omit the field to leave it unchanged, send `null` to clear the corresponding override, or send a value to set it.",
+        "tags": [
+          "Agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "repoId",
+            "in": "query"
           }
         ],
         "requestBody": {
@@ -9404,6 +9509,22 @@
                     "required": [
                       "target"
                     ]
+                  },
+                  "claude": {
+                    "type": "object",
+                    "properties": {
+                      "transport": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "enum": [
+                          "cli",
+                          "sdk",
+                          null
+                        ]
+                      }
+                    }
                   }
                 },
                 "required": [
@@ -40075,7 +40196,15 @@
                       },
                       "providerMeta": {
                         "type": "object",
-                        "properties": {}
+                        "properties": {
+                          "transport": {
+                            "type": "string",
+                            "enum": [
+                              "cli",
+                              "sdk"
+                            ]
+                          }
+                        }
                       },
                       "harnessVariant": {
                         "type": "string"

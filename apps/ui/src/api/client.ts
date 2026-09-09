@@ -5,6 +5,7 @@ import type {
   AgentAvatar,
   AgentMcpServersResponse,
   AgentRuntimeInstancesResponse,
+  AgentRuntimeResponse,
   AgentSkillsResponse,
   AgentsResponse,
   AgentTask,
@@ -29,6 +30,7 @@ import type {
   BudgetsResponse,
   ChannelMessage,
   ChannelsResponse,
+  ClaudeRuntimeConfig,
   CreateUserInput,
   CredentialMissingAgent,
   CredentialMissingAgentsResponse,
@@ -267,6 +269,17 @@ class ApiClient {
     return res.json();
   }
 
+  async fetchAgentRuntime(id: string, repoId?: string): Promise<AgentRuntimeResponse | null> {
+    const params = new URLSearchParams();
+    if (repoId) params.set("repoId", repoId);
+    const query = params.toString();
+    const url = `${this.getBaseUrl()}/api/agents/${id}/runtime${query ? `?${query}` : ""}`;
+    const res = await fetch(url, { headers: this.getHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`Failed to fetch agent runtime: ${res.status}`);
+    return res.json();
+  }
+
   async updateAgentName(id: string, name: string): Promise<AgentWithTasks> {
     const url = `${this.getBaseUrl()}/api/agents/${id}/name`;
     const res = await fetch(url, {
@@ -312,14 +325,19 @@ class ApiClient {
 
   async updateAgentRuntime(data: {
     id: string;
+    repoId?: string;
     harnessProvider: "claude" | "codex" | "pi" | "opencode" | "acp";
     model: string | null;
     allowCustomModel?: boolean;
     /** `null` clears `REASONING_EFFORT_OVERRIDE`; omitted leaves it unchanged; a level sets it. */
     reasoningEffort?: ReasoningEffortLevel | null;
     acp?: AcpRuntimeConfig;
+    claude?: ClaudeRuntimeConfig;
   }): Promise<AgentWithTasks> {
-    const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime`;
+    const params = new URLSearchParams();
+    if (data.repoId) params.set("repoId", data.repoId);
+    const query = params.toString();
+    const url = `${this.getBaseUrl()}/api/agents/${data.id}/runtime${query ? `?${query}` : ""}`;
     const res = await fetch(url, {
       method: "PATCH",
       headers: this.getHeaders(),
@@ -329,6 +347,7 @@ class ApiClient {
         allow_custom_model: data.allowCustomModel ?? false,
         ...(data.reasoningEffort !== undefined ? { reasoning_effort: data.reasoningEffort } : {}),
         ...(data.acp ? { acp: data.acp } : {}),
+        ...(data.claude ? { claude: data.claude } : {}),
       }),
     });
     if (!res.ok) {

@@ -22,7 +22,8 @@ Telemetry tracks high-level lifecycle and operational events — no task content
 | `session.started` | A worker session begins | agentId, taskId |
 | `session.ended` | A worker session ends | agentId, taskId, durationMs, tasksProcessed |
 | `session.cost` | A provider reports token/cost usage | agentId, provider, model, inputTokens, outputTokens, cache/read-write token counters, durationMs, totalCostUsd, isError |
-| `session.failure` | A provider session ends with an error | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
+| `session.failure` | A provider session fails without an intentional cancellation | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
+| `session.cancelled` | A provider reports an intentional cancellation | agentId, provider, model, errorCategory, durationMs, wasRateLimited |
 | `schedule.executed` | A schedule run completes | scheduleType, triggeredWorkflows, wasRecovered |
 | `schedule.error` | A schedule run errors | scheduleType, triggeredWorkflows, wasRecovered, consecutiveErrors |
 | `integration.connected` | An integration is connected | type, provider?, first_of_type |

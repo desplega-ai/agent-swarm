@@ -1,13 +1,16 @@
 ---
 title: Claude Bridge
-description: Opt-in `claude -p` bridge that keeps Claude harness runs on the Max/Pro subscription credit pool
+description: Optional Claude CLI bridge that drives interactive Claude Code through tmux
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 ## Motivation
 
-Starting **2026-06-15**, `claude -p` and the Claude Agent SDK / GitHub Actions surfaces draw from a **dedicated programmatic-credit pool** rather than the Max/Pro subscription quota ([@ClaudeDevs announcement, 2026-05-13](https://x.com/ClaudeDevs/status/2054610152817619388)). Interactive `claude` sessions stay on the subscription pool.
+Anthropic paused the announced separate SDK credit pool on June 15, 2026.
+Its [support update](https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan), checked September 9, says SDK and `claude -p` usage still consume subscription limits.
+OAuth authentication success does not establish how an individual account is billed.
+Bridge selection remains an explicit operator choice.
 
 [`@desplega.ai/claude-bridge`](https://github.com/desplega-ai/claude-bridge) is a Desplega-owned drop-in replacement for common `claude -p` automation. It starts interactive Claude Code inside `tmux`, sends the prompt through the pane, tails Claude's JSONL transcript, and emits Claude-compatible `text`, `json`, or `stream-json` output. From the swarm's perspective, the usual Claude adapter flags still apply.
 
@@ -61,6 +64,11 @@ In-flight task sessions stay on the binary they spawned with; new spawns pick up
 
 ## Requirements
 
+Use `CLAUDE_TRANSPORT=cli` for bridge sessions.
+The SDK transport rejects an effective bridge, including direct and legacy bridge binaries.
+The bridge does not implement the SDK control protocol.
+The adapter preserves the existing fallback when the bridge flag is enabled without OAuth credentials.
+
 - **Bun `>= 1.1`.** The npm package is `@desplega.ai/claude-bridge`; the published bin uses `#!/usr/bin/env bun`.
 - **`tmux` on `PATH`.** The bridge starts interactive Claude Code in a detached tmux pane. The swarm fail-fasts at session-create when `tmux` is missing.
 - **`claude` on `PATH`, version `>= 2.1.80`.** The bridge launches the local Claude CLI.
@@ -91,6 +99,7 @@ Use this only as a compatibility path while migrating.
 
 ## Why not a new `HARNESS_PROVIDER`?
 
-Claude Bridge is a drop-in replacement for the `claude` binary inside the existing `claude` harness: same provider adapter, same MCP plumbing, same Stop-hook behavior, and the same spawned Claude flags. Keeping it as a reloadable env variant avoids a duplicate provider while still letting operators flip the subscription-pool bridge per worker or per repo.
+Claude Bridge remains an executable variant inside the existing Claude provider.
+Operators can select the bridge per worker or repository without creating a separate provider.
 
 See also: [`runbooks/harness-providers.md`](https://github.com/desplega-ai/agent-swarm/blob/main/runbooks/harness-providers.md) — engineering reference for the bridge and compatibility wiring.

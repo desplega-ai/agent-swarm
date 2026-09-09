@@ -35,6 +35,60 @@ describe("respondToApprovalRequest", () => {
 });
 
 describe("updateAgentRuntime", () => {
+  test("treats a missing runtime route as an unsupported capability", async () => {
+    globalThis.fetch = async () => new Response("Not found", { status: 404 });
+
+    await expect(api.fetchAgentRuntime("agent-old-api")).resolves.toBeNull();
+  });
+
+  test("does not mask runtime authorization and server errors", async () => {
+    for (const status of [403, 500]) {
+      globalThis.fetch = async () => new Response("Failed", { status });
+      await expect(api.fetchAgentRuntime("agent-error")).rejects.toThrow(
+        `Failed to fetch agent runtime: ${status}`,
+      );
+    }
+  });
+
+  test("omits Claude transport when the caller does not provide the capability", async () => {
+    globalThis.fetch = async (_url, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        harness_provider: "claude",
+        model: "claude-haiku-4-5",
+        allow_custom_model: false,
+      });
+      return Response.json({ id: "agent-claude" });
+    };
+
+    await api.updateAgentRuntime({
+      id: "agent-claude",
+      harnessProvider: "claude",
+      model: "claude-haiku-4-5",
+    });
+  });
+
+  test("sends a Claude transport override with repository context", async () => {
+    globalThis.fetch = async (url, init) => {
+      expect(url).toBe("https://api.example.test/api/agents/agent-claude/runtime?repoId=repo-1");
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(String(init?.body))).toEqual({
+        harness_provider: "claude",
+        model: "claude-opus-4-8",
+        allow_custom_model: false,
+        claude: { transport: "sdk" },
+      });
+      return Response.json({ id: "agent-claude" });
+    };
+
+    await api.updateAgentRuntime({
+      id: "agent-claude",
+      repoId: "repo-1",
+      harnessProvider: "claude",
+      model: "claude-opus-4-8",
+      claude: { transport: "sdk" },
+    });
+  });
+
   test("sends ACP target configuration with its model knob", async () => {
     globalThis.fetch = async (url, init) => {
       expect(url).toBe("https://api.example.test/api/agents/agent-acp/runtime");

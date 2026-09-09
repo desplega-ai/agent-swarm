@@ -1,0 +1,282 @@
+{
+  "recordedAt": "2026-09-09T11:54:44.380Z",
+  "sdkVersion": "0.3.266",
+  "claudeVersion": "2.1.263",
+  "bridgeVersion": "0.2.2",
+  "contextModeVersion": "1.0.162",
+  "note": "These are the final probe results. They do not include costs from exploratory runs or prove full worker parity.",
+  "hooks": {
+    "scope": "Actual Swarm hooks through SDK, with isolated PM2 and HOME",
+    "events": [
+      {
+        "event": "PostToolUse",
+        "code": 0,
+        "summarySkipped": false,
+        "registrationNudge": false
+      },
+      {
+        "event": "PreToolUse",
+        "code": 0,
+        "summarySkipped": false,
+        "registrationNudge": false
+      },
+      {
+        "event": "PreToolUse",
+        "code": 0,
+        "summarySkipped": false,
+        "registrationNudge": false
+      },
+      {
+        "event": "Stop",
+        "code": 0,
+        "summarySkipped": true,
+        "registrationNudge": false
+      },
+      {
+        "event": "SessionStart",
+        "code": 0,
+        "summarySkipped": false,
+        "registrationNudge": false
+      },
+      {
+        "event": "UserPromptSubmit",
+        "code": 0,
+        "summarySkipped": false,
+        "registrationNudge": false
+      }
+    ],
+    "result": {
+      "subtype": "success",
+      "cost": 0.009451000000000001
+    },
+    "effectiveTools": [
+      "Read"
+    ],
+    "requests": [
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/cancelled-tasks",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/cancelled-tasks",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "GET",
+        "path": "/cancelled-tasks",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "PUT",
+        "path": "/api/active-sessions/heartbeat/<task>",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/ping",
+        "status": 204
+      },
+      {
+        "method": "GET",
+        "path": "/me",
+        "status": 200
+      },
+      {
+        "method": "POST",
+        "path": "/close",
+        "status": 204
+      }
+    ],
+    "heartbeatAdvanced": true,
+    "finalAgentStatus": "offline",
+    "stopSummarySkipped": true,
+    "registrationNudgeAbsent": true,
+    "passed": true
+  },
+  "environment": {
+    "scope": "Synthetic credential selection and SDK process options, without a model call",
+    "passed": true,
+    "credentialSelectionCases": 2,
+    "runtimeEnvironmentPreserved": true,
+    "otelPrivacyEnvironmentPreserved": true,
+    "effortEnvironmentPreserved": true,
+    "taskIdentityPreserved": true,
+    "singleExtraArgumentPreserved": true,
+    "limits": "No real credential rotation, authentication precedence, telemetry export, or arbitrary repeated argument semantics were tested."
+  },
+  "lifecycle": {
+    "probe": "lifecycle",
+    "abortRequested": true,
+    "iteratorShutdownWithinFiveSeconds": true,
+    "parentExitedWithinFiveSeconds": true,
+    "childExitedWithinFiveSeconds": true,
+    "parentExitElapsedMs": 2123,
+    "childExitElapsedMs": 2122,
+    "fixtureCleanupAttempted": {
+      "parent": false,
+      "child": false
+    },
+    "streamError": "Claude Code process aborted by user",
+    "passed": true
+  },
+  "permissions": {
+    "probe": "permissions",
+    "toolFiltering": {
+      "initialTools": [
+        "Read"
+      ],
+      "toolCalls": [
+        "Read",
+        "Read"
+      ],
+      "resultSubtype": "success",
+      "estimatedCostUsd": 0.011078000000000001
+    },
+    "projectAllowedControl": {
+      "toolCalls": [
+        "Read",
+        "Write"
+      ],
+      "resultSubtype": "success",
+      "estimatedCostUsd": 0.00995
+    },
+    "projectDeniedRule": {
+      "toolCalls": [
+        "Read",
+        "Write"
+      ],
+      "resultDenials": [],
+      "permissionDeniedIds": [],
+      "correlatedPermissionError": true,
+      "resultSubtype": "success",
+      "estimatedCostUsd": 0.009928
+    },
+    "controlMarkerObserved": true,
+    "passed": true
+  },
+  "telemetry": {
+    "result": {
+      "subtype": "success",
+      "cost": 0.001716
+    },
+    "requests": [
+      {
+        "path": "/v1/metrics",
+        "bytes": 4043,
+        "promptFound": false,
+        "traceFound": false
+      },
+      {
+        "path": "/v1/logs",
+        "bytes": 4131,
+        "promptFound": false,
+        "traceFound": true
+      },
+      {
+        "path": "/v1/logs",
+        "bytes": 3116,
+        "promptFound": false,
+        "traceFound": true
+      },
+      {
+        "path": "/v1/metrics",
+        "bytes": 3973,
+        "promptFound": false,
+        "traceFound": false
+      },
+      {
+        "path": "/v1/traces",
+        "bytes": 5795,
+        "promptFound": false,
+        "traceFound": true
+      }
+    ],
+    "metricsExported": true,
+    "logsExported": true,
+    "tracesExported": true,
+    "parentTraceFound": true,
+    "promptPrivacyPreserved": true,
+    "passed": true
+  },
+  "context-mode": {
+    "scope": "Installed context-mode plugin, isolated copy, installer repair disabled",
+    "mcpServers": [
+      {
+        "name": "context-mode",
+        "status": "connected"
+      }
+    ],
+    "plugins": [
+      "context-mode"
+    ],
+    "result": {
+      "subtype": "success",
+      "cost": 0.017673
+    },
+    "toolUses": [
+      "ToolSearch",
+      "mcp__context-mode__ctx_execute"
+    ],
+    "markerReturned": true,
+    "successfulExecutionResult": true,
+    "passed": true
+  },
+  "bridge": {
+    "expected": "Bridge rejects the SDK protocol before a model call",
+    "stderr": "claude-bridge: `--output-format` requires `-p`/`--print`.\nUse `-p \"your prompt\" --output-format stream-json`.\nRun `bun ./src/cli.ts --help` for wrapper usage.\n",
+    "error": "Error: Claude Code process exited with code 2. stderr: claude-bridge: `--output-format` requires `-p`/`--print`.\nUse `-p \"your prompt\" --output-format stream-json`.\nRun `bun ./src/cli.ts --help` for wrapper usage.",
+    "expectedRejectionObserved": true
+  }
+}

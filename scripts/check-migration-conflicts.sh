@@ -17,10 +17,20 @@
 # applied file makes the runner silently skip the new file that took its number
 # (incident 2026-06-10: 090_model_tiers skipped after 090→091 renumber).
 #
+# It also fails if a migration added since the base branch sorts at or below
+# the base branch's tail. A migration numbered against a stale main can still
+# apply cleanly (the runner keys applied migrations by version in a map, not
+# a watermark — order doesn't matter to it), but a low number invites exactly
+# the collision this script exists to catch on the next branch that also
+# forks from an equally stale main. This is a monotonicity check, not a
+# contiguity check: gaps in the base branch's numbering (already-merged and
+# harmless) are expected and never flagged.
+#
 # Runnable locally too: bash scripts/check-migration-conflicts.sh
-# Base ref for the immutability check defaults to origin/main; override with
-# MIGRATION_BASE_REF. Skipped (with a notice) when the base ref is missing or
-# is not an ancestor of HEAD — CI enforces it on the PR merge ref.
+# Base ref for the immutability and monotonicity checks defaults to
+# origin/main; override with MIGRATION_BASE_REF. Both are skipped (with a
+# notice) when the base ref is missing or is not an ancestor of HEAD — CI
+# enforces them on the PR merge ref.
 
 set -euo pipefail
 
@@ -114,3 +124,53 @@ if [ -n "$VIOLATIONS" ]; then
 fi
 
 echo "Migration immutability check passed: no base-branch migrations were changed."
+
+# Monotonicity check: every migration added since the base branch (i.e. not
+# present at the same path on the base branch) must sort strictly above the
+# highest NNN prefix on the base branch. Gaps already on the base branch are
+# not a problem — this only guards new work against undercutting main's tail.
+BASE_MAX=0
+while read -r base_path; do
+  case "$base_path" in
+    *.sql) ;;
+    *) continue ;;
+  esac
+  base_name=$(basename "$base_path")
+  prefix=$(echo "$base_name" | grep -oE '^[0-9]+' || true)
+  [ -z "$prefix" ] && continue
+  prefix=$((10#$prefix))
+  if [ "$prefix" -gt "$BASE_MAX" ]; then
+    BASE_MAX=$prefix
+  fi
+done < <(git ls-tree -r --name-only "$BASE_REF" -- "$MIGRATIONS_DIR")
+
+NEW_VIOLATIONS=""
+shopt -s nullglob
+for file in "$MIGRATIONS_DIR"/*.sql; do
+  if git cat-file -e "${BASE_REF}:${file}" 2>/dev/null; then
+    continue # already exists on the base branch — not a new migration
+  fi
+  base=$(basename "$file")
+  prefix=$(echo "$base" | grep -oE '^[0-9]+' || true)
+  [ -z "$prefix" ] && continue
+  prefix=$((10#$prefix))
+  if [ "$prefix" -le "$BASE_MAX" ]; then
+    NEW_VIOLATIONS="${NEW_VIOLATIONS}  ${base} (prefix ${prefix} <= ${BASE_REF} tail ${BASE_MAX})\n"
+  fi
+done
+shopt -u nullglob
+
+if [ -n "$NEW_VIOLATIONS" ]; then
+  echo "ERROR: new migration(s) numbered at or below ${BASE_REF}'s tail (${BASE_MAX})!"
+  echo ""
+  echo "A migration added on this branch sorts below or at the highest NNN"
+  echo "already on ${BASE_REF}. It may still apply correctly (the runner keys"
+  echo "applied migrations by version, not by a watermark), but a low number"
+  echo "invites a collision with another branch. Renumber it above the tail."
+  echo ""
+  echo -e "$NEW_VIOLATIONS"
+  echo "Fix: renumber to $((BASE_MAX + 1)) or higher (check open PRs for a claim on that number)."
+  exit 1
+fi
+
+echo "Migration monotonicity check passed: new migrations sort above ${BASE_REF}'s tail (${BASE_MAX})."

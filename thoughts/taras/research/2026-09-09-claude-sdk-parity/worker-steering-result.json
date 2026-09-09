@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "transport": "sdk",
+  "model": "claude-haiku-4-5",
+  "agentId": "ac5367a9-16b3-4db7-9a0f-e66833c19fee",
+  "taskId": "3e04c2b5-3296-49ab-aacd-328a40a28f17",
+  "queuedWhileTaskActive": true,
+  "enqueueResults": [
+    {
+      "outcome": "queued",
+      "steeringMessageId": "03668121-e95c-411a-866e-a9e694df2662",
+      "effectiveMode": "queue"
+    },
+    {
+      "outcome": "queued",
+      "steeringMessageId": "f16d5a5b-9682-45e2-adf6-5815925c7b54",
+      "effectiveMode": "queue"
+    }
+  ],
+  "deliveredDuringTool": true,
+  "messages": [
+    {
+      "id": "03668121-e95c-411a-866e-a9e694df2662",
+      "mode": "queue",
+      "status": "handled",
+      "deliveredAt": "2026-09-09T15:59:37.458Z",
+      "handledAt": "2026-09-09T15:59:47.006Z"
+    },
+    {
+      "id": "f16d5a5b-9682-45e2-adf6-5815925c7b54",
+      "mode": "queue",
+      "status": "handled",
+      "deliveredAt": "2026-09-09T15:59:37.459Z",
+      "handledAt": "2026-09-09T15:59:48.048Z"
+    }
+  ],
+  "distinctActionsCompleted": true,
+  "sessionId": "cbdd5a45-911f-4a3e-9b63-1d5281f308eb",
+  "costUsd": 0.0515039,
+  "acceptSteerCalls": [
+    {
+      "name": "mcp__agent-swarm__accept-steer",
+      "steeringMessageId": "03668121-e95c-411a-866e-a9e694df2662"
+    },
+    {
+      "name": "mcp__agent-swarm__accept-steer",
+      "steeringMessageId": "f16d5a5b-9682-45e2-adf6-5815925c7b54"
+    }
+  ]
+}

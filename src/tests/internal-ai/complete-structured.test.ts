@@ -313,10 +313,12 @@ describe("completeStructured", () => {
     });
     expect(receivedSchema).toBeDefined();
     const schema = receivedSchema as {
+      $schema: string;
       type: string;
       properties: { summary: { type: string }; count: { type: string } };
       required: string[];
     };
+    expect(schema.$schema).toBe("http://json-schema.org/draft-07/schema#");
     expect(schema.type).toBe("object");
     expect(schema.properties.summary.type).toBe("string");
     expect(schema.properties.count.type).toBe("number");

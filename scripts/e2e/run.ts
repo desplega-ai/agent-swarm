@@ -21,6 +21,10 @@ import { configRoundtrip } from "./scenarios/config-roundtrip";
 import { health } from "./scenarios/health";
 import { mcpSurface } from "./scenarios/mcp-surface";
 import { realtimeRooms } from "./scenarios/realtime-rooms";
+import { slackDelegationChildResult } from "./scenarios/slack-delegation-child-result";
+import { slackDelegationFailedChild } from "./scenarios/slack-delegation-failed-child";
+import { slackDelegationFlagOffRepro } from "./scenarios/slack-delegation-flag-off-repro";
+import { slackDelegationLateChild } from "./scenarios/slack-delegation-late-child";
 import { slackFailedTask } from "./scenarios/slack-failed-task";
 import { slackFollowUp } from "./scenarios/slack-follow-up";
 import { slackMention } from "./scenarios/slack-mention";
@@ -58,6 +62,17 @@ const scenarios: Scenario[] = [
   slackFailedTask,
   slackReactionOverride,
   slackRelayRestart,
+  // Flag-off negative control: SLACK_RENDER_V2 on, SLACK_RENDER_V2_DELEGATION
+  // off — production's actual state during the incident this PR responds to.
+  // Must run before the flag-on block below, which flips delegation on
+  // globally and leaves it on for the rest of the process.
+  slackDelegationFlagOffRepro,
+  // Delegated-delivery coverage (PR #1272). These enable
+  // SLACK_RENDER_V2_DELEGATION via the config API and leave it on for the
+  // rest of the run, so they stay last.
+  slackDelegationChildResult,
+  slackDelegationFailedChild,
+  slackDelegationLateChild,
 ];
 
 type ThreadMark = { scenario: string; label: string; channel: string; ts: string };

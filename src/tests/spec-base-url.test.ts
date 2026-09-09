@@ -219,6 +219,7 @@ describe("OpenAPI base URL provenance", () => {
 });
 
 describe("migration 117 consolidated connections-redesign schema", () => {
+  // This fixture applies the complete migration history, which can exceed ten seconds in parallel CI.
   test("gives existing script connection rows the user source default", () => {
     removeDbFiles(MIGRATION_DB_PATH);
     const database = new Database(MIGRATION_DB_PATH, { create: true });
@@ -262,5 +263,5 @@ describe("migration 117 consolidated connections-redesign schema", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 });
