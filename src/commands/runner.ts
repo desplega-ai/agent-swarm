@@ -164,7 +164,11 @@ export async function fetchRepoConfig(
   guidelines?: RepoGuidelines | null;
 } | null> {
   try {
-    const repoName = vcsRepo.split("/").pop() || vcsRepo;
+    const requested = vcsRepo
+      .trim()
+      .replace(/\/+$/, "")
+      .replace(/\.git$/, "");
+    const repoName = requested.split("/").pop() || requested;
     const resp = await fetch(`${apiUrl}/api/repos?name=${encodeURIComponent(repoName)}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
@@ -183,8 +187,14 @@ export async function fetchRepoConfig(
     if (requireExactMatch) {
       return (
         data.repos.find((r) => {
-          const normalized = r.url.replace(/\/$/, "").replace(/\.git$/, "");
-          return normalized.endsWith(`/${vcsRepo}`) || normalized.endsWith(`:${vcsRepo}`);
+          const normalized = r.url
+            .trim()
+            .replace(/\/+$/, "")
+            .replace(/\.git$/, "");
+          if (normalized === requested) return true;
+          // Qualified URLs must retain their host. Only shorthand references use suffix matching.
+          if (requested.includes(":")) return false;
+          return normalized.endsWith(`/${requested}`) || normalized.endsWith(`:${requested}`);
         }) ?? null
       );
     }

@@ -82,6 +82,50 @@ describe("fetchResolvedEnv", () => {
     }
   });
 
+  test("resolves full repository URLs and normalizes the API name filter", async () => {
+    const repoId = crypto.randomUUID();
+    let registeredUrl = "https://github.com/owner/fixture.git";
+    const requestedNames: Array<string | null> = [];
+    const api = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const name = new URL(req.url).searchParams.get("name");
+        requestedNames.push(name);
+        return Response.json({
+          repos: name === "fixture" ? [{ id: repoId, url: registeredUrl, name: "fixture" }] : [],
+        });
+      },
+    });
+    try {
+      for (const requested of [
+        "https://github.com/owner/fixture",
+        "https://github.com/owner/fixture.git",
+        "https://github.com/owner/fixture.git/",
+        "owner/fixture.git/",
+      ]) {
+        expect((await fetchRepoConfig(api.url.toString(), "fixture", requested, true))?.id).toBe(
+          repoId,
+        );
+      }
+      registeredUrl = "git@github.com:owner/fixture.git";
+      expect((await fetchRepoConfig(api.url.toString(), "fixture", registeredUrl, true))?.id).toBe(
+        repoId,
+      );
+      registeredUrl = "https://another-host.test/owner/fixture";
+      expect(
+        await fetchRepoConfig(
+          api.url.toString(),
+          "fixture",
+          "https://github.com/owner/fixture",
+          true,
+        ),
+      ).toBeNull();
+      expect(requestedNames.every((name) => name === "fixture")).toBe(true);
+    } finally {
+      api.stop(true);
+    }
+  });
+
   test("passes repository scope and restores the transport default after deletion", async () => {
     const agentId = crypto.randomUUID();
     const repoId = crypto.randomUUID();
